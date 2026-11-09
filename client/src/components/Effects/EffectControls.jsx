@@ -4,7 +4,7 @@
  * color pickers, dropdowns, and keyframe indicators.
  */
 
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
     Key,
@@ -15,6 +15,8 @@ import {
     PanelSection, ControlRow, TrackSlider, ToggleSwitch, SelectField, SwatchRow,
 } from '../ui/PanelControls.jsx';
 import { normalizeHex, changedKeys } from '../ui/panelControls.js';
+import { sampleKeyframeTrack } from '../../motion/MotionResolver.js';
+import { validateMotionExpression } from '../../motion/MotionExpression.js';
 
 // ============================================================================
 // CONTROL COMPONENTS
@@ -74,33 +76,90 @@ const SliderControl = ({
     onChange,
     onAddKeyframe,
     hasKeyframe = false,
-    canAnimate = true
+    canAnimate = true,
+    expression = '',
+    onExpressionChange,
+    canExpression = true,
 }) => {
     const { t } = useTranslation('editor');
+    const [expressionOpen, setExpressionOpen] = useState(Boolean(expression));
+    const [expressionDraft, setExpressionDraft] = useState(expression || '');
+    const [expressionError, setExpressionError] = useState('');
+    useEffect(() => {
+        setExpressionDraft(expression || '');
+        const initial = String(expression || '').trim();
+        const validation = initial ? validateMotionExpression(initial, {
+            variables: ['t', 'time', 'duration', 'progress', 'value'],
+        }) : { valid: true };
+        setExpressionError(validation.valid ? '' : validation.reason);
+    }, [expression]);
+
+    const commitExpression = () => {
+        const draft = expressionDraft.trim();
+        if (!draft) {
+            setExpressionError('');
+            onExpressionChange?.(name, '');
+            return;
+        }
+        const validation = validateMotionExpression(draft, {
+            variables: ['t', 'time', 'duration', 'progress', 'value'],
+        });
+        if (!validation.valid) {
+            setExpressionError(validation.reason);
+            return;
+        }
+        setExpressionError('');
+        onExpressionChange?.(name, draft);
+    };
+
     return (
-        <ControlRow label={label} labelWidth={74}>
-            <TrackSlider
-                ariaLabel={label}
-                value={value}
-                min={min}
-                max={max}
-                step={step}
-                unit={unit}
-                tint={tintFor(name)}
-                onChange={(v) => onChange(name, v)}
-            />
-            {canAnimate && (
-                <button
-                    type="button"
-                    onClick={() => onAddKeyframe(name, value)}
-                    className={`p-1 rounded hover:bg-white/10 shrink-0 ${hasKeyframe ? 'text-yellow-400' : 'text-muted-foreground'}`}
-                    title={hasKeyframe ? t('effects.keyframeAtCurrentTime') : t('effects.addKeyframe')}
-                    aria-label={hasKeyframe ? t('effects.keyframeAtCurrentTime') : t('effects.addKeyframe')}
-                >
-                    {hasKeyframe ? <CircleDot className="w-3 h-3" /> : <Circle className="w-3 h-3" />}
-                </button>
-            )}
-        </ControlRow>
+        <div>
+            <ControlRow label={label} labelWidth={74}>
+                <TrackSlider
+                    ariaLabel={label}
+                    value={value}
+                    min={min}
+                    max={max}
+                    step={step}
+                    unit={unit}
+                    tint={tintFor(name)}
+                    onChange={(v) => onChange(name, v)}
+                />
+                {canExpression && <button type="button" onClick={() => setExpressionOpen(open => !open)}
+                    title="Animate with an expression" aria-label={`${label} expression`}
+                    aria-pressed={expressionOpen}
+                    className={`shrink-0 rounded px-1.5 py-1 text-[10px] font-mono ${expressionOpen ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:bg-white/10'}`}>
+                    ƒx
+                </button>}
+                {canExpression && expressionOpen && <input
+                    type="text"
+                    aria-label={`${label} expression formula`}
+                    aria-invalid={!!expressionError}
+                    aria-describedby={expressionError ? `${name}-expression-error` : undefined}
+                    title="Use t, time, duration, progress, value, wiggle(), or noise()"
+                    value={expressionDraft}
+                    placeholder="0.5 + sin(t)"
+                    onChange={event => { setExpressionDraft(event.target.value); setExpressionError(''); }}
+                    onBlur={commitExpression}
+                    onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); commitExpression(); } }}
+                    className={`w-[116px] rounded border bg-black/20 px-2 py-1 text-[10px] font-mono text-foreground placeholder:text-muted-foreground ${expressionError ? 'border-destructive' : 'border-border'}`}
+                />}
+                {canAnimate && (
+                    <button
+                        type="button"
+                        onClick={() => onAddKeyframe(name, value)}
+                        className={`p-1 rounded hover:bg-white/10 shrink-0 ${hasKeyframe ? 'text-yellow-400' : 'text-muted-foreground'}`}
+                        title={hasKeyframe ? t('effects.keyframeAtCurrentTime') : t('effects.addKeyframe')}
+                        aria-label={hasKeyframe ? t('effects.keyframeAtCurrentTime') : t('effects.addKeyframe')}
+                    >
+                        {hasKeyframe ? <CircleDot className="w-3 h-3" /> : <Circle className="w-3 h-3" />}
+                    </button>
+                )}
+            </ControlRow>
+            {canExpression && expressionOpen && expressionError && <p id={`${name}-expression-error`} role="alert" className="ml-[78px] mt-1 text-[10px] text-destructive">
+                {t('scene3d.expressionInvalid', { reason: t(`scene3d.expressionErrors.${expressionError}`) })}
+            </p>}
+        </div>
     );
 };
 
@@ -167,10 +226,12 @@ const PositionControl = ({ name, label, value, onChange }) => {
             <SliderControl
                 name={`${name}_x`} label="X" value={x} min={0} max={1} step={0.01}
                 onChange={(_, val) => onChange(name, { x: val, y })} canAnimate={false}
+                canExpression={false}
             />
             <SliderControl
                 name={`${name}_y`} label="Y" value={y} min={0} max={1} step={0.01}
                 onChange={(_, val) => onChange(name, { x, y: val })} canAnimate={false}
+                canExpression={false}
             />
         </div>
     );
@@ -205,8 +266,17 @@ const EffectControls = ({
 
     const handleParamChange = useCallback((paramName, value) => {
         if (!effect) return;
-        onUpdateParams(effect.id, { [paramName]: value });
-    }, [effect, onUpdateParams]);
+        // Once a parameter has an animation track, edits at the playhead must
+        // change that track. Updating only the static base value would leave
+        // the rendered animation untouched and make the control appear broken.
+        if ((keyframes[paramName] || []).length > 0) {
+            onAddKeyframe(effect.id, paramName, playhead, value);
+            return;
+        }
+        const current = currentValues[paramName];
+        onUpdateParams(effect.id, { [paramName]: current && typeof current === 'object'
+            ? { ...current, value } : value });
+    }, [effect, keyframes, onAddKeyframe, onUpdateParams, playhead]);
 
     const handleAddKeyframe = useCallback((paramName, value) => {
         if (!effect) return;
@@ -248,7 +318,11 @@ const EffectControls = ({
 
     // Render controls based on parameter type
     const renderControl = (paramName, paramDef) => {
-        const value = currentValues[paramName]?.value ?? currentValues[paramName] ?? paramDef.value;
+        const baseValue = currentValues[paramName]?.value ?? currentValues[paramName] ?? paramDef.value;
+        // Reflect the value the renderer evaluates at the current playhead.
+        // Showing the unanimated base value made an animated parameter look
+        // stuck, and edits from this control then jumped back to that base.
+        const value = sampleKeyframeTrack(keyframes[paramName], playhead, baseValue);
 
         switch (paramDef.type) {
             case 'float':
@@ -268,6 +342,14 @@ const EffectControls = ({
                         onChange={handleParamChange}
                         onAddKeyframe={handleAddKeyframe}
                         hasKeyframe={hasKeyframeAt(paramName)}
+                        expression={currentValues[paramName]?.expression}
+                        onExpressionChange={(name, expression) => {
+                            const raw = currentValues[name];
+                            onUpdateParams(effect.id, { [name]: {
+                                ...(raw && typeof raw === 'object' ? raw : { value: raw ?? paramDef.value }),
+                                expression,
+                            } });
+                        }}
                     />
                 );
 

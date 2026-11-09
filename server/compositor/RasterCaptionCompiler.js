@@ -57,6 +57,184 @@ const n4 = (v) => {
     return String(Math.round(n * 10000) / 10000);
 };
 
+// Caption layers are rasterised before the FFmpeg overlay pass. Apply the
+// common color/softness effects to that isolated RGBA stream so they affect
+// caption pixels only, matching the preview's layer-scoped filter behavior.
+function captionEffectFilters(effects) {
+    const filters = [];
+    const appendAnimatedIntervals = (samples, makeFilter) => {
+        const valid = (Array.isArray(samples) ? samples : [])
+            .filter(point => Number.isFinite(Number(point?.t)) && Number.isFinite(Number(point?.value)))
+            .sort((a, b) => Number(a.t) - Number(b.t));
+        if (valid.length < 2) return false;
+        const maxSamples = 120;
+        const bounded = valid.length > maxSamples
+            ? Array.from({ length: maxSamples }, (_, i) => valid[Math.round(i * (valid.length - 1) / (maxSamples - 1))])
+            : valid;
+        for (let i = 0; i < bounded.length - 1; i++) {
+            const from = Number(bounded[i].t), to = Number(bounded[i + 1].t);
+            if (to > from) makeFilter(bounded[i].value, from, to);
+        }
+        return true;
+    };
+    for (const effect of Array.isArray(effects) ? effects : []) {
+        if (!effect || effect.enabled === false) continue;
+        const p = effect.params || {};
+        const num = (key, fallback) => {
+            const raw = p[key]?.value ?? p[key];
+            const n = Number(raw);
+            return Number.isFinite(n) ? n : fallback;
+        };
+        const expression = (key, fallback) => {
+            const samples = Array.isArray(effect.samples?.[key])
+                ? effect.samples[key].filter(point => Number.isFinite(Number(point?.t)) && Number.isFinite(Number(point?.value)))
+                    .sort((a, b) => Number(a.t) - Number(b.t))
+                : [];
+            if (samples.length < 2) return n4(samples[0]?.value ?? num(key, fallback));
+            let expr = n4(samples[samples.length - 1].value);
+            for (let i = samples.length - 2; i >= 0; i--) {
+                const from = samples[i], to = samples[i + 1];
+                const span = Number(to.t) - Number(from.t);
+                const segment = span > 0.001
+                    ? `${n4(from.value)}+(${n4(Number(to.value) - Number(from.value))})*(t-${n4(from.t)})/${n4(span)}`
+                    : n4(to.value);
+                expr = `if(lt(t,${n4(to.t)}),${segment},${expr})`;
+            }
+            return `'${expr}'`;
+        };
+        const isAnimated = key => Array.isArray(effect.samples?.[key]) && effect.samples[key].length > 1;
+        const kind = effect.kind || effect.type;
+        if (kind === 'blur' || kind === 'blur_gaussian') {
+            const blurSamples = Array.isArray(effect.samples?.radius) ? effect.samples.radius
+                : Array.isArray(effect.samples?.amount) ? effect.samples.amount : [];
+            if (blurSamples.length > 1) {
+                // gblur exposes sigma as a runtime option but does not
+                // implement sendcmd updates. Use time-gated instances instead:
+                // exactly one fixed-radius filter is enabled for each sampled
+                // interval, so the alpha/rgb blur is actually rendered rather
+                // than silently accepting a no-op command.
+                appendAnimatedIntervals(blurSamples, (value, from, to) => {
+                    const sigma = Math.max(0, Math.min(40, Number(value) || 0));
+                    if (!(to > from) || sigma <= 0.01) return;
+                    filters.push(`gblur=sigma=${n4(sigma)}:enable='gte(t,${n4(from)})*lt(t,${n4(to)})'`);
+                });
+                continue;
+            }
+            const radius = Math.max(0, Math.min(40, num('radius', num('amount', 0))));
+            if (radius > 0) filters.push(`gblur=sigma=${n4(radius)}`);
+        } else if (kind === 'brightness') {
+            if (isAnimated('amount')) {
+                const amount = expression('amount', num('value', 1)).replace(/^'|'$/g, '');
+                filters.push(`eq=brightness='clip((${amount}),0,2)-1':eval=frame`);
+            } else {
+                const amount = Math.max(0, Math.min(2, num('amount', num('value', 1))));
+                filters.push(`eq=brightness=${n4(amount - 1)}`);
+            }
+        } else if (kind === 'contrast') {
+            if (isAnimated('amount')) filters.push(`eq=contrast='clip(${expression('amount', num('value', 1)).replace(/^'|'$/g, '')},0,4)':eval=frame`);
+            else filters.push(`eq=contrast=${n4(Math.max(0, Math.min(4, num('amount', num('value', 1)))))}`);
+        } else if (kind === 'saturation' || kind === 'saturate') {
+            if (isAnimated('amount')) filters.push(`eq=saturation='clip(${expression('amount', num('value', 1)).replace(/^'|'$/g, '')},0,5)':eval=frame`);
+            else filters.push(`eq=saturation=${n4(Math.max(0, Math.min(5, num('amount', num('value', 1)))))}`);
+        } else if (kind === 'hue' || kind === 'hue-rotate') {
+            if (isAnimated('degrees')) filters.push(`hue=h='clip(${expression('degrees', num('amount', 0)).replace(/^'|'$/g, '')},-360,360)'`);
+            else filters.push(`hue=h=${n4(num('degrees', num('amount', 0)))}`);
+        } else if (kind === 'color_grade') {
+            const contrast = expression('contrast', num('contrast', 100));
+            const saturation = expression('saturation', num('saturation', 100));
+            const hue = expression('hueRotate', num('hueRotate', 0));
+            const mapPercent = value => `clip((${value})/100,0,2)`;
+            const contrastValue = mapPercent(contrast.replace(/^'|'$/g, ''));
+            const saturationValue = mapPercent(saturation.replace(/^'|'$/g, ''));
+            const brightnessSamples = effect.samples?.brightness || [];
+            if (brightnessSamples.length > 1) {
+                appendAnimatedIntervals(brightnessSamples, (value, from, to) => {
+                    const factor = Math.max(0, Math.min(2, Number(value) / 100));
+                    filters.push(`colorchannelmixer=rr=${n4(factor)}:gg=${n4(factor)}:bb=${n4(factor)}:enable='gte(t,${n4(from)})*lt(t,${n4(to)})'`);
+                });
+            } else {
+                const factor = Math.max(0, Math.min(2, num('brightness', 100) / 100));
+                if (factor !== 1) filters.push(`colorchannelmixer=rr=${n4(factor)}:gg=${n4(factor)}:bb=${n4(factor)}`);
+            }
+            if (num('contrast', 100) !== 100 || isAnimated('contrast') || num('saturation', 100) !== 100 || isAnimated('saturation')) {
+                filters.push(`eq=contrast='${contrastValue}':saturation='clip(${saturationValue},0,2)':eval=frame`);
+            }
+            if (isAnimated('hueRotate')) filters.push(`hue=h='clip(${hue.replace(/^'|'$/g, '')},-180,180)'`);
+            else if (num('hueRotate', 0)) filters.push(`hue=h=${n4(Math.max(-180, Math.min(180, num('hueRotate', 0))))}`);
+            const temperature = Math.max(-100, Math.min(100, num('temperature', 0))) * 0.003;
+            const tint = Math.max(-100, Math.min(100, num('tint', 0))) * 0.003;
+            if (temperature || tint) filters.push(`colorbalance=rs=${n4(temperature)}:bs=${n4(-temperature)}:gs=${n4(tint)}`);
+        } else if (kind === 'grain' || kind === 'film_grain') {
+            const rawIntensity = p.intensity?.value ?? p.intensity;
+            const animatedSamples = kind === 'film_grain' || rawIntensity != null
+                ? (effect.samples?.intensity || [])
+                : (effect.samples?.amount || []);
+            const animated = (samples, strengthOf) => appendAnimatedIntervals(samples, (value, from, to) => {
+                const strength = Math.max(0, Math.min(48, strengthOf(Number(value) || 0)));
+                if (strength <= 0) return;
+                const animatedNoise = p.animated?.value ?? p.animated;
+                const flags = kind === 'film_grain' && animatedNoise === false ? 'u' : 't+u';
+                filters.push(`noise=c0s=${n4(strength)}:c1s=${n4(strength)}:c2s=${n4(strength)}:c3s=0:allf=${flags}:enable='gte(t,${n4(from)})*lt(t,${n4(to)})'`);
+            });
+            if (animatedSamples.length > 1) {
+                animated(animatedSamples, value => kind === 'film_grain' ? value * 48 : value);
+            } else {
+                const strength = kind === 'film_grain'
+                    ? Math.max(0, Math.min(48, num('intensity', 0.15) * 48))
+                    : Math.max(0, Math.min(48, num('amount', 8)));
+                if (strength > 0) {
+                    const animatedNoise = p.animated?.value ?? p.animated;
+                    const flags = kind === 'film_grain' && animatedNoise === false ? 'u' : 't+u';
+                    filters.push(`noise=c0s=${n4(strength)}:c1s=${n4(strength)}:c2s=${n4(strength)}:c3s=0:allf=${flags}`);
+                }
+            }
+        } else if (kind === 'chromatic-aberration' || kind === 'rgb_split') {
+            const samples = effect.samples?.amount || [];
+            const splitFilter = value => {
+                if (kind === 'chromatic-aberration') {
+                    const shift = Math.round(Math.max(0, Math.min(12, value)));
+                    return shift ? `format=yuva444p,chromashift=cbh=${-shift}:crh=${shift}:edge=smear,format=rgba` : '';
+                }
+                const amount = Math.max(0, Math.min(50, value));
+                if (!amount) return '';
+                const angleValue = Number(p.angle?.value ?? p.angle);
+                const angle = (Number.isFinite(angleValue) ? angleValue : 0) * Math.PI / 180;
+                const centerXValue = Number(p.centerX?.value ?? p.centerX);
+                const centerYValue = Number(p.centerY?.value ?? p.centerY);
+                const centerX = Math.max(0, Math.min(1, Number.isFinite(centerXValue) ? centerXValue : 0.5));
+                const centerY = Math.max(0, Math.min(1, Number.isFinite(centerYValue) ? centerYValue : 0.5));
+                const dx = n4(Math.cos(angle) * amount), dy = n4(Math.sin(angle) * amount);
+                const radial = `sqrt(pow(X/W-${n4(centerX)},2)+pow(Y/H-${n4(centerY)},2))`;
+                const rx = `clip(X+(${dx})*(${radial}),0,W-1)`, ry = `clip(Y+(${dy})*(${radial}),0,H-1)`;
+                const bx = `clip(X-(${dx})*(${radial}),0,W-1)`, by = `clip(Y-(${dy})*(${radial}),0,H-1)`;
+                return `format=rgba,geq=r='r(${rx},${ry})':g='g(X,Y)':b='b(${bx},${by})':a='alpha(X,Y)'`;
+            };
+            if (samples.length > 1) {
+                appendAnimatedIntervals(samples, (value, from, to) => {
+                    const filter = splitFilter(Number(value) || 0);
+                    if (filter) filters.push(`${filter}:enable='gte(t,${n4(from)})*lt(t,${n4(to)})'`);
+                });
+            } else {
+                const filter = splitFilter(num('amount', kind === 'rgb_split' ? 5 : 1.5));
+                if (filter) filters.push(filter);
+            }
+        } else if (kind === 'distortion') {
+            const samples = effect.samples?.amount || [];
+            if (samples.length > 1) {
+                appendAnimatedIntervals(samples, (value, from, to) => {
+                    const k1 = Math.max(-0.2, Math.min(0.2, Number(value) || 0));
+                    if (!k1) return;
+                    filters.push(`format=yuva444p,lenscorrection=cx=0.5:cy=0.5:k1=${n4(k1)}:k2=0:enable='gte(t,${n4(from)})*lt(t,${n4(to)})',format=rgba`);
+                });
+            } else {
+                const k1 = Math.max(-0.2, Math.min(0.2, num('amount', 0)));
+                if (k1) filters.push(`format=yuva444p,lenscorrection=cx=0.5:cy=0.5:k1=${n4(k1)}:k2=0,format=rgba`);
+            }
+        }
+    }
+    return filters;
+}
+
 // ─── Font metrics (CSS `line-height: normal`) ──────────────────────────────
 
 const metricsCache = new Map();
@@ -577,6 +755,7 @@ function prepareRasterCaptions(entries, opts) {
                 renderScale,
                 outputStart: Math.max(t0, runs[0].from),
                 outputEnd: Number(entry.outputEnd),
+                effects: Array.isArray(entry.raster.effects) ? entry.raster.effects : [],
                 geometry: decimate(geometry, MAX_GEOMETRY_SAMPLES),
                 images: files.size,
             });
@@ -628,6 +807,7 @@ function compileRasterOverlays(items, opts) {
         parts.push(`fps=${fps}`);
         parts.push(`setpts=PTS-STARTPTS+${n4(it.outputStart)}/TB`);
         parts.push('format=rgba');
+        parts.push(...captionEffectFilters(it.effects));
 
         if (hasRotation) {
             const angle = rotAnimated

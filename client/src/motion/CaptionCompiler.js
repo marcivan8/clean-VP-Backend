@@ -44,7 +44,7 @@
  */
 
 import { clipToMotionLayer } from './ClipAdapter.js';
-import { resolveMotionAt } from './MotionResolver.js';
+import { resolveMotionAt, sampleKeyframeTrack } from './MotionResolver.js';
 import { revealedWordCount, activeWordIndex, resolveEmphasis } from './CaptionModel.js';
 import { highlightBreakpoints, highlightMixAt } from './TextCraft.js';
 import { buildTimeMap, timelineToOutputTime, simplifySamples, GEOMETRY_SAMPLE_STEP } from './Compositor.js';
@@ -330,6 +330,43 @@ export function buildCaptionProgram(tracks, baseClips) {
 
             const geometry = sampleChannel(layer, timeMap, ['x', 'y', 'scale', 'opacity', 'glow', 'rotation']);
 
+            // Effect keyframes are authored in clip-local time. Ship sampled
+            // values in output time so export follows the same time map as the
+            // caption itself, including cuts and source gaps.
+            const effectSamples = (Array.isArray(clip.effects) ? clip.effects : []).map(effect => {
+                const keyframes = { ...(effect?.keyframes || {}) };
+                for (const [key, raw] of Object.entries(effect?.params || {})) {
+                    if (!keyframes[key] && Array.isArray(raw?.keyframes)) keyframes[key] = raw.keyframes;
+                }
+                const animatedKeys = Object.entries(keyframes)
+                    .filter(([, track]) => Array.isArray(track) && track.length)
+                    .map(([key]) => key);
+                if (!animatedKeys.length) return effect;
+                const duration = Math.max(0, Number(layer.duration) || 0);
+                const effectKind = effect?.kind || effect?.type;
+                // Blur is visually sensitive to coarse stepped values, so
+                // sample at frame cadence for short text animations. Other
+                // color parameters use a lighter 10 Hz curve sample.
+                const sampleStep = effectKind === 'blur' || effectKind === 'blur_gaussian'
+                    ? Math.max(1 / 30, duration / 118)
+                    : 0.1;
+                const localTimes = new Set([0, duration]);
+                for (let t = sampleStep; t < duration; t += sampleStep) localTimes.add(Number(t.toFixed(4)));
+                for (const key of animatedKeys) for (const frame of keyframes[key]) {
+                    const t = Number(frame?.time);
+                    if (Number.isFinite(t) && t >= 0 && t <= duration) localTimes.add(t);
+                }
+                const samples = {};
+                for (const key of animatedKeys) {
+                    const base = effect.params?.[key]?.value ?? effect.params?.[key] ?? 0;
+                    samples[key] = [...localTimes].sort((a, b) => a - b).map(localTime => ({
+                        t: Number(timelineToOutputTime(timeMap, layer.startTime + localTime).toFixed(4)),
+                        value: Number(sampleKeyframeTrack(keyframes[key], localTime, base)),
+                    })).filter(point => Number.isFinite(point.t) && Number.isFinite(point.value));
+                }
+                return { ...effect, samples };
+            });
+
             // Gate on a genuine reveal-type ANIMATION (e.g. the `word-reveal`
             // preset), not merely on `clip.words` being present. TextOverlay
             // only switches to per-word rendering when `motion.reveal < 1` or
@@ -396,6 +433,10 @@ export function buildCaptionProgram(tracks, baseClips) {
                         // Every layer of the CSS shadow (style packs stack
                         // several); the drawtext path keeps only one.
                         textShadow: typeof clip.textShadow === 'string' ? clip.textShadow : null,
+                        // Preserve the authored layer effect stack for the
+                        // raster compositor. Effects are not caption styling;
+                        // they must remain attached to the text layer itself.
+                        effects: effectSamples,
                         highlight: highlight || null,
                         emphasis: emphasis || null,
                         wordStates: wordRender ? buildWordStates(clip, layer, timeMap, tokens.length, highlight) : null,

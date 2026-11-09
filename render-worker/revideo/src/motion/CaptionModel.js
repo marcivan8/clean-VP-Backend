@@ -54,8 +54,9 @@
  * @param {number} [pauseThreshold=0.4] seconds of silence that forces a break
  * @returns {Array<{text:string,start:number,end:number,words:Array}>}
  */
-export function groupWordsIntoSegments(words, maxWords = 6, pauseThreshold = 0.4) {
+export function groupWordsIntoSegments(words, maxWords = 6, pauseThreshold = 0.4, options = {}) {
     if (!Array.isArray(words) || words.length === 0) return [];
+    const maxChars = Number(options?.maxChars) > 0 ? Number(options.maxChars) : Infinity;
 
     const segments = [];
     let group = [];
@@ -83,7 +84,8 @@ export function groupWordsIntoSegments(words, maxWords = 6, pauseThreshold = 0.4
         const w = words[i];
         if (!w || typeof w.word !== 'string') continue;
         const gap = i > 0 ? (w.start || 0) - (words[i - 1].end || 0) : 0;
-        if (group.length >= maxWords || (group.length > 0 && gap >= pauseThreshold)) flush();
+        const candidateText = [...group, w].map(item => item.word).join(' ');
+        if (group.length > 0 && (group.length >= maxWords || gap >= pauseThreshold || candidateText.length > maxChars)) flush();
         group.push(w);
     }
     flush();
@@ -186,6 +188,17 @@ export const CAPTION_STYLE_PACKS = {
         animationPreset: 'fade',
         wordHighlight: { mode: 'opacity', scale: 1.0 },
     },
+    'editorial-boxed': {
+        id: 'editorial-boxed', name: 'Editorial Box',
+        fontFamily: 'Montserrat', fontWeight: 800, fontSize: 44,
+        color: '#171923',
+        stroke: { width: 0, color: '#000000' },
+        textShadow: 'none',
+        backgroundColor: '#F7F5F0', backgroundPadding: 0.16,
+        uppercase: true,
+        animationPreset: 'fade',
+        wordHighlight: { mode: 'none', scale: 1.0 },
+    },
     'documentary': {
         id: 'documentary', name: 'Documentary',
         fontFamily: 'Playfair Display', fontWeight: 400, fontSize: 40,
@@ -226,6 +239,46 @@ export const CAPTION_STYLE_PACKS = {
         animationPreset: 'glow-reveal',
         wordHighlight: { mode: 'color', color: '#00E5FF', scale: 1.1 },
     },
+    'vox-highlighter': {
+        id: 'vox-highlighter', name: 'Vox Highlighter',
+        fontFamily: 'Montserrat', fontWeight: 800, fontSize: 50,
+        color: '#111827',
+        stroke: { width: 0, color: '#000000' },
+        textShadow: 'none',
+        uppercase: true,
+        animationPreset: 'pop',
+        wordHighlight: { mode: 'vox-marker', color: '#111827', background: '#FFE500', scale: 1.05 },
+    },
+    'hormozi-bounce': {
+        id: 'hormozi-bounce', name: 'Hormozi Explosive',
+        fontFamily: 'Anton', fontWeight: 900, fontSize: 58,
+        color: '#FFFFFF',
+        stroke: { width: 4, color: '#000000' },
+        textShadow: '4px 4px 0 #000, -2px -2px 0 #000',
+        uppercase: true,
+        animationPreset: 'pop',
+        wordHighlight: { mode: 'bounce-box', color: '#000000', background: '#FFE500', altBackground: '#00E5FF', scale: 1.15 },
+    },
+    'typewriter-terminal': {
+        id: 'typewriter-terminal', name: 'Terminal Typewriter',
+        fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 42,
+        color: '#10B981',
+        stroke: { width: 0, color: '#000000' },
+        textShadow: '0 0 10px rgba(16,185,129,0.6)',
+        uppercase: false,
+        animationPreset: 'fade',
+        wordHighlight: { mode: 'terminal-cursor', color: '#34D399', cursor: '█', scale: 1.0 },
+    },
+    'neon-punch': {
+        id: 'neon-punch', name: 'Neon Electric',
+        fontFamily: 'Rajdhani', fontWeight: 800, fontSize: 52,
+        color: '#FFFFFF',
+        stroke: { width: 2, color: '#FF0055' },
+        textShadow: '0 0 16px #FF0055, 0 0 32px #00E5FF',
+        uppercase: true,
+        animationPreset: 'glow-reveal',
+        wordHighlight: { mode: 'neon-glow', color: '#00E5FF', glowColor: '#00E5FF', scale: 1.12 },
+    },
 };
 
 /** Style pack ids, for UI pickers. */
@@ -265,6 +318,15 @@ export const LEGACY_PACK_MOTION = {
     'extended-bold': { uppercase: true,  animationPreset: 'scale-reveal', wordHighlight: { mode: 'box', color: '#0A0A0E', background: '#FFFFFF', scale: 1.04 } },
     'platform-sans': { uppercase: false, animationPreset: 'slide-up',    wordHighlight: { mode: 'opacity', scale: 1 } },
     'editorial':     { uppercase: true,  animationPreset: 'fade',        wordHighlight: { mode: 'none',  scale: 1 } },
+    'creator-pop':   { uppercase: false, animationPreset: 'pop',         wordHighlight: { mode: 'color', color: '#FFE500', scale: 1.08 } },
+    'social-clean':  { uppercase: false, animationPreset: 'slide-up',    wordHighlight: { mode: 'color', color: '#4ADE80', scale: 1.04 } },
+    'punchy-condensed': { uppercase: true, animationPreset: 'pop',        wordHighlight: { mode: 'box', color: '#111111', background: '#FFE500', scale: 1.08 } },
+    'storyteller':   { uppercase: false, animationPreset: 'fade',        wordHighlight: { mode: 'color', color: '#FDE68A', scale: 1.04 } },
+    'creator-minimal': { uppercase: false, animationPreset: 'slide-up',  wordHighlight: { mode: 'color', color: '#00E5FF', scale: 1.04 } },
+    'friendly-round': { uppercase: false, animationPreset: 'pop',        wordHighlight: { mode: 'color', color: '#F9A8D4', scale: 1.04 } },
+    'brand-block':   { uppercase: true,  animationPreset: 'scale-reveal', wordHighlight: { mode: 'box', color: '#111111', background: '#FFFFFF', scale: 1.06 } },
+    'mono-tech-caption': { uppercase: false, animationPreset: 'blur-reveal', wordHighlight: { mode: 'color', color: '#34D399', scale: 1.02 } },
+    'bootzy-caption': { uppercase: false, animationPreset: 'pop', wordHighlight: { mode: 'box', color: '#111111', background: '#FFE500', scale: 1.08 } },
 };
 
 /**
@@ -307,6 +369,8 @@ export function stylePackToClipFields(packId) {
         color:      pack.color,
         stroke:     pack.stroke,
         textShadow: pack.textShadow,
+        ...(pack.backgroundColor ? { backgroundColor: pack.backgroundColor } : {}),
+        ...(Number.isFinite(Number(pack.backgroundPadding)) ? { backgroundPadding: Number(pack.backgroundPadding) } : {}),
         // Nested under `captionStyle` so the pack's motion-specific bits travel
         // with the clip without colliding with any existing flat field.
         captionStyle: {
@@ -337,10 +401,15 @@ export const EMPHASIS_BY_PACK = {
     'hormozi':       { mode: 'color', color: '#FFE500', scale: 1.08 },
     'ali-abdaal':    { mode: 'color', color: '#4ADE80', scale: 1.06 },
     'apple':         { mode: 'scale', scale: 1.12 },
+    'editorial-boxed': { mode: 'color', color: '#8A5A00', scale: 1.0 },
     'documentary':   { mode: 'color', color: '#E8C27A', scale: 1.0 },
     'podcast':       { mode: 'color', color: '#00E5FF', scale: 1.06 },
     'luxury':        { mode: 'color', color: '#D4AF6A', scale: 1.0 },
     'gaming':        { mode: 'color', color: '#FF3D7F', scale: 1.12 },
+    'vox-highlighter':     { mode: 'box',   color: '#111827', background: '#FFE500', scale: 1.05 },
+    'hormozi-bounce':      { mode: 'box',   color: '#000000', background: '#FFE500', scale: 1.15 },
+    'typewriter-terminal': { mode: 'color', color: '#34D399', scale: 1.0 },
+    'neon-punch':          { mode: 'color', color: '#00E5FF', scale: 1.1 },
     // LEGACY_PACK_MOTION ids (the Text panel's original picker)
     'bold-impact':   { mode: 'color', color: '#FFE500', scale: 1.12 },
     'clean-modern':  { mode: 'box',   color: '#000000', background: '#FFE500', scale: 1.04 },
@@ -352,6 +421,15 @@ export const EMPHASIS_BY_PACK = {
     'extended-bold': { mode: 'box',   color: '#0A0A0E', background: '#FFFFFF', scale: 1.04 },
     'platform-sans': { mode: 'scale', scale: 1.1 },
     'editorial':     { mode: 'color', color: '#E8C27A', scale: 1.0 },
+    'creator-pop':   { mode: 'color', color: '#FFE500', scale: 1.08 },
+    'social-clean':  { mode: 'color', color: '#4ADE80', scale: 1.04 },
+    'punchy-condensed': { mode: 'box', color: '#111111', background: '#FFE500', scale: 1.08 },
+    'storyteller':   { mode: 'color', color: '#FDE68A', scale: 1.04 },
+    'creator-minimal': { mode: 'color', color: '#00E5FF', scale: 1.04 },
+    'friendly-round': { mode: 'color', color: '#F9A8D4', scale: 1.04 },
+    'brand-block':   { mode: 'box', color: '#111111', background: '#FFFFFF', scale: 1.06 },
+    'mono-tech-caption': { mode: 'color', color: '#34D399', scale: 1.02 },
+    'bootzy-caption': { mode: 'box', color: '#111111', background: '#FFE500', scale: 1.08 },
 };
 
 const DEFAULT_EMPHASIS = { mode: 'color', color: '#FACC15', scale: 1.12 };

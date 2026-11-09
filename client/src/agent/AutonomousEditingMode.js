@@ -13,7 +13,7 @@
 import { EditPlanner }          from './EditPlanner.js';
 import { IntentParser }         from './IntentParser.js';
 import { CommandCompiler }      from './CommandCompiler.js';
-import { mediaExecutionEngine } from './MediaExecutionEngine.js';
+import { executeVerifiedEdit } from './executeVerifiedEdit.js';
 import { UserApprovalAgent }    from './UserApprovalAgent.js';
 import { EventBus, EVENT_TYPES } from './EventBus.js';
 import useAIStore               from '../store/useAIStore.js';
@@ -242,14 +242,14 @@ class AutonomousEditingModeClass {
 
             try {
                 if (effectiveCommand) {
-                    const result = await mediaExecutionEngine.execute(
+                    const result = await executeVerifiedEdit(
                         [effectiveCommand],
-                        null,
-                        this.abortController.signal
+                        { ...plan, steps: plan.steps?.[i] ? [plan.steps[i]] : plan.steps },
+                        { signal: this.abortController.signal }
                     );
-                    step.result = result;
+                    step.result = result.execution || result;
                     step.state  = result.success ? STEP_STATE.DONE : STEP_STATE.FAILED;
-                    step.error  = result.success ? null : (result.error || 'Execution failed');
+                    step.error  = result.success ? null : (result.error || 'Execution or verification failed');
                 } else {
                     // No command (planning-only step) — mark done
                     step.state = STEP_STATE.DONE;

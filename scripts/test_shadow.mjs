@@ -142,8 +142,8 @@ await check('R121 -- preview scales clip.shadow by the SAME flat 1080 reference 
     // passing clip.shadow unscaled to either one reintroduces the bug.
     assert.doesNotMatch(src, /overlayFilterCss\(0,\s*clip\.shadow\)/, 'the layout-frame branch is passing clip.shadow unscaled to overlayFilterCss');
     assert.doesNotMatch(src, /overlayFilterCss\(motion\.blur,\s*clip\.shadow\)/, 'the sticker branch is passing clip.shadow unscaled to overlayFilterCss');
-    assert.match(src, /overlayFilterCss\(0,\s*scaleShadow\(clip\.shadow,\s*shadowScale\)\)/, 'the layout-frame branch must scale clip.shadow before it reaches overlayFilterCss');
-    assert.match(src, /overlayFilterCss\(motion\.blur,\s*scaleShadow\(clip\.shadow,\s*shadowScale\)\)/, 'the sticker branch must scale clip.shadow before it reaches overlayFilterCss');
+    assert.match(src, /overlayFilterCss\(0,\s*scaleShadow\(clip\.shadow,\s*shadowScale\),/, 'the layout-frame branch must scale clip.shadow before it reaches overlayFilterCss');
+    assert.match(src, /overlayFilterCss\(motion\.blur,\s*scaleShadow\(clip\.shadow,\s*shadowScale\),/, 'the sticker branch must scale clip.shadow before it reaches overlayFilterCss');
 });
 
 await check('R121 -- scaleShadow() itself scales dx/dy/blur proportionally and never produces a negative blur', () => {

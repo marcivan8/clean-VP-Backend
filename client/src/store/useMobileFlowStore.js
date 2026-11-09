@@ -19,6 +19,18 @@ const useMobileFlowStore = create((set, get) => ({
     active: false,
     step: 'outcome',
     outcomeId: null,
+    hasResult: false,
+    /** The unfinished creation request survives upload and edit errors. */
+    creationDraft: { outcomeId: 'reel', request: '' },
+    /**
+     * Which face the 'change' step wears.
+     *   'tweak'    — the six ready-made changes plus a composer. Reached from a
+     *                finished short, where "make it shorter" means something.
+     *   'describe' — the composer alone. Reached from "Something else" on the
+     *                first screen, where nothing has been made yet and a card
+     *                saying "make the captions bigger" has no captions to act on.
+     */
+    changeMode: 'tweak',
     returnToEditor: false,
     /** The user's own words, from the "something else" card. */
     request: '',
@@ -29,7 +41,8 @@ const useMobileFlowStore = create((set, get) => ({
     limitInfo: null,
 
     /** Open on a brand new project. A project that already has an edit never gets this. */
-    open: () => set({ active: true, step: 'outcome', outcomeId: null, request: '', error: null, limitInfo: null, returnToEditor: false, progressSteps: [], progressStartedAt: null }),
+    open: () => set({ active: true, step: 'outcome', outcomeId: null, hasResult: false, request: '', creationDraft: { outcomeId: 'reel', request: '' }, error: null, limitInfo: null, returnToEditor: false, progressSteps: [], progressStartedAt: null, changeMode: 'tweak' }),
+    setCreationDraft: (patch) => set((s) => ({ creationDraft: { ...s.creationDraft, ...patch } })),
 
     beginProgress: (steps = []) => set({
         progressSteps: steps.map((item, index) => ({ index, label: item.label, state: 'waiting', message: null })),
@@ -50,9 +63,10 @@ const useMobileFlowStore = create((set, get) => ({
     choose: (outcomeId, request = '') => set({ outcomeId, request, step: 'working', error: null, progressSteps: [], progressStartedAt: Date.now() }),
 
     /** A run ended: land on the result rather than dumping the user in the editor. */
-    finished: () => set({ step: 'result', error: null }),
+    finished: () => set({ step: 'result', hasResult: true, error: null }),
 
-    toChange: () => set({ step: 'change', error: null, returnToEditor: false }),
+    toChange: (mode) => set({ step: 'change', changeMode: mode === 'describe' ? 'describe' : 'tweak', error: null, returnToEditor: false }),
+    toOutcome: () => set({ step: 'outcome', error: null, returnToEditor: false }),
     toVersions: () => set({ step: 'versions', error: null, returnToEditor: false }),
     toResult: () => set({ step: 'result', error: null, returnToEditor: false }),
 
@@ -87,7 +101,7 @@ const useMobileFlowStore = create((set, get) => ({
         if (s.step === 'limit') return {};
         return {
             error: message || 'Something went wrong.',
-            step: s.outcomeId ? 'result' : 'outcome',
+            step: s.hasResult ? 'result' : 'outcome',
         };
     }),
 

@@ -416,7 +416,6 @@ async function main() {
             'controllers/aiAgentController.js',
             'jobs/audioProcessor.js',
             'server/brain/EditorialBrain.js',
-            'server/brain/PipelineAdapter.js',
             'server/brain/ProjectIntelligence.js',
             'server/brain/media/MediaIntelligencePipeline.js',
             'server/brain/media/VisualAnalyzer.js',
@@ -439,6 +438,15 @@ async function main() {
                 /require\((['"]).*services\/AIProvider\1\)/.test(src));
         }
 
+        // The legacy bridge is deliberately not an AI call site: it cannot
+        // mutate the browser's live timeline, so it must fail closed instead
+        // of proposing edits through a second, disconnected model path.
+        const pipelineAdapter = fs.readFileSync(path.resolve(__dirname, '..', 'server/brain/PipelineAdapter.js'), 'utf8');
+        check('PipelineAdapter refuses undispatched edits without constructing an AI client',
+            !/new OpenAI\(|AIProvider/.test(pipelineAdapter)
+                && /success:\s*false/.test(pipelineAdapter)
+                && /executed:\s*false/.test(pipelineAdapter));
+
         // The factory itself is the ONE legitimate construction site.
         const factorySrc = fs.readFileSync(
             path.resolve(__dirname, '../services/AIProvider.js'), 'utf8');
@@ -450,7 +458,7 @@ async function main() {
     {
         const files = [
             'routes/interviewRoutes.js', 'controllers/aiAgentController.js',
-            'server/brain/EditorialBrain.js', 'server/brain/PipelineAdapter.js',
+            'server/brain/EditorialBrain.js',
             'server/brain/ProjectIntelligence.js',
             'server/brain/media/MediaIntelligencePipeline.js',
             'server/brain/media/VisualAnalyzer.js', 'server/brain/media/ContentClassifier.js',

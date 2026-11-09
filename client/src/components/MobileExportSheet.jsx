@@ -20,17 +20,50 @@ import { SHARE_ROW, SHARE_ROW_LABEL, SHARE_LABEL } from './shareRow.js';
  * ExportModal ("More options"). Mobile only; desktop keeps ExportModal.
  */
 
+// A render the phone cannot pull down in two minutes is not going to arrive by
+// waiting longer; the row becomes tappable instead.
+const PREFETCH_TIMEOUT_MS = 120_000;
+
 const seg = (active) => ({
     height: 40, borderRadius: 9, border: 0, cursor: 'pointer',
     background: active ? 'var(--bg-3)' : 'transparent', color: active ? 'var(--fg)' : 'var(--fg-3)',
     fontFamily: 'var(--f-sans)', fontSize: 13.5, fontWeight: 600,
 });
 
-async function fetchAsFile(url, filename) {
-    const res = await fetch(url);
+/**
+ * Fetch the render into a File, reporting progress as it comes in.
+ *
+ * onProgress gets 0..100 when the response declares its length, and null when
+ * it does not (a chunked response, or one behind a proxy that drops
+ * Content-Length) — the caller shows "working" rather than a made-up number.
+ */
+async function fetchAsFile(url, filename, { onProgress, signal } = {}) {
+    const res = await fetch(url, signal ? { signal } : undefined);
     if (!res.ok) throw new Error(`Download failed (${res.status})`);
-    const blob = await res.blob();
-    return new File([blob], filename || 'vibed-export.mp4', { type: blob.type || 'video/mp4' });
+    const name = filename || 'vibed-export.mp4';
+    const type = res.headers.get('content-type') || 'video/mp4';
+    const total = Number(res.headers.get('content-length')) || 0;
+
+    // Without a readable stream there is nothing to report against, so take the
+    // blob in one go — the old behaviour.
+    if (!res.body || typeof res.body.getReader !== 'function') {
+        const blob = await res.blob();
+        if (onProgress) onProgress(100);
+        return new File([blob], name, { type: blob.type || type });
+    }
+
+    const reader = res.body.getReader();
+    const chunks = [];
+    let received = 0;
+    for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.byteLength;
+        if (onProgress) onProgress(total ? Math.min(99, Math.round((received / total) * 100)) : null);
+    }
+    if (onProgress) onProgress(100);
+    return new File(chunks, name, { type });
 }
 
 function downloadFile(file) {
@@ -59,6 +92,13 @@ export default function MobileExportSheet({ open, onClose, onExport, isExporting
     const [shareError, setShareError] = useState(null);
     // The exported file, fetched BEFORE the user taps Share. See save().
     const [readyFile, setReadyFile] = useState(null);
+    // How the prefetch is going: 'idle' | 'loading' | 'ready' | 'failed', plus
+    // percent (null while the response length is unknown). The share row used
+    // to be disabled on !readyFile alone, so a prefetch that was merely slow
+    // read as a frozen screen, and one that FAILED disabled the row for good —
+    // the on-demand fallback it was documented to fall back to was unreachable.
+    const [fetchState, setFetchState] = useState('idle');
+    const [fetchPercent, setFetchPercent] = useState(null);
 
     // iOS requires navigator.share() to be called while the tap is still the
     // active user gesture. Awaiting a multi-MB download first spends that
@@ -66,12 +106,37 @@ export default function MobileExportSheet({ open, onClose, onExport, isExporting
     // user saw: tap Share, get an error. Fetching the file as soon as the
     // render lands means the tap handler can call share() synchronously.
     useEffect(() => {
-        if (!open || !result?.url) { setReadyFile(null); return undefined; }
+        if (!open || !result?.url) {
+            setReadyFile(null);
+            setFetchState('idle');
+            setFetchPercent(null);
+            return undefined;
+        }
         let cancelled = false;
-        fetchAsFile(result.url, result.filename)
-            .then((f) => { if (!cancelled) setReadyFile(f); })
-            .catch(() => { /* save() falls back to fetching on demand */ });
-        return () => { cancelled = true; };
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        // A stalled download would otherwise keep the row saying "preparing"
+        // forever. Giving up turns it into a tappable button that downloads on
+        // demand, which is a worse share but a working one.
+        const timer = setTimeout(() => controller?.abort(), PREFETCH_TIMEOUT_MS);
+        setReadyFile(null);
+        setFetchState('loading');
+        setFetchPercent(null);
+        fetchAsFile(result.url, result.filename, {
+            signal: controller?.signal,
+            onProgress: (p) => { if (!cancelled) setFetchPercent(p); },
+        })
+            .then((f) => {
+                if (cancelled) return;
+                setReadyFile(f);
+                setFetchState('ready');
+            })
+            .catch((err) => {
+                if (cancelled) return;
+                console.warn('[MobileExportSheet] prefetch failed, falling back to on-demand:', err?.message);
+                setFetchState('failed');
+            })
+            .finally(() => clearTimeout(timer));
+        return () => { cancelled = true; clearTimeout(timer); controller?.abort(); };
     }, [open, result?.url, result?.filename]);
 
     if (!open) return null;
@@ -117,8 +182,9 @@ export default function MobileExportSheet({ open, onClose, onExport, isExporting
 
     const saveSlowPath = async (mode) => {
         setBusy(mode);
+        setFetchPercent(null);
         try {
-            const file = await fetchAsFile(result.url, result.filename);
+            const file = await fetchAsFile(result.url, result.filename, { onProgress: setFetchPercent });
             if (mode === 'save') {
                 downloadFile(file);
             } else if (canShareFiles && navigator.canShare({ files: [file] })) {
@@ -258,15 +324,23 @@ export default function MobileExportSheet({ open, onClose, onExport, isExporting
                                 <button
                                     type="button"
                                     onClick={() => save('share')}
-                                    // Until the file is in hand the only route is the
-                                    // awaiting one, and iOS refuses a share that is not
-                                    // inside the tap. Saying "preparing" beats failing.
-                                    disabled={!readyFile}
-                                    style={{ ...SHARE_ROW, opacity: readyFile ? 1 : 0.55 }}
+                                    // Only disabled while the prefetch is actually
+                                    // running: iOS refuses a share that is not inside
+                                    // the tap, so waiting beats failing. Once it has
+                                    // failed or timed out, the tap takes the on-demand
+                                    // route — a download rather than a dead button.
+                                    disabled={!readyFile || busy === 'share'}
+                                    style={{ ...SHARE_ROW, opacity: fetchState === 'loading' ? 0.55 : 1 }}
                                 >
                                     <ShareIcon size={21} style={{ color: 'var(--accent-2)', flex: 'none' }} />
                                     <span style={SHARE_ROW_LABEL}>
-                                        {readyFile ? t('mobileExport.saveToPhotos') : t('mobileExport.preparingFile')}
+                                        {!readyFile
+                                            ? (fetchState === 'loading' && fetchPercent != null
+                                                ? t('mobileExport.preparingFilePercent', { defaultValue: 'Preparing the file… {{percent}}%', percent: fetchPercent })
+                                                : t('mobileExport.preparingFile'))
+                                            : busy === 'share'
+                                                ? t('mobileExport.preparingFile')
+                                                : t('mobileExport.saveToPhotos')}
                                     </span>
                                 </button>
                             )}
@@ -282,7 +356,11 @@ export default function MobileExportSheet({ open, onClose, onExport, isExporting
                             type="button" onClick={() => save('save')} disabled={!!busy}
                             style={{ width: '100%', height: 56, borderRadius: 999, border: 0, background: 'var(--fg)', color: 'var(--bg)', fontFamily: 'var(--f-sans)', fontSize: 17, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: busy ? 0.7 : 1, cursor: 'pointer' }}
                         >
-                            <Download size={18} /> {busy === 'save' ? t('mobileExport.preparingFile') : t('mobileExport.save')}
+                            <Download size={18} /> {busy === 'save'
+                                ? (fetchPercent == null
+                                    ? t('mobileExport.preparingFile')
+                                    : t('mobileExport.preparingFilePercent', { defaultValue: 'Preparing the file… {{percent}}%', percent: fetchPercent }))
+                                : t('mobileExport.save')}
                         </button>
                         <p style={{ margin: '13px 0 0', textAlign: 'center', fontFamily: 'var(--f-mono)', fontSize: 12, color: 'var(--fg-3)' }}>
                             {t('mobileExport.freeNote')}

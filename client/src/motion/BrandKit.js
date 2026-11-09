@@ -77,7 +77,7 @@ export const BRAND_DEFAULTS = Object.freeze({
 });
 
 /** The colour fields that exist anywhere in the catalogue. */
-export const BRAND_COLOR_FIELDS = Object.freeze(['accent', 'color', 'color2', 'accentColor', 'leftColor', 'rightColor', 'borderColor', 'patternColor']);
+export const BRAND_COLOR_FIELDS = Object.freeze(['accent', 'color', 'color2', 'accentColor', 'leftColor', 'rightColor', 'borderColor', 'patternColor', 'sideColor']);
 
 /**
  * Which brand colour each field takes. `color` is deliberately absent: the
@@ -91,6 +91,8 @@ const FIELD_SOURCE = Object.freeze({
     leftColor: 'accent2',
     rightColor: 'accent',
     borderColor: 'accent',
+    // Extruded title faces use the secondary brand colour for depth.
+    sideColor: 'accent2',
     // Halftone pattern marks follow the brand text colour for clear contrast.
     patternColor: 'text',
 });

@@ -21,6 +21,7 @@
 
 import { applyBrand, brandFonts } from './BrandKit.js';
 import { drawIcon, iconFromText } from './IconLibrary.js';
+import { drawScene3D } from './Scene3D.js';
 import {
     caretOpacity,
     planWordCycle,
@@ -69,7 +70,7 @@ export const TEMPLATE_KINDS = ['counter', 'price-pop', 'logo-card', 'code-window
     // R115: the icon set reaching the catalogue (9), and the advanced
     // effects worth having (13).
     'icon', 'icon-label', 'icon-row',
-    'light-sweep', 'particles', 'gradient-wash', 'chroma-pulse'];
+    'light-sweep', 'particles', 'gradient-wash', 'chroma-pulse', '3d-title', '3d-scene'];
 
 /**
  * R113: the kinds that act ON the frame rather than sitting in it.
@@ -265,6 +266,9 @@ export const TEMPLATE_DEFAULTS = {
     'icon':             { icon: 'sparkle', accent: '#00E5FF', weight: 2, fill: 0, background: 'soft-glow' },
     'icon-label':       { icon: 'bulb', text: 'Pro tip', accent: '#00E5FF', color: '#FFFFFF' },
     'icon-row':         { icons: 'camera,scissors,send', labels: '', accent: '#00E5FF' },
+    // Canvas-rendered 2.5D title shared by preview and PNG-sequence export.
+    '3d-title':         { text: 'MAKE IT MOVE', color: '#FFFFFF', sideColor: '#4F46E5', accent: '#A5B4FC', fontSize: 112, depth: 18, tilt: 12, rotation: 0 },
+    '3d-scene':         { scene: { camera: { z: 7, fov: 780 }, ambient: 0.24, lights: [{ position: { x: -3, y: 5, z: 6 }, intensity: 0.9 }], particles: { count: 28, seed: 13, size: 7, spread: 4.5, speed: 0.12, color: '#A78BFA' }, objects: [{ id: 'hero-object', type: 'box', position: { x: 0, y: 0, z: 0 }, size: { x: 2.1, y: 1.65, z: 1.2 }, rotation: { x: 18, y: 28, z: -6 }, autoRotate: { y: 30 }, color: '#7C3AED' }] } },
     // Advanced effects. All four are frame-sized because they act on the
     // frame, and all four are translucent by design.
     'light-sweep':      { angle: 20, width: 0.18, color: '#FFFFFF', strength: 0.45 },
@@ -472,6 +476,8 @@ export function templateSize(kind, params) {
             const tall = parseList(p.labels, 5).length > 0;
             return { w: n * 180 + 40, h: tall ? 240 : 170 };
         }
+        case '3d-title': return { w: 1080, h: 420 };
+        case '3d-scene': return { w: 1080, h: 760 };
         case 'light-sweep':
         case 'particles':
         case 'gradient-wash':
@@ -5681,6 +5687,59 @@ function drawWordCycle(ctx, p, t, duration, F) {
     ctx.restore();
 }
 
+function draw3DTitle(ctx, p, t, duration) {
+    const text = String(p.text || '').trim();
+    if (!text) return;
+    const w = 1080, h = 420;
+    const size = Math.max(24, Math.min(240, Number(p.fontSize) || 112));
+    const depth = Math.max(0, Math.min(48, Number(p.depth) || 18));
+    const targetTilt = Math.max(-35, Math.min(35, Number(p.tilt) || 0));
+    const spin = Math.max(-45, Math.min(45, Number(p.rotation) || 0));
+    const progress = clamp(t / Math.max(0.08, Math.min(duration || 1, 0.8)), 0, 1);
+    const reveal = 1 - Math.pow(1 - progress, 3);
+    const angleY = (spin * (1 - reveal)) * Math.PI / 180;
+    const angleX = targetTilt * Math.PI / 180;
+    const sx = Math.max(0.72, Math.cos(angleY));
+    const color = String(p.color || '#FFFFFF');
+    const side = String(p.sideColor || '#4F46E5');
+    const accent = String(p.accent || '#A5B4FC');
+    const baseAlpha = ctx.globalAlpha;
+    ctx.save();
+    ctx.globalAlpha *= reveal;
+    ctx.translate(w / 2, h / 2);
+    // Perspective cues: foreshorten the face, compress the extrusion by its
+    // vertical tilt, and draw the side from back to front for stable depth.
+    ctx.transform(sx, Math.sin(angleX) * 0.2, Math.sin(angleY) * 0.16, Math.cos(angleX), 0, 0);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `900 ${size}px Anton, Impact, sans-serif`;
+    ctx.lineJoin = 'round';
+    ctx.shadowColor = 'rgba(0,0,0,.38)';
+    ctx.shadowBlur = 24;
+    ctx.shadowOffsetY = 16;
+    for (let i = depth; i > 0; i--) {
+        const fade = 0.58 + 0.42 * (i / depth);
+        ctx.fillStyle = i % 3 === 0 ? accent : side;
+        ctx.globalAlpha = baseAlpha * reveal * fade;
+        ctx.fillText(text, i * 0.68, i * 0.42);
+    }
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.globalAlpha = baseAlpha * reveal;
+    ctx.fillStyle = color;
+    ctx.strokeStyle = 'rgba(15,23,42,.6)';
+    ctx.lineWidth = Math.max(1.5, size * 0.018);
+    ctx.strokeText(text, 0, 0);
+    ctx.fillText(text, 0, 0);
+    // A subtle specular edge reads as a lit bevel without overwhelming copy.
+    ctx.globalAlpha = baseAlpha * reveal * 0.42;
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = Math.max(1, size * 0.008);
+    ctx.strokeText(text, -1, -1.5);
+    ctx.restore();
+}
+
 export function drawTemplate(ctx, kind, params, t, duration, opts = {}) {
     if (!ctx || !TEMPLATE_KINDS.includes(kind)) return;
     // R114 - the brand is resolved HERE, once, for all 52 kinds. Threading it
@@ -5775,6 +5834,8 @@ export function drawTemplate(ctx, kind, params, t, duration, opts = {}) {
         else if (kind === 'icon') drawIconTemplate(ctx, p, tt, d);
         else if (kind === 'icon-label') drawIconLabel(ctx, p, tt, d, F);
         else if (kind === 'icon-row') drawIconRow(ctx, p, tt, d, F);
+        else if (kind === '3d-title') draw3DTitle(ctx, p, tt, d);
+        else if (kind === '3d-scene') drawScene3D(ctx, p.scene || {}, tt, d, Number(p.w) || 1080, Number(p.h) || 760, opts.images || {});
         else if (kind === 'light-sweep') drawLightSweep(ctx, p, tt, d);
         else if (kind === 'particles') drawParticles(ctx, p, tt, d);
         else if (kind === 'gradient-wash') drawGradientWash(ctx, p, tt, d);
@@ -5793,6 +5854,26 @@ export function templateFromText(text) {
     const raw = String(text || '');
     const s = raw.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
     const quoted = (raw.match(/["“«]\s*([^"”»]+?)\s*["”»]/) || [])[1] || null;
+    if (/\b3d scene\b|3d composition|3d object|3d shape|scene 3d|objet 3d|forme 3d/.test(s)) {
+        const base = TEMPLATE_DEFAULTS['3d-scene'].scene;
+        const primitive = /3d text|text object|texte 3d/.test(s) ? 'text'
+            : /sphere|sph[eè]re/.test(s) ? 'sphere'
+            : /cylinder|cylindre/.test(s) ? 'cylinder'
+                : /cone/.test(s) ? 'cone' : /torus|donut|anneau/.test(s) ? 'torus'
+                    : /plane|plan\b/.test(s) ? 'plane' : 'box';
+        const color = /\b(gold|or|dor[eé])\b/.test(s) ? '#F4B942'
+            : /\b(red|rouge)\b/.test(s) ? '#EF4444' : /\b(blue|bleu)\b/.test(s) ? '#3B82F6'
+                : /\b(green|vert)\b/.test(s) ? '#22C55E' : /\b(pink|rose)\b/.test(s) ? '#EC4899'
+                    : /\b(white|blanc)\b/.test(s) ? '#F8FAFC' : null;
+        const primary = { ...base.objects[0], type: primitive, ...(color ? { color } : {}), ...(primitive === 'sphere' ? { radius: 0.9 } : {}), ...(primitive === 'text' ? { content: quoted || '3D TEXT', fontSize: 0.72, depth: 8 } : {}) };
+        const objects = [primary];
+        if (/\b(and|with|et)\b/.test(s) && /sphere|sph[eè]re/.test(s) && primitive !== 'sphere') objects.push({ type: 'sphere', position: { x: 1.45, y: -0.55, z: 0.25 }, radius: 0.55, color: color || '#38BDF8', autoRotate: { y: 18 } });
+        const scene = { ...base, objects };
+        return { kind: '3d-scene', params: { scene } };
+    }
+    if (/\b3d title\b|\b3d text\b|extruded title|perspective title|titre 3d|texte 3d/.test(s)) {
+        return { kind: '3d-title', params: quoted ? { text: quoted } : {} };
+    }
     // R92: shapes first, so "bar chart 10 of 30" is not read as a counter.
     const shape = shapeFromText(s, raw, quoted);
     if (shape) return shape;

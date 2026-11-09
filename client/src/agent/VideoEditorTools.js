@@ -13,6 +13,7 @@ import { pollJobResult } from '../utils/jobPoller.js';
 import { TEMPLATE_KINDS } from '../motion/TemplateGraphics.js';
 import { iconFromText } from '../motion/IconLibrary.js';
 import { applyPresetToClip } from '../motion/ClipAdapter.js';
+import { describeToolCapabilities, validateToolInvocation } from './ToolCapabilityCatalog.js';
 
 /**
  * VideoEditorTools
@@ -50,6 +51,23 @@ export const TOOL_DEFINITIONS = [
                 confirmed: { type: 'boolean', description: 'True only when the user has explicitly confirmed applying the reviewed candidate ranges.' },
             },
             required: ['operation', 'confirmed'],
+        },
+    },
+    {
+        name: 'resume_failed_job',
+        description: 'Continue the last incomplete edit using its saved remaining operations.',
+        parameters: { type: 'object', properties: {} },
+    },
+    {
+        name: 'add_transitions_to_sections',
+        description: 'Apply transitions at chapter boundaries or across cuts on the main video track.',
+        parameters: {
+            type: 'object',
+            properties: {
+                type: { type: 'string', description: 'Transition type, such as fade.' },
+                duration: { type: 'number', description: 'Transition duration in seconds.' },
+                apply_at: { type: 'string', enum: ['section_boundaries', 'all_cuts'] },
+            },
         },
     },
     // --- Editing Tools ---
@@ -420,8 +438,35 @@ export const TOOL_DEFINITIONS = [
                 limit:      { type: "number", description: "Max recommendations (default 5)" }
             }
         }
-    }
+    },
+    {
+        name: 'apply_zoom',
+        description: 'Apply a manual zoom or punch-in to matching footage.',
+        parameters: { type: 'object', properties: { clipId: { type: 'string' }, scale: { type: 'number' }, start: { type: 'number' }, duration: { type: 'number' } } },
+    },
+    {
+        name: 'apply_smart_zoom',
+        description: 'Find and apply speaker-aware smart zooms to the active footage.',
+        parameters: { type: 'object', properties: { clipIds: { type: 'array', items: { type: 'string' } }, intensity: { type: 'number' } } },
+    },
+    { name: 'smart_cleanup', description: 'Analyze and clean the current edit using safe, verified timeline operations.', parameters: { type: 'object', properties: { removeSilence: { type: 'boolean' }, removeFillerWords: { type: 'boolean' } } } },
+    { name: 'find_hook', description: 'Find the strongest opening hook in the current footage and place the playhead there.', parameters: { type: 'object', properties: {} } },
+    { name: 'place_contextual_broll', description: 'Find relevant stock footage and place it over the matching spoken moments.', parameters: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } } } },
+    { name: 'place_contextual_illustrations', description: 'Place motion graphics that illustrate the current narration.', parameters: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } } } },
+    { name: 'fetch_stock_broll', description: 'Search stock footage for a described visual.', parameters: { type: 'object', properties: { query: { type: 'string' }, type: { type: 'string' }, limit: { type: 'number' } }, required: ['query'] } },
+    { name: 'remove_repetition', description: 'Detect and remove repeated takes or redundant phrases from the edit.', parameters: { type: 'object', properties: { threshold: { type: 'number' } } } },
+    { name: 'reorder_clips', description: 'Reorder selected timeline clips according to the requested sequence.', parameters: { type: 'object', properties: { clipIds: { type: 'array', items: { type: 'string' } }, order: { type: 'array', items: { type: 'string' } } } } },
+    { name: 'cut_segment', description: 'Cut a selected source or timeline range.', parameters: { type: 'object', properties: { start: { type: 'number' }, end: { type: 'number' }, clipId: { type: 'string' } }, required: ['start', 'end'] } },
+    { name: 'identify_quotable_moments', description: 'Analyze the transcript for strong quotable moments and return timestamped candidates.', parameters: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } } } },
+    { name: 'create_video_from_script', description: 'Build a video from a supplied script using matched visual assets and motion design.', parameters: { type: 'object', properties: { script: { type: 'string' }, style: { type: 'string' }, includeImages: { type: 'boolean' } }, required: ['script'] } },
+    { name: 'create_video_from_assets', description: 'Create a montage from uploaded source footage and images in the media bin. Reference assets are excluded.', parameters: { type: 'object', properties: { includeImages: { type: 'boolean' }, style: { type: 'string' } } } },
+    { name: 'layout_split_screen', description: 'Arrange the selected speaker and visual asset in a split-screen composition.', parameters: { type: 'object', properties: { clipId: { type: 'string' }, assetId: { type: 'string' }, ratio: { type: 'number' } } } },
+    { name: 'layout_picture_in_picture', description: 'Place the selected visual asset in a picture-in-picture frame.', parameters: { type: 'object', properties: { clipId: { type: 'string' }, assetId: { type: 'string' }, position: { type: 'string' }, scale: { type: 'number' } } } },
+    { name: 'layout_fullscreen', description: 'Show the selected visual asset full-frame for the requested range.', parameters: { type: 'object', properties: { clipId: { type: 'string' }, assetId: { type: 'string' }, start: { type: 'number' }, duration: { type: 'number' } } } }
 ];
+
+export const TOOL_CAPABILITIES = describeToolCapabilities(TOOL_DEFINITIONS);
+const TOOL_DEFINITION_BY_NAME = new Map(TOOL_DEFINITIONS.map(definition => [definition.name, definition]));
 
 // ── Shared segment→clip helpers (identifyQuotableMoments, findHook, analyzeStructure) ──
 //
@@ -682,13 +727,16 @@ export function buildBrollCandidates(profiles, assets) {
     if (!Array.isArray(profiles) || profiles.length === 0) return [];
     if (!Array.isArray(assets) || assets.length === 0) return [];
 
-    const binAssetIds = new Set();
+    const editableAssetsById = new Map();
     for (const asset of assets) {
-        if (asset?.id) binAssetIds.add(asset.id);
+        // References are inspiration/context, never timeline footage. Filter
+        // them here as well as at placement time so they cannot rank as a
+        // local cutaway candidate.
+        if (asset?.id && asset.assistantReference !== true) editableAssetsById.set(asset.id, asset);
     }
 
     return profiles
-        .filter(p => p && p.assetId && binAssetIds.has(p.assetId))
+        .filter(p => p && p.assetId && editableAssetsById.has(p.assetId))
         .filter(p => p.hasMainSpeaker !== true)
         .map(p => ({
             assetId: p.assetId,
@@ -974,6 +1022,15 @@ export class VideoEditorTools {
 
     async execute(action) {
         console.log(`\n🔧 [VideoEditorTools] Executing Tool: ${action.name}`, JSON.stringify(action.args));
+
+        // Let the operation return its specific, user-facing empty-script
+        // message instead of the generic schema error for an empty string.
+        if (action.name === 'create_video_from_script' && !String(action.args?.script || '').trim()) {
+            return { success: false, message: 'No script text was given to build a video from.' };
+        }
+
+        const invocation = validateToolInvocation(TOOL_DEFINITION_BY_NAME.get(action.name), action.args || {});
+        if (!invocation.success) return { success: false, error: invocation.error };
 
         // Helper to get main filename
         const getFilename = () => {
@@ -1500,7 +1557,7 @@ export class VideoEditorTools {
 
         // Dynamically import to avoid circular dependency issues at module load time
         const { CommandCompiler } = await import('./CommandCompiler.js');
-        const { mediaExecutionEngine } = await import('./MediaExecutionEngine.js');
+        const { executeVerifiedEdit } = await import('./executeVerifiedEdit.js');
 
         const compileResult = CommandCompiler.compile(plan, useTimelineStore.getState());
 
@@ -1522,7 +1579,8 @@ export class VideoEditorTools {
         // Pass signal into the inner execution so its poller is cancelled when
         // the outer 120 s timeout fires — prevents ghost _applySegmentsToTimeline
         // calls on an already-abandoned job.
-        const executionResult = await mediaExecutionEngine.execute(compileResult.commands, null, signal);
+        const verifiedEdit = await executeVerifiedEdit(compileResult.commands, plan, { signal });
+        const executionResult = verifiedEdit.execution || { success: false, error: verifiedEdit.error, results: verifiedEdit.results || [] };
 
         // R131 — "the brain loses the flow after each task done": a failed
         // long-form edit used to vanish completely — nothing recorded which
@@ -1533,7 +1591,7 @@ export class VideoEditorTools {
         // never successfully ran so resumeFailedJob() can hand them straight
         // back to the execution engine without re-planning from scratch.
         const state = this.store;
-        if (executionResult.success) {
+        if (verifiedEdit.success) {
             clearResumableJob(state.projectId);
         } else {
             const remaining = remainingCommandsFrom(compileResult.commands, executionResult.results);
@@ -1547,12 +1605,14 @@ export class VideoEditorTools {
         }
 
         return {
-            success: executionResult.success,
-            message: executionResult.success
+            success: verifiedEdit.success,
+            message: verifiedEdit.success
                 ? `✓ Complete edit applied — ${plan.step_count} steps completed.`
-                : `Complete edit failed: ${executionResult.error} — say "continue" to pick up where it stopped.`,
+                : `Complete edit failed verification: ${verifiedEdit.error || executionResult.error} — review the partial result before continuing.`,
             editPlan: plan,
             results: executionResult.results,
+            ...(verifiedEdit.validation ? { validation: verifiedEdit.validation } : {}),
+            ...(verifiedEdit.partialResult ? { partialResult: true } : {}),
         };
     }
 
@@ -1583,10 +1643,15 @@ export class VideoEditorTools {
                 };
             }
 
-            const { mediaExecutionEngine } = await import('./MediaExecutionEngine.js');
-            const executionResult = await mediaExecutionEngine.execute(record.remainingCommands, null, null);
+            const { executeVerifiedEdit } = await import('./executeVerifiedEdit.js');
+            const verifiedEdit = await executeVerifiedEdit(record.remainingCommands, {
+                plan_id: record.planId,
+                operation: 'resume_failed_job',
+                steps: [],
+            });
+            const executionResult = verifiedEdit.execution || { success: false, error: verifiedEdit.error, results: verifiedEdit.results || [] };
 
-            if (executionResult.success) {
+            if (verifiedEdit.success) {
                 clearResumableJob(state.projectId);
                 return {
                     success: true,

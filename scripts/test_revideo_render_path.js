@@ -44,7 +44,7 @@ function stripSyncHeader(src) {
 
 section('1 · synced motion files match client/src/motion/ (drift detection)');
 {
-    for (const f of ['Easing.js', 'MotionSchema.js', 'MotionResolver.js', 'MotionPresets.js', 'CaptionModel.js']) {
+    for (const f of ['Easing.js', 'MotionSchema.js', 'MotionResolver.js', 'MotionExpression.js', 'MotionPresetExpansion.js', 'MotionPresets.js', 'CaptionModel.js']) {
         const original = read(`client/src/motion/${f}`);
         const copy = stripSyncHeader(read(`render-worker/revideo/src/motion/${f}`));
         check(`${f}: worker copy body matches the original verbatim`, original.trim() === copy.trim(),
@@ -74,10 +74,11 @@ section('2 · RevideoLayerAdapter.js — resolution priority (CJS-strip-eval, re
     // names) exactly as the real Vite bundle would resolve them.
     const easing = read('render-worker/revideo/src/motion/Easing.js');
     const schema = read('render-worker/revideo/src/motion/MotionSchema.js');
+    const expansions = read('render-worker/revideo/src/motion/MotionPresetExpansion.js');
     const presets = read('render-worker/revideo/src/motion/MotionPresets.js');
     const adapter = read('render-worker/revideo/src/motion/RevideoLayerAdapter.js');
 
-    let combined = [easing, schema, presets, adapter]
+    let combined = [easing, schema, expansions, presets, adapter]
         .map(s => s
             .replace(/^\s*import\s+[^;]+;\s*$/gm, '')
             .replace(/^\s*export\s+default\s+\{[\s\S]*?\};\s*$/gm, '')
@@ -110,9 +111,22 @@ section('2 · RevideoLayerAdapter.js — resolution priority (CJS-strip-eval, re
 section('3 · new scene (render-worker/revideo/src/scenes/timeline.tsx) — structure');
 {
     const scene = read('render-worker/revideo/src/scenes/timeline.tsx');
+    const effects = read('render-worker/revideo/src/motion/EffectAdapter.js');
+    const effectWindows = read('render-worker/revideo/src/motion/EffectWindows.js');
+    const effectParameters = read('render-worker/revideo/src/motion/EffectParameters.js');
     check('imports the ported RevideoLayerAdapter', /from '\.\.\/motion\/RevideoLayerAdapter\.js'/.test(scene));
     check('imports resolveMotionAt from the ported MotionResolver', /resolveMotionAt.*from '\.\.\/motion\/MotionResolver\.js'/.test(scene));
+    check('procedural expressions are passed into the export motion layer', read('render-worker/revideo/src/motion/RevideoLayerAdapter.js').includes('expressions: clip.expressions'));
     check('imports revealedWordCount from the ported CaptionModel', /revealedWordCount.*from '\.\.\/motion\/CaptionModel\.js'/.test(scene));
+    check('Revideo scene imports and applies the per-clip effect adapter to text and image nodes',
+        /createRevideoEffectFilters.*from '\.\.\/motion\/EffectAdapter\.js'/.test(scene)
+        && (scene.match(/filters=\{effectFilters\}/g) || []).length === 2);
+    check('worker effect adapter supports blur and core color filters',
+        ['blur_gaussian', 'brightness', 'contrast', 'saturation', 'hue-rotate'].every(kind => effects.includes(`case '${kind}'`)));
+    check('worker effect adapter respects effect windows and keyframed parameter values',
+        effects.includes('isEffectActiveAt(effect') && effects.includes('resolveRevideoEffectParameter(')
+        && effectWindows.includes('effect.outputWindows') && effectWindows.includes('localTime')
+        && effectParameters.includes('sampleKeyframeTrack(track') && effectParameters.includes('evaluateMotionExpression('));
     check('reads baseVideoUrl as a scene variable', /baseVideoUrl.*=.*useVar.*baseVideoUrl/.test(scene) || /vars\.get\('baseVideoUrl'/.test(scene) || /'baseVideoUrl'/.test(scene));
     check('base video is a SINGLE full-canvas Video node (no per-clip video loop)', /<Video\b/.test(scene) && (scene.match(/<Video\b/g) || []).length === 1);
     check('renders text tracks', /track\.type === 'text'/.test(scene));
@@ -127,6 +141,27 @@ section('3 · new scene (render-worker/revideo/src/scenes/timeline.tsx) — stru
     check('removes each clip node after its duration (no permanent on-screen leak)', /nodeRef\(\)\.remove\(\)/.test(scene));
     check('converts percent-of-frame-centre to pixel-from-canvas-centre', /toPxX/.test(scene) && /toPxY/.test(scene));
     check('word-timed reveal uses revealedWordCount, not a flat reveal fraction', /revealedWordCount\(/.test(scene));
+    check('Revideo caption renderer resolves the active word from word timing', /activeWordIndex\(layer\.words, playback\.time\)/.test(scene));
+    check('Revideo captions apply style-pack active-word color', /highlightMode === 'color'.*highlight\.color/s.test(scene));
+    check('Revideo captions apply style-pack active-word opacity and scale', /highlightMode !== 'opacity'/s.test(scene) && /highlight\.scale/.test(scene));
+    check('Revideo text layers render independent horizontal and vertical motion scale', /scale=\{\(\) => \[resolved\(\)\.scale \* resolved\(\)\.scaleX, resolved\(\)\.scale \* resolved\(\)\.scaleY\]\}/.test(scene));
+    check('Revideo image overlays render independent horizontal and vertical motion scale', (scene.match(/scale=\{\(\) => \[resolved\(\)\.scale \* resolved\(\)\.scaleX, resolved\(\)\.scale \* resolved\(\)\.scaleY\]\}/g) || []).length === 2);
+}
+
+section('3c · client Revideo project applies scale-axis transforms');
+{
+    const project = read('client/src/revideo/project.tsx');
+    check('Revideo project reads independent scale axes from the motion resolver',
+        /scaleX: resolved\.scaleX/.test(project) && /scaleY: resolved\.scaleY/.test(project));
+    check('Revideo project multiplies scale axes into video and overlay geometry',
+        /motion\.scaleX/.test(project) && /motion\.scaleY/.test(project));
+    check('Revideo project uses the canonical easing resolver for clip zoom keyframes',
+        /import \{ resolveMotionAt, sampleKeyframeTrack \} from '\.\.\/motion\/MotionResolver\.js';/.test(project)
+        && /return sampleKeyframeTrack\(keyframes, time, defaultValue\)/.test(project)
+        && !/const easingMap: Record<string, \(t: number\) => number>/.test(project));
+    check('Revideo base footage combines saved position and rotation keyframes with motion animations',
+        /evaluateKF\(kf\.x, clipLocalTime\(playback\.time, clip\.start\), clip\.x \|\| 0\) \+ motionOffsets/.test(project)
+        && /motionOffsets\(motionLayer, playback\.time, canvasWidth, canvasHeight\)\.rotation\s*\+\s*evaluateKF\(kf\.rotation/.test(project));
 }
 
 section('3b · render-worker caption fonts — @font-face registration for headless Chrome');
@@ -241,7 +276,7 @@ section('5 · jobs/exportProcessor.js — opt-in wiring, mutual exclusion, fails
     check('useRevideo requires RENDER_WORKER_URL to be configured', /!!process\.env\.RENDER_WORKER_URL/.test(exp));
     check('useRevideo requires an actual text or overlay track (no-op otherwise)', /revideoTextTracks\.length > 0 \|\| revideoOverlayTracks\.length > 0/.test(exp));
 
-    check('STEP 2.5 (compositor) is skipped when useRevideo — no double-compositing', /rawPlan && process\.env\.COMPOSITOR_DISABLED !== '1' && !useRevideo/.test(exp));
+    check('STEP 2.5 (compositor) is skipped when useRevideo — no double-compositing', /rawPlan && \(rawPlan\.overlays \|\| \[\]\)\.length > 0 && process\.env\.COMPOSITOR_DISABLED !== '1' && !useRevideo/.test(exp));
     check('STEP 4 (drawtext captions) is skipped only when Revideo succeeded — no double captions, no dropped captions (R92)', /textTracks\.length > 0 && !revideoSucceeded/.test(exp));
     check('R92: worker health is checked before the compositor is skipped', /useRevideo && !\(await revideoWorkerHealthy\(\)\)/.test(exp) && /async function revideoWorkerHealthy/.test(exp));
 

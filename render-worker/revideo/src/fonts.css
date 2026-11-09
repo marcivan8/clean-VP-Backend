@@ -51,6 +51,8 @@
 @font-face { font-family: 'Bebas Neue';         font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/BebasNeue-Regular.ttf') format('truetype'); }
 @font-face { font-family: 'Montserrat';         font-style: normal; font-weight: 800; font-display: block; src: url('./fonts/Montserrat-Bold.ttf') format('truetype'); }
 @font-face { font-family: 'Inter';              font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Inter-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'JetBrains Mono';     font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/JetBrainsMono-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Bootzy TM';          font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/BootzyTM.ttf') format('truetype'); }
 @font-face { font-family: 'Barlow Condensed';   font-style: normal; font-weight: 700; font-display: block; src: url('./fonts/BarlowCondensed-Bold.ttf') format('truetype'); }
 @font-face { font-family: 'Playfair Display';   font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/PlayfairDisplay-Regular.ttf') format('truetype'); }
 @font-face { font-family: 'Lora';               font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Lora-Regular.ttf') format('truetype'); }

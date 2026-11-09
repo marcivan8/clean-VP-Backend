@@ -11,8 +11,8 @@
  *
  * Returns:
  *   { url, filename, metadata }
- *   url = '/api/proxy/gcs-media/exports/{userId}/{jobId}.mp4'  (GCS)
- *      OR '/uploads/exports/{jobId}.mp4'                       (local dev fallback)
+ *   url = '/api/proxy/gcs-media/exports/{userId}/{jobId}.{format}' (GCS)
+ *      OR '/uploads/exports/{jobId}.{format}'                       (local fallback)
  */
 
 const ffmpeg = require('fluent-ffmpeg');
@@ -63,6 +63,18 @@ function runFfmpegArgs(bin, args) {
         });
     });
 }
+
+function runProgram(bin, args, cwd) {
+    return new Promise((resolve, reject) => {
+        const proc = spawn(bin, args, { cwd });
+        const stderr = [];
+        proc.stderr.on('data', chunk => stderr.push(chunk));
+        proc.on('error', reject);
+        proc.on('close', code => code === 0
+            ? resolve()
+            : reject(new Error(`${path.basename(bin)} exited ${code}: ${Buffer.concat(stderr).toString('utf8').slice(-4000)}`)));
+    });
+}
 // ─────────────────────────────────────────────────────────────────────────────
 
 const gcsBucket = storageConfig.bucket;
@@ -70,6 +82,81 @@ const gcsBucket = storageConfig.bucket;
 // ─── Helpers (mirrors exportRoutes.js) ───────────────────────────────────────
 
 const isServerUsableUrl = (u) => u && !u.startsWith('blob:');
+
+/**
+ * The opt-in Revideo worker currently draws plain text and static image
+ * overlays with transform/opacity motion. It does not apply effect stacks,
+ * masks, blend modes, vector/template layers, or media overlays. Keep those
+ * projects on the complete FFmpeg compositor path until the worker implements
+ * those capabilities, rather than claiming success after dropping features.
+ */
+const REVVIDEO_SUPPORTED_EFFECTS = new Set([
+    'blur', 'blur_gaussian', 'brightness', 'contrast', 'saturation', 'saturate',
+    'hue', 'hue-rotate', 'grayscale', 'sepia',
+]);
+const REVVIDEO_EFFECT_ANIMATABLE_PARAMS = {
+    blur: new Set(['radius', 'amount']), blur_gaussian: new Set(['radius', 'amount']),
+    brightness: new Set(['amount', 'value']), contrast: new Set(['amount', 'value']),
+    saturation: new Set(['amount', 'value']), saturate: new Set(['amount', 'value']),
+    hue: new Set(['degrees', 'amount']), 'hue-rotate': new Set(['degrees', 'amount']),
+    grayscale: new Set(['amount', 'value']), sepia: new Set(['amount', 'value']),
+};
+
+function isRevideoEffectAnimationSupported(effect) {
+    const supported = REVVIDEO_EFFECT_ANIMATABLE_PARAMS[effect?.kind || effect?.type];
+    if (!supported) return true;
+    const params = effect?.params || {};
+    const animated = new Set([
+        ...Object.keys(effect?.keyframes || {}),
+        ...Object.keys(effect?.expressions || {}),
+        ...Object.keys(params).filter(key => Array.isArray(params[key]?.keyframes) || typeof params[key]?.expression === 'string'),
+    ]);
+    return [...animated].every(key => supported.has(key));
+}
+
+function isRevideoTextStyleSupported(clip) {
+    if (clip.fontStyle && clip.fontStyle !== 'normal') return false;
+    if (clip.textDecoration && clip.textDecoration !== 'none') return false;
+    if (clip.textAlign && clip.textAlign !== 'center') return false;
+    if (clip.textShadow && clip.textShadow !== 'none') return false;
+    if (clip.stroke || clip.backgroundColor || clip.uppercase || clip.captionStyle?.uppercase) return false;
+    const highlightMode = clip.captionStyle?.wordHighlight?.mode;
+    return !highlightMode || ['none', 'color', 'opacity', 'scale'].includes(highlightMode);
+}
+
+function isRevideoTrackSupported(track) {
+    if (!track || !Array.isArray(track.clips) || track.clips.length === 0) return false;
+    const transformProps = new Set(['x', 'y', 'scale', 'rotation', 'opacity']);
+    return track.clips.every(clip => {
+        if (!clip || (clip.effects || []).some(effect => effect && effect.enabled !== false
+            && !REVVIDEO_SUPPORTED_EFFECTS.has(effect.kind || effect.type))) return false;
+        if ((clip.effects || []).some(effect => effect && effect.enabled !== false && !isRevideoEffectAnimationSupported(effect))) return false;
+        if ((clip.effects || []).some(effect => effect && effect.enabled !== false
+            && effect.outputWindows != null && (!Array.isArray(effect.outputWindows)
+                || effect.outputWindows.some(window => !window || !Number.isFinite(Number(window.start))
+                    || !Number.isFinite(Number(window.end)) || Number(window.start) < 0
+                    || Number(window.end) <= Number(window.start))))) return false;
+        // The Revideo layer adapter reads the motion-engine animation schema,
+        // but does not yet translate the legacy per-clip keyframes or the
+        // nested-composition stack. Keep these clips on the compositor path;
+        // accepting them here would export a static/flattened approximation.
+        if (Object.values(clip.keyframes || {}).some(track => Array.isArray(track) && track.length > 0)) return false;
+        if (Array.isArray(clip.compositionStack) && clip.compositionStack.length > 0) return false;
+        if (clip.sceneMask || clip.layerMask || clip.mask || clip.shadow || (clip.blendMode && clip.blendMode !== 'source-over')) return false;
+        const expressions = clip.expressions || {};
+        if (Object.keys(expressions).some(prop => !transformProps.has(prop))) return false;
+        const animations = Array.isArray(clip.animations) ? clip.animations : [];
+        if (animations.some(animation => (animation?.keyframes || []).some(frame =>
+            Object.keys(frame?.properties || {}).some(prop => !transformProps.has(prop)
+                && !(prop === 'reveal' && Array.isArray(clip.words) && clip.words.length > 0))))) return false;
+        if (track.type === 'text') return clip.type === 'text' && !clip.template && !clip.runs && isRevideoTextStyleSupported(clip);
+        if (track.type === 'overlay') {
+            const kind = clip.type || 'image';
+            return ['image', 'sticker'].includes(kind) && !!(clip.url || clip.proxyUrl || clip.sourceUrl);
+        }
+        return false;
+    });
+}
 
 /**
  * The line of an FFmpeg failure that actually says what went wrong.
@@ -146,9 +233,22 @@ function fitContainSizePx(mediaW, mediaH, canvasWidth, canvasHeight) {
  *  a prior float round-trip) doesn't spuriously take the new code path. */
 function hasBaseClipTransform(clip) {
     const scale = Number(clip.scale);
+    const scaleX = Number(clip.scaleX);
+    const scaleY = Number(clip.scaleY);
+    const rotation = Number(clip.rotation);
+    const opacity = Number(clip.opacity);
+    const animatedOpacity = Array.isArray(clip.keyframes?.opacity) && clip.keyframes.opacity.length > 0;
+    const animatedRotation = Array.isArray(clip.keyframes?.rotation) && clip.keyframes.rotation.length > 0;
     const x = Number(clip.x) || 0;
     const y = Number(clip.y) || 0;
-    return (Number.isFinite(scale) && Math.abs(scale - 1) > 1e-6) || Math.abs(x) > 0.5 || Math.abs(y) > 0.5;
+    return (Number.isFinite(scale) && Math.abs(scale - 1) > 1e-6)
+        || (Number.isFinite(scaleX) && Math.abs(scaleX - 1) > 1e-6)
+        || (Number.isFinite(scaleY) && Math.abs(scaleY - 1) > 1e-6)
+        || (Number.isFinite(rotation) && Math.abs(rotation) > 1e-6)
+        || (Number.isFinite(opacity) && opacity < 1 - 1e-6)
+        || animatedOpacity
+        || animatedRotation
+        || Math.abs(x) > 0.5 || Math.abs(y) > 0.5;
 }
 
 /**
@@ -161,18 +261,58 @@ function hasBaseClipTransform(clip) {
  */
 function buildTransformFilters(clip, targetWidth, targetHeight) {
     const even = (n) => Math.max(2, Math.round(n / 2) * 2);
-    const srcW = clip.metadata?.resolution?.w || clip.sourceWidth || targetWidth;
-    const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || targetHeight;
+    const rawSrcW = clip.metadata?.resolution?.w || clip.sourceWidth || targetWidth;
+    const rawSrcH = clip.metadata?.resolution?.h || clip.sourceHeight || targetHeight;
+    const cropW = Math.max(0.05, Math.min(1, Number(clip.virtualCam?.cropW) || 1));
+    const cropH = Math.max(0.05, Math.min(1, Number(clip.virtualCam?.cropH) || 1));
+    const srcW = rawSrcW * cropW;
+    const srcH = rawSrcH * cropH;
     const fitted = fitContainSizePx(srcW, srcH, targetWidth, targetHeight);
     const scale = Number.isFinite(Number(clip.scale)) && Number(clip.scale) > 0 ? Number(clip.scale) : 1;
-    const w = even(fitted.w * scale);
-    const h = even(fitted.h * scale);
-    const overlayX = Math.round((targetWidth - w) / 2 + (Number(clip.x) || 0));
-    const overlayY = Math.round((targetHeight - h) / 2 + (Number(clip.y) || 0));
+    const scaleX = Number.isFinite(Number(clip.scaleX)) && Number(clip.scaleX) > 0 ? Number(clip.scaleX) : scale;
+    const scaleY = Number.isFinite(Number(clip.scaleY)) && Number(clip.scaleY) > 0 ? Number(clip.scaleY) : scale;
+    const w = even(fitted.w * scaleX);
+    const h = even(fitted.h * scaleY);
+    const rotation = Number.isFinite(Number(clip.rotation)) ? Number(clip.rotation) : 0;
+    const opacity = Number.isFinite(Number(clip.opacity)) ? Math.max(0, Math.min(1, Number(clip.opacity))) : 1;
+    const radians = rotation * Math.PI / 180;
+    const rotatedW = Math.abs(rotation) > 1e-6 ? even(Math.abs(w * Math.cos(radians)) + Math.abs(h * Math.sin(radians))) : w;
+    const rotatedH = Math.abs(rotation) > 1e-6 ? even(Math.abs(h * Math.cos(radians)) + Math.abs(w * Math.sin(radians))) : h;
+    const needsAlpha = Math.abs(rotation) > 1e-6 || opacity < 1 - 1e-6;
+    const alphaFilters = needsAlpha
+        ? `,format=rgba${Math.abs(rotation) > 1e-6 ? `,rotate=${rotation.toFixed(4)}*PI/180:ow=2*ceil(rotw(iw)/2):oh=2*ceil(roth(ih)/2):c=black@0:bilinear=1` : ''}${opacity < 1 - 1e-6 ? `,colorchannelmixer=aa=${opacity.toFixed(4)}` : ''},format=yuva420p`
+        : '';
+    const overlayX = Math.round((targetWidth - rotatedW) / 2 + (Number(clip.x) || 0));
+    const overlayY = Math.round((targetHeight - rotatedH) / 2 + (Number(clip.y) || 0));
     return {
-        scaleFilter: `scale=${w}:${h}:force_original_aspect_ratio=disable,setsar=1`,
-        overlayX, overlayY, w, h,
+        scaleFilter: `scale=${w}:${h}:force_original_aspect_ratio=disable,setsar=1${alphaFilters}`,
+        overlayX, overlayY, w: rotatedW, h: rotatedH, sourceW: w, sourceH: h, rotation, opacity,
     };
+}
+
+function buildAnimatedOpacityFilter(keyframes) {
+    const points = (Array.isArray(keyframes) ? keyframes : [])
+        .filter(frame => Number.isFinite(Number(frame?.time)) && Number.isFinite(Number(frame?.value)))
+        .map(frame => ({ t: Math.max(0, Number(frame.time)), v: Math.max(0, Math.min(1, Number(frame.value))), e: frame.easing }))
+        .sort((a, b) => a.t - b.t);
+    if (!points.length) return null;
+    const expression = keyframeExpr(points, 'T', 6);
+    if (!expression) return null;
+    return `format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*clip((${expression}),0,1)'`;
+}
+
+/** Rotate a clip-local layer per frame while keeping a fixed, centered bounds. */
+function buildAnimatedRotationFilter(keyframes) {
+    const points = (Array.isArray(keyframes) ? keyframes : [])
+        .filter(frame => Number.isFinite(Number(frame?.time)) && Number.isFinite(Number(frame?.value)))
+        .map(frame => ({ t: Math.max(0, Number(frame.time)), v: Number(frame.value), e: frame.easing }))
+        .sort((a, b) => a.t - b.t);
+    if (!points.length) return null;
+    const angle = keyframeExpr(points, 't', 5);
+    if (!angle) return null;
+    // The diagonal square keeps every intermediate angle inside the same output
+    // bounds; otherwise FFmpeg sizes the first frame and clips later rotations.
+    return `format=rgba,rotate='(${angle})*PI/180':ow=2*ceil(sqrt(iw*iw+ih*ih)/2):oh=2*ceil(sqrt(iw*iw+ih*ih)/2):c=black@0:bilinear=1,format=yuva420p`;
 }
 
 /**
@@ -214,13 +354,123 @@ function atempoChain(speed) {
  *                             the frame (multicam angle centre)
  * Returns null when there is nothing visible to animate.
  */
+function springEaseExpr(stiffness, damping, mass, u) {
+    const k = Math.max(1, Number(stiffness) || 170);
+    const c = Math.max(0.1, Number(damping) || 26);
+    const m = Math.max(0.1, Number(mass) || 1);
+    const w0 = Math.sqrt(k / m);
+    const zeta = c / (2 * Math.sqrt(k * m));
+    let response;
+    if (zeta < 0.9999) {
+        const wd = w0 * Math.sqrt(1 - zeta * zeta);
+        const tau = `((${u})*${(Math.log(1000) / (zeta * w0)).toFixed(6)})`;
+        response = `(1-exp(-${(zeta * w0).toFixed(6)}*${tau})*(cos(${wd.toFixed(6)}*${tau})+${(zeta * w0 / wd).toFixed(6)}*sin(${wd.toFixed(6)}*${tau})))`;
+    } else if (zeta <= 1.0001) {
+        const tau = `((${u})*${(9.2 / w0).toFixed(6)})`;
+        response = `(1-exp(-${w0.toFixed(6)}*${tau})*(1+${w0.toFixed(6)}*${tau}))`;
+    } else {
+        const root = Math.sqrt(zeta * zeta - 1);
+        const r1 = -w0 * (zeta - root), r2 = -w0 * (zeta + root);
+        const A = r2 / (r2 - r1), B = 1 - A;
+        const tau = `((${u})*${(Math.log(1000) / Math.abs(r1)).toFixed(6)})`;
+        response = `(1-(${A.toFixed(6)}*exp(${r1.toFixed(6)}*${tau})+${B.toFixed(6)}*exp(${r2.toFixed(6)}*${tau})))`;
+    }
+    return `if(lte(${u},0),0,if(gte(${u},1),1,${response}))`;
+}
+
+function sampledEaseExpr(samples, u) {
+    const n = samples.length - 1;
+    let expression = samples[n].toFixed(6);
+    for (let i = n - 1; i >= 0; i--) {
+        const a = i / n, b = (i + 1) / n;
+        // Samples are already values at normalized positions. Interpolate by
+        // the local segment fraction exactly once; multiplying the slope by
+        // n and then dividing by the segment width applied n twice, causing
+        // eased exports (and zoom curves that use this helper) to overshoot.
+        const value = `(${samples[i].toFixed(6)}+${(samples[i + 1] - samples[i]).toFixed(6)}*((${u}-${a.toFixed(6)})/${(1 / n).toFixed(6)}))`;
+        expression = `if(lt(${u},${b.toFixed(6)}),${value},${expression})`;
+    }
+    return `if(lte(${u},0),0,if(gte(${u},1),1,${expression}))`;
+}
+
+function cubicBezierEaseExpr(x1, y1, x2, y2, u) {
+    // CSS easing clamps time control points to [0, 1] while allowing vertical
+    // overshoot. Mirror client/src/motion/Easing.js so camera animation and
+    // layer animation interpret the same authored curve.
+    x1 = Math.max(0, Math.min(1, Number(x1)));
+    x2 = Math.max(0, Math.min(1, Number(x2)));
+    const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+    const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+    const sx = t => ((ax * t + bx) * t + cx) * t;
+    const sy = t => ((ay * t + by) * t + cy) * t;
+    const dx = t => (3 * ax * t + 2 * bx) * t + cx;
+    const sample = x => {
+        let t = x;
+        for (let i = 0; i < 8; i++) { const e = sx(t) - x; if (Math.abs(e) < 1e-7) return sy(t); const d = dx(t); if (Math.abs(d) < 1e-7) break; t = Math.max(0, Math.min(1, t - e / d)); }
+        let lo = 0, hi = 1; t = x;
+        for (let i = 0; i < 30; i++) { const v = sx(t); if (Math.abs(v - x) < 1e-7) break; if (x > v) lo = t; else hi = t; t = (lo + hi) / 2; }
+        return sy(t);
+    };
+    return sampledEaseExpr(Array.from({ length: 17 }, (_, i) => sample(i / 16)), u);
+}
+
 function zoomEaseExpr(easing, u) {
-    switch (easing) {
-        case 'easeOutCubic': return `(1-pow(1-${u},3))`;
-        case 'easeInCubic': return `pow(${u},3)`;
-        case 'easeIn': case 'ease-in': return `(${u}*${u})`;
-        case 'easeOut': case 'ease-out': return `(${u}*(2-${u}))`;
-        case 'easeInOut': case 'ease-in-out': return `if(lt(${u},0.5),2*${u}*${u},-1+(4-2*${u})*${u})`;
+    const raw = String(easing || 'linear').trim();
+    const customBezier = /^cubic-bezier\(([^)]+)\)$/i.exec(raw);
+    if (customBezier) {
+        const p = customBezier[1].split(',').map(Number);
+        if (p.length === 4 && p.every(Number.isFinite)) return cubicBezierEaseExpr(p[0], p[1], p[2], p[3], u);
+    }
+    const steps = /^steps\s*\(\s*(\d+)\s*(?:,\s*(jump-start|jump-end|jump-none|jump-both|start|end)\s*)?\)$/i.exec(raw);
+    if (steps) {
+        const count = Number(steps[1]);
+        const position = (steps[2] || 'end').toLowerCase();
+        const mode = position === 'start' ? 'jump-start' : position === 'end' ? 'jump-end' : position;
+        if (Number.isSafeInteger(count) && count > 0 && !(position === 'jump-none' && count === 1)) {
+            if (mode === 'jump-none' && count === 1) return u;
+            const denominator = mode === 'jump-both' ? count + 1 : mode === 'jump-none' ? count - 1 : count;
+            const offset = mode === 'jump-start' || mode === 'jump-both' ? 1 : 0;
+            return `if(gte(${u},1),1,if(lte(${u},0),${mode === 'jump-start' || mode === 'jump-both' ? (1 / denominator).toFixed(6) : 0},(floor(${u}*${count})+${offset})/${denominator}))`;
+        }
+    }
+    const springs = {
+        spring: [170, 26, 1], springGentle: [120, 14, 1], springWobbly: [180, 12, 1],
+        springStiff: [210, 20, 1], springSlow: [280, 60, 1], springSnappy: [400, 28, 1],
+        springBouncy: [180, 12, 1], springSmooth: [200, 28.284, 1], springHeavy: [140, 25, 2],
+    };
+    const springAliases = { 'spring-gentle': 'springGentle', 'spring-wobbly': 'springWobbly', 'spring-stiff': 'springStiff', 'spring-slow': 'springSlow', 'spring-snappy': 'springSnappy', 'spring-bouncy': 'springBouncy', 'spring-smooth': 'springSmooth', 'spring-heavy': 'springHeavy', wobbly: 'springWobbly', snappy: 'springSnappy', bouncy: 'springBouncy', smooth: 'springSmooth', heavy: 'springHeavy' };
+    const springName = springAliases[raw] || raw;
+    if (springs[springName]) return springEaseExpr(...springs[springName], u);
+    const springArgs = /^spring\(([^)]+)\)$/i.exec(raw);
+    if (springArgs) {
+        const args = springArgs[1].split(',').map(Number);
+        if (args.length >= 2 && args.every(Number.isFinite)) return springEaseExpr(args[0], args[1], args[2] || 1, u);
+    }
+    switch (raw.toLowerCase()) {
+        case 'easeoutcubic': return `(1-pow(1-${u},3))`;
+        case 'easeincubic': return `pow(${u},3)`;
+        case 'easeinoutcubic': case 'ease-in-out-cubic': return `if(lt(${u},0.5),4*pow(${u},3),1-pow(-2*${u}+2,3)/2)`;
+        case 'easeinquart': case 'ease-in-quart': return `pow(${u},4)`;
+        case 'easeoutquart': case 'ease-out-quart': return `(1-pow(1-${u},4))`;
+        case 'easeinoutquart': case 'ease-in-out-quart': return `if(lt(${u},0.5),8*pow(${u},4),1-pow(-2*${u}+2,4)/2)`;
+        case 'easeinsine': case 'ease-in-sine': return `(1-cos(${u}*PI/2))`;
+        case 'easeoutsine': case 'ease-out-sine': return `sin(${u}*PI/2)`;
+        case 'easeinoutsine': case 'ease-in-out-sine': return `-(cos(PI*${u})-1)/2`;
+        case 'easeinexpo': case 'ease-in-expo': return `if(lte(${u},0),0,pow(2,10*${u}-10))`;
+        case 'easeoutexpo': case 'ease-out-expo': return `if(gte(${u},1),1,1-pow(2,-10*${u}))`;
+        case 'easeinoutexpo': case 'ease-in-out-expo': return `if(lte(${u},0),0,if(gte(${u},1),1,if(lt(${u},0.5),pow(2,20*${u}-10)/2,(2-pow(2,-20*${u}+10))/2)))`;
+        case 'easeoutcirc': case 'ease-out-circ': return `sqrt(1-pow(${u}-1,2))`;
+        case 'easeinoutcirc': case 'ease-in-out-circ': return `if(lt(${u},0.5),(1-sqrt(1-pow(2*${u},2)))/2,(sqrt(1-pow(-2*${u}+2,2))+1)/2)`;
+        case 'backout': case 'back-out': case 'back': return `(1+2.70158*pow(${u}-1,3)+1.70158*pow(${u}-1,2))`;
+        case 'backin': case 'back-in': case 'anticipate': return `(2.70158*pow(${u},3)-1.70158*pow(${u},2))`;
+        case 'backinout': case 'back-in-out': return `if(lt(${u},0.5),(pow(2*${u},2)*(3.59490952*2*${u}-2.59490952))/2,(pow(2*${u}-2,2)*(3.59490952*(2*${u}-2)+2.59490952)+2)/2)`;
+        case 'bounce': return `if(lt(${u},0.36363636),7.5625*pow(${u},2),if(lt(${u},0.72727273),7.5625*pow(${u}-0.54545455,2)+0.75,if(lt(${u},0.90909091),7.5625*pow(${u}-0.81818182,2)+0.9375,7.5625*pow(${u}-0.95454545,2)+0.984375)))`;
+        case 'elastic': return `if(lte(${u},0),0,if(gte(${u},1),1,pow(2,-10*${u})*sin((${u}-0.1)*5*PI)+1))`;
+        case 'easein': case 'ease-in': return `(${u}*${u})`;
+        case 'easeout': case 'ease-out': return `(${u}*(2-${u}))`;
+        case 'ease': case 'easeinout': case 'ease-in-out': return `if(lt(${u},0.5),2*${u}*${u},-1+(4-2*${u})*${u})`;
+        case 'step-start': return `if(gte(${u},1),1,1)`;
+        case 'step-end': return `if(gte(${u},1),1,0)`;
         default: return u;
     }
 }
@@ -241,40 +491,54 @@ function keyframeExpr(pts, T, digits = 4) {
     return `if(lt(${T},${pts[0].t.toFixed(3)}),${pts[0].v.toFixed(digits)},${e})`;
 }
 
-function buildSmoothZoomFilter(kfs, { fps = 30, anchor = { mode: 'fixed', x: 0.5, y: 0.28 }, multiplier = 1, minZoom = 1.0, maxZoom = 2.0, panX = null, panY = null } = {}) {
+function buildSmoothZoomFilter(kfs, { fps = 30, anchor = { mode: 'fixed', x: 0.5, y: 0.28 }, multiplier = 1, minZoom = 1.0, maxZoom = 2.0, panX = null, panY = null, scaleXKfs = null, scaleYKfs = null, positionX = null, positionY = null, width = 1, height = 1 } = {}) {
     const clean = (arr, map) => (arr || [])
         .filter(k => k && Number.isFinite(Number(k.time)) && Number.isFinite(Number(k.value)))
         .map(k => ({ t: Math.max(0, Number(k.time)), v: map(Number(k.value)), e: k.easing }))
         .sort((a, b) => a.t - b.t);
     const pts = clean(kfs, v => Math.min(maxZoom, Math.max(minZoom, v * multiplier)));
+    // Independent axis tracks are relative multipliers. Keep the established
+    // uniform track as each axis' fallback so existing camera moves are byte-
+    // for-byte equivalent, while X/Y keyframes can shape a deliberate stretch.
+    const xPts = clean(scaleXKfs || kfs, v => Math.min(maxZoom, Math.max(minZoom, v * multiplier)));
+    const yPts = clean(scaleYKfs || kfs, v => Math.min(maxZoom, Math.max(minZoom, v * multiplier)));
     // Camera pan (shake / whip / pan), fraction of the frame: the picture
     // moves right by panX × width. Fed by CameraMotionCompiler.
     const px = clean(panX, v => Math.max(-0.5, Math.min(0.5, v)));
     const py = clean(panY, v => Math.max(-0.5, Math.min(0.5, v)));
-    const pans = px.some(p => Math.abs(p.v) > 1e-4) || py.some(p => Math.abs(p.v) > 1e-4);
-    if (!pts.length && !pans) return null;
-    if (!pans && !pts.some(p => p.v > 1.0005)) return null; // never zoomed in: nothing to draw
+    // Clip transform keyframes store pixel offsets; perspective pan expects a
+    // frame fraction. Keep them as a separate expression so camera-pan tracks
+    // can coexist with manually animated X/Y position.
+    const tx = clean(positionX, v => Math.max(-0.5, Math.min(0.5, v / Math.max(1, width))));
+    const ty = clean(positionY, v => Math.max(-0.5, Math.min(0.5, v / Math.max(1, height))));
+    const pans = [...px, ...py, ...tx, ...ty].some(p => Math.abs(p.v) > 1e-4);
+    if (!pts.length && !xPts.length && !yPts.length && !pans) return null;
+    if (!pans && ![...pts, ...xPts, ...yPts].some(p => p.v > 1.0005)) return null; // never zoomed in: nothing to draw
 
     const T = `(in/${fps})`;
     const z = keyframeExpr(pts, T) || '1';
-    const dx = pans ? keyframeExpr(px, T, 5) : null;
-    const dy = pans ? keyframeExpr(py, T, 5) : null;
+    const zx = keyframeExpr(scaleXKfs ? xPts : pts, T) || z;
+    const zy = keyframeExpr(scaleYKfs ? yPts : pts, T) || z;
+    const dxParts = [keyframeExpr(px, T, 5), keyframeExpr(tx, T, 5)].filter(Boolean);
+    const dyParts = [keyframeExpr(py, T, 5), keyframeExpr(ty, T, 5)].filter(Boolean);
+    const dx = dxParts.length ? `(${dxParts.join('+')})` : null;
+    const dy = dyParts.length ? `(${dyParts.join('+')})` : null;
 
     const ax = Math.max(0, Math.min(1, Number(anchor?.x ?? 0.5)));
     const ay = Math.max(0, Math.min(1, Number(anchor?.y ?? 0.28)));
     let L, Tp;
     if (anchor?.mode === 'center') {
-        L  = `clip(W*${ax.toFixed(4)}-W/(2*(${z})),0,W-W/(${z}))`;
-        Tp = `clip(H*${ay.toFixed(4)}-H/(2*(${z})),0,H-H/(${z}))`;
+        L  = `clip(W*${ax.toFixed(4)}-W/(2*(${zx})),0,W-W/(${zx}))`;
+        Tp = `clip(H*${ay.toFixed(4)}-H/(2*(${zy})),0,H-H/(${zy}))`;
     } else {
-        L  = `(W*${ax.toFixed(4)}*(1-1/(${z})))`;
-        Tp = `(H*${ay.toFixed(4)}*(1-1/(${z})))`;
+        L  = `(W*${ax.toFixed(4)}*(1-1/(${zx})))`;
+        Tp = `(H*${ay.toFixed(4)}*(1-1/(${zy})))`;
     }
     // Moving the picture right by dx·W = moving the sampled window left.
-    if (dx) L  = `(${L}-(${dx})*W/(${z}))`;
-    if (dy) Tp = `(${Tp}-(${dy})*H/(${z}))`;
-    const R = `(${L}+W/(${z}))`;
-    const B = `(${Tp}+H/(${z}))`;
+    if (dx) L  = `(${L}-(${dx})*W/(${zx}))`;
+    if (dy) Tp = `(${Tp}-(${dy})*H/(${zy}))`;
+    const R = `(${L}+W/(${zx}))`;
+    const B = `(${Tp}+H/(${zy}))`;
     return `fps=${fps},perspective=x0='${L}':y0='${Tp}':x1='${R}':y1='${Tp}':x2='${L}':y2='${B}':x3='${R}':y3='${B}':interpolation=linear:eval=frame`;
 }
 
@@ -459,7 +723,7 @@ function loadDepthCompositor() {
  * is applied to the picture, the mask and the audio together.
  */
 async function renderMattedSegment(clip, src, segPath, opts) {
-    const { targetWidth, targetHeight, targetFps, codec, profile, audioBitrate, maskLocalPath, bgImagePath, sandwichFilter, sandwichInput } = opts;
+    const { targetWidth, targetHeight, targetFps, codec, profile, audioBitrate, maskLocalPath, bgImagePath, sandwichFilter, sandwichInput, clipLutFilters = new Map() } = opts;
     const { matteFilterGraph, normalizeMatte } = await loadMatteSettings();
     const settings = normalizeMatte(clip.layerMask?.settings);
     if (settings.mode === 'image' && !bgImagePath) settings.mode = 'blur';
@@ -467,7 +731,22 @@ async function renderMattedSegment(clip, src, segPath, opts) {
     const offset = Number(clip.offset) || 0;
     const readDur = (Number(clip.duration) || 0) * speed;
     const maskSeek = Math.max(0, offset - (Number(clip.layerMask?.sourceStart) || 0));
-    const graph = matteFilterGraph(settings, { width: targetWidth, height: targetHeight, speed, duration: Number(clip.duration) || 5, sandwichFilter: sandwichFilter || null });
+    const visualEffects = compileTimelineVisualEffects(clip.effects, {
+        width: targetWidth, height: targetHeight, duration: Number(clip.duration) || 5, clipStart: Number(clip.start) || 0, complexGlow: true, clipLutFilters,
+    });
+    const hasComplexGlow = visualEffects.some(filter => String(filter).startsWith('__VIBED_HIGHLIGHT_GLOW__'));
+    const hasComplexLut = visualEffects.some(filter => String(filter).startsWith('__VIBED_LUT__'));
+    const graph = matteFilterGraph(settings, {
+        width: targetWidth,
+        height: targetHeight,
+        speed,
+        duration: Number(clip.duration) || 5,
+        sandwichFilter: sandwichFilter || null,
+        outputFilter: hasComplexGlow || hasComplexLut ? null : visualEffects.join(','),
+        outputGraph: hasComplexGlow || hasComplexLut ? compileTimelineVisualEffectGraph(visualEffects, { input: 'outbase', output: 'outv' }) : null,
+        crop: clip.virtualCam ? { x: clip.virtualCam.cropX, y: clip.virtualCam.cropY, w: clip.virtualCam.cropW, h: clip.virtualCam.cropH } : null,
+        transform: { scale: Number(clip.scale) > 0 ? Number(clip.scale) : 1, x: Number(clip.x) || 0, y: Number(clip.y) || 0 },
+    });
     return new Promise((resolve, reject) => {
         const cmd = ffmpeg()
             .input(src).setStartTime(offset).setDuration(readDur)
@@ -479,8 +758,12 @@ async function renderMattedSegment(clip, src, segPath, opts) {
         cmd.complexFilter(graph, 'outv');
         const vol = (clip.volume ?? 1.0) * (clip.trackVolume ?? 1.0);
         const af = [];
-        if (speed !== 1) af.push(...atempoChain(speed));
+        if (speed !== 1) {
+            if (clip.speedChangeMaintainPitch === false) af.push(`asetrate=44100*${speed.toFixed(4)}`, 'aresample=44100');
+            else af.push(...atempoChain(speed));
+        }
         if (vol !== 1.0) af.push(`volume=${vol.toFixed(4)}`);
+        af.push(...compileTimelineAudioEffects(clip.effects));
         if (af.length) cmd.audioFilters(af);
         cmd
             .fps(targetFps)
@@ -814,10 +1097,836 @@ function getResolutionDimensions(aspectRatio, tier) {
 }
 
 /** FFmpeg equivalents for the CSS effects used by the editor's timeline shelf. */
-function compileTimelineVisualEffects(effects = []) {
+function compileEffectKeyframeExpression(effect, parameter, fallback, min, max, clipStart = 0) {
+    const raw = effect?.params?.[parameter];
+    const sampled = effect?.samples?.[parameter];
+    const input = Array.isArray(sampled) && sampled.length ? sampled : (effect?.keyframes?.[parameter] || raw?.keyframes);
+    if (!Array.isArray(input) || input.length === 0) return null;
+    const rawTrack = input.map((keyframe, index) => ({
+        time: Number(sampled?.length ? (keyframe?.t ?? keyframe?.time) : keyframe?.time) - (sampled?.length ? 0 : (Number(clipStart) || 0)),
+        value: keyframe?.value ?? keyframe?.properties?.[parameter],
+        easing: String(keyframe?.easing || 'linear'), index,
+    })).filter(point => Number.isFinite(point.time))
+        .sort((a, b) => a.time - b.time || a.index - b.index);
+    // Color/vector tracks share the same authored timing as scalar effects.
+    // Compile each channel independently so FFmpeg's per-frame expressions
+    // follow the same interpolation as the canvas preview.
+    const vectorLength = rawTrack.find(point => Array.isArray(point.value))?.value?.length;
+    if (Number.isInteger(vectorLength) && vectorLength > 0
+        && rawTrack.every(point => Array.isArray(point.value) && point.value.length === vectorLength
+            && point.value.every(channel => Number.isFinite(Number(channel))))) {
+        return Array.from({ length: vectorLength }, (_, channel) => compileScalarEffectTrack(
+            rawTrack.map(point => {
+                const value = Number(point.value[channel]);
+                return { ...point, value: Math.max(min, Math.min(max, value <= 1 ? value * 255 : value)) };
+            }),
+        ));
+    }
+    const track = rawTrack.filter(point => Number.isFinite(Number(point.value)))
+        .map(point => ({ ...point, value: Math.max(min, Math.min(max, Number(point.value))) }));
+    return compileScalarEffectTrack(track);
+}
+
+function compileScalarEffectTrack(track) {
+    const unique = [];
+    for (const point of track) {
+        if (unique.at(-1)?.time === point.time) unique[unique.length - 1] = point;
+        else unique.push(point);
+    }
+    if (!unique.length) return null;
+    if (unique.length === 1) return String(unique[0].value);
+
+    // FFmpeg expressions cannot call the JS easing resolver. Approximate
+    // continuous curves with bounded samples, but preserve discrete step
+    // curves exactly: linearly joining samples turns a hold into a visible
+    // ramp near every step boundary.
+    const stepProgress = (easing, u) => {
+        const raw = String(easing || '').trim();
+        const named = raw.toLowerCase().replace(/[-_\s]/g, '');
+        if (named === 'stepstart') return `if(gte(${u},1),1,1)`;
+        if (named === 'stepend') return `if(gte(${u},1),1,0)`;
+        const match = /^steps\s*\(\s*(\d+)\s*(?:,\s*(jump-start|jump-end|jump-none|jump-both|start|end)\s*)?\)$/i.exec(raw);
+        if (!match) return null;
+        const count = Number(match[1]);
+        const rawPosition = (match[2] || 'end').toLowerCase();
+        const position = rawPosition === 'start' ? 'jump-start' : rawPosition === 'end' ? 'jump-end' : rawPosition;
+        if (!Number.isSafeInteger(count) || count <= 0 || (position === 'jump-none' && count <= 1)) return null;
+        const denominator = position === 'jump-both' ? count + 1 : position === 'jump-none' ? count - 1 : count;
+        const offset = position === 'jump-start' || position === 'jump-both' ? 1 : 0;
+        return `if(gte(${u},1),1,(floor(${u}*${count})+${offset})/${denominator})`;
+    };
+    let expression = unique.at(-1).value.toFixed(6);
+    for (let i = unique.length - 2; i >= 0; i--) {
+        const from = unique[i], to = unique[i + 1];
+        const duration = Math.max(0.000001, to.time - from.time);
+        const u = `clip((t-${from.time.toFixed(6)})/${duration.toFixed(6)},0,1)`;
+        const stepped = stepProgress(to.easing, u);
+        let progress = stepped;
+        if (!progress) {
+            const subdivisions = Math.max(1, Math.min(120, Math.ceil((to.time - from.time) * 24)));
+            const samples = Array.from({ length: subdivisions + 1 }, (_, sampleIndex) =>
+                applyRetimeEasing(to.easing, sampleIndex / subdivisions));
+            progress = sampledEaseExpr(samples, u);
+        }
+        const interpolated = `${from.value.toFixed(6)}+(${to.value.toFixed(6)}-${from.value.toFixed(6)})*(${progress})`;
+        expression = `if(lt(t,${to.time.toFixed(6)}),${interpolated},${expression})`;
+    }
+    return expression;
+}
+
+function effectParam(effect, key, fallback) {
+    const value = effect?.params?.[key];
+    return value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'value')
+        ? value.value
+        : (value ?? fallback);
+}
+
+/** Attach compositor-sampled procedural parameters to their authored effect slots. */
+function applyEffectSamples(clipEffects = [], sampledEffects = []) {
+    const byIndex = new Map((Array.isArray(sampledEffects) ? sampledEffects : [])
+        .filter(effect => Number.isInteger(effect?.sourceIndex) && effect.samples)
+        .map(effect => [effect.sourceIndex, effect.samples]));
+    return (Array.isArray(clipEffects) ? clipEffects : []).map((effect, index) => {
+        const samples = byIndex.get(index);
+        return samples ? { ...effect, samples } : effect;
+    });
+}
+
+function compileTimelineAudioEffects(effects = []) {
     const filters = [];
-    for (const effect of Array.isArray(effects) ? effects : []) {
+    const ordered = (Array.isArray(effects) ? effects : [])
+        .filter(effect => effect && effect.enabled !== false)
+        .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+    for (const effect of ordered) {
+        const kind = effect.kind || effect.type;
+        if (kind === 'audio_normalize') {
+            const requested = Number(effectParam(effect, 'targetLevel', -3));
+            const target = Math.max(-20, Math.min(0, Number.isFinite(requested) ? requested : -3));
+            filters.push(`loudnorm=I=${target}:TP=-1.5:LRA=11`);
+        } else if (kind === 'audio_denoise') {
+            const amount = Math.max(0, Math.min(1, Number(effectParam(effect, 'amount', 0.5)) || 0));
+            filters.push(`afftdn=nf=${(-80 + amount * 60).toFixed(1)}`);
+        }
+    }
+    return filters;
+}
+
+function resolveTimelineSpeedEffect(effects = [], clipStart = 0, clipDuration = 0) {
+    const speedEffects = (Array.isArray(effects) ? effects : [])
+        .filter(effect => effect && effect.enabled !== false && (effect.kind || effect.type) === 'speed_change')
+        .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+    if (!speedEffects.length) return { speed: null, maintainPitch: null, warning: null };
+    const effect = speedEffects[speedEffects.length - 1];
+    const end = clipStart + clipDuration;
+    const partial = (effect.startTime != null && Number(effect.startTime) > clipStart)
+        || (effect.endTime != null && Number(effect.endTime) < end);
+    const speedParam = effect?.params?.speed;
+    const authoredKeyframes = effect?.keyframes?.speed || speedParam?.keyframes;
+    const speedTrack = (Array.isArray(authoredKeyframes) ? authoredKeyframes : [])
+        .map(frame => Number(frame?.value ?? frame?.properties?.speed))
+        .filter(Number.isFinite);
+    const raw = Number(effectParam(effect, 'speed', 1));
+    const maintainPitch = effectParam(effect, 'maintainPitch', true);
+    if (partial || speedTrack.length > 1) {
+        const effectStart = Math.max(clipStart, Number.isFinite(Number(effect.startTime)) ? Number(effect.startTime) : clipStart);
+        const effectEnd = Math.min(end, Number.isFinite(Number(effect.endTime)) ? Number(effect.endTime) : end);
+        if (effectEnd <= effectStart) return { speed: null, maintainPitch: null, warning: null };
+
+        const track = (Array.isArray(authoredKeyframes) ? authoredKeyframes : [])
+            .map((frame, index) => ({
+                time: Number(frame?.time),
+                value: Number(frame?.value ?? frame?.properties?.speed),
+                easing: frame?.easing || 'linear',
+                index,
+            }))
+            .filter(frame => Number.isFinite(frame.time) && Number.isFinite(frame.value))
+            .sort((a, b) => a.time - b.time || a.index - b.index);
+        const sampleTrack = time => {
+            if (!track.length) return Math.max(0.1, Math.min(4, Number.isFinite(raw) ? raw : 1));
+            if (time <= track[0].time) return track[0].value;
+            if (time >= track.at(-1).time) return track.at(-1).value;
+            for (let i = 0; i < track.length - 1; i++) {
+                const from = track[i], to = track[i + 1];
+                if (time < from.time || time > to.time) continue;
+                const progress = (time - from.time) / Math.max(1e-9, to.time - from.time);
+                const eased = applyRetimeEasing(to.easing, progress);
+                return from.value + (to.value - from.value) * eased;
+            }
+            return track.at(-1).value;
+        };
+        const retimeKeys = [];
+        if (effectStart > clipStart) {
+            const epsilon = Math.min(1e-5, (effectStart - clipStart) / 2, (effectEnd - effectStart) / 2);
+            retimeKeys.push({ time: clipStart, value: 1, easing: 'linear' });
+            retimeKeys.push({ time: effectStart - epsilon, value: 1, easing: 'linear' });
+        }
+        retimeKeys.push({ time: effectStart, value: sampleTrack(effectStart), easing: 'linear' });
+        retimeKeys.push(...track.filter(frame => frame.time > effectStart && frame.time < effectEnd));
+        retimeKeys.push({ time: effectEnd, value: sampleTrack(effectEnd), easing: 'linear' });
+        if (effectEnd < end) {
+            const epsilon = Math.min(1e-5, (end - effectEnd) / 2, (effectEnd - effectStart) / 2);
+            retimeKeys.push({ time: effectEnd + epsilon, value: 1, easing: 'linear' });
+            retimeKeys.push({ time: end, value: 1, easing: 'linear' });
+        }
+        const retime = buildSpeedRetimePlan(clipDuration, retimeKeys, 1, clipStart, maintainPitch !== false);
+        return {
+            speed: null,
+            maintainPitch: maintainPitch !== false,
+            retime,
+            warning: retime ? null : 'Animated speed keyframes could not be mapped to this clip and were not applied.',
+        };
+    }
+    const uniqueSpeeds = [...new Set(speedTrack)];
+    const constantSpeed = uniqueSpeeds.length === 1 ? uniqueSpeeds[0] : raw;
+    return {
+        speed: Number.isFinite(constantSpeed) ? Math.max(0.1, Math.min(4, constantSpeed)) : 1,
+        maintainPitch: maintainPitch !== false,
+        warning: null
+    };
+}
+
+/**
+ * Build a bounded piecewise-constant approximation of an animated speed
+ * curve. Segment boundaries are in output time; source boundaries integrate
+ * the average rate, so the complete source range maps to exactly the clip's
+ * authored timeline duration. The same plan drives video timestamps and
+ * audio atempo segments.
+ */
+function applyRetimeEasing(name, progress) {
+    const t = Math.max(0, Math.min(1, progress));
+    const rawKey = String(name || 'linear').trim().toLowerCase();
+    const key = rawKey.replace(/[-_\s]/g, '');
+    const functions = {
+        linear: x => x,
+        // Match the canonical motion engine's one-step CSS aliases. These
+        // names are exposed in the keyframe UI, so treating them as unknown
+        // linear easings made the rendered retime disagree with its preview.
+        stepstart: () => 1,
+        stepend: x => x >= 1 ? 1 : 0,
+        ease: x => x < 0.5 ? 2 * x * x : -1 + (4 - 2 * x) * x,
+        easein: x => x * x,
+        easeout: x => x * (2 - x),
+        easeinout: x => x < 0.5 ? 2 * x * x : -1 + (4 - 2 * x) * x,
+        easeincubic: x => x ** 3,
+        easeoutcubic: x => 1 - (1 - x) ** 3,
+        easeinoutcubic: x => x < 0.5 ? 4 * x ** 3 : 1 - ((-2 * x + 2) ** 3) / 2,
+        easeinquart: x => x ** 4,
+        easeoutquart: x => 1 - (1 - x) ** 4,
+        easeinoutquart: x => x < 0.5 ? 8 * x ** 4 : 1 - 8 * (1 - x) ** 4,
+        easeinsine: x => 1 - Math.cos((x * Math.PI) / 2),
+        easeoutsine: x => Math.sin((x * Math.PI) / 2),
+        easeinoutsine: x => -(Math.cos(Math.PI * x) - 1) / 2,
+        easeinexpo: x => x === 0 ? 0 : 2 ** (10 * x - 10),
+        easeoutexpo: x => x === 1 ? 1 : 1 - 2 ** (-10 * x),
+        easeinoutexpo: x => x === 0 || x === 1 ? x : x < 0.5 ? 2 ** (20 * x - 10) / 2 : (2 - 2 ** (-20 * x + 10)) / 2,
+        easeoutcirc: x => Math.sqrt(Math.max(0, 1 - (x - 1) ** 2)),
+        easeinoutcirc: x => x < 0.5
+            ? (1 - Math.sqrt(Math.max(0, 1 - (2 * x) ** 2))) / 2
+            : (Math.sqrt(Math.max(0, 1 - (-2 * x + 2) ** 2)) + 1) / 2,
+        backout: x => 1 + 2.70158 * (x - 1) ** 3 + 1.70158 * (x - 1) ** 2,
+        backin: x => 2.70158 * x ** 3 - 1.70158 * x ** 2,
+        backinout: x => {
+            const c = 1.70158 * 1.525;
+            return x < 0.5
+                ? (Math.pow(2 * x, 2) * ((c + 1) * 2 * x - c)) / 2
+                : (Math.pow(2 * x - 2, 2) * ((c + 1) * (2 * x - 2) + c) + 2) / 2;
+        },
+        elastic: x => x === 0 || x === 1 ? x : 2 ** (-10 * x) * Math.sin((x - 0.1) * 5 * Math.PI) + 1,
+        bounce: x => {
+            const n = 7.5625, d = 2.75;
+            if (x < 1 / d) return n * x * x;
+            if (x < 2 / d) return n * (x - 1.5 / d) ** 2 + 0.75;
+            if (x < 2.5 / d) return n * (x - 2.25 / d) ** 2 + 0.9375;
+            return n * (x - 2.625 / d) ** 2 + 0.984375;
+        },
+    };
+    // Parse arguments before normalizing aliases; removing hyphens from a
+    // whole easing string corrupts valid negative Bézier y control points.
+    const bezier = /^cubic[-_\s]?bezier\s*\(([^)]+)\)$/.exec(rawKey);
+    if (bezier) {
+        const [rawX1, y1, rawX2, y2] = bezier[1].split(',').map(Number);
+        if ([rawX1, y1, rawX2, y2].every(Number.isFinite)) {
+            // Match the canonical CSS easing parser: x controls must be in
+            // [0,1] for a monotonic time curve; y controls may overshoot.
+            const x1 = Math.max(0, Math.min(1, rawX1));
+            const x2 = Math.max(0, Math.min(1, rawX2));
+            const sample = u => 3 * (1 - u) ** 2 * u * y1 + 3 * (1 - u) * u ** 2 * y2 + u ** 3;
+            const position = u => 3 * (1 - u) ** 2 * u * x1 + 3 * (1 - u) * u ** 2 * x2 + u ** 3;
+            let low = 0, high = 1;
+            for (let i = 0; i < 24; i++) { const mid = (low + high) / 2; if (position(mid) < t) low = mid; else high = mid; }
+            return sample((low + high) / 2);
+        }
+    }
+    const steps = /^steps\s*\(\s*(\d+)\s*(?:,\s*(jump-start|jump-end|jump-none|jump-both|start|end)\s*)?\)$/i.exec(rawKey);
+    if (steps) {
+        const count = Number(steps[1]);
+        const rawPosition = (steps[2] || 'end').toLowerCase();
+        const position = rawPosition === 'start' ? 'jump-start' : rawPosition === 'end' ? 'jump-end' : rawPosition;
+        if (Number.isSafeInteger(count) && count > 0 && !(position === 'jump-none' && count === 1)) {
+            return t >= 1 ? 1 : position === 'jump-start' ? (Math.floor(t * count) + 1) / count
+                : position === 'jump-both' ? (Math.floor(t * count) + 1) / (count + 1)
+                    : position === 'jump-none' ? Math.floor(t * count) / (count - 1)
+                        : Math.floor(t * count) / count;
+        }
+    }
+    const springMatch = /^spring\s*\(([^)]+)\)$/.exec(rawKey);
+    const springPresets = {
+        spring: [170, 26, 1], springgentle: [120, 14, 1], springwobbly: [180, 12, 1],
+        springstiff: [210, 20, 1], springslow: [280, 60, 1], springsnappy: [400, 28, 1],
+        springbouncy: [180, 12, 1], springsmooth: [200, 28.284, 1], springheavy: [140, 25, 2],
+    };
+    const alias = { ease: 'easeinout', back: 'backout', anticipate: 'backin', wobbly: 'springwobbly',
+        snappy: 'springsnappy', bouncy: 'springbouncy', smooth: 'springsmooth', heavy: 'springheavy' }[key] || key;
+    const springArgs = springMatch ? springMatch[1].split(',').map(Number) : springPresets[alias];
+    if (springArgs && springArgs.length >= 2 && springArgs.slice(0, 2).every(Number.isFinite)) {
+        const stiffness = Math.max(1, springArgs[0]);
+        const damping = Math.max(0.1, springArgs[1]);
+        const mass = Math.max(0.1, Number(springArgs[2]) || 1);
+        const w0 = Math.sqrt(stiffness / mass);
+        const zeta = damping / (2 * Math.sqrt(stiffness * mass));
+        let spring, settle;
+        if (zeta < 1) {
+            const wd = w0 * Math.sqrt(1 - zeta * zeta);
+            spring = u => 1 - Math.exp(-zeta * w0 * u) * (Math.cos(wd * u) + (zeta * w0 / wd) * Math.sin(wd * u));
+            settle = Math.log(1000) / (zeta * w0);
+        } else if (zeta === 1) {
+            spring = u => 1 - Math.exp(-w0 * u) * (1 + w0 * u);
+            settle = 9.2 / w0;
+        } else {
+            const r1 = -w0 * (zeta - Math.sqrt(zeta * zeta - 1));
+            const r2 = -w0 * (zeta + Math.sqrt(zeta * zeta - 1));
+            const a = r2 / (r2 - r1), b = 1 - a;
+            spring = u => 1 - (a * Math.exp(r1 * u) + b * Math.exp(r2 * u));
+            settle = Math.log(1000) / Math.abs(r1);
+        }
+        return t <= 0 ? 0 : t >= 1 ? 1 : spring(t * settle);
+    }
+    return (functions[alias] || functions.linear)(t);
+}
+
+function buildSpeedRetimePlan(clipDuration, keyframes, baseSpeed = 1, clipStart = 0, maintainPitch = true) {
+    const duration = Number(clipDuration);
+    if (!Number.isFinite(duration) || duration <= 0 || !Array.isArray(keyframes)) return null;
+    const boundedSpeed = value => Math.max(0.1, Math.min(4, Number.isFinite(Number(value)) ? Number(value) : 1));
+    const points = keyframes.map((frame, index) => ({
+        time: Number(frame?.time) - (Number(clipStart) || 0),
+        value: boundedSpeed(frame?.value ?? frame?.properties?.speed),
+        easing: frame?.easing || 'linear',
+        index,
+    })).filter(frame => Number.isFinite(frame.time) && frame.time >= 0 && frame.time <= duration)
+        .sort((a, b) => a.time - b.time || a.index - b.index)
+        .reduce((unique, frame) => {
+            if (unique.at(-1)?.time === frame.time) unique[unique.length - 1] = frame;
+            else unique.push(frame);
+            return unique;
+        }, []);
+    if (points.length < 2) return null;
+    if (points[0].time > 0) points.unshift({ time: 0, value: boundedSpeed(baseSpeed) });
+    if (points.at(-1).time < duration) points.push({ time: duration, value: points.at(-1).value });
+
+    const intervals = [];
+    const maxIntervals = 240;
+    for (let i = 0; i < points.length - 1; i++) {
+        if (intervals.length >= maxIntervals) return null;
+        const from = points[i], to = points[i + 1];
+        const span = to.time - from.time;
+        if (span <= 0) continue;
+        const count = Math.min(maxIntervals - intervals.length, Math.max(1, Math.ceil(span * 8)));
+        if (count <= 0) return null;
+        const easing = progress => applyRetimeEasing(to.easing, progress);
+        for (let j = 0; j < count; j++) {
+            const p0 = j / count, p1 = (j + 1) / count;
+            const start = from.time + span * p0;
+            const end = from.time + span * p1;
+            const s0 = Math.max(0.1, Math.min(4, from.value + (to.value - from.value) * easing(p0)));
+            const s1 = Math.max(0.1, Math.min(4, from.value + (to.value - from.value) * easing(p1)));
+            const speed = (s0 + s1) / 2;
+            const sourceStart = intervals.at(-1)?.sourceEnd || 0;
+            const sourceEnd = sourceStart + (end - start) * speed;
+            intervals.push({ start, end, speed, sourceStart, sourceEnd });
+        }
+    }
+    if (!intervals.length || intervals.at(-1).end < duration - 1e-5) return null;
+
+    let expression = duration.toFixed(6);
+    for (let i = intervals.length - 1; i >= 0; i--) {
+        const interval = intervals[i];
+        const sourceEnd = interval.sourceEnd.toFixed(6);
+        const mapped = `${interval.start.toFixed(6)}+(T-${interval.sourceStart.toFixed(6)})/${interval.speed.toFixed(6)}`;
+        expression = `if(lt(T\\,${sourceEnd})\\,${mapped}\\,${expression})`;
+    }
+    const audioSplits = intervals.map((_, index) => `[retime_in_${index}]`).join('');
+    const audioGraph = [
+        `[0:a]asetpts=PTS-STARTPTS,asplit=${intervals.length}${audioSplits}`,
+        ...intervals.map((interval, index) => {
+            const tempo = maintainPitch
+                ? atempoChain(interval.speed).join(',')
+                : `asetrate=44100*${interval.speed.toFixed(6)},aresample=44100`;
+            return `[retime_in_${index}]atrim=start=${interval.sourceStart.toFixed(6)}:end=${interval.sourceEnd.toFixed(6)},asetpts=PTS-STARTPTS,aformat=sample_rates=44100:channel_layouts=stereo,${tempo}[retime_seg_${index}]`;
+        }),
+        `${intervals.map((_, index) => `[retime_seg_${index}]`).join('')}concat=n=${intervals.length}:v=0:a=1[aretimed]`,
+    ].join(';');
+    return {
+        duration,
+        sourceDuration: intervals.at(-1).sourceEnd,
+        intervals,
+        videoFilter: `setpts=PTS-STARTPTS,setpts='${expression}/TB'`,
+        audioGraph,
+        maintainPitch,
+    };
+}
+
+function renderRetimeAudio(source, outputPath, retime, { offset = 0, duration, volume = 1, bitrate = '192k', effects = [], hasAudio = true } = {}) {
+    return new Promise((resolve, reject) => {
+        const postFilters = [
+            ...compileTimelineAudioEffects(effects),
+            ...(Number(volume) !== 1 ? [`volume=${Number(volume).toFixed(4)}`] : []),
+        ];
+        if (!hasAudio) {
+            ffmpeg()
+                .input('anullsrc=channel_layout=stereo:sample_rate=44100')
+                .inputOptions(['-f', 'lavfi'])
+                .setDuration(duration)
+                .audioCodec('aac')
+                .audioBitrate(bitrate)
+                .output(outputPath)
+                .on('end', resolve)
+                .on('error', reject)
+                .run();
+            return;
+        }
+        const graph = [retime.audioGraph, `[aretimed]${postFilters.length ? `${postFilters.join(',')},` : ''}anull[aout]`];
+        ffmpeg(source)
+            .setStartTime(offset)
+            .setDuration(duration)
+            .complexFilter(graph, 'aout')
+            .audioCodec('aac')
+            .audioBitrate(bitrate)
+            .output(outputPath)
+            .on('end', resolve)
+            .on('error', reject)
+            .run();
+    });
+}
+
+const EXPORTABLE_TIMELINE_EFFECTS = new Set([
+    'blur', 'blur_gaussian', 'blur_radial', 'blur_motion', 'motion-blur',
+    'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate', 'color_grade',
+    'grain', 'film_grain', 'chromatic-aberration', 'rgb_split', 'distortion', 'vignette',
+    'glow', 'fade_in', 'fade_out', 'glitch', 'shake', 'speed_change', 'lut_apply',
+    'audio_normalize', 'audio_denoise',
+]);
+
+function timelineEffectWindow(effect, clipStart = 0, duration = 0) {
+    const origin = Number.isFinite(Number(clipStart)) ? Number(clipStart) : 0;
+    const length = Math.max(0, Number(duration) || 0);
+    const clipEnd = length > 0 ? origin + length : Infinity;
+    const authoredStart = effect?.startTime == null || effect.startTime === '' ? origin : Number(effect.startTime);
+    const authoredEnd = effect?.endTime == null || effect.endTime === '' ? clipEnd : Number(effect.endTime);
+    const absoluteStart = Number.isFinite(authoredStart) ? authoredStart : origin;
+    const absoluteEnd = Number.isFinite(authoredEnd) ? authoredEnd : clipEnd;
+    const start = Math.max(0, absoluteStart - origin);
+    const end = Math.min(length > 0 ? length : Infinity, absoluteEnd - origin);
+    if (!(end > start)) return { active: false, partial: false, start, end };
+    return { active: true, partial: start > 0 || (length > 0 && end < length), start, end };
+}
+
+function scopeEffectFiltersToWindow(filters, firstFilterIndex, window, effect, complexGlow) {
+    if (!window.active) {
+        filters.splice(firstFilterIndex);
+        return;
+    }
+    if (!window.partial) return;
+    const kind = effect?.kind || effect?.type || effect?.id;
+    const segment = filters.slice(firstFilterIndex);
+    // Camera shake changes the filter chain's intermediate geometry, so omit a
+    // partial instance instead of applying it to the entire clip. Highlight
+    // glow is handled later by an overlay node and can be time-gated there.
+    if (kind === 'shake') {
+        filters.splice(firstFilterIndex);
+        return;
+    }
+    const glowIndex = segment.findIndex(filter => String(filter).startsWith('__VIBED_HIGHLIGHT_GLOW__'));
+    if (glowIndex >= 0 && complexGlow) {
+        const raw = String(segment[glowIndex]);
+        const spec = JSON.parse(raw.slice('__VIBED_HIGHLIGHT_GLOW__'.length));
+        spec.window = { start: window.start, end: window.end };
+        filters[firstFilterIndex + glowIndex] = `__VIBED_HIGHLIGHT_GLOW__${JSON.stringify(spec)}`;
+        return;
+    }
+    const lutIndex = segment.findIndex(filter => String(filter).startsWith('__VIBED_LUT__'));
+    if (lutIndex >= 0) {
+        const spec = JSON.parse(String(segment[lutIndex]).slice('__VIBED_LUT__'.length));
+        spec.window = { start: window.start, end: window.end };
+        filters[firstFilterIndex + lutIndex] = `__VIBED_LUT__${JSON.stringify(spec)}`;
+        return;
+    }
+    if (glowIndex >= 0) {
+        filters.splice(firstFilterIndex);
+        return;
+    }
+    const enable = `:enable='gte(t,${window.start.toFixed(6)})*lt(t,${Number.isFinite(window.end) ? window.end.toFixed(6) : '1e12'})'`;
+    filters.splice(firstFilterIndex, segment.length, ...segment.map(filter => `${filter}${enable}`));
+}
+
+function hasRenderedAIAnalysis(clip, effect, kind) {
+    const analysis = clip?.metadata?.aiEffectAnalysis?.[effect?.id];
+    if (!analysis || analysis.error) return false;
+    if (kind === 'beat_sync') {
+        const mode = effectParam(effect, 'effectType', 'zoom_pulse');
+        if (mode === 'flash') return (clip.effects || []).some(candidate => candidate?.id === `${effect.id}-generated-flash`
+            && candidate.enabled !== false && ['brightness', 'color_grade'].includes(candidate.kind || candidate.type));
+        if (mode === 'shake') return (clip.effects || []).some(candidate => candidate?.id === `${effect.id}-generated-shake`
+            && candidate.enabled !== false && (candidate.kind || candidate.type) === 'shake'
+            && Array.isArray(candidate.keyframes?.intensity) && candidate.keyframes.intensity.length > 0);
+        if (mode !== 'zoom_pulse') return false;
+    }
+    return Array.isArray(clip?.keyframes?.scale) && clip.keyframes.scale.length > 0;
+}
+
+function collectTimelineEffectWarnings(clips = [], { clipLutFilters = new Map() } = {}) {
+    const warnings = [];
+    for (const clip of Array.isArray(clips) ? clips : []) {
+        for (const effect of Array.isArray(clip?.effects) ? clip.effects : []) {
+            if (!effect || effect.enabled === false) continue;
+            const kind = effect.kind || effect.type;
+            if (!kind) continue;
+            const window = timelineEffectWindow(effect, Number(clip.start) || 0, Number(clip.duration) || 0);
+            if (!window.active) continue;
+            if (window.partial && kind === 'shake') {
+                warnings.push(`${clip.name || 'A clip'}: the partial “${kind}” effect could not be applied in export and was skipped.`);
+                continue;
+            }
+            if (kind === 'lut_apply') {
+                if (!clipLutFilters.has(String(effectParam(effect, 'lutId', effectParam(effect, 'lut', ''))))) {
+                    warnings.push(`${clip.name || 'A clip'}: its LUT could not be resolved for export and was skipped.`);
+                }
+            } else if (['smart_zoom', 'emotion_frame', 'beat_sync'].includes(kind) && !hasRenderedAIAnalysis(clip, effect, kind)) {
+                const mode = kind === 'beat_sync' ? effectParam(effect, 'effectType', 'zoom_pulse') : null;
+                warnings.push(mode && mode !== 'zoom_pulse' && mode !== 'flash'
+                    ? `${clip.name || 'A clip'}: “beat_sync” mode “${mode}” has no export implementation and was skipped.`
+                    : `${clip.name || 'A clip'}: “${kind}” has no completed analysis keyframes, so it was skipped in export.`);
+            } else if (!EXPORTABLE_TIMELINE_EFFECTS.has(kind) && !['smart_zoom', 'emotion_frame', 'beat_sync'].includes(kind)) {
+                warnings.push(`${clip.name || 'A clip'}: the “${kind}” effect is not supported in export and was skipped.`);
+            }
+        }
+    }
+    return [...new Set(warnings)];
+}
+
+function compileTimelineVisualEffects(effects = [], { width = 1080, height = 1920, duration = 0, clipStart = 0, complexGlow = false, clipLutFilters = new Map() } = {}) {
+    const filters = [];
+    const orderedEffects = (Array.isArray(effects) ? effects : [])
+        .map((effect, index) => ({ effect, index }))
+        .sort((a, b) => (Number(a.effect?.order) || 0) - (Number(b.effect?.order) || 0) || a.index - b.index)
+        .map(({ effect }) => effect);
+    const brightnessFilter = (factor) => {
+        const value = Math.max(0, Math.min(2, Number.isFinite(Number(factor)) ? Number(factor) : 1));
+        return `colorchannelmixer=rr=${value.toFixed(4)}:gg=${value.toFixed(4)}:bb=${value.toFixed(4)}`;
+    };
+    for (const effect of orderedEffects) {
         if (!effect || effect.enabled === false) continue;
+        const effectWindow = timelineEffectWindow(effect, clipStart, duration);
+        const firstEffectFilter = filters.length;
+        if (!effectWindow.active) continue;
+        // The footage stack stores editable effects as { kind, params }, while
+        // the older timeline shelf stores named presets as { id }. Compile
+        // both schemas here so primary footage and overlays share the same
+        // user-authored effect semantics.
+        if (effect.kind || effect.type) {
+            const p = effect.params || {};
+            const read = (key, fallback) => {
+                const value = Number(p[key]?.value ?? p[key] ?? fallback);
+                if (Number.isFinite(value)) return value;
+                const safeFallback = Number(fallback);
+                return Number.isFinite(safeFallback) ? safeFallback : 0;
+            };
+            const animated = (key, fallback, min, max) => compileEffectKeyframeExpression(effect, key, fallback, min, max, clipStart);
+            const kind = effect.kind || effect.type;
+            // Retiming effects are executed by the timeline speed compiler,
+            // not by this per-frame visual filter stack.
+            // Audio, LUT resolution, and AI analysis also have dedicated
+            // pipelines. The export warning collector reports skipped or
+            // unresolved cases for these effect families.
+            if (['speed_change', 'audio_normalize', 'audio_denoise', 'smart_zoom', 'emotion_frame', 'beat_sync'].includes(kind)) continue;
+            if (kind === 'lut_apply' && !clipLutFilters.has(String(effectParam(effect, 'lutId', effectParam(effect, 'lut', ''))))) continue;
+            const amount = read('amount', read('value', 1));
+            const localTime = (value, fallback) => {
+                const time = Number(value);
+                return Number.isFinite(time) ? Math.max(0, time - (Number(clipStart) || 0)) : fallback;
+            };
+            switch (kind) {
+                case 'blur': case 'blur_gaussian': filters.push(`gblur=sigma=${Math.max(0, Math.min(50, read('radius', amount)))}`); break;
+                case 'blur_radial': {
+                    const intensityValue = Math.max(0, Math.min(1, read('intensity', 0.3)));
+                    const intensityTrack = animated('intensity', intensityValue, 0, 1);
+                    const intensity = String(intensityTrack || intensityValue.toFixed(6)).replace(/\bt\b/g, 'T');
+                    const centerX = Math.max(0, Math.min(1, read('centerX', 0.5)));
+                    const centerY = Math.max(0, Math.min(1, read('centerY', 0.5)));
+                    const samples = Math.max(8, Math.min(64, Math.round(read('samples', 32))));
+                    const sampleChannel = channel => {
+                        const terms = [];
+                        for (let index = 0; index < samples; index++) {
+                            const progress = (index / samples).toFixed(6);
+                            const x = `clip(X+(${centerX}-X/W)*(${progress})*(${intensity})*sqrt(pow(${centerX}-X/W,2)+pow(${centerY}-Y/H,2))*0.5*W,0,W-1)`;
+                            const y = `clip(Y+(${centerY}-Y/H)*(${progress})*(${intensity})*sqrt(pow(${centerX}-X/W,2)+pow(${centerY}-Y/H,2))*0.5*H,0,H-1)`;
+                            terms.push(`${channel}(${x},${y})`);
+                        }
+                        return `(${terms.join('+')})/${samples}`;
+                    };
+                    filters.push(`format=rgba,geq=r='${sampleChannel('r')}':g='${sampleChannel('g')}':b='${sampleChannel('b')}':a='alpha(X,Y)'`);
+                    break;
+                }
+                case 'blur_motion': case 'motion-blur': {
+                    const rawIntensity = p.intensity?.value ?? p.intensity;
+                    const hasIntensity = rawIntensity != null;
+                    const rawLegacyAmount = p.amount?.value ?? p.amount ?? p.value?.value ?? p.value;
+                    const legacyAmount = Number(rawLegacyAmount);
+                    const hasLegacyAmount = rawLegacyAmount != null || Array.isArray(effect.keyframes?.amount);
+                    const intensityValue = Math.max(0, Math.min(1, hasIntensity
+                        ? Number(rawIntensity)
+                        : hasLegacyAmount
+                            ? (Number.isFinite(legacyAmount) ? legacyAmount : amount) / 31.176914536
+                            : 0.5));
+                    const intensityTrack = animated('intensity', intensityValue, 0, 1);
+                    const amountTrack = !hasIntensity && hasLegacyAmount
+                        ? animated('amount', Number.isFinite(legacyAmount) ? legacyAmount : amount, 0, 50)
+                        : null;
+                    const intensity = intensityTrack
+                        ? `clip((${intensityTrack.replace(/\bt\b/g, 'T')}),0,1)`
+                        : amountTrack
+                            ? `clip((${amountTrack.replace(/\bt\b/g, 'T')})/31.176914536,0,1)`
+                            : intensityValue.toFixed(6);
+                    const rawAngle = p.angle?.value ?? p.angle;
+                    const angle = ((Number(rawAngle) || 0) % 360 + 360) % 360;
+                    const angleTrack = animated('angle', angle, 0, 360);
+                    const angleExpression = angleTrack
+                        ? `mod((${angleTrack.replace(/\bt\b/g, 'T')}),360)`
+                        : angle.toFixed(6);
+                    const samples = Math.max(2, Math.min(64, Math.round(read('samples', 16))));
+                    const sampleChannel = channel => {
+                        const terms = [];
+                        for (let index = 0; index < samples; index++) {
+                            const progress = (index / (samples - 1) - 0.5).toFixed(6);
+                            const travel = `(${progress})*(${intensity})*0.1*W`;
+                            const x = `clip(X+cos((${angleExpression})*PI/180)*${travel},0,W-1)`;
+                            const y = `clip(Y+sin((${angleExpression})*PI/180)*${travel},0,H-1)`;
+                            terms.push(`${channel}(${x},${y})`);
+                        }
+                        return `(${terms.join('+')})/${samples}`;
+                    };
+                    filters.push(`format=rgba,geq=r='${sampleChannel('r')}':g='${sampleChannel('g')}':b='${sampleChannel('b')}':a='alpha(X,Y)'`);
+                    break;
+                }
+                case 'brightness': {
+                    const expression = animated('amount', Number.isFinite(amount) ? amount : 1, 0, 2);
+                    if (expression) filters.push(`eq=brightness='((${expression})-1)/2':eval=frame`);
+                    else filters.push(brightnessFilter(Number.isFinite(amount) ? amount : 1));
+                    break;
+                }
+                case 'contrast': {
+                    const value = animated('amount', amount, 0, 4) || Math.max(0, Math.min(4, Number.isFinite(amount) ? amount : 1));
+                    filters.push(`eq=contrast='${value}':eval=frame`);
+                    break;
+                }
+                case 'saturation': case 'saturate': {
+                    const value = animated('amount', amount, 0, 5) || Math.max(0, Math.min(5, Number.isFinite(amount) ? amount : 1));
+                    filters.push(`eq=saturation='${value}':eval=frame`);
+                    break;
+                }
+                case 'hue': case 'hue-rotate': {
+                    const degrees = animated('degrees', Number(p.degrees ?? amount) || 0, -360, 360) || Math.max(-360, Math.min(360, Number(p.degrees ?? amount) || 0));
+                    filters.push(`hue=h='${degrees}'`);
+                    break;
+                }
+                case 'color_grade': {
+                    const brightness = animated('brightness', read('brightness', 100), 0, 200);
+                    if (brightness) {
+                        // CSS brightness is multiplicative. `eq=brightness`
+                        // adds an offset, so it diverges badly on highlights.
+                        // geq exposes frame time and preserves the source alpha.
+                        const timeExpression = brightness.replace(/\bt\b/g, 'T');
+                        filters.push(`format=rgba,geq=r='clip(r(X,Y)*clip((${timeExpression})/100,0,2),0,255)':g='clip(g(X,Y)*clip((${timeExpression})/100,0,2),0,255)':b='clip(b(X,Y)*clip((${timeExpression})/100,0,2),0,255)':a='alpha(X,Y)'`);
+                    } else {
+                        const factor = Number(read('brightness', 100));
+                        filters.push(brightnessFilter(Number.isFinite(factor) ? factor / 100 : 1));
+                    }
+                    const contrastTrack = animated('contrast', read('contrast', 100), 0, 200);
+                    const saturationTrack = animated('saturation', read('saturation', 100), 0, 200);
+                    const contrastRaw = Number(read('contrast', 100));
+                    const saturationRaw = Number(read('saturation', 100));
+                    const contrast = contrastTrack ? `'(${contrastTrack})/100'` : String(Math.max(0, Math.min(2, Number.isFinite(contrastRaw) ? contrastRaw / 100 : 1)));
+                    const saturation = saturationTrack ? `'(${saturationTrack})/100'` : String(Math.max(0, Math.min(2, Number.isFinite(saturationRaw) ? saturationRaw / 100 : 1)));
+                    filters.push(`eq=contrast=${contrast}:saturation=${saturation}:eval=frame`);
+                    const hueExpression = animated('hueRotate', read('hueRotate', 0), -180, 180);
+                    const hue = hueExpression || Math.max(-180, Math.min(180, read('hueRotate', 0)));
+                    if (hueExpression) filters.push(`hue=h='${hueExpression}'`);
+                    else if (hue) filters.push(`hue=h=${hue}`);
+                    const temperature = Math.max(-100, Math.min(100, read('temperature', 0))) * 0.003;
+                    const tint = Math.max(-100, Math.min(100, read('tint', 0))) * 0.003;
+                    if (temperature || tint) filters.push(`colorbalance=rs=${temperature.toFixed(4)}:bs=${(-temperature).toFixed(4)}:gs=${tint.toFixed(4)}`);
+                    break;
+                }
+                case 'lut_apply': {
+                    const lutId = String(effectParam(effect, 'lutId', effectParam(effect, 'lut', '')) || '');
+                    const lutFilter = clipLutFilters.get(lutId);
+                    const intensity = Number(effectParam(effect, 'intensity', 1));
+                    if (lutFilter) filters.push(`__VIBED_LUT__${JSON.stringify({ filter: lutFilter, intensity: Number.isFinite(intensity) ? Math.max(0, Math.min(1, intensity)) : 1 })}`);
+                    break;
+                }
+                case 'grain': filters.push(`noise=alls=${Math.max(0, Math.min(48, Number.isFinite(amount) ? amount : 8))}:allf=t+u`); break;
+                case 'film_grain': {
+                    const rawAnimated = p.animated?.value ?? p.animated;
+                    const animated = rawAnimated == null ? true : Boolean(rawAnimated);
+                    const intensity = Math.max(0, Math.min(1, read('intensity', 0.15)));
+                    const intensityTrack = compileEffectKeyframeExpression(effect, 'intensity', intensity, 0, 1, clipStart);
+                    const strength = intensityTrack
+                        ? `clip((${intensityTrack.replace(/\bt\b/g, 'T')}),0,1)*48`
+                        : (intensity * 48).toFixed(4);
+                    const size = Math.max(0.5, Math.min(5, read('size', 1.5)));
+                    const seed = Math.max(0, Math.min(2147483647, Math.floor(read('seed', 941))));
+                    const frame = animated ? 'floor(T*30)' : '0';
+                    const hash = `(sin((floor(X/${size.toFixed(4)})+${seed}*7.1)*12.9898+(floor(Y/${size.toFixed(4)})+${seed}*3.17)*78.233+${frame}*37.719)*43758.5453)`;
+                    const noise = `((${hash})-floor(${hash})-0.5)*(${strength})`;
+                    filters.push(`format=rgba,geq=r='clip(r(X,Y)+${noise},0,255)':g='clip(g(X,Y)+${noise},0,255)':b='clip(b(X,Y)+${noise},0,255)':a='alpha(X,Y)'`);
+                    break;
+                }
+                case 'chromatic-aberration': { const shift = Math.round(Math.max(0, Math.min(12, Number.isFinite(amount) ? amount : 2))); filters.push(`chromashift=cbh=${-shift}:crh=${shift}:edge=smear`); break; }
+                case 'rgb_split': {
+                    const distance = Math.max(0, Math.min(50, read('amount', 5)));
+                    const angle = read('angle', 0) * Math.PI / 180;
+                    const centerX = Math.max(0, Math.min(1, read('centerX', 0.5)));
+                    const centerY = Math.max(0, Math.min(1, read('centerY', 0.5)));
+                    const dx = (Math.cos(angle) * distance).toFixed(6);
+                    const dy = (Math.sin(angle) * distance).toFixed(6);
+                    const radialDistance = `sqrt(pow(X/W-${centerX},2)+pow(Y/H-${centerY},2))`;
+                    const redX = `clip(X+(${dx})*(${radialDistance}),0,W-1)`;
+                    const redY = `clip(Y+(${dy})*(${radialDistance}),0,H-1)`;
+                    const blueX = `clip(X-(${dx})*(${radialDistance}),0,W-1)`;
+                    const blueY = `clip(Y-(${dy})*(${radialDistance}),0,H-1)`;
+                    filters.push(`format=rgba,geq=r='r(${redX},${redY})':g='g(X,Y)':b='b(${blueX},${blueY})':a='alpha(X,Y)'`);
+                    break;
+                }
+                case 'distortion': filters.push(`lenscorrection=cx=0.5:cy=0.5:k1=${Math.max(-0.2, Math.min(0.2, Number.isFinite(amount) ? amount : 0.018))}:k2=0`); break;
+                case 'vignette': {
+                    const intensityValue = Math.max(0, Math.min(1, read('intensity', 0.5)));
+                    const radiusValue = Math.max(0.1, Math.min(1.5, read('radius', 0.7)));
+                    const softnessValue = Math.max(0, Math.min(1, read('softness', 0.5)));
+                    const asGeqTime = expression => String(expression).replace(/\bt\b/g, 'T');
+                    const intensity = asGeqTime(animated('intensity', intensityValue, 0, 1) || intensityValue.toFixed(6));
+                    const radius = asGeqTime(animated('radius', radiusValue, 0.1, 1.5) || radiusValue.toFixed(6));
+                    const softness = asGeqTime(animated('softness', softnessValue, 0, 1) || softnessValue.toFixed(6));
+                    const rawColor = effectParam(effect, 'color', [0, 0, 0]);
+                    const hex = typeof rawColor === 'string' ? rawColor.match(/^#?([\da-f]{6})$/i) : null;
+                    const color = hex
+                        ? [0, 2, 4].map(index => parseInt(hex[1].slice(index, index + 2), 16))
+                        : Array.isArray(rawColor) ? rawColor.slice(0, 3).map(channel => {
+                            const value = Number(channel);
+                            return Math.round(Math.max(0, Math.min(255, Number.isFinite(value) ? (value <= 1 ? value * 255 : value) : 0)));
+                        }) : [0, 0, 0];
+                    const animatedColor = animated('color', color, 0, 255);
+                    const colorChannels = Array.isArray(animatedColor) && animatedColor.length >= 3
+                        ? animatedColor.slice(0, 3).map(channel => String(channel).replace(/\bt\b/g, 'T'))
+                        : color.map(String);
+                    const distance = 'sqrt(pow(X/W-0.5,2)+pow(Y/H-0.5,2))';
+                    const edgeT = `clip((${distance}-(${radius}-${softness}))/max(${softness},0.0001),0,1)`;
+                    const edge = `(${edgeT})*(${edgeT})*(3-2*(${edgeT}))`;
+                    const mix = `(${edge})*(${intensity})`;
+                    filters.push(`format=rgba,geq=r='r(X,Y)*(1-${mix})+(${colorChannels[0]})*${mix}':g='g(X,Y)*(1-${mix})+(${colorChannels[1]})*${mix}':b='b(X,Y)*(1-${mix})+(${colorChannels[2]})*${mix}':a='alpha(X,Y)'`);
+                    break;
+                }
+                case 'glow': {
+                    const radius = Math.max(1, Math.min(50, read('radius', 10)));
+                    const threshold = Math.max(0, Math.min(1, read('threshold', 0.7)));
+                    const intensity = Math.max(0, Math.min(1, read('intensity', 1)) * 0.7);
+                    const thresholdTrack = animated('threshold', threshold, 0, 1);
+                    const intensityTrack = animated('intensity', read('intensity', 1), 0, 1);
+                    const radiusTrack = animated('radius', radius, 1, 50);
+                    const radiusInput = effect?.samples?.radius?.length ? effect.samples.radius
+                        : (effect?.keyframes?.radius || effect?.params?.radius?.keyframes || []);
+                    const radiusValues = radiusInput.map(point => Number(point?.value)).filter(Number.isFinite)
+                        .map(value => Math.max(1, Math.min(50, value)));
+                    const color = effectParam(effect, 'color', [0.447, 0.851, 1]);
+                    const hex = typeof color === 'string' ? color.match(/^#?([\da-f]{6})$/i) : null;
+                    const channels = hex ? [0, 2, 4].map(index => parseInt(hex[1].slice(index, index + 2), 16))
+                        : Array.isArray(color) ? color.slice(0, 3).map(channel => {
+                        const value = Number(channel);
+                        const normalized = Number.isFinite(value) ? value : 1;
+                        return Math.round(Math.max(0, Math.min(255, normalized <= 1 ? normalized * 255 : normalized)));
+                    }) : [114, 217, 255];
+                    const animatedColor = animated('color', channels, 0, 255);
+                    const glowColor = Array.isArray(animatedColor) && animatedColor.length >= 3
+                        ? animatedColor.slice(0, 3).map(channel => String(channel).replace(/\bt\b/g, 'T'))
+                        : channels;
+                    if (complexGlow) filters.push(`__VIBED_HIGHLIGHT_GLOW__${JSON.stringify({
+                        radius, threshold: threshold * 255, intensity, color: glowColor,
+                        thresholdExpression: thresholdTrack ? `(${String(thresholdTrack).replace(/\bt\b/g, 'T')})*255` : null,
+                        intensityExpression: intensityTrack ? `(${String(intensityTrack).replace(/\bt\b/g, 'T')})*0.7` : null,
+                        radiusExpression: radiusTrack ? String(radiusTrack).replace(/\bt\b/g, 'T') : null,
+                        radiusRange: radiusValues.length > 1
+                            ? [Math.min(...radiusValues), Math.max(...radiusValues)] : null,
+                    })}`);
+                    else filters.push(`gblur=sigma=${radius}`, `eq=brightness=${Math.max(0, Math.min(0.2, intensity * 0.05))}`);
+                    break;
+                }
+                case 'fade_in': {
+                    const fadeDuration = Math.max(0.05, Math.min(Number(duration) || 60, read('duration', 0.5)));
+                    const start = localTime(effect.startTime, 0);
+                    const color = effectParam(effect, 'color', [0, 0, 0]);
+                    const hex = Array.isArray(color) ? `0x${color.slice(0, 3).map(c => Math.round(Math.max(0, Math.min(1, Number(c) || 0)) * 255).toString(16).padStart(2, '0')).join('')}` : String(color).replace('#', '0x');
+                    filters.push(`fade=t=in:st=${start.toFixed(3)}:d=${fadeDuration.toFixed(3)}:color=${hex}`);
+                    break;
+                }
+                case 'fade_out': {
+                    const fadeDuration = Math.max(0.05, Math.min(Number(duration) || 60, read('duration', 0.5)));
+                    const end = localTime(effect.endTime, Number(duration) || 0);
+                    const start = Math.max(0, end - fadeDuration);
+                    const color = effectParam(effect, 'color', [0, 0, 0]);
+                    const hex = Array.isArray(color) ? `0x${color.slice(0, 3).map(c => Math.round(Math.max(0, Math.min(1, Number(c) || 0)) * 255).toString(16).padStart(2, '0')).join('')}` : String(color).replace('#', '0x');
+                    filters.push(`fade=t=out:st=${start.toFixed(3)}:d=${Math.max(0.05, Math.min(fadeDuration, end - start)).toFixed(3)}:color=${hex}`);
+                    break;
+                }
+                case 'glitch': {
+                    const rawAmount = read('amount', read('intensity', 0.2) * 40);
+                    const amount = Math.max(0, Math.min(32, Number.isFinite(rawAmount) ? rawAmount : 8));
+                    const seed = Math.max(0, Math.min(1000, read('seed', 17)));
+                    const track = animated('amount', amount, 0, 32);
+                    const sampledAmount = String(track || amount.toFixed(4)).replace(/\bt\b/g, 'T');
+                    const frame = 'floor(T*12)';
+                    const shift = `if(gt(sin(Y*0.37+${frame}*2.1+${seed}),0.72),round(sin(Y*12.9898+${frame}*78.233+${seed}*0.17)*(${sampledAmount})),0)`;
+                    filters.push(`format=rgba,geq=r='r(clip(X+${shift},0,W-1),Y)':g='g(clip(X+${shift},0,W-1),Y)':b='b(clip(X+${shift},0,W-1),Y)':a='alpha(clip(X+${shift},0,W-1),Y)'`);
+                    break;
+                }
+                case 'shake': {
+                    const frequency = Math.max(1, Math.min(60, read('frequency', 10)));
+                    const baseIntensity = Math.max(0, Math.min(50, read('intensity', 5)));
+                    // Beat Sync writes an intensity envelope onto this effect.
+                    // Evaluate that track per output frame so the generated
+                    // beat accents actually move the picture during export.
+                    const intensityTrack = animated('intensity', baseIntensity, 0, 50);
+                    const intensity = intensityTrack
+                        ? `(${String(intensityTrack)})*${Math.max(0.25, width / 1080).toFixed(4)}`
+                        : String((baseIntensity * Math.max(0.25, width / 1080)).toFixed(3));
+                    const rotation = Math.max(0, Math.min(10, read('rotationAmount', 0)));
+                    const rotationTrack = animated('rotationAmount', rotation, 0, 10);
+                    const rotationExpr = rotationTrack ? String(rotationTrack) : rotation.toFixed(3);
+                    const seed = read('randomSeed', 0);
+                    const zoom = 1.08 + rotation * 0.01;
+                    const scaledWidth = Math.ceil(width * zoom / 2) * 2;
+                    const scaledHeight = Math.ceil(height * zoom / 2) * 2;
+                    const x = `(iw-ow)/2+sin(t*${frequency}*2*PI+${seed})*(${intensity})`;
+                    const y = `(ih-oh)/2+sin(t*${frequency}*1.73*2*PI+${seed + 31})*(${intensity})`;
+                    filters.push(`scale=${scaledWidth}:${scaledHeight}`, `rotate=a='sin(t*${frequency}*0.83*2*PI+${seed + 67})*(${rotationExpr})*PI/180':c=black@0:ow=iw:oh=ih`, `crop=${width}:${height}:x='${x}':y='${y}'`);
+                    break;
+                }
+                default: break;
+            }
+            if (filters.length === firstEffectFilter && EXPORTABLE_TIMELINE_EFFECTS.has(kind)) {
+                throw new Error(`Exportable footage effect has no renderer: ${String(kind || '(missing kind)')}`);
+            }
+            scopeEffectFiltersToWindow(filters, firstEffectFilter, effectWindow, effect, complexGlow);
+            continue;
+        }
         switch (effect.id) {
             case 'warm-film': filters.push('colorbalance=rs=.04:gs=.015:bs=-.035', 'eq=saturation=1.18:contrast=1.06'); break;
             case 'vivid': filters.push('eq=saturation=1.45:contrast=1.08'); break;
@@ -853,10 +1962,96 @@ function compileTimelineVisualEffects(effects = []) {
             case 'aqua': filters.push('hue=h=155:s=1.18', 'eq=brightness=0.02'); break;
             case 'lavender': filters.push('hue=h=265:s=0.78', 'eq=brightness=0.03'); break;
             case 'sports': filters.push('eq=contrast=1.22:saturation=1.3:brightness=0.02'); break;
+            // Footage treatments mirror the live preview's SVG filters. FFmpeg
+            // uses temporal noise, channel offsets, spatial blur and lens
+            // correction so exports retain actual pixel-level treatment.
+            case 'film-grain': filters.push('noise=alls=9:allf=t+u'); break;
+            case 'chromatic-aberration': filters.push('chromashift=cbh=-2:crh=2:edge=smear'); break;
+            case 'motion-blur': {
+                const sigma = 2 * Math.max(width / 1080, height / 1920) * 0.7;
+                // Match the preview SVG's slightly anisotropic blur instead of
+                // dropping the vertical component entirely in rendered files.
+                filters.push(`gblur=sigma=${sigma.toFixed(4)}:sigmaV=${(sigma * 0.21).toFixed(4)}`);
+                break;
+            }
+            case 'lens-distortion': filters.push('lenscorrection=cx=0.5:cy=0.5:k1=-0.04:k2=0.01'); break;
             default: break;
         }
+        if (filters.length === firstEffectFilter) {
+            throw new Error(`Cannot export unsupported footage effect preset: ${String(effect.id || '(missing id)')}`);
+        }
+        scopeEffectFiltersToWindow(filters, firstEffectFilter, effectWindow, effect, complexGlow);
     }
     return filters;
+}
+
+/** Compile linear FFmpeg filters and thresholded highlight bloom stages into a
+ * single filter_complex graph, preserving authored effect order. */
+function compileTimelineVisualEffectGraph(filters = [], { input = '0:v', output = 'vfxout' } = {}) {
+    const graph = [];
+    let current = input;
+    let stage = 0;
+    let linear = [];
+    const flushLinear = () => {
+        if (!linear.length) return;
+        const next = `vfx_${stage++}`;
+        graph.push(`[${current}]${linear.join(',')}[${next}]`);
+        current = next;
+        linear = [];
+    };
+    for (const filter of filters) {
+        const prefix = '__VIBED_HIGHLIGHT_GLOW__';
+        const lutPrefix = '__VIBED_LUT__';
+        if (String(filter).startsWith(lutPrefix)) {
+            flushLinear();
+            const spec = JSON.parse(String(filter).slice(lutPrefix.length));
+            const [base, source, graded, merged] = [`vfx_${stage++}`, `vfx_${stage++}`, `vfx_${stage++}`, `vfx_${stage++}`];
+            graph.push(`[${current}]split[${base}][${source}]`);
+            graph.push(`[${source}]${spec.filter}[${graded}]`);
+            const enable = spec.window
+                ? `:enable='gte(t,${Number(spec.window.start).toFixed(6)})*lt(t,${Number(spec.window.end).toFixed(6)})'`
+                : '';
+            graph.push(`[${base}][${graded}]blend=all_opacity=${Number(spec.intensity).toFixed(4)}${enable}[${merged}]`);
+            current = merged;
+            continue;
+        }
+        if (!String(filter).startsWith(prefix)) { linear.push(filter); continue; }
+        flushLinear();
+        const spec = JSON.parse(String(filter).slice(prefix.length));
+        const [red, green, blue] = spec.color;
+        const splitBase = `vfx_${stage++}`, splitBloom = `vfx_${stage++}`;
+        const bloom = `vfx_${stage++}`, merged = `vfx_${stage++}`;
+        const threshold = spec.thresholdExpression || Number(spec.threshold).toFixed(3);
+        const intensity = spec.intensityExpression || Number(spec.intensity).toFixed(4);
+        // Match the live SVG highlight mask: Rec. 709 luminance with a soft
+        // ramp from threshold to white, followed by a tinted bloom overlay.
+        const luminance = `(0.2126*r(X,Y)+0.7152*g(X,Y)+0.0722*b(X,Y))`;
+        const alpha = `255*(${intensity})*clip((${luminance}-(${threshold}))/max(255-(${threshold}),1),0,1)`;
+        const radius = Number(spec.radius).toFixed(3);
+        graph.push(`[${current}]split[${splitBase}][${splitBloom}]`);
+        const animatedRadius = spec.radiusExpression && Array.isArray(spec.radiusRange)
+            && spec.radiusRange.length === 2 && spec.radiusRange[1] > spec.radiusRange[0];
+        if (animatedRadius) {
+            const [minRadius, maxRadius] = spec.radiusRange.map(value => Math.max(1, Math.min(50, Number(value))));
+            const [radiusA, radiusB, blurA, blurB] = [`vfx_${stage++}`, `vfx_${stage++}`, `vfx_${stage++}`, `vfx_${stage++}`];
+            const radiusMix = `clip((${spec.radiusExpression}-${minRadius.toFixed(4)})/${(maxRadius - minRadius).toFixed(4)},0,1)`;
+            graph.push(`[${splitBloom}]format=rgba,geq=r='${red}':g='${green}':b='${blue}':a='${alpha}',split[${radiusA}][${radiusB}]`);
+            graph.push(`[${radiusA}]gblur=sigma=${minRadius.toFixed(3)}[${blurA}]`);
+            graph.push(`[${radiusB}]gblur=sigma=${maxRadius.toFixed(3)}[${blurB}]`);
+            graph.push(`[${blurA}][${blurB}]blend=all_expr='A*(1-(${radiusMix}))+B*(${radiusMix})'[${bloom}]`);
+        } else {
+            graph.push(`[${splitBloom}]format=rgba,geq=r='${red}':g='${green}':b='${blue}':a='${alpha}',gblur=sigma=${radius}[${bloom}]`);
+        }
+        const enable = spec.window
+            ? `:enable='gte(t,${Number(spec.window.start).toFixed(6)})*lt(t,${Number(spec.window.end).toFixed(6)})'`
+            : '';
+        graph.push(`[${splitBase}][${bloom}]overlay=shortest=1:format=auto${enable}[${merged}]`);
+        current = merged;
+    }
+    flushLinear();
+    if (!graph.length) graph.push(`[${input}]null[${output}]`);
+    else graph.push(`[${current}]null[${output}]`);
+    return graph;
 }
 
 // ─── Main job handler ─────────────────────────────────────────────────────────
@@ -864,6 +2059,9 @@ function compileTimelineVisualEffects(effects = []) {
 module.exports = async function processExportJob(job) {
     const startTime = Date.now();
     const { timeline, settings = {}, userId = 'anonymous', assetMap = {} } = job.data;
+    // Share the exact keyframe/easing implementation with scene preview when
+    // resolving animated source-time remaps for nested video layers.
+    const { sampleKeyframeTrack } = await import('../client/src/motion/MotionResolver.js');
 
     await job.updateProgress(2);
 
@@ -927,14 +2125,23 @@ module.exports = async function processExportJob(job) {
     // the Revideo render-worker when it's enabled; everything else (cuts,
     // grading, camera motion, audio) stays exactly where it already is in
     // this file, per the confirmed split.
-    const revideoTextTracks    = timeline.tracks.filter(t => t.type === 'text'    && t.clips?.length > 0);
-    const revideoOverlayTracks = timeline.tracks.filter(t => t.type === 'overlay' && t.clips?.length > 0);
+    const allTextTracks    = timeline.tracks.filter(t => t.type === 'text'    && t.clips?.length > 0);
+    const allOverlayTracks = timeline.tracks.filter(t => t.type === 'overlay' && t.clips?.length > 0);
+    const revideoTextTracks = allTextTracks.filter(isRevideoTrackSupported);
+    const revideoOverlayTracks = allOverlayTracks.filter(isRevideoTrackSupported);
     // Opt-in only — with this unset (the default), nothing below changes:
     // STEP 2.5 and STEP 4 run exactly as they always have. This is a NEW,
     // not-yet-independently-verified render path (see CLAUDE.md), so it does
     // not become every user's default behaviour just by existing.
     const revideoEnabled = process.env.REVIDEO_RENDER_ENABLED === '1' && !!process.env.RENDER_WORKER_URL;
-    let useRevideo = revideoEnabled && (revideoTextTracks.length > 0 || revideoOverlayTracks.length > 0);
+    // A worker render replaces both the FFmpeg graphics compositor and the
+    // caption pass. It may take ownership only when it can draw EVERY visual
+    // track in this project; otherwise a mixed route would silently drop the
+    // unsupported tracks or their effects.
+    const hasUnsupportedVisualTracks = allTextTracks.length !== revideoTextTracks.length
+        || allOverlayTracks.length !== revideoOverlayTracks.length;
+    let useRevideo = revideoEnabled && !hasUnsupportedVisualTracks
+        && (revideoTextTracks.length > 0 || revideoOverlayTracks.length > 0);
     let revideoSucceeded = false;
     let revideoWarning = null;
     // R92: check the worker BEFORE the compositor step is skipped for it. A
@@ -1167,10 +2374,24 @@ module.exports = async function processExportJob(job) {
     };
 
     // ── Collect & sort clips ───────────────────────────────────────────────
+    const baseEffectSamples = new Map((settings.compositionPlan?.base?.effectsByClip || [])
+        .map(entry => [entry.clipId, entry.effects || []]));
     let allClips = [];
     for (const track of videoTracks) {
         for (const clip of track.clips) {
-            allClips.push({ ...clip, trackVolume: track.volume ?? 1.0 });
+            const authoredEffects = applyEffectSamples(clip.effects, baseEffectSamples.get(clip.id));
+            const effects = authoredEffects
+                .filter(effect => effect && effect.enabled !== false)
+                .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+            const speedResult = resolveTimelineSpeedEffect(effects, Number(clip.start) || 0, Number(clip.duration) || 0);
+            allClips.push({
+                ...clip,
+                ...(speedResult.speed !== null ? { speed: speedResult.speed } : {}),
+                ...(speedResult.maintainPitch !== null ? { speedChangeMaintainPitch: speedResult.maintainPitch } : {}),
+                ...(speedResult.retime ? { _speedRetime: speedResult.retime } : {}),
+                ...(speedResult.warning ? { _effectWarning: speedResult.warning } : {}),
+                trackVolume: track.volume ?? 1.0
+            });
         }
     }
     allClips.sort((a, b) => a.start - b.start);
@@ -1203,6 +2424,25 @@ module.exports = async function processExportJob(job) {
         }
     }
 
+    // Resolve per-clip LUTs through the same trusted library as project LUTs.
+    // The effect stores an asset id, never an arbitrary worker filesystem path.
+    const clipLutFilters = new Map();
+    const clipLutIds = [...new Set(allClips.flatMap(clip => (clip.effects || [])
+        .filter(effect => effect && effect.enabled !== false && (effect.kind || effect.type) === 'lut_apply')
+        .map(effect => String(effectParam(effect, 'lutId', effectParam(effect, 'lut', '')) || ''))
+        .filter(Boolean)))];
+    if (clipLutIds.length) {
+        try {
+            const { lutExportIntegration } = require('../server/lut-engine/library/LUTExportIntegration.js');
+            for (const lutId of clipLutIds) {
+                const filter = await lutExportIntegration.getLUTFilterForExport(lutId, tmpDir);
+                if (filter) clipLutFilters.set(lutId, filter);
+            }
+        } catch (lutErr) {
+            console.warn(`[ExportJob ${job.id}] Per-clip LUT lookup failed:`, lutErr.message);
+        }
+    }
+
     await job.updateProgress(5);
 
     // ── STEP 1: Trim each clip into a segment ──────────────────────────────
@@ -1221,6 +2461,14 @@ module.exports = async function processExportJob(job) {
     // way compositorWarning/captionWarning already surface a degraded export
     // instead of a silently wrong one.
     const skippedClips = [];
+    const effectWarnings = [
+        ...collectTimelineEffectWarnings(allClips, { clipLutFilters }),
+        ...allClips.filter(clip => clip._effectWarning).map(clip => `${clip.name || 'A clip'}: ${clip._effectWarning}`),
+        ...audioTracks.flatMap(track => (track.clips || []).flatMap(clip => {
+            const speedResult = resolveTimelineSpeedEffect(clip.effects, Number(clip.start) || 0, Number(clip.duration) || 0);
+            return speedResult.warning ? [`${clip.name || 'An audio clip'}: ${speedResult.warning}`] : [];
+        }))
+    ];
     const sandwichRenderedClipIds = new Set();
 
     for (let i = 0; i < allClips.length; i++) {
@@ -1248,6 +2496,7 @@ module.exports = async function processExportJob(job) {
         const vol     = (clip.volume ?? 1.0) * (clip.trackVolume ?? 1.0);
         const speed   = clip.speed || 1.0;
         const isImage = clip.type === 'image';
+        const speedRetime = !isImage ? clip._speedRetime : null;
 
         // R67 — "blur background" (Object Intelligence). A genuinely different
         // render path (two-input alpha compositing, see
@@ -1315,7 +2564,7 @@ module.exports = async function processExportJob(job) {
 
                 await renderMattedSegment(clip, src, segPath, {
                     targetWidth, targetHeight, targetFps, codec, profile, audioBitrate,
-                    maskLocalPath, bgImagePath, sandwichFilter,
+                    maskLocalPath, bgImagePath, sandwichFilter, clipLutFilters,
                 });
                 segments.push(segPath);
                 segOutputStarts.push(cumulativeOut);
@@ -1352,6 +2601,8 @@ module.exports = async function processExportJob(job) {
         // null when the clip carries no blurZone, so the branch below is a
         // single, cheap truthiness check per clip.
         const zb = clip.blurZone ? await loadZoneBlur() : null;
+        const retimeHasAudio = speedRetime ? await hasAudioStream(src) : null;
+        const videoOnlyPath = speedRetime ? path.join(tmpDir, `retimed-video-${i}.mp4`) : segPath;
 
         await new Promise((resolve, reject) => {
             let cmd;
@@ -1375,19 +2626,14 @@ module.exports = async function processExportJob(job) {
             const vc = clip.virtualCam;
             const hasCrop = vc && typeof vc.cropW === 'number' && typeof vc.cropH === 'number'
                 && (vc.cropW < 0.999 || vc.cropH < 0.999);
-            // R100: a manual resize/reposition transform on this clip. Skipped
-            // when a multicam crop is ALSO present on the same clip: the crop
-            // runs first and changes the effective (cropped) source aspect,
-            // which fitContainSizePx() here does not know about — composing
-            // the two correctly is unhandled for now, so the crop wins and the
-            // transform is ignored rather than silently producing the wrong
-            // on-screen size. (The common case — a plain resized/repositioned
-            // clip with no multicam angle on it — is unaffected.)
+            // R100: calculate transform fit against the post-crop media bounds,
+            // matching the preview order (virtual camera crop, then layer transform).
             const hasBaseTransform = hasBaseClipTransform(clip);
-            if (hasBaseTransform && hasCrop) {
-                console.warn(`  [R100] clip "${clip.name}" has both a multicam crop and a resize/position transform — the crop takes priority, the transform is skipped for this clip.`);
-            }
-            const baseTransform = (hasBaseTransform && !hasCrop) ? buildTransformFilters(clip, targetWidth, targetHeight) : null;
+            const opacityKfs = Array.isArray(clip.keyframes?.opacity) && clip.keyframes.opacity.length ? clip.keyframes.opacity : null;
+            const rotationKfs = Array.isArray(clip.keyframes?.rotation) && clip.keyframes.rotation.length ? clip.keyframes.rotation : null;
+            const baseTransform = hasBaseTransform
+                ? buildTransformFilters(opacityKfs || rotationKfs ? { ...clip, ...(opacityKfs ? { opacity: 1 } : {}), ...(rotationKfs ? { rotation: 0 } : {}) } : clip, targetWidth, targetHeight)
+                : null;
             // Camera track: scale keyframes (zoom rhythm, KeyframeEditor, camera
             // presets) plus panX/panY (camera shake/whip/pan, from
             // CameraMotionCompiler). Images get it too: a base-track photo
@@ -1395,17 +2641,27 @@ module.exports = async function processExportJob(job) {
             const scaleKfs = clip.keyframes && Array.isArray(clip.keyframes.scale) && clip.keyframes.scale.length
                 ? clip.keyframes.scale
                 : null;
+            const scaleXKfs = Array.isArray(clip.keyframes?.scaleX) && clip.keyframes.scaleX.length ? clip.keyframes.scaleX : null;
+            const scaleYKfs = Array.isArray(clip.keyframes?.scaleY) && clip.keyframes.scaleY.length ? clip.keyframes.scaleY : null;
             const panX = Array.isArray(clip.keyframes?.panX) && clip.keyframes.panX.length ? clip.keyframes.panX : null;
             const panY = Array.isArray(clip.keyframes?.panY) && clip.keyframes.panY.length ? clip.keyframes.panY : null;
+            const positionX = Array.isArray(clip.keyframes?.x) && clip.keyframes.x.length ? clip.keyframes.x : null;
+            const positionY = Array.isArray(clip.keyframes?.y) && clip.keyframes.y.length ? clip.keyframes.y : null;
 
             const vFilters = [];
             const aFilters = [];
             // Scale keyframes animate on clip-local TIMELINE time, so the speed
             // change runs first whenever a zoom follows (spatial filters do not
             // care about timestamps, so this order changes nothing else).
-            const hasZoomKfs = !!(scaleKfs || panX || panY);
+            const hasZoomKfs = !!(scaleKfs || scaleXKfs || scaleYKfs || panX || panY || positionX || positionY);
+            const transformMotion = {
+                positionX, positionY,
+                width: baseTransform?.sourceW || targetWidth,
+                height: baseTransform?.sourceH || targetHeight,
+            };
             const speedFirst = !isImage && speed !== 1.0 && hasZoomKfs;
-            if (speedFirst) vFilters.push(`setpts=${(1 / speed).toFixed(4)}*PTS`);
+            if (speedRetime) vFilters.push(speedRetime.videoFilter);
+            else if (speedFirst) vFilters.push(`setpts=${(1 / speed).toFixed(4)}*PTS`);
 
             const isAspectChangingCrop = hasCrop && (vc.reframe || Math.abs((vc.cropW ?? 1) - (vc.cropH ?? 1)) >= 0.05);
 
@@ -1418,7 +2674,7 @@ module.exports = async function processExportJob(job) {
                 const cy0 = Math.max(0, Math.min(1, (vc.cropY ?? 0) + (vc.cropH ?? 1) / 2));
                 const baseZoom = vc.scale || (1 / Math.min(vc.cropW, vc.cropH));
                 const anchor = { mode: 'center', x: cx0, y: cy0 };
-                const zoom = buildSmoothZoomFilter(scaleKfs || [{ time: 0, value: 1 }], { fps: targetFps, anchor, multiplier: baseZoom, maxZoom: 8.0, panX, panY })
+                const zoom = buildSmoothZoomFilter(scaleKfs || [{ time: 0, value: 1 }], { fps: targetFps, anchor, multiplier: baseZoom, maxZoom: 8.0, panX, panY, scaleXKfs, scaleYKfs, ...transformMotion })
                     || buildSmoothZoomFilter([{ time: 0, value: baseZoom }], { fps: targetFps, anchor, maxZoom: 8.0 });
                 if (zoom) vFilters.push(zoom);
                 vFilters.push(baseTransform ? baseTransform.scaleFilter : scaleFilter);
@@ -1441,7 +2697,7 @@ module.exports = async function processExportJob(job) {
                 // on top of the scaled output rather than attempting a uniform perspective zoom
                 // on the uncropped wide frame.
                 if (hasCrop && hasZoomKfs && isAspectChangingCrop) {
-                    const zoom = buildSmoothZoomFilter(scaleKfs, { fps: targetFps, anchor: { mode: 'fixed', x: 0.5, y: 0.28 }, panX, panY });
+                    const zoom = buildSmoothZoomFilter(scaleKfs, { fps: targetFps, anchor: { mode: 'fixed', x: 0.5, y: 0.28 }, panX, panY, scaleXKfs, scaleYKfs, ...transformMotion });
                     if (zoom) {
                         vFilters.push(zoom);
                         console.log(`  [camera] clip "${clip.name}": animated zoom on reframed output (${scaleKfs?.length || 0} scale keyframes)`);
@@ -1450,9 +2706,10 @@ module.exports = async function processExportJob(job) {
             }
 
             // A still image just lasts `dur`; speed means nothing for it.
-            if (!isImage && speed !== 1.0) {
+            if (!isImage && speed !== 1.0 && !speedRetime) {
                 if (!speedFirst) vFilters.push(`setpts=${(1 / speed).toFixed(4)}*PTS`);
-                aFilters.push(...atempoChain(speed));
+                if (clip.speedChangeMaintainPitch === false) aFilters.push(`asetrate=44100*${speed.toFixed(4)}`, 'aresample=44100');
+                else aFilters.push(...atempoChain(speed));
             }
             if (!isImage && vol !== 1.0) aFilters.push(`volume=${vol.toFixed(4)}`);
 
@@ -1462,16 +2719,33 @@ module.exports = async function processExportJob(job) {
             // speaker's face). The editor preview uses the same anchor
             // (RHYTHM_ANCHOR_Y in client/src/revideo/project.tsx).
             if (!hasCrop && hasZoomKfs) {
-                const zoom = buildSmoothZoomFilter(scaleKfs, { fps: targetFps, anchor: { mode: 'fixed', x: 0.5, y: 0.28 }, panX, panY });
+                const zoom = buildSmoothZoomFilter(scaleKfs, { fps: targetFps, anchor: { mode: 'fixed', x: 0.5, y: 0.28 }, panX, panY, scaleXKfs, scaleYKfs, ...transformMotion });
                 if (zoom) {
                     vFilters.push(zoom);
                     console.log(`  [camera] clip "${clip.name}": animated zoom/pan (${scaleKfs?.length || 0} scale, ${(panX?.length || 0) + (panY?.length || 0)} pan keyframes)`);
                 }
             }
 
+            if (opacityKfs) vFilters.push(buildAnimatedOpacityFilter(opacityKfs));
+            if (rotationKfs && baseTransform) {
+                const rotationFilter = buildAnimatedRotationFilter(rotationKfs);
+                if (rotationFilter) {
+                    const opacityIndex = vFilters.findIndex(filter => String(filter).startsWith('format=rgba,geq='));
+                    vFilters.splice(opacityIndex >= 0 ? opacityIndex : vFilters.length, 0, rotationFilter);
+                    const side = Math.max(2, Math.ceil(Math.hypot(baseTransform.sourceW, baseTransform.sourceH) / 2) * 2);
+                    baseTransform.w = side;
+                    baseTransform.h = side;
+                    baseTransform.overlayX = Math.round((targetWidth - side) / 2 + (Number(clip.x) || 0));
+                    baseTransform.overlayY = Math.round((targetHeight - side) / 2 + (Number(clip.y) || 0));
+                }
+            }
+
             // Timeline effect cards are stored on clips and mirror the live CSS
             // preview with supported FFmpeg filter approximations.
-            vFilters.push(...compileTimelineVisualEffects(clip.effects));
+            vFilters.push(...compileTimelineVisualEffects(clip.effects, {
+                width: targetWidth, height: targetHeight, duration: dur, clipStart: Number(clip.start) || 0, complexGlow: true, clipLutFilters,
+            }));
+            aFilters.push(...compileTimelineAudioEffects(clip.effects));
 
             // Colour grade LAST, so it grades the final composed frame rather
             // than an intermediate one — after rotation correction, crop,
@@ -1488,23 +2762,31 @@ module.exports = async function processExportJob(job) {
             // clip-relative — see BlurZoneOverlay.jsx) always runs on THAT,
             // so it behaves identically regardless of which path produced it.
             const hasZone = !!(clip.blurZone && zb);
-            const usedComplexFilter = !!baseTransform || hasZone;
-            if (baseTransform) {
+            const hasComplexGlow = vFilters.some(filter => String(filter).startsWith('__VIBED_HIGHLIGHT_GLOW__'));
+            const hasComplexLut = vFilters.some(filter => String(filter).startsWith('__VIBED_LUT__'));
+            const usedComplexFilter = !!baseTransform || hasZone || hasComplexGlow || hasComplexLut;
+            if (baseTransform || hasZone || hasComplexGlow || hasComplexLut) {
+                const graph = compileTimelineVisualEffectGraph(vFilters, { input: '0:v', output: 'fg' });
                 const vbaseLabel = hasZone ? 'vbase' : 'vout';
-                const segs = [
-                    vFilters.length ? `[0:v]${vFilters.join(',')}[fg]` : '[0:v]null[fg]',
-                    `color=c=black:s=${targetWidth}x${targetHeight}:d=${dur}[bg]`,
-                    `[bg][fg]overlay=x=${baseTransform.overlayX}:y=${baseTransform.overlayY}:eval=init[${vbaseLabel}]`,
-                ];
-                if (hasZone) segs.push(...zb.zoneBlurFilterGraph(clip.blurZone, { width: targetWidth, height: targetHeight, inLabel: 'vbase', outLabel: 'vout' }));
-                cmd.complexFilter(segs, 'vout');
-            } else if (hasZone) {
-                cmd.complexFilter([vFilters.length ? `[0:v]${vFilters.join(',')}[vbase]` : '[0:v]null[vbase]', ...zb.zoneBlurFilterGraph(clip.blurZone, { width: targetWidth, height: targetHeight, inLabel: 'vbase', outLabel: 'vout' })], 'vout');
+                if (baseTransform) {
+                    graph.push(
+                        `color=c=black:s=${targetWidth}x${targetHeight}:d=${dur}[bg]`,
+                        `[bg][fg]overlay=x=${baseTransform.overlayX}:y=${baseTransform.overlayY}:eval=init[${vbaseLabel}]`,
+                    );
+                } else {
+                    graph.push(`[fg]null[${vbaseLabel}]`);
+                }
+                if (hasZone) graph.push(...zb.zoneBlurFilterGraph(clip.blurZone, { width: targetWidth, height: targetHeight, inLabel: 'vbase', outLabel: 'vout' }));
+                cmd.complexFilter(graph, 'vout');
             } else {
                 cmd.videoFilters(vFilters.join(','));
             }
 
-            if (isImage) {
+            if (speedRetime) {
+                // Audio is retimed in a separate filter graph after the video
+                // pass, using the same integrated speed curve.
+                cmd.addOutputOption('-an');
+            } else if (isImage) {
                 cmd.input(`anullsrc=channel_layout=stereo:sample_rate=44100`).inputOptions(['-f', 'lavfi']);
                 // complexFilter() (the blurZone / R100 transform branches
                 // above) only auto-maps its own output label -- unlike
@@ -1520,22 +2802,44 @@ module.exports = async function processExportJob(job) {
                 if (usedComplexFilter) cmd.addOutputOption('-map', '0:a?');
             }
 
+            if (!speedRetime) cmd.addOutputOption('-shortest');
             cmd
                 .fps(targetFps)
                 .videoCodec(codec)
                 .addOutputOption('-profile:v', profile)
                 .addOutputOption('-pix_fmt', 'yuv420p')
                 .addOutputOption('-movflags', '+faststart')
-                .addOutputOption('-shortest')
                 .audioBitrate(audioBitrate)
-                .output(segPath)
-                .on('end', () => {
-                    segments.push(segPath);
-                    // Record this clip's output start time BEFORE incrementing.
-                    segOutputStarts.push(cumulativeOut);
-                    segClips.push(clip);
-                    cumulativeOut += dur;
-                    resolve();
+                .output(videoOnlyPath)
+                .on('end', async () => {
+                    try {
+                        if (speedRetime) {
+                            const retimedAudioPath = path.join(tmpDir, `retimed-audio-${i}.m4a`);
+                            await renderRetimeAudio(src, retimedAudioPath, speedRetime, {
+                                offset: inPoint,
+                                duration: dur,
+                                volume: vol,
+                                bitrate: audioBitrate,
+                                effects: clip.effects,
+                                hasAudio: retimeHasAudio,
+                            });
+                            await new Promise((muxResolve, muxReject) => ffmpeg(videoOnlyPath)
+                                .input(retimedAudioPath)
+                                .outputOptions(['-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'copy', '-t', String(dur), '-movflags', '+faststart'])
+                                .output(segPath)
+                                .on('end', muxResolve)
+                                .on('error', muxReject)
+                                .run());
+                        }
+                        segments.push(segPath);
+                        // Record this clip's output start time BEFORE incrementing.
+                        segOutputStarts.push(cumulativeOut);
+                        segClips.push(clip);
+                        cumulativeOut += dur;
+                        resolve();
+                    } catch (retimeErr) {
+                        reject(retimeErr);
+                    }
                 })
                 .on('error', (err, _stdout, stderr) => {
                     console.error(`[ExportJob] ffmpeg failed clip ${i + 1}: ${err.message}`);
@@ -1636,10 +2940,8 @@ module.exports = async function processExportJob(job) {
     // Three independent conditions must all hold before a single filter runs:
     //   1. the client sent a composition plan,
     //   2. the plan validates,
-    //   3. the plan has at least one overlay (`planIsNoOp` is false).
-    // A project with one video track — i.e. every project that renders
-    // correctly today — produces an empty overlay list, so this block is
-    // skipped entirely and the export is byte-for-byte what it was before.
+    //   3. there are drawable overlays. Base-footage effect samples have
+    //      already been attached to the ordinary clip effect stack above.
     // COMPOSITOR_DISABLED=1 is a deploy-free kill switch if it ever misbehaves
     // in production.
     //
@@ -1648,6 +2950,7 @@ module.exports = async function processExportJob(job) {
     // continues. A video missing its stickers is a far better outcome than no
     // video, and the reason is surfaced to the user rather than swallowed.
     let compositorWarning = null;
+    let transparentGraphicsPath = null;
     const rawPlan = settings.compositionPlan || null;
 
     // R63 — animated captions. Declared here, at function scope, NOT inside the
@@ -1666,7 +2969,7 @@ module.exports = async function processExportJob(job) {
     // composite them here — doing both would draw every sticker/lower-third
     // twice. `useRevideo` is decided up front, before this step, for exactly
     // that reason.
-    if (rawPlan && process.env.COMPOSITOR_DISABLED !== '1' && !useRevideo) {
+    if (rawPlan && (rawPlan.overlays || []).length > 0 && process.env.COMPOSITOR_DISABLED !== '1' && !useRevideo) {
         try {
             const { compileCompositionPlan, validateCompositionPlanShape } =
                 require('../server/compositor/CompositorCompiler.js');
@@ -1692,35 +2995,146 @@ module.exports = async function processExportJob(job) {
             // not fatal — one dead sticker URL must not cost the whole export.
             const inputs = [];
             const inputFiles = [];
+            const skippedOverlayWarnings = [];
+            const partialOverlayWarnings = [];
             for (let i = 0; i < overlays.length; i++) {
                 const ov = overlays[i];
 
                 // R89: template components are DRAWN here (same drawing code as
                 // the preview), not downloaded. One PNG per output frame, sized
                 // to the largest box the layer reaches.
+                if (ov.source?.type === 'vector' && ov.source.vector) {
+                    try {
+                        const { renderVectorFrames } = require('../server/compositor/TemplateRenderer.js');
+                        const maxW = Math.max(...(ov.geometry || []).map(g => Number(g.w) || 0), 0.05);
+                        const durationSec = Math.max(0.2, Number(ov.outputEnd) - Number(ov.outputStart));
+                        const seq = await renderVectorFrames(ov.source.vector, {
+                            durationSec,
+                            fps: targetFps,
+                            widthPx: Math.round(maxW * targetWidth),
+                            tmpDir,
+                            name: `vector-${i}`,
+                            motionBlur: ov.motionBlur,
+                        });
+                        inputs.push({ overlayId: ov.id, inputIndex: inputFiles.length + 1 });
+                        inputFiles.push({ path: seq.pattern, isImage: false, outputEnd: ov.outputEnd, sequenceFps: targetFps });
+                    } catch (vectorErr) {
+                        console.warn(`  ⚠️  vector ${ov.id}: could not be drawn — layer skipped:`, vectorErr.message);
+                        skippedOverlayWarnings.push(`Vector layer ${ov.id} could not be rendered`);
+                    }
+                    continue;
+                }
+
+                // R89: template components are DRAWN here (same drawing code as
+                // the preview), not downloaded. One PNG per output frame, sized
+                // to the largest box the layer reaches.
                 if (ov.source?.type === 'template' && ov.source.template) {
                     try {
-                        const { renderTemplateFrames } = require('../server/compositor/TemplateRenderer.js');
+                        const { renderTemplateFrames, loadScene3D } = require('../server/compositor/TemplateRenderer.js');
                         const maxW = Math.max(...(ov.geometry || []).map(g => Number(g.w) || 0), 0.05);
                         const imageFiles = {};
-                        const imgUrl = ov.source.template?.params?.imageUrl;
-                        if (imgUrl) {
-                            const imgPath = path.join(tmpDir, `tplimg-${i}${path.extname(String(imgUrl).split('?')[0]) || '.png'}`);
-                            const got = await fetchClipSource({ id: `${ov.clipId}-img`, name: path.basename(imgPath), assetId: ov.source.template?.params?.imageAssetId || undefined, url: imgUrl, sourceUrl: imgUrl, proxyUrl: imgUrl }, imgPath);
-                            if (got) imageFiles[imgUrl] = got;
+                        const templateParams = ov.source.template?.params || {};
+                        const durationSec = Math.max(0.2, Number(ov.outputEnd) - Number(ov.outputStart));
+                        const videoFrameFiles = {};
+                        const sceneObjects = (templateParams.scene?.objects || []).map(object => ({ ...object }));
+                        const templateImageAsset = templateParams.imageAssetId ? assetMap[templateParams.imageAssetId] : null;
+                        const resolvedTemplateImageUrl = templateParams.imageUrl || templateImageAsset?.sourceUrl || templateImageAsset?.proxyUrl || templateImageAsset?.url || null;
+                        const templateImages = [{ url: resolvedTemplateImageUrl, assetId: templateParams.imageAssetId }];
+                        for (const object of sceneObjects) {
+                            if (!['image', 'mesh'].includes(object?.type)) continue;
+                            const imageAsset = object.imageAssetId ? assetMap[object.imageAssetId] : null;
+                            const imageUrl = object.imageUrl || object.textureUrl || imageAsset?.sourceUrl || imageAsset?.proxyUrl || imageAsset?.url || null;
+                            if (!object.imageUrl && imageUrl && !object.textureUrl) object.imageUrl = imageUrl;
+                            if (imageUrl) templateImages.push({ url: imageUrl, assetId: object.imageAssetId });
                         }
-                        const seq = await renderTemplateFrames(ov.source.template, {
-                            durationSec: Math.max(0.2, Number(ov.outputEnd) - Number(ov.outputStart)),
+                        const seenTemplateImages = new Set();
+                        for (const [imageIndex, imageRef] of templateImages.entries()) {
+                            const imgUrl = imageRef?.url;
+                            if (!imgUrl) {
+                                if (imageRef?.assetId) partialOverlayWarnings.push(`3D image texture ${imageRef.assetId} on layer ${ov.id} has no available source`);
+                                continue;
+                            }
+                            if (seenTemplateImages.has(imgUrl)) continue;
+                            seenTemplateImages.add(imgUrl);
+                            const imgPath = path.join(tmpDir, `tplimg-${i}-${imageIndex}${path.extname(String(imgUrl).split('?')[0]) || '.png'}`);
+                            const got = await fetchClipSource({ id: `${ov.clipId}-img-${imageIndex}`, name: path.basename(imgPath), assetId: imageRef.assetId || undefined, url: imgUrl, sourceUrl: imgUrl, proxyUrl: imgUrl }, imgPath);
+                            if (got) imageFiles[imgUrl] = got;
+                            else partialOverlayWarnings.push(`3D image texture ${imageRef.assetId || imageIndex} on layer ${ov.id} could not be loaded`);
+                        }
+                        for (const [videoIndex, object] of sceneObjects.entries()) {
+                            if (object?.type !== 'video' || (!object.videoUrl && !object.videoAssetId)) continue;
+                            const textureKey = object.videoTextureKey || object.id || `${ov.clipId}-video-${videoIndex}`;
+                            object.videoTextureKey = textureKey;
+                            try {
+                                const videoAsset = object.videoAssetId ? assetMap[object.videoAssetId] : null;
+                                const videoUrl = object.videoUrl || videoAsset?.sourceUrl || videoAsset?.proxyUrl || videoAsset?.url;
+                                const videoName = videoAsset?.name || object.name || `tplvideo-${i}-${videoIndex}.mp4`;
+                                if (!videoUrl) {
+                                    partialOverlayWarnings.push(`3D video texture ${videoName} on layer ${ov.id} has no available source`);
+                                    continue;
+                                }
+                                const videoExt = path.extname(String(videoUrl || videoName).split('?')[0]) || '.mp4';
+                                const videoPath = path.join(tmpDir, `tplvideo-${i}-${videoIndex}${videoExt}`);
+                                const got = await fetchClipSource({ id: `${ov.clipId}-video-${videoIndex}`, name: videoName, assetId: object.videoAssetId || undefined, url: videoUrl, sourceUrl: videoUrl, proxyUrl: videoUrl }, videoPath);
+                                if (!got) {
+                                    partialOverlayWarnings.push(`3D video texture ${videoName} on layer ${ov.id} could not be loaded`);
+                                    continue;
+                                }
+                                const startAt = Math.max(0, Number(object.videoStart) || 0);
+                                const speed = Math.max(0.05, Number(object.videoSpeed) || 1);
+                                const remap = object.timeRemap || {};
+                                const { remapSceneObjectTime, maxSceneObjectSourceTime } = await loadScene3D();
+                                const remapAt = time => remapSceneObjectTime(remap, time, durationSec);
+                                // Use the renderer's exact remapping logic and output cadence.
+                                const maxMappedTime = maxSceneObjectSourceTime(remap, durationSec, targetFps);
+                                const extractionDuration = Math.max(1 / targetFps, maxMappedTime * speed + 1 / targetFps);
+                                const neededFrames = Math.max(1, Math.ceil(extractionDuration * targetFps) + 1);
+                                const frameDir = path.join(tmpDir, `tplvideo-frames-${i}-${videoIndex}`);
+                                fs.mkdirSync(frameDir, { recursive: true });
+                                // Keep alpha-capable scene video textures intact.
+                                // JPEG extraction silently filled transparent pixels
+                                // with black, so a ProRes/WebM texture became an
+                                // opaque rectangle in the 3D template render.
+                                const framePattern = path.join(frameDir, 'frame-%06d.png');
+                                await runFfmpegArgs(ffmpegPath, [
+                                    '-hide_banner', '-loglevel', 'error', '-i', got,
+                                    '-ss', String(startAt), '-t', String(extractionDuration),
+                                    // Reset timestamps after seeking so the extracted sequence's
+                                    // frame zero is relative to startAt. TemplateRenderer maps
+                                    // requested source seconds back into this bounded sequence.
+                                    '-vf', `setpts=PTS-STARTPTS,fps=${targetFps},scale=960:-2:flags=lanczos,format=rgba`, '-frames:v', String(neededFrames),
+                                    '-c:v', 'png', '-pix_fmt', 'rgba', '-compression_level', '3', '-y', framePattern,
+                                ]);
+                                const extracted = fs.readdirSync(frameDir)
+                                    .filter(file => /^frame-\d+\.png$/i.test(file))
+                                    .sort((a, b) => Number(a.match(/\d+/)?.[0]) - Number(b.match(/\d+/)?.[0]))
+                                    .map(file => path.join(frameDir, file));
+                                if (extracted.length) videoFrameFiles[textureKey] = { frames: extracted, startTime: startAt };
+                                else partialOverlayWarnings.push(`3D video texture ${videoName} on layer ${ov.id} produced no frames`);
+                            } catch (videoErr) {
+                                console.warn(`  ⚠️  3D video texture ${object.name || object.id || videoIndex}:`, videoErr.message);
+                                partialOverlayWarnings.push(`3D video texture ${object.name || object.id || videoIndex} on layer ${ov.id} could not be prepared`);
+                            }
+                        }
+                        const templateForRender = templateParams.scene
+                            ? { ...ov.source.template, params: { ...templateParams, imageUrl: resolvedTemplateImageUrl || templateParams.imageUrl, scene: { ...templateParams.scene, objects: sceneObjects, audioWaveformsByAsset: timeline.audioWaveformsByAsset || {} } } }
+                            : { ...ov.source.template, params: { ...templateParams, imageUrl: resolvedTemplateImageUrl || templateParams.imageUrl } };
+                        const seq = await renderTemplateFrames(templateForRender, {
+                            durationSec,
                             fps: targetFps,
                             widthPx: Math.round(maxW * targetWidth),
                             tmpDir,
                             name: String(i),
                             imageFiles,
+                            videoFrameFiles,
+                            mask: ov.sceneMask,
+                            motionBlur: ov.motionBlur,
                         });
                         inputs.push({ overlayId: ov.id, inputIndex: inputFiles.length + 1 });
                         inputFiles.push({ path: seq.pattern, isImage: false, outputEnd: ov.outputEnd, sequenceFps: targetFps });
                     } catch (tplErr) {
                         console.warn(`  ⚠️  template ${ov.id}: could not be drawn — layer skipped:`, tplErr.message);
+                        skippedOverlayWarnings.push(`Template layer ${ov.id} could not be rendered`);
                     }
                     continue;
                 }
@@ -1737,6 +3151,7 @@ module.exports = async function processExportJob(job) {
                 const src = await fetchClipSource(srcClip, dlPath);
                 if (!src) {
                     console.warn(`  ⚠️  overlay ${ov.id}: source unresolved — layer skipped`);
+                    skippedOverlayWarnings.push(`Overlay ${ov.id} could not be loaded`);
                     continue;
                 }
                 // Input 0 is the base video, so overlay inputs start at 1.
@@ -1752,7 +3167,60 @@ module.exports = async function processExportJob(job) {
             }
 
             const compiled = compileCompositionPlan(rawPlan, inputs);
-            if (!compiled) throw new Error('no drawable overlay layers after source resolution');
+            if (!compiled) {
+                const detail = skippedOverlayWarnings.slice(0, 3).join('; ');
+                const remainder = skippedOverlayWarnings.length - Math.min(3, skippedOverlayWarnings.length);
+                throw new Error(`no drawable overlay layers after source resolution${detail ? `: ${detail}${remainder > 0 ? `; ${remainder} more layer(s) skipped` : ''}` : ''}`);
+            }
+            if (skippedOverlayWarnings.length) {
+                const shown = skippedOverlayWarnings.slice(0, 3);
+                const remainder = skippedOverlayWarnings.length - shown.length;
+                compositorWarning = `${shown.join('; ')}${remainder > 0 ? `; ${remainder} more layer(s) skipped` : ''}.`;
+            }
+            if (partialOverlayWarnings.length) {
+                const shown = partialOverlayWarnings.slice(0, 3);
+                const remainder = partialOverlayWarnings.length - shown.length;
+                const detail = `${shown.join('; ')}${remainder > 0 ? `; ${remainder} more texture(s) unavailable` : ''}.`;
+                compositorWarning = [compositorWarning, detail].filter(Boolean).join(' ');
+            }
+
+            // Optional alpha deliverable: render only the planned overlay
+            // layers over a transparent RGBA base. The ordinary PNG sequence
+            // below remains the flattened finished video.
+            if (String(settings.format || '').toLowerCase() === 'transparent-png-sequence') {
+                const alphaGraph = compileCompositionPlan(rawPlan, inputs, { preserveAlpha: true });
+                if (!alphaGraph) throw new Error('no drawable graphic layers are available for a transparent sequence');
+                const duration = Math.max(0.1, Number(rawPlan.base?.totalDuration) || 0.1);
+                const alphaDir = path.join(tmpDir, 'transparent-graphics');
+                fs.mkdirSync(alphaDir, { recursive: true });
+                const alphaPattern = path.join(alphaDir, 'frame-%06d.png');
+                const graphPath = path.join(tmpDir, 'transparent_graphics_filter.txt');
+                fs.writeFileSync(graphPath, alphaGraph.filterComplex, 'utf8');
+                const args = [
+                    '-hide_banner', '-loglevel', 'error',
+                    '-f', 'lavfi', '-i', `color=c=black@0:s=${targetWidth}x${targetHeight}:r=${targetFps}:d=${duration},format=rgba`,
+                ];
+                for (const input of inputFiles) {
+                    if (input.sequenceFps) args.push('-framerate', String(input.sequenceFps), '-start_number', '0', '-i', input.path);
+                    else if (input.isImage) args.push('-loop', '1', '-t', String(Math.max(0.1, input.outputEnd)), '-i', input.path);
+                    else {
+                        if (input.seek > 0) args.push('-ss', String(input.seek));
+                        args.push('-i', input.path);
+                    }
+                }
+                args.push(
+                    '-filter_complex_script', graphPath,
+                    '-map', `[${alphaGraph.outputLabel}]`,
+                    '-frames:v', String(Math.max(1, Math.ceil(duration * targetFps))),
+                    '-start_number', '1',
+                    '-c:v', 'png', '-pix_fmt', 'rgba', '-compression_level', '3',
+                    '-y', alphaPattern,
+                );
+                await runFfmpegArgs(ffmpegPath, args);
+                fs.writeFileSync(path.join(alphaDir, 'README.txt'), `Vibed transparent graphics sequence\nResolution: ${targetWidth}x${targetHeight}\nFrame rate: ${targetFps} fps\nFrames are numbered from 000001 and contain the composition-plan overlay layers with transparency. Footage base, audio, and captions are not included.\n`);
+                transparentGraphicsPath = alphaDir;
+                console.log(`  ✅ Rendered transparent overlay sequence (${alphaGraph.used} layers)`);
+            }
 
             const compositedPath = path.join(tmpDir, 'composited.mp4');
             await new Promise((resolve, reject) => {
@@ -1802,13 +3270,36 @@ module.exports = async function processExportJob(job) {
 
                 const aSegPath = path.join(tmpDir, `audio-${i}-${j}.aac`);
                 const vol      = (clip.volume ?? 1.0) * (track.volume ?? 1.0);
+                const speedResult = resolveTimelineSpeedEffect(clip.effects, Number(clip.start) || 0, Number(clip.duration) || 0);
+                if (speedResult.retime) {
+                    const hasAudio = await hasAudioStream(src);
+                    if (!hasAudio) {
+                        skippedClips.push(clip.name || 'an audio track');
+                        continue;
+                    }
+                    await renderRetimeAudio(src, aSegPath, speedResult.retime, {
+                        offset: Number(clip.offset) || 0,
+                        duration: Number(clip.duration) || 0,
+                        volume: vol,
+                        bitrate: audioBitrate,
+                        effects: clip.effects,
+                        hasAudio: true,
+                    });
+                    audioSegments.push({ path: aSegPath, startTime: clip.start });
+                    continue;
+                }
 
                 await new Promise((resolve, reject) => {
-                    const aSpeed = Number(clip.speed) > 0 ? Number(clip.speed) : 1;
+                    const aSpeed = speedResult.speed ?? (Number(clip.speed) > 0 ? Number(clip.speed) : 1);
+                    const speedFilters = aSpeed !== 1
+                        ? (speedResult.maintainPitch === false
+                            ? [`asetrate=44100*${aSpeed.toFixed(4)}`, 'aresample=44100']
+                            : atempoChain(aSpeed))
+                        : [];
                     ffmpeg(src)
                         .setStartTime(clip.offset || 0)
                         .setDuration(clip.duration || 0) // output -t: the clip's timeline length
-                        .audioFilters([...(aSpeed !== 1 ? atempoChain(aSpeed) : []), `volume=${vol.toFixed(4)}`].join(','))
+                        .audioFilters([...speedFilters, ...compileTimelineAudioEffects(clip.effects), `volume=${vol.toFixed(4)}`].join(','))
                         .audioBitrate(audioBitrate)
                         .output(aSegPath)
                         .on('end', () => { audioSegments.push({ path: aSegPath, startTime: clip.start }); resolve(); })
@@ -2425,10 +3916,56 @@ module.exports = async function processExportJob(job) {
         fs.renameSync(finalVideoPath, outputPath);
     }
 
+    // The edit pipeline uses MP4 intermediates because its effect, caption,
+    // transition, and compositing stages are authored against that container.
+    // Honour the export dialog's WebM choice with one final encode instead of
+    // returning H.264 bytes under a misleading extension.
+    let deliveredPath = outputPath;
+    let deliveredCodec = codec;
+    const formatChoice = String(settings.format || 'mp4').toLowerCase();
+    const requestedFormat = ['mp4', 'webm', 'png-sequence', 'transparent-png-sequence'].includes(formatChoice) ? formatChoice : 'mp4';
+    if (requestedFormat === 'webm') {
+        deliveredPath = path.join(exportsDir, `${jobId}.webm`);
+        await runFfmpegArgs(ffmpegPath, [
+            '-hide_banner', '-loglevel', 'error', '-i', outputPath,
+            '-map', '0:v:0', '-map', '0:a?',
+            '-c:v', 'libvpx-vp9', '-crf', '30', '-b:v', '0',
+            '-deadline', 'good', '-cpu-used', '4', '-row-mt', '1',
+            '-pix_fmt', 'yuv420p', '-c:a', 'libopus', '-b:a', audioBitrate,
+            '-f', 'webm', '-y', deliveredPath,
+        ]);
+        deliveredCodec = 'libvpx-vp9';
+        fs.unlinkSync(outputPath);
+    } else if (requestedFormat === 'png-sequence') {
+        const sequenceDir = path.join(tmpDir, 'png-sequence');
+        fs.mkdirSync(sequenceDir, { recursive: true });
+        const framePattern = path.join(sequenceDir, 'frame-%06d.png');
+        await runFfmpegArgs(ffmpegPath, [
+            '-hide_banner', '-loglevel', 'error', '-i', outputPath,
+            '-map', '0:v:0', '-vf', `fps=${targetFps}`,
+            '-start_number', '1', '-c:v', 'png', '-compression_level', '3',
+            '-y', framePattern,
+        ]);
+        fs.writeFileSync(path.join(sequenceDir, 'README.txt'), `Vibed PNG image sequence\nResolution: ${targetWidth}x${targetHeight}\nFrame rate: ${targetFps} fps\nFrames are numbered from 000001. This sequence contains the finished composite and is opaque.\n`);
+        deliveredPath = path.join(exportsDir, `${jobId}-frames.zip`);
+        await runProgram('zip', ['-q', '-r', '-X', deliveredPath, 'png-sequence'], tmpDir);
+        deliveredCodec = 'png-sequence';
+        fs.unlinkSync(outputPath);
+    } else if (requestedFormat === 'transparent-png-sequence') {
+        if (!transparentGraphicsPath || !fs.existsSync(transparentGraphicsPath)) {
+            throw new Error(compositorWarning || 'Transparent graphics export needs at least one supported overlay layer. Choose PNG sequence for a flattened video export.');
+        }
+        deliveredPath = path.join(exportsDir, `${jobId}-transparent-graphics.zip`);
+        await runProgram('zip', ['-q', '-r', '-X', deliveredPath, 'transparent-graphics'], tmpDir);
+        deliveredCodec = 'png-sequence-alpha';
+    }
+
     // Report what was actually rendered, not what was asked for. The old
     // metadata echoed targetWidth x targetHeight, so a 1920x1080 file came
     // back labelled "1080x1920" and the wrong-shape bug was invisible.
-    const renderedDims = await getVideoDimensions(outputPath);
+    const renderedDims = ['png-sequence', 'transparent-png-sequence'].includes(requestedFormat)
+        ? { width: targetWidth, height: targetHeight }
+        : await getVideoDimensions(deliveredPath);
     if (renderedDims && (renderedDims.width !== targetWidth || renderedDims.height !== targetHeight)) {
         console.warn(`  ⚠️  [ExportJob ${job.id}] rendered ${renderedDims.width}x${renderedDims.height}, expected ${targetWidth}x${targetHeight}`);
     }
@@ -2436,7 +3973,8 @@ module.exports = async function processExportJob(job) {
     await job.updateProgress(90);
 
     // ── Upload to GCS or keep local ────────────────────────────────────────
-    const filename = path.basename(outputPath);
+    const filename = path.basename(deliveredPath);
+    const deliveredStats = fs.existsSync(deliveredPath) ? fs.statSync(deliveredPath) : null;
     let resultUrl;
 
     if (gcsBucket) {
@@ -2445,12 +3983,12 @@ module.exports = async function processExportJob(job) {
         const projectFolder = /^[0-9a-f-]{8,64}$/i.test(String(settings.projectId || '')) ? `${settings.projectId}/` : '';
         const gcsDestPath = `exports/${userId}/${projectFolder}${filename}`;
         try {
-            await gcsBucket.upload(outputPath, {
+            await gcsBucket.upload(deliveredPath, {
                 destination: gcsDestPath,
-                metadata: { contentType: 'video/mp4' },
+                metadata: { contentType: requestedFormat === 'webm' ? 'video/webm' : ['png-sequence', 'transparent-png-sequence'].includes(requestedFormat) ? 'application/zip' : 'video/mp4' },
             });
             // Remove local file after successful GCS upload
-            fs.unlinkSync(outputPath);
+            fs.unlinkSync(deliveredPath);
             resultUrl = `/api/proxy/gcs-media/${gcsDestPath}`;
             console.log(`  ✅ Uploaded to GCS: ${gcsDestPath}`);
         } catch (uploadErr) {
@@ -2467,8 +4005,7 @@ module.exports = async function processExportJob(job) {
     await job.updateProgress(100);
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-    const stats    = fs.existsSync(outputPath) ? fs.statSync(outputPath) : null;
-    const sizeMB   = stats ? (stats.size / 1024 / 1024).toFixed(1) : '?';
+    const sizeMB   = deliveredStats ? (deliveredStats.size / 1024 / 1024).toFixed(1) : '?';
 
     console.log(`🏁 [ExportJob ${job.id}] Complete: ${sizeMB}MB in ${duration}s → ${resultUrl}`);
 
@@ -2517,12 +4054,13 @@ module.exports = async function processExportJob(job) {
         // path, so this is the one warning field that means "missing
         // entirely," not "missing some polish."
         revideoWarning: revideoWarning || undefined,
+        effectWarning: effectWarnings.length ? [...new Set(effectWarnings)].join(' ') : undefined,
         metadata: {
             duration:   `${duration}s render time`,
             sizeMB:     parseFloat(sizeMB) || 0,
             resolution: renderedDims ? `${renderedDims.width}x${renderedDims.height}` : `${targetWidth}x${targetHeight}`,
             fps:        targetFps,
-            codec,
+            codec: deliveredCodec,
             segments:   allClips.length,
             platform:   platform?.label || null,
         },
@@ -2538,9 +4076,20 @@ module.exports.atempoChain = atempoChain;
 module.exports.fitContainSizePx = fitContainSizePx;
 module.exports.hasBaseClipTransform = hasBaseClipTransform;
 module.exports.buildTransformFilters = buildTransformFilters;
+module.exports.buildAnimatedRotationFilter = buildAnimatedRotationFilter;
+module.exports.buildAnimatedOpacityFilter = buildAnimatedOpacityFilter;
 // R104b — the audio-mix filtergraph, so both branches can be pinned without
 // standing up a whole export.
 module.exports.buildAudioMixGraph = buildAudioMixGraph;
+module.exports.compileTimelineVisualEffects = compileTimelineVisualEffects;
+module.exports.compileTimelineVisualEffectGraph = compileTimelineVisualEffectGraph;
+module.exports.compileTimelineAudioEffects = compileTimelineAudioEffects;
+module.exports.applyEffectSamples = applyEffectSamples;
+module.exports.resolveTimelineSpeedEffect = resolveTimelineSpeedEffect;
+module.exports.buildSpeedRetimePlan = buildSpeedRetimePlan;
+module.exports.applyRetimeEasing = applyRetimeEasing;
+module.exports.collectTimelineEffectWarnings = collectTimelineEffectWarnings;
+module.exports.isRevideoTrackSupported = isRevideoTrackSupported;
 
 
 

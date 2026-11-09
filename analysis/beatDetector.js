@@ -1,126 +1,117 @@
 const ffmpeg = require('fluent-ffmpeg');
-const fs = require('fs');
+ffmpeg.setFfmpegPath(require('ffmpeg-static'));
 
-/**
- * Detects BPM and Beat Timestamps from an audio/video file.
- * Uses FFmpeg to stream raw PCM data and analyzes energy peaks.
- * 
- * @param {string} filePath - Path to audio/video file
- * @returns {Promise<Object>} - { bpm: number, beats: number[] (timestamps in seconds) }
- */
-async function detectBeats(filePath) {
+const WINDOW_SIZE = 1024;
+const HISTORY_WINDOWS = 43; // approximately one second at 44.1 kHz
+
+/** Accumulates only short-window energy values, not every decoded PCM sample. */
+class PCMBeatAnalyzer {
+    constructor(sampleRate = 44100) {
+        this.sampleRate = sampleRate;
+        this.energy = 0;
+        this.samplesInWindow = 0;
+        this.pendingByte = null;
+        this.energies = [];
+    }
+
+    addChunk(chunk) {
+        let i = 0;
+        if (this.pendingByte !== null && chunk.length) {
+            const sample = Buffer.from([this.pendingByte, chunk[0]]).readInt16LE(0) / 32768;
+            this._addSample(sample);
+            this.pendingByte = null;
+            i = 1;
+        }
+        for (; i + 1 < chunk.length; i += 2) this._addSample(chunk.readInt16LE(i) / 32768);
+        if (i < chunk.length) this.pendingByte = chunk[i];
+    }
+
+    _addSample(sample) {
+        this.energy += sample * sample;
+        this.samplesInWindow += 1;
+        if (this.samplesInWindow === WINDOW_SIZE) this._flushWindow();
+    }
+
+    _flushWindow() {
+        this.energies.push(this.energy / this.samplesInWindow);
+        this.energy = 0;
+        this.samplesInWindow = 0;
+    }
+
+    finish(options = {}) {
+        if (this.samplesInWindow) this._flushWindow();
+        return analyzeEnergies(this.energies, this.sampleRate, options);
+    }
+}
+
+function median(values) {
+    if (!values.length) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function analyzeEnergies(energies, sampleRate = 44100, options = {}) {
+    if (!Array.isArray(energies) || energies.length < 3) return { bpm: 0, beats: [] };
+    const prefix = new Float64Array(energies.length + 1);
+    for (let i = 0; i < energies.length; i++) prefix[i + 1] = prefix[i] + energies[i];
+
+    const peaks = [];
+    const minDistance = Math.ceil((0.25 * sampleRate) / WINDOW_SIZE);
+    const requestedSensitivity = Number(options.sensitivity);
+    const sensitivity = Number.isFinite(requestedSensitivity)
+        ? Math.max(0, Math.min(1, requestedSensitivity))
+        : 0.5;
+    const threshold = 1.65 - sensitivity * 0.55;
+    for (let i = 1; i < energies.length - 1; i++) {
+        const start = Math.max(0, i - HISTORY_WINDOWS);
+        const count = i - start;
+        if (!count) continue;
+        const average = (prefix[i] - prefix[start]) / count;
+        const current = energies[i];
+        // Require an actual local peak and a clear rise over the recent noise floor.
+        if (current < 0.00002 || current <= energies[i - 1] || current < energies[i + 1] || current < average * threshold) continue;
+        const last = peaks[peaks.length - 1];
+        if (last && i - last.index < minDistance) {
+            if (current > last.energy) peaks[peaks.length - 1] = { index: i, energy: current };
+        } else peaks.push({ index: i, energy: current });
+    }
+
+    const beats = peaks.map(({ index }) => Number(((index * WINDOW_SIZE) / sampleRate).toFixed(3)));
+    const intervals = beats.slice(1).map((time, i) => time - beats[i]).filter(value => value >= 0.25 && value <= 2);
+    let bpm = intervals.length ? 60 / median(intervals) : 0;
+    // Beat trackers commonly report half/double tempo; normalize into a useful range.
+    while (bpm && bpm < 60) bpm *= 2;
+    while (bpm > 180) bpm /= 2;
+    return { bpm: bpm ? Math.round(bpm) : 0, beats };
+}
+
+async function detectBeats(filePath, options = {}) {
     return new Promise((resolve, reject) => {
-        const pcmData = [];
-
-        // 1. Decode to Raw PCM (Signed 16-bit Little Endian, 44.1kHz, Mono)
+        const analyzer = new PCMBeatAnalyzer(44100);
+        let settled = false;
         const stream = ffmpeg(filePath)
+            .noVideo()
             .audioCodec('pcm_s16le')
             .audioChannels(1)
             .audioFrequency(44100)
             .format('s16le')
-            .on('error', (err) => reject(err))
+            .on('error', error => {
+                if (!settled) { settled = true; reject(error); }
+            })
             .pipe();
-
-        stream.on('data', (chunk) => {
-            // Chunk is a Buffer. Convert to Float array for analysis.
-            // s16le = 2 bytes per sample.
-            for (let i = 0; i < chunk.length; i += 2) {
-                // Read Int16 (-32768 to 32767) and normalize to -1.0 to 1.0
-                const int16 = chunk.readInt16LE(i);
-                pcmData.push(int16 / 32768.0);
-            }
+        stream.on('data', chunk => analyzer.addChunk(chunk));
+        stream.on('error', error => {
+            if (!settled) { settled = true; reject(error); }
         });
-
         stream.on('end', () => {
+            if (settled) return;
             try {
-                const result = analyzePCM(pcmData, 44100);
-                resolve(result);
-            } catch (e) {
-                reject(e);
-            }
+                settled = true;
+                resolve(analyzer.finish(options));
+            } catch (error) { reject(error); }
         });
     });
 }
 
-/**
- * Simple Energy-Based Beat Detection Strategy
- */
-function analyzePCM(buffer, sampleRate) {
-    // Optimization: Downsample to ~100Hz for energy calculation to save CPU?
-    // Or just analyze chunks. 
-    // Let's use a standard "Energy Threshold" algorithm.
-
-    // 1. Calculate Instantaneous Energy in windows
-    const windowSize = 1024; // ~23ms
-    const energies = [];
-
-    for (let i = 0; i < buffer.length; i += windowSize) {
-        let sum = 0;
-        for (let j = 0; j < windowSize; j++) {
-            if (i + j < buffer.length) {
-                sum += buffer[i + j] * buffer[i + j];
-            }
-        }
-        energies.push(sum);
-    }
-
-    // 2. Compute Local Average Energy (History Buffer)
-    // We look at ~1 second history (43 windows of 1024 samples @ 44100Hz)
-    const historySize = 43;
-    const beats = [];
-
-    for (let i = 0; i < energies.length; i++) {
-        // Get local history average
-        const start = Math.max(0, i - historySize);
-        const end = i; // Up to current
-        let avgSum = 0;
-        let count = 0;
-        for (let k = start; k < end; k++) {
-            avgSum += energies[k];
-            count++;
-        }
-
-        const localAvg = count > 0 ? avgSum / count : 0;
-        const variance = 1.3; // Sensitivity threshold. 1.3 to 1.5 is standard.
-        const c = 1.3;
-
-        // 3. Peak Detection
-        // If instant energy > local average * C, it's a beat.
-        if (energies[i] > localAvg * c && energies[i] > 0.01) { // 0.01 silence gate
-            // We found a peak. But we assume beats don't happen faster than 250ms (240 BPM)
-            // Debounce logic
-            const timeSeconds = (i * windowSize) / sampleRate;
-            const lastBeat = beats.length > 0 ? beats[beats.length - 1] : -1;
-
-            if (timeSeconds - lastBeat > 0.25) {
-                beats.push(timeSeconds);
-            }
-        }
-    }
-
-    // 4. Calculate Approximate BPM
-    let bpm = 0;
-    if (beats.length > 1) {
-        // Calculate intervals
-        const intervals = [];
-        for (let i = 0; i < beats.length - 1; i++) {
-            intervals.push(beats[i + 1] - beats[i]);
-        }
-
-        // Get average interval
-        const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-        if (avgInterval > 0) {
-            bpm = 60 / avgInterval;
-        }
-    }
-
-    // Clean up BPM (Rounding)
-    bpm = Math.round(bpm);
-
-    return {
-        bpm,
-        beats: beats.map(b => parseFloat(b.toFixed(3)))
-    };
-}
-
-module.exports = { detectBeats };
+module.exports = { detectBeats, analyzeEnergies, PCMBeatAnalyzer };

@@ -3,7 +3,7 @@ import { makeProject, DependencyContext } from '@revideo/core';
 import { makeScene2D, Video, Audio, Img, Txt, Node, brightness, contrast, saturate, hue } from '@revideo/2d';
 import { waitFor, useScene, all, any, createRef } from '@revideo/core';
 import { clipToMotionLayer } from '../motion/ClipAdapter.js';
-import { resolveMotionAt } from '../motion/MotionResolver.js';
+import { resolveMotionAt, sampleKeyframeTrack } from '../motion/MotionResolver.js';
 
 /**
  * PATCH: DependencyContext.collectPromise uses Promise.all in consumePromises(),
@@ -21,36 +21,11 @@ import { resolveMotionAt } from '../motion/MotionResolver.js';
 
 /**
  * Evaluate a keyframe array at a given local clip time.
- * Supports: linear, easeIn, easeOut, easeInOut, bounce, elastic.
+ * Uses the canonical resolver so the editor's scale/zoom tracks support the
+ * same named, spring, steps, and cubic-Bezier curves as motion layers/export.
  */
 function evaluateKF(keyframes: any[], time: number, defaultValue: number): number {
-    if (!keyframes || keyframes.length === 0) return defaultValue;
-    const sorted = [...keyframes].sort((a, b) => a.time - b.time);
-    if (time <= sorted[0].time) return sorted[0].value;
-    if (time >= sorted[sorted.length - 1].time) return sorted[sorted.length - 1].value;
-
-    let from = sorted[0], to = sorted[1];
-    for (let i = 0; i < sorted.length - 1; i++) {
-        if (time >= sorted[i].time && time < sorted[i + 1].time) { from = sorted[i]; to = sorted[i + 1]; break; }
-    }
-    const t0 = (time - from.time) / Math.max(to.time - from.time, 0.0001);
-    const easingMap: Record<string, (t: number) => number> = {
-        linear: t => t,
-        easeIn: t => t * t,
-        easeOut: t => t * (2 - t),
-        easeInOut: t => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t,
-        'ease-in': t => t * t,
-        'ease-out': t => t * (2 - t),
-        'ease-in-out': t => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t,
-        // Zoom rhythm punch-ins snap with easeOutCubic (MediaExecutionEngine
-        // rhythm_zoom); without these they fell back to linear in the preview.
-        easeOutCubic: t => 1 - Math.pow(1 - t, 3),
-        easeInCubic: t => t * t * t,
-        bounce: t => { const n1 = 7.5625, d1 = 2.75; if (t < 1/d1) return n1*t*t; if (t < 2/d1) return n1*(t-=1.5/d1)*t+0.75; if (t < 2.5/d1) return n1*(t-=2.25/d1)*t+0.9375; return n1*(t-=2.625/d1)*t+0.984375; },
-        elastic: t => t === 0 || t === 1 ? t : Math.pow(2, -10*t) * Math.sin((t-0.1)*5*Math.PI) + 1,
-    };
-    const easing = easingMap[to.easing || 'linear'] || easingMap.linear;
-    return from.value + (to.value - from.value) * easing(t0);
+    return sampleKeyframeTrack(keyframes, time, defaultValue);
 }
 
 /** Helper: get clip-local time relative to clip start (for keyframe evaluation) */
@@ -74,7 +49,7 @@ const RHYTHM_ANCHOR_Y = 0.28;
  * with an animation on the clip, the zoom rhythm vanished from the preview.
  */
 function videoCameraScale(kf: any, localTime: number, animScale: number | null, baseScale: number): number {
-    const own = kf?.scaleX ?? kf?.scale;
+    const own = kf?.scale;
     if (animScale === null) return evaluateKF(own, localTime, baseScale);
     return animScale * evaluateKF(own, localTime, 1);
 }
@@ -108,6 +83,8 @@ function motionOffsets(motionLayer: any, absoluteTime: number, canvasWidth: numb
         dx: (dxPct / 100) * canvasWidth,
         dy: (dyPct / 100) * canvasHeight,
         scale: resolved.scale,
+        scaleX: resolved.scaleX,
+        scaleY: resolved.scaleY,
         rotation: resolved.rotation,
         opacity: resolved.opacity,
     };
@@ -259,12 +236,20 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     const vcCy = hasVc ? ((vc.cropY ?? 0) + (vc.cropH ?? 1) / 2) - 0.5 : 0;
 
                     const overlayScaleBase = canvasWidth * 0.25 / Math.max(1, fitted.w);
-                    const totalScaleX = () => isOverlay
-                        ? overlayScaleBase * motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale
-                        : videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : null, clip.scaleX ?? clip.scale ?? 1) * vcZoom;
-                    const totalScaleY = () => isOverlay
-                        ? overlayScaleBase * motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale
-                        : videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : null, clip.scaleY ?? clip.scale ?? 1) * vcZoom;
+                    const totalScaleX = () => {
+                        const motion = motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight);
+                        return isOverlay
+                            ? overlayScaleBase * motion.scale * motion.scaleX
+                            : videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motion.scale, clip.scale ?? 1)
+                                * motion.scaleX * evaluateKF(kf.scaleX, clipLocalTime(playback.time, clip.start), 1) * vcZoom;
+                    };
+                    const totalScaleY = () => {
+                        const motion = motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight);
+                        return isOverlay
+                            ? overlayScaleBase * motion.scale * motion.scaleY
+                            : videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motion.scale, clip.scale ?? 1)
+                                * motion.scaleY * evaluateKF(kf.scaleY, clipLocalTime(playback.time, clip.start), 1) * vcZoom;
+                    };
 
                     const posX = () => {
                         if (isOverlay) {
@@ -272,7 +257,9 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             const centreX = ((Number.isFinite(clip.x) ? clip.x : 50) / 100) * canvasWidth + motion.dx;
                             return centreX - fitted.w * totalScaleX() / 2;
                         }
-                        const baseX = motionLayer ? (clip.x || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dx : evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0);
+                        const baseX = motionLayer
+                            ? evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dx
+                            : evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0);
                         return baseX - vcCx * fitted.w * totalScaleX();
                     };
                     const posY = () => {
@@ -282,8 +269,12 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             return centreY - fitted.h * totalScaleY() / 2;
                         }
                         const baseY = motionLayer
-                            ? (clip.y || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dy
-                                + (0.5 - RHYTHM_ANCHOR_Y) * canvasHeight * (videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale, 1) - 1)
+                            ? evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dy
+                                + (0.5 - RHYTHM_ANCHOR_Y) * canvasHeight * (
+                                    videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale, 1)
+                                    * motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scaleY
+                                    * evaluateKF(kf.scaleY, clipLocalTime(playback.time, clip.start), 1) - 1
+                                )
                             : evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0) + rhythmAnchorDy(kf, clipLocalTime(playback.time, clip.start), canvasHeight);
                         return baseY - vcCy * fitted.h * totalScaleY();
                     };
@@ -306,8 +297,14 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             y={posY}
                             scaleX={totalScaleX}
                             scaleY={totalScaleY}
-                            rotation={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).rotation : evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
-                            opacity={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).opacity : evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
+                            rotation={() => motionLayer
+                                ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).rotation
+                                    + evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0) - (clip.rotation || 0)
+                                : evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
+                            opacity={() => motionLayer
+                                ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).opacity
+                                    + evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1) - (clip.opacity ?? 1)
+                                : evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
                             filters={g ? [
                                 brightness((g.brightness ?? 100) / 100),
                                 contrast((g.contrast ?? 100) / 100),

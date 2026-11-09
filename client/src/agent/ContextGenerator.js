@@ -2,11 +2,13 @@ import useTimelineStore from '../store/useTimelineStore.js';
 import { styleContext } from './EditingStyles.js';
 import { applyStyleToAnalysis } from './ContentAnalyzer.js';
 import { buildTimelineSourceMap } from '../timeline/targetRangeResolver.js';
+import { buildAssetManifest, manifestSummary } from './AssetManifest.js';
 
 export class ContextGenerator {
     static getTimelineContext() {
         const state = useTimelineStore.getState();
-        const { tracks, duration, currentTime, aspectRatio, beatMarkers, activeClipId, selectedClipIds, selectedTimelineRange, targetFindings, assetTargetFindings } = state;
+        const { tracks, duration, currentTime, aspectRatio, beatMarkers, activeClipId, selectedClipIds, selectedTimelineRange, targetFindings, assetTargetFindings, assets } = state;
+        const editingStyle = styleContext(state.editingStyle, state.editingMode);
 
         // Build clips array for local parsing
         const clips = [];
@@ -30,6 +32,17 @@ export class ContextGenerator {
         displayStr += `- Total Duration: ${duration.toFixed(2)}s\n`;
         displayStr += `- Current Playhead: ${currentTime.toFixed(2)}s\n`;
         displayStr += `- Tracks: ${tracks.length}\n`;
+        if (editingStyle) displayStr += `- Editing style: ${editingStyle.id}; mode: ${editingStyle.mode}. Explicit user instructions override style defaults; use the style only for choices the user left open.\n`;
+        const assetManifest = buildAssetManifest(assets);
+        const editableAssets = assetManifest.filter(asset => asset.editable);
+        if (editableAssets.length) {
+            displayStr += `- Editable media bin assets (${editableAssets.length}; complete inventory follows):\n`;
+            editableAssets.forEach(asset => {
+                const duration = asset.duration;
+                displayStr += `  ${asset.id}: ${asset.name} (${asset.type}, role=${asset.role}, analysis=${asset.analysisStatus}, confidence=${asset.confidence ?? 'unknown'}${Number.isFinite(duration) && duration > 0 ? `, ${duration.toFixed(1)}s` : ''})${asset.description ? ` — ${asset.description}` : ''}\n`;
+            });
+            displayStr += `Use only these editable media-bin assets as edit sources. Reference-only materials are excluded.\n`;
+        }
         if (beatMarkers && beatMarkers.length > 0) {
             displayStr += `- Beat Markers Detected: ${beatMarkers.length}\n`;
         }
@@ -81,6 +94,15 @@ export class ContextGenerator {
             activeClipId,
             selectedClipIds: Array.isArray(selectedClipIds) ? selectedClipIds : [],
             selectedTimelineRange: selectedTimelineRange || null,
+            editingStyle,
+            instructionPriority: 'Explicit user instructions override style defaults; style guidance fills only unspecified choices.',
+            // Give the API planner the same grounded source inventory used by
+            // local media tools. Never expose assistant-only references as
+            // candidate edit sources.
+            // Keep every asset addressable, with explicit purpose and analysis
+            // state. References remain visible to planning but cannot be edit sources.
+            assetManifest: manifestSummary(assetManifest),
+            mediaBin: assetManifest.filter(asset => asset.editable),
             display: displayStr
         };
     }
@@ -92,6 +114,7 @@ export class ContextGenerator {
     static getStructuredContext() {
         const state = useTimelineStore.getState();
         const { tracks, duration, currentTime, aspectRatio, activeClipId, selectedClipIds, selectedTimelineRange, captions, pacingSegments, beatMarkers, assets, transcriptionAttempted, speakerMap } = state;
+        const assetManifest = manifestSummary(buildAssetManifest(assets));
 
         // --- Collect all clips ---
         const allClips = [];
@@ -185,6 +208,7 @@ export class ContextGenerator {
         }
 
         return {
+            AssetManifest: assetManifest,
             ProjectContext: {
                 editingMode,
                 exportTarget: null, // Set by user intent, not context

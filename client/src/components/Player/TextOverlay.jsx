@@ -14,6 +14,7 @@ import { resolveMotionAt }   from '../../motion/MotionResolver.js';
 import { revealedWordCount, activeWordIndex, resolveEmphasis } from '../../motion/CaptionModel.js';
 import { highlightMixAt } from '../../motion/TextCraft.js';
 import { mixColor, withAlpha } from '../../motion/ColorTheory.js';
+import { resolveTimelineEffectFilter } from '../../motion/TimelineVisualEffects.js';
 // R66 — clip grouping. See the identical import in GraphicOverlay.jsx: a
 // LowerThird's title (this component) and its background bar (GraphicOverlay,
 // a different track) share a `groupId`; dragging either one must move both.
@@ -548,6 +549,8 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
                     'translate(-50%, -50%)',
                     motion.rotation ? `rotate(${motion.rotation}deg)` : '',
                     `scale(${motion.scale})`,
+                    `scaleX(${motion.scaleX ?? 1})`,
+                    `scaleY(${motion.scaleY ?? 1})`,
                 ].filter(Boolean).join(' ');
 
                 const highlight = clip.captionStyle?.wordHighlight || null;
@@ -565,6 +568,14 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
 
                 const filters = [];
                 if (motion.blur > 0) filters.push(`blur(${motion.blur * previewScale}px)`);
+                // Text layers use the same authored timeline effect stack as
+                // footage and graphic overlays. Keep it time-sampled so effect
+                // keyframes follow the playhead while scrubbing.
+                const timelineFilter = resolveTimelineEffectFilter(clip.effects, currentTime, {
+                    clipStart: Number(clip.start ?? clip.startTime) || 0,
+                    clipDuration: Number(clip.duration) || 0,
+                });
+                if (timelineFilter && timelineFilter !== 'none') filters.push(timelineFilter);
                 const glowShadow = motion.glow > 0
                     ? `0 0 ${motion.glow * previewScale}px currentColor, 0 0 ${motion.glow * 2 * previewScale}px currentColor`
                     : null;

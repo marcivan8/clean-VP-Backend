@@ -1,6 +1,9 @@
 import MasterClock from './MasterClock';
 import RingBuffer from './RingBuffer';
 import { EffectPipeline, EffectRenderer, GPUEffectEngine } from '../effects';
+import { createGpuClipEffectConfigs } from '../effects/ClipEffectAdapter.js';
+import { mapSourceIntervalToTimelineSegments, mapSourceTimeToTimeline, mapTimelineTimeToRate, mapTimelineTimeToSource } from '../timeline/retimeMap.js';
+import { resampleMonoPcm } from './audioResample.js';
 
 /**
  * Playback State Machine
@@ -189,9 +192,15 @@ class PlaybackEngine {
         this.effectsRenderer = null;
         this.gpuEffectEngine = null;
         this.activePlacements = []; // Set by TimelineStateManager
+        this.effectSourceClipId = null;
+        this.clipEffectTargetId = null;
+        this.clipEffectPlacement = null;
+        this.clipEffectIds = [];
+        this.clipEffectSignature = '';
 
         // Audio Streaming Queue (Flow Control)
         this.audioQueue = [];
+        this.timelineRetimeMap = null;
 
         if (this.effectsEnabled) {
             this.initEffectsEngine();
@@ -597,7 +606,7 @@ class PlaybackEngine {
             // Start decoding
             this.worker.postMessage({
                 type: 'START_GENERATING',
-                payload: { startTime: this.clock.getCurrentTime(), url: targetUrl }
+                payload: { startTime: this.mapTimelineTimeToSource(this.clock.getCurrentTime()), url: targetUrl }
             });
 
             // Wait for preload with timeout
@@ -684,7 +693,7 @@ class PlaybackEngine {
         // but we keep the clock paused and don't start the RAF loop.
         this.worker.postMessage({
             type: 'START_GENERATING',
-            payload: { startTime: this.clock.getCurrentTime(), url }
+            payload: { startTime: this.mapTimelineTimeToSource(this.clock.getCurrentTime()), url }
         });
     }
 
@@ -699,8 +708,17 @@ class PlaybackEngine {
         this.audioQueue = []; // Clear pending audio chunks
 
         // Signal Producer (Worker) to seek
-        this.worker.postMessage({ type: 'SEEK', payload: { time } });
+        this.worker.postMessage({ type: 'SEEK', payload: { time: this.mapTimelineTimeToSource(time) } });
         console.log(`[PlaybackEngine] Seeked to ${time}, Buffer flushed.`);
+    }
+
+    setTimelineRetimeMap(map) {
+        this.timelineRetimeMap = map || null;
+        if (this.currentUrl) this.seek(this.clock.getCurrentTime());
+    }
+
+    mapTimelineTimeToSource(time) {
+        return mapTimelineTimeToSource(this.timelineRetimeMap, time);
     }
 
     // New Color API
@@ -858,6 +876,47 @@ class PlaybackEngine {
     }
 
     /**
+     * Identify the clip represented by decoded frames so placement effects
+     * from unrelated layers are not applied to its texture.
+     */
+    setEffectSourceClipId(clipId) {
+        this.effectSourceClipId = clipId || null;
+    }
+
+    /**
+     * Route shader-backed footage effects through the same graph as timeline
+     * effects. CSS remains responsible for effects without a matching shader;
+     * mapped effects use their actual preview algorithms.
+     */
+    setClipEffects(clipId, effects = [], placement = {}) {
+        if (!this.effectsPipeline) return false;
+        const configs = createGpuClipEffectConfigs(clipId, effects, placement);
+        const signature = JSON.stringify({ clipId, configs, startTime: placement.startTime, duration: placement.duration });
+        if (signature === this.clipEffectSignature) return true;
+
+        for (const effectId of this.clipEffectIds) this.effectsPipeline.removeEffect(effectId);
+        this.clipEffectIds = [];
+        this.clipEffectSignature = signature;
+        this.clipEffectTargetId = configs.length ? clipId : null;
+        this.clipEffectPlacement = configs.length ? {
+            id: clipId,
+            clipId,
+            startTime: Number(placement.startTime) || 0,
+            duration: Math.max(0, Number(placement.duration) || 0),
+        } : null;
+
+        for (const config of configs) {
+            const effect = this.effectsPipeline.addEffect(config);
+            this.clipEffectIds.push(effect.id);
+        }
+        return true;
+    }
+
+    supportsClipEffectPreview() {
+        return Boolean(this.effectsEnabled && this.effectsPipeline && this.effectsRenderer);
+    }
+
+    /**
      * Enable/disable effects processing
      */
     setEffectsEnabled(enabled) {
@@ -933,14 +992,31 @@ class PlaybackEngine {
 
             // QUEUE AUDIO FOR STREAMING (Flow Control)
             if (payload.buffers && payload.buffers.length > 0) {
-                // We push the whole payload to queue. 
-                // We assume data is time-ordered.
-                this.audioQueue.push({
-                    trackId: 'video_main',
-                    data: payload.buffers[0], // Left channel for now
-                    timestamp: payload.timestamp,
-                    duration: payload.duration
-                });
+                const rawStart = Number(payload.timestamp) || 0;
+                const rawDuration = Math.max(0, Number(payload.duration) || 0);
+                const map = this.timelineRetimeMap;
+                const sourceStart = Math.max(rawStart, map?.sourceOffset ?? rawStart);
+                const sourceEnd = Math.min(rawStart + rawDuration,
+                    map?.segments?.length ? map.segments[map.segments.length - 1].sourceEnd : rawStart + rawDuration);
+                if (sourceEnd <= sourceStart) return;
+                const sampleData = resampleMonoPcm(
+                    payload.buffers[0], payload.sampleRate, this.clock.audioCtx.sampleRate
+                );
+                const durationScale = rawDuration > 0 ? sampleData.length / rawDuration : 0;
+                const sourceIntervals = mapSourceIntervalToTimelineSegments(map, sourceStart, sourceEnd);
+                for (const interval of sourceIntervals) {
+                    const startSample = Math.max(0, Math.min(sampleData.length,
+                        Math.round((interval.sourceStart - rawStart) * durationScale)));
+                    const endSample = Math.max(startSample, Math.min(sampleData.length,
+                        Math.round((interval.sourceEnd - rawStart) * durationScale)));
+                    if (endSample <= startSample) continue;
+                    this.audioQueue.push({
+                        trackId: 'video_main',
+                        data: sampleData.slice(startSample, endSample),
+                        timestamp: interval.timelineStart,
+                        duration: Math.max(0, interval.timelineEnd - interval.timelineStart),
+                    });
+                }
             }
         }
     }
@@ -1104,6 +1180,16 @@ class PlaybackEngine {
     feedAudio(masterTime) {
         if (!this.audioNode) return;
 
+        const videoRate = mapTimelineTimeToRate(this.timelineRetimeMap, masterTime);
+        this.audioNode.port.postMessage({
+            type: 'SET_PLAYBACK_RATE',
+            payload: {
+                trackId: 'video_main',
+                rate: videoRate,
+                maintainPitch: this.timelineRetimeMap?.maintainPitch !== false,
+            },
+        });
+
         // --- 1. Stream Cached Audio Chunks (Flow Control) ---
         // Feed queue -> Worklet (Keep ~2s buffered)
         // Worklet Buffer is 5s. We keep it topped up but not overflowing.
@@ -1262,7 +1348,13 @@ class PlaybackEngine {
      * @param {number} timestamp
      */
     pushFrame(frame, timestamp) {
-        const item = { data: frame, timestamp };
+        const segments = this.timelineRetimeMap?.segments;
+        if (segments?.length && (timestamp < this.timelineRetimeMap.sourceOffset - 0.1
+            || timestamp > segments[segments.length - 1].sourceEnd + 0.1)) {
+            frame?.close?.();
+            return;
+        }
+        const item = { data: frame, timestamp: mapSourceTimeToTimeline(this.timelineRetimeMap, timestamp) };
 
         // Push to buffer
         const success = this.buffer.push(item);
@@ -1390,7 +1482,38 @@ class PlaybackEngine {
         // Need to be careful about format. VideoFrame usually RGBA or similar.
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frameItem.data);
 
+        // GPU effects render into ping-pong textures. Feed that processed
+        // texture into the visible frame shader instead of discarding it; this
+        // keeps crop, aspect fit and the project's color grade in the same
+        // final draw while making the effect output observable in the preview.
+        let renderTexture = this.texture;
+        if (this.effectsEnabled && this.effectsRenderer && (this.activePlacements.length > 0 || this.clipEffectPlacement)) {
+            try {
+                const previewPlacements = [...this.activePlacements];
+                if (this.clipEffectPlacement) {
+                    const existingIndex = previewPlacements.findIndex(placement => placement.id === this.clipEffectPlacement.id);
+                    if (existingIndex >= 0) previewPlacements[existingIndex] = { ...previewPlacements[existingIndex], ...this.clipEffectPlacement };
+                    else previewPlacements.push(this.clipEffectPlacement);
+                }
+                renderTexture = this.effectsRenderer.renderPreview(
+                    this.texture,
+                    previewPlacements,
+                    this.clock.getCurrentTime(),
+                    {
+                        width: gl.drawingBufferWidth,
+                        height: gl.drawingBufferHeight,
+                        timestamp: frameItem.timestamp,
+                        sourceClipId: this.effectSourceClipId,
+                    },
+                ) || this.texture;
+            } catch (e) {
+                console.error('[PlaybackEngine] Effects render error:', e);
+                renderTexture = this.texture;
+            }
+        }
+
         gl.uniform1i(this.loc.image, 0); // cached in initGL() — never look this up per-frame
+        gl.bindTexture(gl.TEXTURE_2D, renderTexture);
 
         // Update Uniforms
         gl.uniform1f(this.loc.brightness, this.gradingParams.brightness);
@@ -1418,29 +1541,6 @@ class PlaybackEngine {
 
         // DRAW
         gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-        // === EFFECTS PROCESSING ===
-        // Apply GPU effects after base color grading
-        if (this.effectsEnabled && this.effectsRenderer && this.activePlacements.length > 0) {
-            try {
-                const currentTime = this.clock.getCurrentTime();
-
-                // Process effects for each active placement
-                // Note: This modifies the framebuffer in-place using ping-pong rendering
-                this.effectsRenderer.renderPreview(
-                    this.texture, // The current video texture
-                    this.activePlacements,
-                    currentTime,
-                    {
-                        width: gl.drawingBufferWidth,
-                        height: gl.drawingBufferHeight,
-                        timestamp: frameItem.timestamp
-                    }
-                );
-            } catch (e) {
-                console.error('[PlaybackEngine] Effects render error:', e);
-            }
-        }
 
         this.lastFrameRendered = frameItem.timestamp;
     }

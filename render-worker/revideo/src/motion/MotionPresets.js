@@ -40,6 +40,7 @@
  */
 
 import { createAnimation, createKeyframe, ANIMATION_TYPES, LAYER_KINDS } from './MotionSchema.js';
+import { TEXT_EXPANSIONS, IMAGE_EXPANSIONS, STICKER_EXPANSIONS, CAMERA_EXPANSIONS } from './MotionPresetExpansion.js';
 
 /** Default entrance length. Short enough to feel snappy on 0.6-1.2s captions. */
 const IN = 0.35;
@@ -55,6 +56,86 @@ const fit = (want, duration) => {
 };
 
 const kf = createKeyframe;
+
+/* ─── NEW CORE ANIMATION PRESETS (Phase 3 Motion Enrichment) ─── */
+const FLIP_3D_PRESET = {
+    label: '3D Flip',
+    build: ({ duration } = {}) => {
+        const d = fit(0.5, duration);
+        return [createAnimation({
+            type: ANIMATION_TYPES.ROTATE, presetId: 'flip-3d', duration: d, easing: 'backOut',
+            keyframes: [
+                kf(0,        { rotation: -35, opacity: 0, scale: 0.85 }),
+                kf(d * 0.65, { rotation: 6,   opacity: 1, scale: 1.04 }),
+                kf(d,        { rotation: 0,   opacity: 1, scale: 1 }),
+            ],
+        })];
+    },
+};
+
+const ELASTIC_SNAP_PRESET = {
+    label: 'Elastic Snap',
+    build: ({ duration } = {}) => {
+        const d = fit(0.55, duration);
+        return [createAnimation({
+            type: ANIMATION_TYPES.SCALE, presetId: 'elastic-snap', duration: d, easing: 'elastic',
+            keyframes: [
+                kf(0,        { scale: 0.15, opacity: 0 }),
+                kf(d * 0.5,  { scale: 1.18, opacity: 1 }),
+                kf(d * 0.75, { scale: 0.94, opacity: 1 }),
+                kf(d,        { scale: 1,    opacity: 1 }),
+            ],
+        })];
+    },
+};
+
+const KINETIC_SLAM_PRESET = {
+    label: 'Kinetic Slam',
+    build: ({ duration } = {}) => {
+        const d = fit(0.35, duration);
+        return [createAnimation({
+            type: ANIMATION_TYPES.SCALE, presetId: 'kinetic-slam', duration: d, easing: 'easeOutQuart',
+            keyframes: [
+                kf(0,       { scale: 2.0,  opacity: 0 }),
+                kf(d * 0.4, { scale: 0.96, opacity: 1 }),
+                kf(d,       { scale: 1,    opacity: 1 }),
+            ],
+        })];
+    },
+};
+
+const SPLIT_REVEAL_PRESET = {
+    label: 'Split Reveal',
+    build: ({ duration } = {}) => {
+        const d = fit(0.5, duration);
+        return [createAnimation({
+            type: ANIMATION_TYPES.REVEAL, presetId: 'split-reveal', duration: d, easing: 'easeInOutCubic',
+            keyframes: [
+                kf(0,        { reveal: 0,   opacity: 0 }),
+                kf(d * 0.25, { reveal: 0.3, opacity: 1 }),
+                kf(d,        { reveal: 1,   opacity: 1 }),
+            ],
+        })];
+    },
+};
+
+const GLITCH_STUTTER_PRESET = {
+    label: 'Glitch Stutter',
+    build: ({ duration } = {}) => {
+        const d = fit(0.35, duration);
+        return [createAnimation({
+            type: ANIMATION_TYPES.TRANSLATE, presetId: 'glitch-stutter', duration: d, easing: 'linear',
+            keyframes: [
+                kf(0,       { x: 0,    y: 0,    opacity: 0 }),
+                kf(d * 0.2, { x: -2.5, y: 1.2,  opacity: 0.8 }),
+                kf(d * 0.4, { x: 2.8,  y: -1.0, opacity: 1 }),
+                kf(d * 0.6, { x: -1.5, y: 0.6,  opacity: 0.7 }),
+                kf(d * 0.8, { x: 1.0,  y: -0.3, opacity: 1 }),
+                kf(d,       { x: 0,    y: 0,    opacity: 1 }),
+            ],
+        })];
+    },
+};
 
 /* ───────────────────────────── TEXT ───────────────────────────── */
 
@@ -165,6 +246,66 @@ const TEXT_PRESETS = {
             })];
         },
     },
+    'blur-pop': {
+        label: 'Blur Pop',
+        build: ({ duration } = {}) => {
+            const d = fit(0.45, duration);
+            return [createAnimation({
+                type: ANIMATION_TYPES.BLUR, presetId: 'blur-pop', duration: d, easing: 'backOut',
+                keyframes: [kf(0, { scale: 0.82, blur: 10, opacity: 0 }), kf(d, { scale: 1, blur: 0, opacity: 1 })],
+            })];
+        },
+    },
+    'drop-in': {
+        label: 'Drop In',
+        build: ({ duration } = {}) => {
+            const d = fit(0.5, duration);
+            return [createAnimation({
+                type: ANIMATION_TYPES.TRANSLATE, presetId: 'drop-in', duration: d, easing: 'bounce',
+                keyframes: [kf(0, { y: -8, opacity: 0 }), kf(d * 0.78, { y: 0.7, opacity: 1 }), kf(d, { y: 0, opacity: 1 })],
+            })];
+        },
+    },
+    'drift-left': {
+        label: 'Drift Left',
+        build: ({ duration } = {}) => {
+            const d = fit(0.45, duration);
+            return [createAnimation({
+                type: ANIMATION_TYPES.TRANSLATE, presetId: 'drift-left', duration: d, easing: 'easeOutCubic',
+                keyframes: [kf(0, { x: 7, opacity: 0 }), kf(d, { x: 0, opacity: 1 })],
+            })];
+        },
+    },
+    'rotate-settle': {
+        label: 'Rotate & Settle',
+        build: ({ duration } = {}) => {
+            const d = fit(0.55, duration);
+            return [createAnimation({
+                type: ANIMATION_TYPES.ROTATE, presetId: 'rotate-settle', duration: d, easing: 'backOut',
+                keyframes: [kf(0, { rotation: -9, scale: 0.9, opacity: 0 }), kf(d * 0.72, { rotation: 2, scale: 1.02, opacity: 1 }), kf(d, { rotation: 0, scale: 1, opacity: 1 })],
+            })];
+        },
+    },
+    'wipe-left': {
+        label: 'Wipe Left',
+        build: ({ duration } = {}) => {
+            const d = fit(0.6, duration);
+            return [createAnimation({
+                type: ANIMATION_TYPES.REVEAL, presetId: 'wipe-left', duration: d, easing: 'easeInOutCubic',
+                keyframes: [kf(0, { reveal: 0, x: -2 }), kf(d, { reveal: 1, x: 0 })],
+            })];
+        },
+    },
+    'glow-pulse': {
+        label: 'Glow Pulse',
+        build: ({ duration } = {}) => {
+            const d = fit(0.75, duration);
+            return [createAnimation({
+                type: ANIMATION_TYPES.GLOW, presetId: 'glow-pulse', duration: d, easing: 'easeInOut',
+                keyframes: [kf(0, { glow: 0 }), kf(d * 0.45, { glow: 18 }), kf(d, { glow: 0 })],
+            })];
+        },
+    },
     'mask-reveal': {
         label: 'Mask Reveal',
         build: ({ duration } = {}) => {
@@ -175,6 +316,12 @@ const TEXT_PRESETS = {
             })];
         },
     },
+    'flip-3d':        FLIP_3D_PRESET,
+    'elastic-snap':   ELASTIC_SNAP_PRESET,
+    'kinetic-slam':   KINETIC_SLAM_PRESET,
+    'split-reveal':   SPLIT_REVEAL_PRESET,
+    'glitch-stutter': GLITCH_STUTTER_PRESET,
+    ...TEXT_EXPANSIONS,
 };
 
 /* ───────────────────────────── IMAGE ───────────────────────────── */
@@ -210,6 +357,66 @@ const IMAGE_PRESETS = {
             })];
         },
     },
+    'ken-burns-out': {
+        label: 'Ken Burns Out',
+        build: ({ duration } = {}) => {
+            const d = Math.max(0.5, Number(duration) || 5);
+            return [createAnimation({
+                type: ANIMATION_TYPES.SCALE, presetId: 'ken-burns-out', duration: d, easing: 'linear',
+                keyframes: [kf(0, { scale: 1.18, x: -1.5, y: 1 }), kf(d, { scale: 1.02, x: 0, y: 0 })],
+            })];
+        },
+    },
+    'pan-up': {
+        label: 'Pan Up',
+        build: ({ duration } = {}) => {
+            const d = Math.max(0.5, Number(duration) || 4);
+            return [createAnimation({
+                type: ANIMATION_TYPES.TRANSLATE, presetId: 'pan-up', duration: d, easing: 'linear',
+                keyframes: [kf(0, { y: 4, scale: 1.1 }), kf(d, { y: -4, scale: 1.1 })],
+            })];
+        },
+    },
+    'pan-down': {
+        label: 'Pan Down',
+        build: ({ duration } = {}) => {
+            const d = Math.max(0.5, Number(duration) || 4);
+            return [createAnimation({
+                type: ANIMATION_TYPES.TRANSLATE, presetId: 'pan-down', duration: d, easing: 'linear',
+                keyframes: [kf(0, { y: -4, scale: 1.1 }), kf(d, { y: 4, scale: 1.1 })],
+            })];
+        },
+    },
+    'drift-diagonal': {
+        label: 'Drift Diagonal',
+        build: ({ duration } = {}) => {
+            const d = Math.max(0.5, Number(duration) || 5);
+            return [createAnimation({
+                type: ANIMATION_TYPES.TRANSLATE, presetId: 'drift-diagonal', duration: d, easing: 'linear',
+                keyframes: [kf(0, { x: -3, y: 2, scale: 1.12 }), kf(d, { x: 3, y: -2, scale: 1.12 })],
+            })];
+        },
+    },
+    'focus-pull': {
+        label: 'Focus Pull',
+        build: ({ duration } = {}) => {
+            const d = Math.max(0.45, Number(duration) || 2);
+            return [createAnimation({
+                type: ANIMATION_TYPES.BLUR, presetId: 'focus-pull', duration: d, easing: 'easeOutCubic',
+                keyframes: [kf(0, { blur: 8, scale: 1.06 }), kf(d, { blur: 0, scale: 1 })],
+            })];
+        },
+    },
+    'slow-rotate': {
+        label: 'Slow Rotate',
+        build: ({ duration } = {}) => {
+            const d = Math.max(0.5, Number(duration) || 5);
+            return [createAnimation({
+                type: ANIMATION_TYPES.ROTATE, presetId: 'slow-rotate', duration: d, easing: 'linear',
+                keyframes: [kf(0, { rotation: -1.2, scale: 1.08 }), kf(d, { rotation: 1.2, scale: 1.08 })],
+            })];
+        },
+    },
     'zoom': {
         label: 'Zoom',
         build: ({ duration } = {}) => {
@@ -240,6 +447,9 @@ const IMAGE_PRESETS = {
             })];
         },
     },
+    'kinetic-slam': KINETIC_SLAM_PRESET,
+    'split-reveal': SPLIT_REVEAL_PRESET,
+    ...IMAGE_EXPANSIONS,
 };
 
 /* ──────────────────────────── STICKER ──────────────────────────── */
@@ -303,6 +513,60 @@ const STICKER_PRESETS = {
             })];
         },
     },
+    'spin-in': {
+        label: 'Spin In',
+        build: ({ duration } = {}) => {
+            const d = fit(0.6, duration);
+            return [createAnimation({
+                type: ANIMATION_TYPES.ROTATE, presetId: 'spin-in', duration: d, easing: 'backOut',
+                keyframes: [kf(0, { rotation: -100, scale: 0.65, opacity: 0 }), kf(d, { rotation: 0, scale: 1, opacity: 1 })],
+            })];
+        },
+    },
+    'sticker-float': {
+        label: 'Float',
+        build: ({ duration } = {}) => {
+            const d = Math.max(1, Number(duration) || 2);
+            return [createAnimation({
+                type: ANIMATION_TYPES.TRANSLATE, presetId: 'sticker-float', duration: d, easing: 'easeInOut',
+                keyframes: [kf(0, { y: 0 }), kf(d * 0.5, { y: -2 }), kf(d, { y: 0 })],
+            })];
+        },
+    },
+    'heartbeat': {
+        label: 'Heartbeat',
+        build: ({ duration } = {}) => {
+            const d = Math.max(0.7, Number(duration) || 1.1);
+            return [createAnimation({
+                type: ANIMATION_TYPES.SCALE, presetId: 'heartbeat', duration: d, easing: 'easeInOut',
+                keyframes: [kf(0, { scale: 1 }), kf(d * 0.25, { scale: 1.12 }), kf(d * 0.48, { scale: 1 }), kf(d * 0.72, { scale: 1.09 }), kf(d, { scale: 1 })],
+            })];
+        },
+    },
+    'swing': {
+        label: 'Swing',
+        build: ({ duration } = {}) => {
+            const d = Math.max(0.6, Number(duration) || 1.2);
+            return [createAnimation({
+                type: ANIMATION_TYPES.ROTATE, presetId: 'swing', duration: d, easing: 'easeInOut',
+                keyframes: [kf(0, { rotation: 0 }), kf(d * 0.25, { rotation: -8 }), kf(d * 0.5, { rotation: 6 }), kf(d * 0.75, { rotation: -3 }), kf(d, { rotation: 0 })],
+            })];
+        },
+    },
+    'sticker-slide-left': {
+        label: 'Slide In Left',
+        build: ({ duration } = {}) => {
+            const d = fit(0.45, duration);
+            return [createAnimation({
+                type: ANIMATION_TYPES.TRANSLATE, presetId: 'sticker-slide-left', duration: d, easing: 'easeOutCubic',
+                keyframes: [kf(0, { x: -10, opacity: 0 }), kf(d, { x: 0, opacity: 1 })],
+            })];
+        },
+    },
+    'flip-3d':        FLIP_3D_PRESET,
+    'elastic-snap':   ELASTIC_SNAP_PRESET,
+    'glitch-stutter': GLITCH_STUTTER_PRESET,
+    ...STICKER_EXPANSIONS,
 };
 
 /* ──────────────────────────── CAMERA ───────────────────────────── */
@@ -330,6 +594,66 @@ const CAMERA_PRESETS = {
             return [createAnimation({
                 type: ANIMATION_TYPES.SCALE, presetId: 'camera-pull', duration: d, easing: 'easeInOutCubic',
                 keyframes: [kf(0, { scale: 1.15 }), kf(d, { scale: 1 })],
+            })];
+        },
+    },
+    'camera-drift-left': {
+        label: 'Drift Left',
+        build: ({ duration } = {}) => {
+            const d = Math.max(0.5, Number(duration) || 3);
+            return [createAnimation({
+                type: ANIMATION_TYPES.TRANSLATE, presetId: 'camera-drift-left', duration: d, easing: 'easeInOutCubic',
+                keyframes: [kf(0, { x: 3, scale: 1.08 }), kf(d, { x: -3, scale: 1.08 })],
+            })];
+        },
+    },
+    'camera-drift-right': {
+        label: 'Drift Right',
+        build: ({ duration } = {}) => {
+            const d = Math.max(0.5, Number(duration) || 3);
+            return [createAnimation({
+                type: ANIMATION_TYPES.TRANSLATE, presetId: 'camera-drift-right', duration: d, easing: 'easeInOutCubic',
+                keyframes: [kf(0, { x: -3, scale: 1.08 }), kf(d, { x: 3, scale: 1.08 })],
+            })];
+        },
+    },
+    'camera-pedestal-up': {
+        label: 'Pedestal Up',
+        build: ({ duration } = {}) => {
+            const d = Math.max(0.5, Number(duration) || 3);
+            return [createAnimation({
+                type: ANIMATION_TYPES.TRANSLATE, presetId: 'camera-pedestal-up', duration: d, easing: 'easeInOutCubic',
+                keyframes: [kf(0, { y: 3, scale: 1.08 }), kf(d, { y: -3, scale: 1.08 })],
+            })];
+        },
+    },
+    'camera-pedestal-down': {
+        label: 'Pedestal Down',
+        build: ({ duration } = {}) => {
+            const d = Math.max(0.5, Number(duration) || 3);
+            return [createAnimation({
+                type: ANIMATION_TYPES.TRANSLATE, presetId: 'camera-pedestal-down', duration: d, easing: 'easeInOutCubic',
+                keyframes: [kf(0, { y: -3, scale: 1.08 }), kf(d, { y: 3, scale: 1.08 })],
+            })];
+        },
+    },
+    'camera-orbit': {
+        label: 'Orbit',
+        build: ({ duration } = {}) => {
+            const d = Math.max(0.5, Number(duration) || 4);
+            return [createAnimation({
+                type: ANIMATION_TYPES.ROTATE, presetId: 'camera-orbit', duration: d, easing: 'easeInOutCubic',
+                keyframes: [kf(0, { rotation: -1.1, scale: 1.1, x: -1 }), kf(d, { rotation: 1.1, scale: 1.1, x: 1 })],
+            })];
+        },
+    },
+    'camera-handheld-soft': {
+        label: 'Handheld Soft',
+        build: ({ duration } = {}) => {
+            const d = Math.max(0.6, Number(duration) || 2.4);
+            return [createAnimation({
+                type: ANIMATION_TYPES.TRANSLATE, presetId: 'camera-handheld-soft', duration: d, easing: 'linear',
+                keyframes: [kf(0, { x: 0, y: 0, scale: 1.035 }), kf(d * 0.2, { x: -0.35, y: 0.2, scale: 1.035 }), kf(d * 0.4, { x: 0.25, y: -0.2, scale: 1.035 }), kf(d * 0.65, { x: -0.2, y: 0.1, scale: 1.035 }), kf(d * 0.82, { x: 0.3, y: 0.15, scale: 1.035 }), kf(d, { x: 0, y: 0, scale: 1.035 })],
             })];
         },
     },
@@ -374,6 +698,8 @@ const CAMERA_PRESETS = {
             })];
         },
     },
+    'kinetic-slam': KINETIC_SLAM_PRESET,
+    ...CAMERA_EXPANSIONS,
 };
 
 /** All presets, flat, keyed by id. */

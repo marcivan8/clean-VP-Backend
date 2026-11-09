@@ -1,24 +1,27 @@
-import React, { useEffect } from 'react';
+import React, { lazy, Suspense, useEffect } from 'react';
 import { bindEditSteps } from './store/useEditStepsStore';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import HomePage from './pages/HomePage';
-import EditorPage from './pages/EditorPage';
-import DashboardPage from './pages/DashboardPage';
-import AnalyzerPage from './pages/AnalyzerPage';
-import DataPage from './pages/DataPage';
-import GdprPage from './pages/GdprPage';
-import AuthPage from './pages/AuthPage';
-import PrivacyPage from './pages/PrivacyPage';
-import SuccessPage from './pages/SuccessPage';
-import CookiePolicyPage from './pages/CookiePolicyPage';
-import UserStylePage from './pages/UserStylePage';
-import AccountPage from './pages/AccountPage';
-import TermsPage from './pages/TermsPage';
-import LegalNoticePage from './pages/LegalNoticePage';
-import UnsubscribePage from './pages/UnsubscribePage';
 import ConsentBanner from './components/ConsentBanner';
 import { supabase } from './lib/supabaseClient';
 import useSessionStore from './store/useSessionStore';
+
+// Route-level loading keeps the editor, landing 3D scene, and account/legal
+// screens out of the initial app bundle until the visitor opens them.
+const HomePage = lazy(() => import('./pages/HomePage'));
+const EditorPage = lazy(() => import('./pages/EditorPage'));
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const AnalyzerPage = lazy(() => import('./pages/AnalyzerPage'));
+const DataPage = lazy(() => import('./pages/DataPage'));
+const GdprPage = lazy(() => import('./pages/GdprPage'));
+const AuthPage = lazy(() => import('./pages/AuthPage'));
+const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
+const SuccessPage = lazy(() => import('./pages/SuccessPage'));
+const CookiePolicyPage = lazy(() => import('./pages/CookiePolicyPage'));
+const UserStylePage = lazy(() => import('./pages/UserStylePage'));
+const AccountPage = lazy(() => import('./pages/AccountPage'));
+const TermsPage = lazy(() => import('./pages/TermsPage'));
+const LegalNoticePage = lazy(() => import('./pages/LegalNoticePage'));
+const UnsubscribePage = lazy(() => import('./pages/UnsubscribePage'));
 
 function App() {
     const { migrateSession } = useSessionStore();
@@ -43,35 +46,37 @@ function App() {
 
     return (
         <BrowserRouter>
-            <Routes>
-                <Route path="/"        element={<HomePage />} />
-                <Route path="/auth"    element={<AuthPage />} />
+            <Suspense fallback={null}>
+                <Routes>
+                    <Route path="/"        element={<HomePage />} />
+                    <Route path="/auth"    element={<AuthPage />} />
 
-                {/* Dashboard — authenticated users only (DashboardPage handles its own redirect) */}
-                <Route path="/dashboard" element={<DashboardPage />} />
+                    {/* Dashboard — authenticated users only (DashboardPage handles its own redirect) */}
+                    <Route path="/dashboard" element={<DashboardPage />} />
 
-                {/* Editor — /editor for new/anonymous, /editor/:projectId to open a saved project */}
-                <Route path="/editor"            element={<EditorPage />} />
-                <Route path="/editor/:projectId" element={<EditorPage />} />
+                    {/* Editor — /editor for new/anonymous, /editor/:projectId to open a saved project */}
+                    <Route path="/editor"            element={<EditorPage />} />
+                    <Route path="/editor/:projectId" element={<EditorPage />} />
 
-                <Route path="/analyzer" element={<AnalyzerPage />} />
+                    <Route path="/analyzer" element={<AnalyzerPage />} />
 
-                {/* "Your Style" — what the Editorial Brain has learned about this
+                    {/* "Your Style" — what the Editorial Brain has learned about this
                     user, plus the GDPR reset/export controls for that data. The
                     page was fully built but had no <Route> for it, so none of it
                     was reachable (see CLAUDE.md R37). */}
-                <Route path="/style"    element={<UserStylePage />} />
-                <Route path="/account"  element={<AccountPage />} />
+                    <Route path="/style"    element={<UserStylePage />} />
+                    <Route path="/account"  element={<AccountPage />} />
 
-                <Route path="/data"     element={<DataPage />} />
-                <Route path="/gdpr"     element={<GdprPage />} />
-                <Route path="/privacy"  element={<PrivacyPage />} />
-                <Route path="/success"       element={<SuccessPage />} />
-                <Route path="/cookie-policy" element={<CookiePolicyPage />} />
-                <Route path="/terms"         element={<TermsPage />} />
-                <Route path="/legal"         element={<LegalNoticePage />} />
-                <Route path="/unsubscribe"   element={<UnsubscribePage />} />
-            </Routes>
+                    <Route path="/data"     element={<DataPage />} />
+                    <Route path="/gdpr"     element={<GdprPage />} />
+                    <Route path="/privacy"  element={<PrivacyPage />} />
+                    <Route path="/success"       element={<SuccessPage />} />
+                    <Route path="/cookie-policy" element={<CookiePolicyPage />} />
+                    <Route path="/terms"         element={<TermsPage />} />
+                    <Route path="/legal"         element={<LegalNoticePage />} />
+                    <Route path="/unsubscribe"   element={<UnsubscribePage />} />
+                </Routes>
+            </Suspense>
             <ConsentBanner />
         </BrowserRouter>
     );

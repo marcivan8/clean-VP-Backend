@@ -18,8 +18,8 @@
  * DirectorIntelligence). Adapting instead means the engine is live the moment
  * one component calls it.
  *
- * PERSISTENCE CONTRACT: the three new clip fields this writes — `animations`,
- * `words`, `captionStyle` — must appear in BOTH `toLegacyTracks()` and
+ * PERSISTENCE CONTRACT: the motion fields this writes — `animations`,
+ * `expressions`, `motionPath`, `words`, `captionStyle` — must appear in BOTH `toLegacyTracks()` and
  * `fromLegacyTracks()` in TimelineStateManager.js. Those two hand-maintained
  * field lists are the real schema of this app; a field in one but not the
  * other silently vanishes on project reload. (`animation`, the legacy string,
@@ -175,9 +175,19 @@ export function clipToMotionLayer(clip, track) {
         x,
         y,
         scale:     Number.isFinite(Number(clip.scale)) ? Number(clip.scale) : 1,
+        scaleX:    Number.isFinite(Number(clip.scaleX)) ? Number(clip.scaleX) / (Number(clip.scale) || 1) : 1,
+        scaleY:    Number.isFinite(Number(clip.scaleY)) ? Number(clip.scaleY) / (Number(clip.scale) || 1) : 1,
         rotation:  Number.isFinite(Number(clip.rotation)) ? Number(clip.rotation) : 0,
         opacity:   Number.isFinite(Number(clip.opacity)) ? Number(clip.opacity) : 1,
         animations: resolveAnimations(clip),
+        motionPath: clip.motionPath && Array.isArray(clip.motionPath.points) ? clip.motionPath : null,
+        expressions: clip.expressions && typeof clip.expressions === 'object' ? clip.expressions : {},
+        expressionLayers: (Array.isArray(clip.compositionStack) ? clip.compositionStack : [])
+            .filter(group => group?.transformExpressions && typeof group.transformExpressions === 'object')
+            .map(group => ({ startTime: Number(group.start) || 0, duration: Number(group.duration) || 0,
+                originX: Number(group.originX) || 0, originY: Number(group.originY) || 0,
+                frameW: Number(group.frameW) || 1920, frameH: Number(group.frameH) || 1080,
+                expressions: group.transformExpressions })),
         words:     Array.isArray(clip.words) ? clip.words : null,
         content:   clip.content ?? clip.name ?? '',
         style: {
@@ -219,6 +229,8 @@ export function motionLayerToClipUpdates(layer) {
     if (Number.isFinite(layer.rotation))  updates.rotation = layer.rotation;
     if (Number.isFinite(layer.opacity))   updates.opacity = layer.opacity;
     if (Array.isArray(layer.animations))  updates.animations = layer.animations;
+    if (layer.motionPath === null || (layer.motionPath && Array.isArray(layer.motionPath.points))) updates.motionPath = layer.motionPath;
+    if (layer.expressions && typeof layer.expressions === 'object') updates.expressions = layer.expressions;
     if (Array.isArray(layer.words))       updates.words = layer.words;
     if (typeof layer.content === 'string') updates.content = layer.content;
 

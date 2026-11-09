@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 import useTimelineStore from '../store/useTimelineStore';
-import { listNodes, NODE_TYPES } from '../motion/SceneSchema.js';
+import { listNodes, NODE_TYPES, CONTAINER_TYPES } from '../motion/SceneSchema.js';
 import { validateScene, safeZoneForAspect, describeIssues } from '../motion/SceneValidator.js';
 import { authFetch } from '../utils/authFetch.js';
 import { captureReviewFrame } from '../motion/captureReviewFrame.js';
@@ -102,6 +102,7 @@ function waitForPreviewFrame(surface) {
 
 const ICONS = {
     [NODE_TYPES.GROUP]: Layers,
+    [NODE_TYPES.COMPOSITION]: Layers,
     [NODE_TYPES.TEXT]: Type,
     [NODE_TYPES.CAPTION]: Type,
     [NODE_TYPES.SHAPE]: Square,
@@ -114,7 +115,7 @@ const ICONS = {
 function LayerRow({ entry, sceneId, selectedId, onSelect, collapsed, onToggle, t }) {
     const { node, depth } = entry;
     const Icon = ICONS[node.type] || Square;
-    const isGroup = node.type === NODE_TYPES.GROUP;
+    const isGroup = CONTAINER_TYPES.includes(node.type);
     const isSelected = node.id === selectedId;
     const title = node.content ? String(node.content).slice(0, 40) : node.name;
 
@@ -134,6 +135,12 @@ function LayerRow({ entry, sceneId, selectedId, onSelect, collapsed, onToggle, t
             </button>
             {!isGroup && (
                 <>
+                    <button type="button"
+                        onClick={() => useTimelineStore.getState().precomposeSceneNode(sceneId, node.id)}
+                        aria-label={t('scenePanel.precompose')} title={t('scenePanel.precompose')}
+                        className="p-1 text-muted-foreground hover:text-primary">
+                        <Layers className="w-3 h-3" />
+                    </button>
                     <button type="button"
                         onClick={() => useTimelineStore.getState().setSceneNodeHidden(sceneId, node.id, !node.hidden)}
                         aria-label={node.hidden ? t('scenePanel.show') : t('scenePanel.hide')}
@@ -164,6 +171,11 @@ function NodeEditor({ sceneId, node, t }) {
         x: node.transform?.x ?? 50,
         y: node.transform?.y ?? 50,
         duration: node.duration ?? 0,
+        maskShape: node.mask?.kind === 'shape' ? node.mask.shape : 'none',
+        maskFeather: node.mask?.kind === 'shape' ? node.mask.feather ?? 0 : 0,
+        maskInvert: node.mask?.kind === 'shape' ? !!node.mask.invert : false,
+        blurShutterAngle: node.motionBlur?.shutterAngle ?? 180,
+        blurSamples: node.motionBlur?.samples ?? 5,
     });
     const [note, setNote] = useState('');
 
@@ -180,6 +192,10 @@ function NodeEditor({ sceneId, node, t }) {
     }, [sceneId, node.id, t]);
 
     const isText = node.type === NODE_TYPES.TEXT || node.type === NODE_TYPES.CAPTION;
+    const supportsMask = [NODE_TYPES.SHAPE, NODE_TYPES.IMAGE, NODE_TYPES.VIDEO, NODE_TYPES.STICKER].includes(node.type);
+    const supportsTemporalBlur = isText || (node.type === NODE_TYPES.SHAPE && !!(node.vector
+        || (node.template && node.template.kind !== '3d-scene')));
+    const motionBlur = node.motionBlur || { enabled: false, samples: 5, shutterAngle: 180 };
     /**
      * Commit a number only if one was actually typed. `Number('')` is 0, so an
      * emptied box would otherwise commit zero: a font size of 0 (an invisible
@@ -238,6 +254,83 @@ function NodeEditor({ sceneId, node, t }) {
                         onBlur={e => commitNumber(e.target.value, v => ({ duration: Math.max(0.1, v) }))} />
                 </label>
             </div>
+            {supportsTemporalBlur && (
+                <div className="space-y-2 border-t border-border/60 pt-2">
+                    <label className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                        <input type="checkbox" checked={!!motionBlur.enabled}
+                            onChange={event => commit({ motionBlur: { ...motionBlur, enabled: event.target.checked } })} />
+                        {t('scenePanel.temporalMotionBlur')}
+                    </label>
+                    {motionBlur.enabled && <div className="grid grid-cols-2 gap-2">
+                        <label className="block space-y-1">
+                            <span className={label}>{t('scenePanel.shutterAngle')}</span>
+                            <input className={field} type="number" min="0" max="360" step="15" value={draft.blurShutterAngle}
+                                onChange={event => setDraft(current => ({ ...current, blurShutterAngle: event.target.value }))}
+                                onBlur={event => commitNumber(event.target.value, value => {
+                                    const shutterAngle = Math.max(0, Math.min(360, value));
+                                    setDraft(current => ({ ...current, blurShutterAngle: shutterAngle }));
+                                    return { motionBlur: { ...motionBlur, shutterAngle } };
+                                })} />
+                        </label>
+                        <label className="block space-y-1">
+                            <span className={label}>{t('scenePanel.blurSamples')}</span>
+                            <input className={field} type="number" min="2" max="15" step="1" value={draft.blurSamples}
+                                onChange={event => setDraft(current => ({ ...current, blurSamples: event.target.value }))}
+                                onBlur={event => commitNumber(event.target.value, value => {
+                                    const samples = Math.max(2, Math.min(15, Math.round(value)));
+                                    setDraft(current => ({ ...current, blurSamples: samples }));
+                                    return { motionBlur: { ...motionBlur, samples } };
+                                })} />
+                        </label>
+                    </div>}
+                </div>
+            )}
+            {supportsMask && (
+                <div className="grid grid-cols-2 gap-2 border-t border-border/60 pt-2">
+                    <label className="block space-y-1">
+                        <span className={label}>{t('scenePanel.mask')}</span>
+                        <select className={field} value={draft.maskShape}
+                            onChange={event => {
+                                const shape = event.target.value;
+                                setDraft(current => ({ ...current, maskShape: shape }));
+                                commit(shape === 'none' ? { mask: null } : { mask: {
+                                    ...(node.mask?.kind === 'shape' ? node.mask : {}), kind: 'shape', shape,
+                                    feather: Number(draft.maskFeather) || 0, invert: draft.maskInvert,
+                                } });
+                            }}>
+                            <option value="none">{t('scenePanel.maskNone')}</option>
+                            {['circle', 'ellipse', 'rectangle', 'rounded-rectangle', 'polygon', 'star', 'arrow'].map(shape => (
+                                <option key={shape} value={shape}>{t(`scenePanel.mask_${shape}`)}</option>
+                            ))}
+                        </select>
+                    </label>
+                    {draft.maskShape !== 'none' && (
+                        <label className="block space-y-1">
+                            <span className={label}>{t('scenePanel.maskFeather')}</span>
+                            <input className={field} type="number" min="0" max="0.25" step="0.01" value={draft.maskFeather}
+                                onChange={event => setDraft(current => ({ ...current, maskFeather: event.target.value }))}
+                                onBlur={event => commitNumber(event.target.value, value => {
+                                    const feather = Math.max(0, Math.min(0.25, value));
+                                    setDraft(current => ({ ...current, maskFeather: feather }));
+                                    return { mask: { ...(node.mask?.kind === 'shape' ? node.mask : {}),
+                                        kind: 'shape', shape: draft.maskShape, feather, invert: draft.maskInvert } };
+                                })} />
+                        </label>
+                    )}
+                    {draft.maskShape !== 'none' && (
+                        <label className="col-span-2 flex items-center gap-2 text-[10px] text-muted-foreground">
+                            <input type="checkbox" checked={draft.maskInvert}
+                                onChange={event => {
+                                    const invert = event.target.checked;
+                                    setDraft(current => ({ ...current, maskInvert: invert }));
+                                    commit({ mask: { ...(node.mask?.kind === 'shape' ? node.mask : {}), kind: 'shape',
+                                        shape: draft.maskShape, feather: Number(draft.maskFeather) || 0, invert } });
+                                }} />
+                            {t('scenePanel.maskInvert')}
+                        </label>
+                    )}
+                </div>
+            )}
             {note && <p className="text-[10px] text-amber-400">{note}</p>}
         </div>
     );
@@ -317,7 +410,7 @@ export default function ScenePanel() {
         const wasPlaying = store.isPlaying;
         try {
             if (wasPlaying) store.setIsPlaying(false);
-            const beatGroups = (scene.nodes || []).filter(node => node?.type === 'group' && node.duration > 0).slice(0, 8);
+            const beatGroups = (scene.nodes || []).filter(node => CONTAINER_TYPES.includes(node?.type) && node.duration > 0).slice(0, 8);
             const samples = (beatGroups.length ? beatGroups.map((group, index) => ({
                 beat: Number.isFinite(Number(group.origin?.index)) ? Number(group.origin.index) + 1 : index + 1,
                 label: group.name || group.origin?.beat || t('scenePanel.title'),
@@ -490,8 +583,8 @@ export default function ScenePanel() {
                         ))}
                     </div>
 
-                    {selected && selected.type !== NODE_TYPES.GROUP && (
-                        <NodeEditor key={`${sceneId}:${selected.id}:${selected.content}:${selected.style?.fontSize}:${selected.transform?.x}:${selected.transform?.y}:${selected.duration}`}
+                    {selected && !CONTAINER_TYPES.includes(selected.type) && (
+                        <NodeEditor key={`${sceneId}:${selected.id}:${selected.content}:${selected.style?.fontSize}:${selected.transform?.x}:${selected.transform?.y}:${selected.duration}:${selected.motionBlur?.enabled}:${selected.motionBlur?.samples}:${selected.motionBlur?.shutterAngle}`}
                             sceneId={sceneId} node={selected} t={t} />
                     )}
 

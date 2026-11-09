@@ -9,31 +9,8 @@
 // ============================================================================
 // EASING FUNCTIONS
 // ============================================================================
-
-const EASING_FUNCTIONS = {
-    linear: t => t,
-    easeIn: t => t * t,
-    easeOut: t => t * (2 - t),
-    easeInOut: t => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t,
-    easeInCubic: t => t * t * t,
-    easeOutCubic: t => (--t) * t * t + 1,
-    easeInOutCubic: t => t < 0.5 ? 4 * t * t * t : (t - 1) * (2 * t - 2) * (2 * t - 2) + 1,
-    easeInQuart: t => t * t * t * t,
-    easeOutQuart: t => 1 - (--t) * t * t * t,
-    easeInOutQuart: t => t < 0.5 ? 8 * t * t * t * t : 1 - 8 * (--t) * t * t * t,
-    bounce: t => {
-        const n1 = 7.5625;
-        const d1 = 2.75;
-        if (t < 1 / d1) return n1 * t * t;
-        if (t < 2 / d1) return n1 * (t -= 1.5 / d1) * t + 0.75;
-        if (t < 2.5 / d1) return n1 * (t -= 2.25 / d1) * t + 0.9375;
-        return n1 * (t -= 2.625 / d1) * t + 0.984375;
-    },
-    elastic: t => {
-        if (t === 0 || t === 1) return t;
-        return Math.pow(2, -10 * t) * Math.sin((t - 0.1) * 5 * Math.PI) + 1;
-    }
-};
+import { resolveEasing } from '../motion/Easing.js';
+import { resolveEffectParameter } from '../motion/EffectTiming.js';
 
 // ============================================================================
 // ENGINE TYPES
@@ -61,6 +38,18 @@ export const PARAM_TYPES = {
     FILE: 'file',        // File path (e.g., LUT)
     CURVE: 'curve'       // Bezier curve points
 };
+
+function isFiniteEffectValue(value) {
+    return (typeof value === 'number' && Number.isFinite(value))
+        || typeof value === 'boolean'
+        || typeof value === 'string'
+        || (Array.isArray(value) && value.length > 0 && value.every(item => Number.isFinite(item)));
+}
+
+function isRecoverableEffectTrackValue(value) {
+    return isFiniteEffectValue(value)
+        || (Array.isArray(value) && value.length > 0 && value.some(item => Number.isFinite(item)));
+}
 
 // ============================================================================
 // EFFECT NODE CLASS
@@ -92,6 +81,12 @@ export class EffectNode {
         // === Parameters ===
         // Format: { paramName: { value, min, max, type, options?, step? } }
         this.params = this._normalizeParams(config.params || {});
+        this.expressions = { ...(config.expressions || {}) };
+        for (const [key, param] of Object.entries(this.params)) {
+            if (typeof param.expression === 'string' && !this.expressions[key]) {
+                this.expressions[key] = param.expression;
+            }
+        }
 
         // === Keyframes ===
         // Format: { paramName: [{ time, value, easing }] }
@@ -122,7 +117,8 @@ export class EffectNode {
                     type: value.type || PARAM_TYPES.FLOAT,
                     options: value.options || null,
                     step: value.step || null,
-                    label: value.label || key
+                    label: value.label || key,
+                    ...(typeof value.expression === 'string' ? { expression: value.expression } : {})
                 };
             } else {
                 // Simple value, wrap it
@@ -151,6 +147,7 @@ export class EffectNode {
      * Set param value
      */
     setParam(paramName, value) {
+        if (!isFiniteEffectValue(value)) return false;
         if (this.params[paramName]) {
             const param = this.params[paramName];
             // Clamp to min/max if numeric
@@ -158,7 +155,9 @@ export class EffectNode {
                 value = Math.max(param.min, Math.min(param.max, value));
             }
             this.params[paramName].value = value;
+            return true;
         }
+        return false;
     }
 
     /**
@@ -191,16 +190,30 @@ export class EffectNode {
             return baseValue;
         }
 
-        // Sort keyframes by time
-        const sorted = [...keyframes].sort((a, b) => a.time - b.time);
+        // Ignore malformed keys and keep author order stable. When multiple
+        // keys share a timestamp, the later-authored key wins, matching the
+        // canonical motion resolver and avoiding zero-width interpolation.
+        const sorted = keyframes.map((keyframe, index) => ({ keyframe, index, time: Number(keyframe?.time) }))
+            .filter(entry => Number.isFinite(entry.time) && isRecoverableEffectTrackValue(entry.keyframe?.value))
+            .sort((a, b) => a.time - b.time || a.index - b.index)
+            .reduce((unique, entry) => {
+                if (unique.at(-1)?.time === entry.time) unique[unique.length - 1] = entry;
+                else unique.push(entry);
+                return unique;
+            }, [])
+            .map(entry => ({ ...entry.keyframe, time: entry.time }));
+        if (!sorted.length) return baseValue;
+
+        const sampleTime = Number(time);
+        if (!Number.isFinite(sampleTime)) return baseValue;
 
         // Before first keyframe
-        if (time <= sorted[0].time) {
+        if (sampleTime <= sorted[0].time) {
             return sorted[0].value;
         }
 
         // After last keyframe
-        if (time >= sorted[sorted.length - 1].time) {
+        if (sampleTime >= sorted[sorted.length - 1].time) {
             return sorted[sorted.length - 1].value;
         }
 
@@ -209,7 +222,7 @@ export class EffectNode {
         let toKf = sorted[1];
 
         for (let i = 0; i < sorted.length - 1; i++) {
-            if (time >= sorted[i].time && time < sorted[i + 1].time) {
+            if (sampleTime >= sorted[i].time && sampleTime < sorted[i + 1].time) {
                 fromKf = sorted[i];
                 toKf = sorted[i + 1];
                 break;
@@ -218,10 +231,10 @@ export class EffectNode {
 
         // Calculate progress between keyframes
         const duration = toKf.time - fromKf.time;
-        const progress = duration > 0 ? (time - fromKf.time) / duration : 0;
+        const progress = duration > 0 ? (sampleTime - fromKf.time) / duration : 0;
 
         // Apply easing
-        const easing = EASING_FUNCTIONS[toKf.easing] || EASING_FUNCTIONS.linear;
+        const easing = resolveEasing(toKf.easing || 'linear');
         const easedProgress = easing(progress);
 
         // Interpolate value
@@ -232,14 +245,36 @@ export class EffectNode {
      * Interpolate between two values
      */
     _interpolateValue(from, to, t) {
-        // Number interpolation
-        if (typeof from === 'number' && typeof to === 'number') {
+        // Interpolate only finite numeric scalars. Malformed values should not
+        // turn a valid effect into NaN and disappear from the preview/export.
+        if (typeof from === 'number' && Number.isFinite(from)
+            && typeof to === 'number' && Number.isFinite(to)) {
             return from + (to - from) * t;
         }
 
-        // Array interpolation (colors, vectors)
+        // Array interpolation (colors, vectors) is only meaningful when both
+        // keyframes describe the same dimensional value. For example, a
+        // 3-channel color cannot be interpolated against a 4-channel color
+        // without inventing alpha semantics; use the nearer authored value.
         if (Array.isArray(from) && Array.isArray(to)) {
-            return from.map((v, i) => v + (to[i] - v) * t);
+            if (from.length === to.length && from.every(Number.isFinite) && to.every(Number.isFinite)) {
+                return from.map((value, index) => value + (to[index] - value) * t);
+            }
+            // The shared motion sampler holds the nearest authored vector
+            // when dimensions differ. Do the same here: padding a shorter
+            // color/vector with channels from the other keyframe invents a
+            // value that exists nowhere in the authored track.
+            if (from.every(Number.isFinite) && to.every(Number.isFinite) && from.length !== to.length) {
+                return t < 0.5 ? from : to;
+            }
+            const preferred = t < 0.5 ? from : to;
+            const fallback = t < 0.5 ? to : from;
+            const length = Math.max(preferred.length, fallback.length);
+            return Array.from({ length }, (_, index) => (
+                Number.isFinite(preferred[index]) ? preferred[index]
+                    : Number.isFinite(fallback[index]) ? fallback[index]
+                        : 0
+            ));
         }
 
         // Boolean - just switch at 0.5
@@ -254,10 +289,24 @@ export class EffectNode {
     /**
      * Get all params interpolated at time
      */
-    getParamsAt(time) {
+    getParamsAt(time, context = {}) {
         const result = {};
         for (const paramName of Object.keys(this.params)) {
-            result[paramName] = this.getParamAt(paramName, time);
+            const keyed = this.getParamAt(paramName, time);
+            const expression = this.expressions[paramName] || this.params[paramName]?.expression;
+            if (typeof expression !== 'string' || !expression.trim()) {
+                result[paramName] = keyed;
+                continue;
+            }
+            result[paramName] = resolveEffectParameter({
+                params: { [paramName]: { value: this.getParam(paramName), expression } },
+                expressions: { [paramName]: expression },
+                keyframes: { [paramName]: this.keyframes[paramName] || [] },
+            }, paramName, this.getParam(paramName), time, {
+                ...context,
+                clipStart: context.clipStart ?? context.placement?.startTime ?? context.placement?.start ?? 0,
+                clipDuration: context.clipDuration ?? context.placement?.duration,
+            });
         }
         return result;
     }
@@ -270,18 +319,25 @@ export class EffectNode {
      * Add a keyframe
      */
     addKeyframe(paramName, time, value, easing = 'linear') {
+        const normalizedTime = Number(time);
+        if (!paramName || !Number.isFinite(normalizedTime) || normalizedTime < 0 || !isFiniteEffectValue(value)) {
+            return false;
+        }
+
         if (!this.keyframes[paramName]) {
             this.keyframes[paramName] = [];
         }
 
-        // Remove existing keyframe at same time
-        this.keyframes[paramName] = this.keyframes[paramName].filter(kf => kf.time !== time);
+        // Normalize timestamps before comparing so imported numeric strings and
+        // editor-authored numbers replace the same point in the track.
+        this.keyframes[paramName] = this.keyframes[paramName]
+            .filter(kf => Number.isFinite(Number(kf?.time)) && Number(kf.time) !== normalizedTime)
+            .map(kf => ({ ...kf, time: Number(kf.time) }));
 
-        // Add new keyframe
-        this.keyframes[paramName].push({ time, value, easing });
+        this.keyframes[paramName].push({ time: normalizedTime, value, easing });
 
-        // Sort by time
         this.keyframes[paramName].sort((a, b) => a.time - b.time);
+        return true;
     }
 
     /**
@@ -289,8 +345,13 @@ export class EffectNode {
      */
     removeKeyframe(paramName, time) {
         if (this.keyframes[paramName]) {
-            this.keyframes[paramName] = this.keyframes[paramName].filter(kf => kf.time !== time);
+            const normalizedTime = Number(time);
+            if (!Number.isFinite(normalizedTime)) return false;
+            this.keyframes[paramName] = this.keyframes[paramName]
+                .filter(kf => Number(kf?.time) !== normalizedTime);
+            return true;
         }
+        return false;
     }
 
     /**
@@ -362,7 +423,7 @@ export class EffectNode {
      * @param {object} context - Processing context
      * @returns {Promise<*>} Processed output
      */
-    async process(input, context) {
+    async process(_input, _context) {
         throw new Error(`process() not implemented for effect type: ${this.type}`);
     }
 
@@ -376,7 +437,7 @@ export class EffectNode {
     /**
      * Get FFmpeg filter string (for CPU effects)
      */
-    getFFmpegFilter(context) {
+    getFFmpegFilter(_context) {
         return null;
     }
 
@@ -400,6 +461,7 @@ export class EffectNode {
             startTime: this.startTime,
             endTime: this.endTime,
             params: this.params,
+            expressions: this.expressions,
             keyframes: this.keyframes,
             createdAt: this.createdAt,
             metadata: this.metadata

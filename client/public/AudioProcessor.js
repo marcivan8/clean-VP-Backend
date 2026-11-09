@@ -10,6 +10,7 @@ class RingBuffer {
         this.buffer = new Float32Array(capacity);
         this.writePtr = 0;
         this.readPtr = 0;
+        this.readFraction = 0;
         this.available = 0;
     }
 
@@ -42,32 +43,47 @@ class RingBuffer {
 
     // Read `count` samples into `output` array (accumulate mode)
     // output[i] += sample * volume
-    mixInto(output, count, volume) {
-        if (this.available < count) {
-            // Underrun! Not enough data. 
-            // We mix what we have, or nothing?
-            // Silence for missing parts.
-            return false; // Underrun
-        }
-
-        let readIdx = this.readPtr;
-
+    mixInto(output, count, volume, rate = 1) {
+        const step = Math.max(0.1, Math.min(4, Number(rate) || 1));
+        let phase = this.readFraction;
+        let mixed = false;
         for (let i = 0; i < count; i++) {
-            const sample = this.buffer[readIdx];
+            const base = Math.floor(phase);
+            if (base >= this.available) break;
+            const firstIndex = (this.readPtr + base) % this.capacity;
+            const secondIndex = base + 1 < this.available ? (firstIndex + 1) % this.capacity : firstIndex;
+            const fraction = phase - base;
+            const sample = this.buffer[firstIndex] * (1 - fraction) + this.buffer[secondIndex] * fraction;
             output[i] += sample * volume;
-
-            readIdx++;
-            if (readIdx >= this.capacity) readIdx = 0;
+            phase += step;
+            mixed = true;
         }
+        const availableBeforeRead = this.available;
+        const consumed = Math.min(availableBeforeRead, Math.floor(phase));
+        this.readPtr = (this.readPtr + consumed) % this.capacity;
+        this.available = availableBeforeRead - consumed;
+        this.readFraction = consumed >= availableBeforeRead ? 0 : phase - consumed;
+        return mixed;
+    }
 
-        this.readPtr = readIdx;
-        this.available -= count;
-        return true;
+    sampleAt(offset) {
+        const index = Math.trunc(offset);
+        if (index < 0 || index >= this.available) return 0;
+        return this.buffer[(this.readPtr + index) % this.capacity];
+    }
+
+    discard(count) {
+        const consumed = Math.max(0, Math.min(this.available, Math.trunc(count)));
+        this.readPtr = (this.readPtr + consumed) % this.capacity;
+        this.available -= consumed;
+        this.readFraction = 0;
+        return consumed;
     }
 
     clear() {
         this.writePtr = 0;
         this.readPtr = 0;
+        this.readFraction = 0;
         this.available = 0;
     }
 }
@@ -101,6 +117,9 @@ class AudioProcessor extends AudioWorkletProcessor {
                     muted: false,
                     solo: false,
                     isPlaying: true,
+                    playbackRate: 1,
+                    maintainPitch: true,
+                    pitchStretch: null,
                     rms: 0,
                     // Effects State
                     denoise: false,
@@ -129,6 +148,14 @@ class AudioProcessor extends AudioWorkletProcessor {
                 }
                 break;
 
+            case 'SET_PLAYBACK_RATE':
+                if (this.tracks.has(payload.trackId)) {
+                    const track = this.tracks.get(payload.trackId);
+                    track.playbackRate = Math.max(0.1, Math.min(4, Number(payload.rate) || 1));
+                    if (payload.maintainPitch !== undefined) track.maintainPitch = payload.maintainPitch !== false;
+                }
+                break;
+
             case 'SET_EFFECTS':
                 // payload: { trackId, denoise, enhance }
                 if (this.tracks.has(payload.trackId)) {
@@ -151,13 +178,108 @@ class AudioProcessor extends AudioWorkletProcessor {
                 break;
 
             case 'CLEAR_BUFFERS':
-                this.tracks.forEach(t => t.buffer.clear());
+                this.tracks.forEach(t => {
+                    t.buffer.clear();
+                    t.pitchStretch = null;
+                });
                 break;
 
             case 'REMOVE_TRACK':
                 this.tracks.delete(payload.trackId);
                 break;
         }
+    }
+
+    mixPitchPreservedInto(trackData, output, count, rate) {
+        const hopSize = Math.max(256, Math.round((globalThis.sampleRate || 48000) * 0.01));
+        const windowSize = hopSize * 2;
+        const searchRadius = Math.max(16, Math.round((globalThis.sampleRate || 48000) * 0.005));
+        let state = trackData.pitchStretch;
+        if (!state || state.hopSize !== hopSize) {
+            state = trackData.pitchStretch = {
+                hopSize,
+                windowSize,
+                searchRadius,
+                tail: new Float32Array(hopSize),
+                grain: new Float32Array(windowSize),
+                hop: new Float32Array(hopSize),
+                hopOffset: hopSize,
+                initialized: false,
+                firstOverlap: true,
+                lastRate: rate,
+            };
+        }
+
+        const generateHop = () => {
+            const { buffer } = trackData;
+            const H = state.hopSize;
+            const W = state.windowSize;
+            const S = state.searchRadius;
+            if (!state.initialized) {
+                if (buffer.available < W) return false;
+                for (let i = 0; i < W; i++) state.grain[i] = buffer.sampleAt(i);
+                state.hop.set(state.grain.subarray(0, H));
+                state.tail.set(state.grain.subarray(H, W));
+                state.initialized = true;
+                state.firstOverlap = true;
+                state.lastRate = rate;
+                state.hopOffset = 0;
+                return true;
+            }
+
+            const predicted = state.firstOverlap
+                ? rate * H
+                : Math.max(0, S + (rate - state.lastRate) * H);
+            const minStart = Math.max(0, Math.floor(predicted - S));
+            const maxStart = Math.max(minStart, Math.ceil(predicted + S));
+            if (buffer.available < maxStart + W) return false;
+
+            // WSOLA: align the next grain to the prior overlap, then crossfade
+            // a 10ms hop. Coarse search plus local refinement keeps the audio
+            // thread bounded while retaining a stable waveform phase.
+            let bestStart = minStart;
+            let bestScore = -Infinity;
+            for (let start = minStart; start <= maxStart; start += 8) {
+                let score = 0;
+                for (let i = 0; i < H; i += 8) score += state.tail[i] * buffer.sampleAt(start + i);
+                if (score > bestScore) { bestScore = score; bestStart = start; }
+            }
+            const coarseStart = bestStart;
+            const refineStart = Math.max(minStart, coarseStart - 7);
+            const refineEnd = Math.min(maxStart, coarseStart + 7);
+            for (let start = refineStart; start <= refineEnd; start++) {
+                let score = 0;
+                for (let i = 0; i < H; i += 4) score += state.tail[i] * buffer.sampleAt(start + i);
+                if (score > bestScore) { bestScore = score; bestStart = start; }
+            }
+
+            for (let i = 0; i < H; i++) {
+                const mix = i / Math.max(1, H - 1);
+                state.hop[i] = state.tail[i] * (1 - mix) + buffer.sampleAt(bestStart + i) * mix;
+                state.tail[i] = buffer.sampleAt(bestStart + H + i);
+            }
+            const advance = Math.max(1, Math.round(rate * H));
+            // Keep a search window before the next predicted grain so WSOLA
+            // can align in either direction without reading consumed samples.
+            buffer.discard(Math.max(0, bestStart + advance - S));
+            state.firstOverlap = false;
+            state.lastRate = rate;
+            state.hopOffset = 0;
+            return true;
+        };
+
+        let mixed = false;
+        let written = 0;
+        while (written < count) {
+            if (state.hopOffset >= state.hopSize && !generateHop()) break;
+            const available = state.hopSize - state.hopOffset;
+            const take = Math.min(count - written, available);
+            for (let i = 0; i < take; i++) output[written + i] += state.hop[state.hopOffset + i];
+            state.hopOffset += take;
+            written += take;
+            mixed = true;
+        }
+        return mixed;
     }
 
     process(inputs, outputs, parameters) {
@@ -214,7 +336,13 @@ class AudioProcessor extends AudioWorkletProcessor {
             // HACK: Re-use channelR as scratch if mono? No.
             // Let's just create one.
             const scratch = new Float32Array(bufferSize);
-            const dataAvailable = trackData.buffer.mixInto(scratch, bufferSize, 1.0); // Extract raw
+            let dataAvailable;
+            if (trackData.maintainPitch && Math.abs(trackData.playbackRate - 1) > 0.001) {
+                dataAvailable = this.mixPitchPreservedInto(trackData, scratch, bufferSize, trackData.playbackRate);
+            } else {
+                trackData.pitchStretch = null;
+                dataAvailable = trackData.buffer.mixInto(scratch, bufferSize, 1.0, trackData.playbackRate);
+            }
 
             if (dataAvailable) {
                 // --- EFFECTS CHAIN ---

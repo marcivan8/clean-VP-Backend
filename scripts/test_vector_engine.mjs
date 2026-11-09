@@ -3,6 +3,7 @@
 // Run: node scripts/test_vector_engine.mjs
 
 import assert from 'assert/strict';
+import Canvas from '@napi-rs/canvas';
 import {
     tokenizePath,
     parseSvgPath,
@@ -14,8 +15,28 @@ import {
     drawCapsule,
     resolveGradient,
     applyTrimPath,
+    vectorMatteDataUrl,
     drawVectorGraphic,
 } from '../client/src/motion/VectorGraphics.js';
+
+for (const [kind, vector, expected] of [
+    ['polygon', { kind: 'polygon', sides: 6 }, '<polygon'],
+    ['star', { kind: 'star', points: 7 }, '<polygon'],
+    ['arrow', { kind: 'arrow' }, '<path'],
+    ['custom path', { kind: 'path', pathData: 'M0 0 L100 0 L50 100 Z' }, '<path'],
+]) {
+    const url = vectorMatteDataUrl({ ...vector, w: 100, h: 100 });
+    assert.ok(url?.startsWith('data:image/svg+xml,'), `${kind} matte returns an SVG data URL`);
+    assert.ok(decodeURIComponent(url.split(',')[1]).includes(expected), `${kind} matte contains the expected SVG geometry`);
+}
+const escapedMatte = decodeURIComponent(vectorMatteDataUrl({ kind: 'path', pathData: 'M0 0"/><script>alert(1)</script>' }).split(',')[1]);
+assert.ok(escapedMatte.includes('&quot;') && !escapedMatte.includes('<script>'), 'custom path data cannot inject SVG elements into the matte');
+assert.equal(vectorMatteDataUrl({ kind: 'unsupported-shape' }), null, 'unknown vector mattes fail closed');
+assert.deepEqual(parseSvgPath('M0 0 Z 1 2'), [{ type: 'M', args: [0, 0] }, { type: 'Z', args: [] }],
+    'stray numbers after close-path are ignored instead of reusing Z indefinitely');
+assert.deepEqual(parseSvgPath('M0 0 C1 2 nope 4 5 6 L7 8'), [
+    { type: 'M', args: [0, 0] }, { type: 'L', args: [7, 8] },
+], 'malformed or non-finite command arguments are skipped without creating invalid geometry');
 
 import {
     normalizeRuns,
@@ -56,6 +77,8 @@ console.log('✓ SVG path tokenizes and parses M, L, C, Q, Z commands accurately
 
 // 1.2 Path execution on mock canvas context
 const ops = [];
+let activeDash = [7, 3];
+let strokeDash = null;
 const mockCtx = {
     beginPath: () => ops.push('beginPath'),
     moveTo: (x, y) => ops.push(`moveTo(${x},${y})`),
@@ -64,15 +87,18 @@ const mockCtx = {
     quadraticCurveTo: (cx, cy, x, y) => ops.push(`quadraticCurveTo(${x},${y})`),
     arcTo: (x1, y1, x2, y2, r) => ops.push(`arcTo(${r})`),
     arc: (x, y, r, sa, ea) => ops.push(`arc(${r})`),
+    ellipse: (x, y, rx, ry, rotation, start, end, anticlockwise) => ops.push(`ellipse(${rx},${ry},${anticlockwise})`),
     closePath: () => ops.push('closePath'),
     fill: () => ops.push('fill'),
-    stroke: () => ops.push('stroke'),
+    stroke: () => { strokeDash = [...activeDash]; ops.push('stroke'); },
     save: () => ops.push('save'),
     restore: () => ops.push('restore'),
     translate: (x, y) => ops.push(`translate(${x},${y})`),
     rotate: (r) => ops.push(`rotate(${r})`),
     scale: (sx, sy) => ops.push(`scale(${sx},${sy})`),
-    setLineDash: (d) => ops.push(`setLineDash([${d.join(',')}])`),
+    setLineDash: (d) => { activeDash = [...d]; ops.push(`setLineDash([${d.join(',')}])`); },
+    setTransform: () => {},
+    clearRect: () => {},
     createLinearGradient: () => ({ addColorStop: () => {} }),
     createRadialGradient: () => ({ addColorStop: () => {} }),
     globalAlpha: 1,
@@ -88,6 +114,29 @@ assert.ok(ops.includes('bezierCurveTo(90,100)'));
 assert.ok(ops.includes('quadraticCurveTo(130,140)'));
 assert.ok(ops.includes('closePath'));
 console.log('✓ drawSvgPath executes normalized canvas drawing calls');
+
+const gradientStops = [];
+const safeGradientCtx = {
+    createLinearGradient: () => ({ addColorStop: (offset, color) => {
+        if (color === 'not-a-colour') throw new Error('Invalid color');
+        gradientStops.push([offset, color]);
+    } }),
+};
+const safeGradient = resolveGradient(safeGradientCtx, { type: 'linear', stops: [
+    { offset: 0.8, color: '#0000FF' }, { offset: -2, color: '#FFFFFF' },
+    { offset: 0.2, color: '#00FF00' }, { offset: 0.5, color: 'not-a-colour' },
+] });
+assert.ok(safeGradient, 'valid gradient stops survive malformed neighbors');
+assert.deepEqual(gradientStops.map(([offset]) => offset), [0, 0.2, 0.8], 'gradient stops are clamped and sorted before Canvas receives them');
+assert.equal(resolveGradient({ createLinearGradient: () => { throw new Error('Invalid geometry'); } }, {
+    type: 'linear', color: '#123456', x0: NaN,
+}), '#123456', 'invalid gradient geometry degrades to its configured solid color');
+console.log('✓ Gradient stops are normalized and invalid vector gradients fail soft');
+
+ops.length = 0;
+drawSvgPath(mockCtx, 'M 0 0 A 10 6 25 0 1 24 8');
+assert.ok(ops.some(op => op.startsWith('ellipse(')), 'SVG elliptical arcs must render as curves, not diagonal chords');
+console.log('✓ SVG endpoint arcs render as elliptical curves');
 
 // 1.3 Parametric Shapes
 ops.length = 0;
@@ -123,8 +172,21 @@ drawVectorGraphic(mockCtx, {
     blendMode: 'multiply',
 });
 assert.ok(ops.includes('fill') && ops.includes('stroke'));
+assert.deepEqual(strokeDash, [], 'ordinary vector strokes clear inherited dash state before drawing');
 assert.equal(mockCtx.globalCompositeOperation, 'multiply');
 console.log('✓ drawVectorGraphic coordinates transforms, blend modes, fill and stroke');
+
+const additiveCanvas = Canvas.createCanvas(8, 8);
+const additiveCtx = additiveCanvas.getContext('2d');
+additiveCtx.fillStyle = '#808080';
+additiveCtx.fillRect(0, 0, 8, 8);
+drawVectorGraphic(additiveCtx, {
+    kind: 'rect', x: 0, y: 0, w: 8, h: 8, fill: '#808080', opacity: 0.75, blendMode: 'addition',
+});
+const additivePixel = additiveCtx.getImageData(4, 4, 1, 1).data;
+assert.ok(additivePixel[0] >= 210 && additivePixel[1] >= 210 && additivePixel[2] >= 210,
+    `addition blend mode performs additive vector compositing in Canvas preview (pixel ${[...additivePixel].join(',')})`);
+console.log('✓ vector addition blend mode maps to Canvas lighter compositing');
 
 console.log('\n── 2. Advanced Typography & Multi-Run Rich Text ──');
 
@@ -203,6 +265,7 @@ const scene = createScene({
 const vectorNode = createNode(NODE_TYPES.SHAPE, {
     name: 'Badge Container',
     duration: 4.5,
+    mask: { kind: 'shape', shape: 'ellipse', x: 0.1, y: 0.2, w: 0.3, h: 0.4 },
     vector: {
         kind: 'capsule',
         w: 360,
@@ -214,7 +277,7 @@ const vectorNode = createNode(NODE_TYPES.SHAPE, {
         },
         stroke: '#FFE500',
         strokeWidth: 3,
-        blendMode: 'source-over',
+        blendMode: 'multiply',
     },
 });
 
@@ -246,11 +309,13 @@ assert.equal(flattened.placements.length, 2);
 const vectorPlacement = flattened.placements.find(p => p.clip.type === 'vector');
 assert.ok(vectorPlacement, 'Vector shape flattened into overlay track clip with type="vector"');
 assert.equal(vectorPlacement.clip.vector.kind, 'capsule');
+assert.deepEqual(vectorPlacement.clip.sceneMask, vectorNode.mask, 'vector shape masks survive scene flattening for preview and export');
+assert.equal(vectorPlacement.clip.blendMode, 'multiply', 'vector blend mode reaches the shared compositor layer');
 
-const textPlacement = flattened.placements.find(p => p.trackType === 'text');
-assert.ok(textPlacement, 'Text flattened into text track clip with runs preserved');
-assert.equal(textPlacement.clip.runs.length, 2);
-assert.equal(textPlacement.clip.charAnim.preset, 'slideUp');
+const textPlacement = flattened.placements.find(p => p.clip.template?.kind === 'rich-text');
+assert.ok(textPlacement, 'Animated multi-run text flattened into the shared rich-text renderer');
+assert.equal(textPlacement.clip.template.params.runs.length, 2);
+assert.equal(textPlacement.clip.template.params.charAnim.preset, 'slideUp');
 console.log('✓ flattenScene preserves vector specs and rich text runs for renderers');
 
 console.log('\n── 4. Server-Side Export Parity (TemplateRenderer) ──');

@@ -14,6 +14,8 @@ if (typeof globalThis.localStorage === 'undefined') {
 }
 
 import assert from 'assert';
+import { register } from 'node:module';
+register('./lib/clientLoaderHooks.mjs', import.meta.url);
 import { execSync } from 'child_process';
 import ffmpegPath from 'ffmpeg-static';
 
@@ -147,6 +149,15 @@ test('matteFilterGraph incorporates sandwich layer filter when provided', () => 
     const joined = graph.join(';');
     assert.ok(joined.includes('KINETIC HEADLINE'), 'Sandwich filter text is included in pipeline');
     assert.ok(joined.includes('[bg_raw]drawtext'), 'Draws onto background plate before foreground composite');
+});
+
+test('matteFilterGraph applies footage effects after compositing the subject and background', () => {
+    const graph = matteFilterGraph(
+        { mode: 'blur', blur: 18 },
+        { width: 320, height: 240, outputFilter: 'eq=contrast=1.2:eval=frame' },
+    );
+    assert.ok(graph.at(-1).includes('overlay=0:0:shortest=1,format=yuv420p,eq=contrast=1.2:eval=frame[outv]'),
+        'clip footage effects grade the completed matte composite');
 });
 
 test('FFmpeg executes real filter graph for rack-focus & dim-spotlight', () => {

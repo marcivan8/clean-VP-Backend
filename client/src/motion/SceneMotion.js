@@ -34,6 +34,7 @@ import { sampleAnimation } from './MotionResolver.js';
 import { sanitizeAnimations, LIMITS } from './MotionComposer.js';
 import { createAnimation, createKeyframe, ANIMATION_TYPES } from './MotionSchema.js';
 import { pointsToBezierSpline } from './SpatialMotion.js';
+import { resolveEasing } from './Easing.js';
 
 /** How a stagger walks the children of a group. */
 export const STAGGER_ORDERS = ['forward', 'reverse', 'centre', 'edges'];
@@ -42,7 +43,10 @@ export const STAGGER_ORDERS = ['forward', 'reverse', 'centre', 'edges'];
 export const REPEAT_MODES = ['loop', 'pingpong'];
 
 /** Samples used when a curve has to become keyframes. Keeps under LIMITS. */
-const PATH_SAMPLES = 12;
+// Use the full animation keyframe budget for flattened paths. Twelve points
+// produced visible position and banking differences versus the continuous
+// MotionResolver on uneven curves, especially during the first path segment.
+const PATH_SAMPLES = LIMITS.maxKeyframes;
 const ORBIT_SAMPLES = 10;
 
 const num = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
@@ -169,43 +173,47 @@ export function compilePath(path, ctx = {}) {
     const samples = Math.min(LIMITS.maxKeyframes, Math.max(3, num(path.samples, PATH_SAMPLES)));
     const bank = num(path.bank, 0);
     const spin = num(path.spin, 0);
+    const pathEase = resolveEasing(path.easing || 'easeInOutCubic');
 
     const keyframes = [];
     const spline = (path.mode === 'bezier' || path.arcLength) ? pointsToBezierSpline(points, path.closed) : null;
 
     for (let i = 0; i < samples; i++) {
         const u = i / (samples - 1);
+        const easedU = Math.max(0, Math.min(1, pathEase(u)));
         let x, y, rot;
         if (spline) {
-            const pt = spline.sampleAtNormalizedDistance(u);
+            const pt = spline.sampleAtNormalizedDistance(easedU);
             x = pt.x;
             y = pt.y;
             if (bank !== 0) {
                 rot = round(pt.heading * bank, 2);
             }
         } else {
-            const pt = sampleCurve(points, u);
+            const pt = sampleCurve(points, easedU);
             x = pt[0];
             y = pt[1];
             if (bank !== 0) {
                 // Angle of travel, so the layer leans into the turn.
-                const ahead = sampleCurve(points, Math.min(1, u + 0.02));
-                const behind = sampleCurve(points, Math.max(0, u - 0.02));
+                const ahead = sampleCurve(points, Math.min(1, easedU + 0.02));
+                const behind = sampleCurve(points, Math.max(0, easedU - 0.02));
                 const angle = (Math.atan2(ahead[1] - behind[1], ahead[0] - behind[0]) * 180) / Math.PI;
                 rot = round(angle * bank, 2);
             }
         }
         const props = { x: round(x, 2), y: round(y, 2) };
         if (rot !== undefined) props.rotation = rot;
-        else if (spin !== 0) props.rotation = round(spin * u, 2);
-        keyframes.push(createKeyframe(round(duration * u, 3), props));
+        else if (spin !== 0) props.rotation = round(spin * easedU, 2);
+        keyframes.push(createKeyframe(round(duration * u, 3), props, 'linear'));
     }
 
     return createAnimation({
         type: ANIMATION_TYPES.TRANSLATE,
         startTime: round(startTime),
         duration: round(duration),
-        easing: path.easing || 'easeInOutCubic',
+        // Easing has already been applied to path progress. Applying it again
+        // per sampled segment distorts both speed and timing.
+        easing: 'linear',
         anchor: 'in',
         presetId: 'path',
         keyframes,
@@ -270,14 +278,15 @@ export function expandRepeat(animation, ctx = {}) {
 
 // ─── Parenting ───────────────────────────────────────────────────────────────
 
-const POSITIONAL = new Set(['x', 'y', 'rotation']);
+const POSITIONAL = new Set(['x', 'y', 'scale', 'scaleX', 'scaleY', 'rotation']);
 
 /**
  * Pass a group's animation down to one child.
  *
- * Opacity, scale and blur need nothing clever: the renderers already multiply
- * or take the max of what several animations say, so the parent's track is
- * simply handed to the child as well.
+ * Opacity and blur need nothing clever: the renderers already multiply or
+ * take the max of what several animations say, so the parent's track is
+ * simply handed to the child as well. Scale also moves the child around the
+ * group anchor, so its position is sampled into the inherited track below.
  *
  * Position and rotation do need care. A rotating parent should swing its
  * children AROUND ITS ORIGIN — copying the rotation onto each child would
@@ -314,17 +323,22 @@ export function inheritAnimation(animation, ctx = {}) {
         const s = sampleAnimation(animation, at);
         const rot = num(s.rotation, 0);
         const scale = num(s.scale, 1);
+        const scaleX = num(s.scaleX, 1);
+        const scaleY = num(s.scaleY, 1);
         // Where the child ends up once the parent has turned and scaled.
-        const px = (offX / 100) * frame.w * scale;
-        const py = (offY / 100) * frame.h * scale;
+        const px = (offX / 100) * frame.w * scale * scaleX;
+        const py = (offY / 100) * frame.h * scale * scaleY;
         const rad = (rot * Math.PI) / 180;
         const rx = px * Math.cos(rad) - py * Math.sin(rad);
         const ry = px * Math.sin(rad) + py * Math.cos(rad);
         const props = {
-            x: round(num(s.x, 0) + ((rx - px) / frame.w) * 100, 2),
-            y: round(num(s.y, 0) + ((ry - py) / frame.h) * 100, 2),
+            x: round(num(s.x, 0) + ((rx - offX * frame.w / 100) / frame.w) * 100, 2),
+            y: round(num(s.y, 0) + ((ry - offY * frame.h / 100) / frame.h) * 100, 2),
         };
         if (touched.has('rotation')) props.rotation = round(rot, 2);
+        if (touched.has('scale')) props.scale = round(scale, 4);
+        if (touched.has('scaleX')) props.scaleX = round(scaleX, 4);
+        if (touched.has('scaleY')) props.scaleY = round(scaleY, 4);
         keyframes.push(createKeyframe(round(at, 3), props));
     }
     return createAnimation({
@@ -351,7 +365,44 @@ export function resolveNodeAnimations(child, ctx = {}) {
     const own = (Array.isArray(child?.animations) ? child.animations : []).map(a => expandRepeat(a, { duration }));
     const path = child?.path ? compilePath(child.path, { duration }) : null;
     const inherited = (Array.isArray(ctx.parentAnimations) ? ctx.parentAnimations : [])
-        .map(a => inheritAnimation(a, { offsetX: ctx.offsetX, offsetY: ctx.offsetY, frame: ctx.frame, duration }))
+        .map(entry => {
+            // Scene flattening carries each ancestor animation together with
+            // that ancestor's absolute origin. A nested leaf's local x/y is
+            // only relative to its immediate parent, so using it here made
+            // inherited rotation/scale orbit around the wrong point.
+            const animation = entry?.animation || entry;
+            const offsetX = Number.isFinite(Number(entry?.originX))
+                ? num(ctx.absoluteX, 0) - Number(entry.originX)
+                : ctx.offsetX;
+            const offsetY = Number.isFinite(Number(entry?.originY))
+                ? num(ctx.absoluteY, 0) - Number(entry.originY)
+                : ctx.offsetY;
+            let alignedAnimation = animation;
+            if (Number.isFinite(Number(entry?.startTimeAbs)) && Number.isFinite(Number(ctx.absoluteStart))) {
+                const elapsed = Math.max(0, Number(ctx.absoluteStart) - Number(entry.startTimeAbs));
+                const animationStart = Math.max(0, num(animation.startTime, 0));
+                if (elapsed <= animationStart) {
+                    alignedAnimation = { ...animation, startTime: animationStart - elapsed };
+                } else {
+                    const sampleAt = elapsed - animationStart;
+                    const sourceDuration = Math.max(0, num(animation.duration, duration));
+                    const keyframes = Array.isArray(animation.keyframes) ? animation.keyframes : [];
+                    const first = sampleAnimation(animation, sampleAt);
+                    const shifted = [{ time: 0, properties: first }];
+                    for (const keyframe of keyframes) {
+                        if (num(keyframe?.time, 0) <= sampleAt) continue;
+                        shifted.push({ ...keyframe, time: num(keyframe.time, 0) - sampleAt });
+                    }
+                    alignedAnimation = {
+                        ...animation,
+                        startTime: 0,
+                        duration: Math.max(0.05, sourceDuration - sampleAt),
+                        keyframes: shifted,
+                    };
+                }
+            }
+            return inheritAnimation(alignedAnimation, { offsetX, offsetY, frame: ctx.frame, duration });
+        })
         .filter(Boolean);
 
     const all = [...inherited, ...own, ...(path ? [path] : [])].slice(0, LIMITS.maxAnimations);
@@ -381,7 +432,6 @@ export function resolveGroupAnimations(group, frame) {
     const path = group?.path ? compilePath(group.path, { duration }) : null;
     return sanitizeAnimations([...own, ...(path ? [path] : [])].slice(0, LIMITS.maxAnimations), {
         duration,
-        kind: 'video',
         frame,
     });
 }

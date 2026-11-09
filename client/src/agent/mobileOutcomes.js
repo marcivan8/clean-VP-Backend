@@ -44,6 +44,20 @@ export const OUTCOMES = [
         seconds: 60,
         range: '45 – 75s',
     },
+    {
+        id: 'story_time',
+        styleId: 'talking_head',
+        seconds: 45,
+        range: '30 – 60s',
+    },
+    {
+        id: 'photo_collage',
+        // The editor has no dedicated collage playbook yet. The prompt below
+        // still controls its assembly; Vlog supplies a restrained pacing base.
+        styleId: 'vlog',
+        seconds: 30,
+        range: '15 – 45s',
+    },
 ];
 
 export const OUTCOME_BY_ID = Object.fromEntries(OUTCOMES.map(o => [o.id, o]));
@@ -64,14 +78,26 @@ export function startOutcome(outcomeId, opts = {}) {
     // so a later manual edit and the recipe steps see the same choice.
     useTimelineStore.getState().setEditingStyle?.(outcome.styleId);
 
-    // "edit it" is the generic request that runs the whole playbook; a typed
-    // request runs as itself instead (buildAutopilotSteps decides).
-    const request = opts.request?.trim() || 'edit it';
+    // Keep the style playbook intact for mobile creation. The user's direction
+    // runs as a final refinement so a request such as "add upbeat music" does
+    // not replace the steps that actually build the short.
+    const request = 'edit it';
+
+    const requestedDuration = opts.request?.match(/\b(\d{2,3})\s*(?:s\b|sec(?:ond)?s?\b|seconds?\b)/i);
+    const requestedSeconds = Number(requestedDuration?.[1]);
+    const shortTargetSeconds = requestedSeconds >= 10 && requestedSeconds <= 180
+        ? requestedSeconds
+        : outcome.seconds;
 
     return runAutopilot(request, {
         styleId: outcome.styleId,
-        shortTargetSeconds: outcome.seconds,
+        shortTargetSeconds,
+        userDirection: opts.request?.trim() || (outcomeId === 'photo_collage'
+            ? 'Create a photo collage from the uploaded images with clean transitions and subtle motion. Use an uploaded music track as the background soundtrack when available.'
+            : ''),
         ...(opts.run ? { run: opts.run } : {}),
+        ...(opts.onPlan ? { onPlan: opts.onPlan } : {}),
+        ...(opts.onStep ? { onStep: opts.onStep } : {}),
     });
 }
 

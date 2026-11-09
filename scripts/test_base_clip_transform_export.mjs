@@ -17,6 +17,14 @@ const ok = (n) => log(`✓ ${n}`);
 
 const EP = require('../jobs/exportProcessor.js');
 const { fitContainSizePx, hasBaseClipTransform, buildTransformFilters } = EP;
+const exportSource = fs.readFileSync(new URL('../jobs/exportProcessor.js', import.meta.url), 'utf8');
+assert.match(exportSource, /const baseTransform = hasBaseTransform\s*\n\s*\? buildTransformFilters/,
+    'the export worker must apply base transforms even when a virtual-camera crop is active');
+assert.doesNotMatch(exportSource, /crop takes priority, the transform is skipped/,
+    'the old crop-versus-transform exclusion must stay removed');
+assert.match(exportSource, /if \(rotationKfs && baseTransform\)/,
+    'keyframed rotation must remain available on transformed multicam crops');
+ok('export worker routes cropped media through the shared transform and animated rotation path');
 
 // ── 1 · fitContainSizePx matches client/src/motion/BaseClipGeometry.js's
 //        fitContainSize() exactly -- the preview/export parity guarantee ──
@@ -41,6 +49,12 @@ const { fitContainSizePx, hasBaseClipTransform, buildTransformFilters } = EP;
     assert.equal(hasBaseClipTransform({ scale: 1, x: 0, y: 0 }), false);
     assert.equal(hasBaseClipTransform({ scale: 1.0000001, x: 0, y: 0 }), false, 'float round-trip noise must not trip it');
     assert.equal(hasBaseClipTransform({ scale: 1.5 }), true);
+    assert.equal(hasBaseClipTransform({ scaleX: 1.5 }), true);
+    assert.equal(hasBaseClipTransform({ scaleY: 0.75 }), true);
+    assert.equal(hasBaseClipTransform({ rotation: 18 }), true);
+    assert.equal(hasBaseClipTransform({ opacity: 0.5 }), true);
+    assert.equal(hasBaseClipTransform({ opacity: 1 }), false);
+    assert.equal(hasBaseClipTransform({ keyframes: { opacity: [{ time: 0, value: 0.5 }] } }), true);
     assert.equal(hasBaseClipTransform({ x: 50 }), true);
     assert.equal(hasBaseClipTransform({ y: -30 }), true);
     ok('hasBaseClipTransform fires only for an actually resized/repositioned clip, never a pristine default one');
@@ -61,6 +75,36 @@ const { fitContainSizePx, hasBaseClipTransform, buildTransformFilters } = EP;
     assert.equal(t2.overlayX, (1080 - 540) / 2);
     assert.equal(t2.overlayY, (1920 - 960) / 2);
     ok('scale=0.5 halves both dimensions and re-centres the overlay position');
+
+    const anisotropic = buildTransformFilters({ scale: 1, scaleX: 1.5, scaleY: 0.5, x: 0, y: 0,
+        metadata: { resolution: { w: 1080, h: 1920 } } }, 1080, 1920);
+    assert.equal(anisotropic.w, 1620);
+    assert.equal(anisotropic.h, 960);
+    ok('base clip export applies independent scaleX and scaleY dimensions');
+
+    const rotated = buildTransformFilters({ scale: 0.5, rotation: 90, x: 0, y: 0,
+        metadata: { resolution: { w: 1080, h: 1920 } } }, 1080, 1920);
+    assert.equal(rotated.w, 960);
+    assert.equal(rotated.h, 540);
+    assert.match(rotated.scaleFilter, /rotate=90\.0000\*PI\/180/);
+    assert.equal(rotated.overlayX, 60);
+    assert.equal(rotated.overlayY, 690);
+    ok('base clip export rotates footage around its centre and positions the rotated bounds');
+
+    const cropTransform = buildTransformFilters({ scale: 0.5, x: 40, y: 0,
+        virtualCam: { cropX: 0.5, cropY: 0, cropW: 0.5, cropH: 0.5 },
+        metadata: { resolution: { w: 360, h: 360 } } }, 360, 360);
+    assert.equal(cropTransform.sourceW, 180);
+    assert.equal(cropTransform.sourceH, 180);
+    assert.equal(cropTransform.overlayX, 130);
+    assert.equal(cropTransform.overlayY, 90);
+    ok('transform geometry is computed from the virtual-camera crop before scaling and positioning');
+
+    const translucent = buildTransformFilters({ scale: 0.5, opacity: 0.4, x: 0, y: 0,
+        metadata: { resolution: { w: 1080, h: 1920 } } }, 1080, 1920);
+    assert.equal(translucent.opacity, 0.4);
+    assert.match(translucent.scaleFilter, /colorchannelmixer=aa=0\.4000/);
+    ok('base clip export preserves transparent alpha for footage opacity');
 
     // Moving right/down by canvas pixels shifts the overlay position by the same amount.
     const t3 = buildTransformFilters({ scale: 0.5, x: 100, y: -50, metadata: { resolution: { w: 1080, h: 1920 } } }, 1080, 1920);
@@ -183,6 +227,74 @@ if (!FFMPEG) {
         // canvas -- the top-right corner is well outside that box either way.
         const corner = pixelAt(outPath, canvasW - 10, 10);
         assert.ok(isBlack(corner), `expected black near the top-right corner, got ${JSON.stringify(corner)}`);
+    });
+
+    const rotatedPath = path.join(dir, 'rotated-out.mp4');
+    const rotated = buildTransformFilters({ scale: 0.5, rotation: 90,
+        metadata: { resolution: { w: canvasW, h: canvasH } } }, canvasW, canvasH);
+    const rotatedGraph = [
+        `[0:v]${rotated.scaleFilter}[fg]`,
+        `color=c=black:s=${canvasW}x${canvasH}:d=1[bg]`,
+        `[bg][fg]overlay=x=${rotated.overlayX}:y=${rotated.overlayY}:eval=init[vout]`,
+    ].join(';');
+    const rotatedRender = spawnSync(FFMPEG, [
+        '-hide_banner', '-loglevel', 'error', '-i', srcPath,
+        '-filter_complex', rotatedGraph, '-map', '[vout]', '-frames:v', '10',
+        '-pix_fmt', 'yuv420p', '-y', rotatedPath,
+    ], { encoding: 'utf8', timeout: 60_000 });
+    await check('FFmpeg accepts the transparent, centred rotation transform at export size', () => {
+        assert.equal(rotatedRender.status, 0, (rotatedRender.stderr || '').split('\n').slice(-6).join(' | '));
+        const [w, h] = readDimensions(rotatedPath);
+        assert.equal(w, canvasW); assert.equal(h, canvasH);
+        assert.ok(isRed(pixelAt(rotatedPath, canvasW / 2, canvasH / 2)), 'rotated footage remains visible at the frame centre');
+    });
+
+    const cropSourcePath = path.join(dir, 'crop-source.mp4');
+    const cropOutputPath = path.join(dir, 'crop-transform-out.mp4');
+    const cropTransform = buildTransformFilters({ scale: 0.5, x: 40, y: 0,
+        virtualCam: { cropX: 0.5, cropY: 0, cropW: 0.5, cropH: 0.5 },
+        metadata: { resolution: { w: 360, h: 360 } } }, 360, 360);
+    const cropSourceRender = spawnSync(FFMPEG, [
+        '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:size=360x360:duration=1:rate=10',
+        '-vf', 'drawbox=x=180:y=0:w=180:h=180:c=green:t=fill,drawbox=x=0:y=180:w=180:h=180:c=blue:t=fill,drawbox=x=180:y=180:w=180:h=180:c=yellow:t=fill',
+        '-frames:v', '10', '-pix_fmt', 'yuv420p', '-y', cropSourcePath,
+    ], { encoding: 'utf8', timeout: 60_000 });
+    const cropGraph = [
+        `[0:v]crop=iw*0.5:ih*0.5:iw*0.5:0,${cropTransform.scaleFilter}[fg]`,
+        'color=c=black:s=360x360:d=1[bg]',
+        `[bg][fg]overlay=x=${cropTransform.overlayX}:y=${cropTransform.overlayY}:eval=init[vout]`,
+    ].join(';');
+    const cropRender = spawnSync(FFMPEG, [
+        '-hide_banner', '-loglevel', 'error', '-i', cropSourcePath,
+        '-filter_complex', cropGraph, '-map', '[vout]', '-frames:v', '10', '-pix_fmt', 'yuv420p', '-y', cropOutputPath,
+    ], { encoding: 'utf8', timeout: 60_000 });
+    await check('FFmpeg preserves the selected virtual-camera crop after scale and position transforms', () => {
+        assert.equal(cropSourceRender.status, 0, cropSourceRender.stderr || 'failed to create crop test source');
+        assert.equal(cropRender.status, 0, cropRender.stderr || 'crop and transform composition failed');
+        const center = pixelAt(cropOutputPath, cropTransform.overlayX + 90, cropTransform.overlayY + 90);
+        assert.ok(center && center.g > center.r * 1.5 && center.g > center.b * 1.5,
+            `expected green selected quadrant at transformed crop center, got ${JSON.stringify(center)}`);
+        assert.ok(isBlack(pixelAt(cropOutputPath, 10, 10)), 'cropped layer must remain a positioned overlay, not fill the canvas');
+    });
+
+    const opacityPath = path.join(dir, 'opacity-out.mp4');
+    const opacityTransform = buildTransformFilters({ scale: 0.5, opacity: 0.4,
+        metadata: { resolution: { w: canvasW, h: canvasH } } }, canvasW, canvasH);
+    const opacityGraph = [
+        `[0:v]${opacityTransform.scaleFilter}[fg]`,
+        `color=c=black:s=${canvasW}x${canvasH}:d=1[bg]`,
+        `[bg][fg]overlay=x=${opacityTransform.overlayX}:y=${opacityTransform.overlayY}:eval=init[vout]`,
+    ].join(';');
+    const opacityRender = spawnSync(FFMPEG, [
+        '-hide_banner', '-loglevel', 'error', '-i', srcPath,
+        '-filter_complex', opacityGraph, '-map', '[vout]', '-frames:v', '10',
+        '-pix_fmt', 'yuv420p', '-y', opacityPath,
+    ], { encoding: 'utf8', timeout: 60_000 });
+    await check('FFmpeg composites base footage at the authored opacity', () => {
+        assert.equal(opacityRender.status, 0, (opacityRender.stderr || '').split('\n').slice(-6).join(' | '));
+        const pixel = pixelAt(opacityPath, canvasW / 2, canvasH / 2);
+        assert.ok(pixel && pixel.r > 70 && pixel.r < 140 && pixel.g < 35 && pixel.b < 35,
+            `expected 40% red over black, got ${JSON.stringify(pixel)}`);
     });
 }
 

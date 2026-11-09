@@ -13,34 +13,36 @@
  * - Resize video
  */
 
-import {
-    Input,
-    Output,
-    Conversion,
-    ALL_FORMATS,
-    BlobSource,
-    BufferSource,
-    BufferTarget,
-    Mp4OutputFormat,
-    WebMOutputFormat,
-} from 'mediabunny';
-
 import useTimelineStore from '../store/useTimelineStore.js';
+
+// Browser-side conversion is an occasional operation, not a prerequisite for
+// opening the editor. Keep MediaBunny out of the main application bundle and
+// share the in-flight import between concurrent conversions.
+let mediaBunnyModulePromise;
+function loadMediaBunny() {
+    if (!mediaBunnyModulePromise) {
+        mediaBunnyModulePromise = import('mediabunny').catch(error => {
+            mediaBunnyModulePromise = null;
+            throw error;
+        });
+    }
+    return mediaBunnyModulePromise;
+}
 
 /**
  * Create a mediabunny Input from a File, Blob, or ArrayBuffer
  */
-function createInput(source) {
+function createInput(source, mediaBunny) {
     if (source instanceof File || source instanceof Blob) {
-        return new Input({
-            formats: ALL_FORMATS,
-            source: new BlobSource(source),
+        return new mediaBunny.Input({
+            formats: mediaBunny.ALL_FORMATS,
+            source: new mediaBunny.BlobSource(source),
         });
     }
     if (source instanceof ArrayBuffer || source instanceof Uint8Array) {
-        return new Input({
-            formats: ALL_FORMATS,
-            source: new BufferSource(source),
+        return new mediaBunny.Input({
+            formats: mediaBunny.ALL_FORMATS,
+            source: new mediaBunny.BufferSource(source),
         });
     }
     throw new Error('MediaBunnyService: Unsupported source type. Provide a File, Blob, or ArrayBuffer.');
@@ -49,13 +51,13 @@ function createInput(source) {
 /**
  * Get the output format class for a given format string
  */
-function getOutputFormat(format = 'mp4') {
+function getOutputFormat(format = 'mp4', mediaBunny) {
     switch (format.toLowerCase()) {
-        case 'webm': return new WebMOutputFormat();
+        case 'webm': return new mediaBunny.WebMOutputFormat();
         case 'mp4':
         case 'mov':
         default:
-            return new Mp4OutputFormat();
+            return new mediaBunny.Mp4OutputFormat();
     }
 }
 
@@ -72,7 +74,8 @@ class MediaBunnyService {
      * @returns {Promise<object>} Metadata object
      */
     async readMetadata(source) {
-        const input = createInput(source);
+        const mediaBunny = await loadMediaBunny();
+        const input = createInput(source, mediaBunny);
 
         try {
             const [format, mimeType, duration, tracks, videoTracks, audioTracks] = await Promise.all([
@@ -129,17 +132,18 @@ class MediaBunnyService {
      */
     async trimMedia(source, startTime, endTime, options = {}) {
         const { format = 'mp4', onProgress, signal } = options;
+        const mediaBunny = await loadMediaBunny();
 
         console.log(`[MediaBunnyService] Trimming: ${startTime}s → ${endTime}s (${format})`);
 
-        const input = createInput(source);
-        const target = new BufferTarget();
-        const output = new Output({
-            format: getOutputFormat(format),
+        const input = createInput(source, mediaBunny);
+        const target = new mediaBunny.BufferTarget();
+        const output = new mediaBunny.Output({
+            format: getOutputFormat(format, mediaBunny),
             target,
         });
 
-        const conversion = await Conversion.init({
+        const conversion = await mediaBunny.Conversion.init({
             input,
             output,
             trim: { start: startTime, end: endTime },
@@ -224,15 +228,16 @@ class MediaBunnyService {
 
         console.log(`[MediaBunnyService] Speed change: ${speed}x (${format})`);
 
-        const input = createInput(source);
-        const target = new BufferTarget();
-        const output = new Output({
-            format: getOutputFormat(format),
+        const mediaBunny = await loadMediaBunny();
+        const input = createInput(source, mediaBunny);
+        const target = new mediaBunny.BufferTarget();
+        const output = new mediaBunny.Output({
+            format: getOutputFormat(format, mediaBunny),
             target,
         });
 
         // Adjust frame rate to change perceived speed
-        const conversion = await Conversion.init({
+        const conversion = await mediaBunny.Conversion.init({
             input,
             output,
             video: (videoTrack) => ({
@@ -281,10 +286,11 @@ class MediaBunnyService {
 
         console.log(`[MediaBunnyService] Converting to ${outputFormat}`);
 
-        const input = createInput(source);
-        const target = new BufferTarget();
-        const output = new Output({
-            format: getOutputFormat(outputFormat),
+        const mediaBunny = await loadMediaBunny();
+        const input = createInput(source, mediaBunny);
+        const target = new mediaBunny.BufferTarget();
+        const output = new mediaBunny.Output({
+            format: getOutputFormat(outputFormat, mediaBunny),
             target,
         });
 
@@ -299,7 +305,7 @@ class MediaBunnyService {
             };
         }
 
-        const conversion = await Conversion.init(conversionOptions);
+        const conversion = await mediaBunny.Conversion.init(conversionOptions);
 
         if (!conversion.isValid) {
             throw new Error(`Conversion to ${outputFormat} invalid`);
@@ -336,15 +342,16 @@ class MediaBunnyService {
 
         console.log('[MediaBunnyService] Extracting audio');
 
-        const input = createInput(source);
-        const target = new BufferTarget();
+        const mediaBunny = await loadMediaBunny();
+        const input = createInput(source, mediaBunny);
+        const target = new mediaBunny.BufferTarget();
         // For audio extraction, we output to MP4 with video discarded
-        const output = new Output({
-            format: new Mp4OutputFormat(),
+        const output = new mediaBunny.Output({
+            format: new mediaBunny.Mp4OutputFormat(),
             target,
         });
 
-        const conversion = await Conversion.init({
+        const conversion = await mediaBunny.Conversion.init({
             input,
             output,
             video: { discard: true },

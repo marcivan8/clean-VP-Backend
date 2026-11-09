@@ -462,6 +462,7 @@
 @font-face { font-family: 'Audiowide';          font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Audiowide-Regular.ttf') format('truetype'); }
 @font-face { font-family: 'DM Sans';            font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/DMSans-Regular.ttf') format('truetype'); }
 @font-face { font-family: 'Unbounded';          font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Unbounded-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'JetBrains Mono';     font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/JetBrainsMono-Regular.ttf') format('truetype'); }
 @font-face { font-family: 'Roboto';             font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Roboto-Regular.ttf') format('truetype'); }
 @font-face { font-family: 'Bootzy TM';          font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/BootzyTM.woff2') format('woff2'), url('/fonts/BootzyTM.ttf') format('truetype'); }
 
@@ -1052,31 +1053,39 @@ section { padding: 96px 0; position: relative; }
   color: var(--fg-4);
 }
 
+/* R156: this strip is the MOBILE panel switcher only — PanelRail replaced it
+ * on desktop (R108), so these are phone sizes, not desktop ones. It used to be
+ * 10px uppercase mono with 10px icons and 5px of vertical padding: a 24px-tall
+ * target carrying type you have to lean in to read. The inactive colour was
+ * --fg-3, which on a dark panel left eleven labels all but invisible and the
+ * active one barely distinguishable. */
 .studio-tab-btn {
   font-family: var(--f-mono);
-  font-size: 10px;
-  letter-spacing: 0.08em;
+  font-size: 12px;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-  padding: 5px 10px;
-  border-radius: 6px;
-  border: 0.5px solid transparent;
-  color: var(--fg-3);
+  min-height: 40px;
+  padding: 0 13px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  color: var(--fg-2);
   background: transparent;
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
 }
 .studio-tab-btn:hover {
   background: var(--glass-2);
-  color: var(--fg-2);
+  color: var(--fg);
 }
 .studio-tab-btn.active {
   background: var(--glass-2);
-  border-color: var(--glass-stroke);
+  border-color: var(--accent);
   color: var(--fg);
+  font-weight: 600;
 }
 
 /* ── R108: the desktop panel rail ─────────────────────────────────────────

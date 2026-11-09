@@ -298,5 +298,129 @@ section('7 · Sticker rotation in the compositor: centred, and animated');
     }
 }
 
+section('8 · Text-layer effect stack reaches the raster overlay');
+{
+    const source = read('client/src/motion/CaptionCompiler.js');
+    const compiler = require(path.join(ROOT, 'server/compositor/RasterCaptionCompiler.js'));
+    const compiled = compiler.compileRasterOverlays([{
+        clipId: 'caption-effects', listPath: '/tmp/caption.ffconcat',
+        outputStart: 1, outputEnd: 3,
+        geometry: [{ t: 1, x: 50, y: 50, scale: 1, opacity: 1, rotation: 0 }],
+        effects: [
+            { kind: 'blur', params: { radius: 2 } },
+            { kind: 'brightness', params: { amount: 1.2 } },
+            { kind: 'contrast', params: { amount: 1.1 } },
+            { kind: 'saturation', params: { amount: 0.8 } },
+            { kind: 'hue', params: { degrees: 12 } },
+            { kind: 'glitch', params: { amount: 10 }, enabled: false },
+        ],
+    }], { frameWidth: 1080, frameHeight: 1920, fps: 30 });
+    check('client caption program preserves and samples text layer effects',
+        source.includes('const effectSamples') && source.includes('effects: effectSamples'));
+    const animatedProgram = CLIENT.buildCaptionProgram([textTrack([{
+        id: 'effect-keyframed-caption', content: 'sampled', start: 10, duration: 2,
+        effects: [
+            { type: 'brightness', params: { amount: 1 }, keyframes: { amount: [
+                { time: 0, value: 1 }, { time: 2, value: 2, easing: 'ease-in' },
+            ] } },
+            { type: 'blur', params: { radius: 0 }, keyframes: { radius: [
+                { time: 0, value: 0 }, { time: 2, value: 8, easing: 'ease-in' },
+            ] } },
+        ],
+    }])], [
+        { id: 'base-a', start: 0, duration: 2 },
+        { id: 'base-b', start: 10, duration: 2 },
+    ]);
+    const effectTrack = animatedProgram.entries[0]?.raster?.effects?.[0]?.samples?.amount || [];
+    const midpoint = effectTrack.find(point => Math.abs(point.t - 3) < 1e-4);
+    const blurTrack = animatedProgram.entries[0]?.raster?.effects?.[1]?.samples?.radius || [];
+    check('effect samples follow clip-local eased keyframes through the cut time map',
+        animatedProgram.entries[0]?.outputStart === 2 && midpoint?.value === 1.25);
+    check('animated blur samples at frame cadence on short text clips', blurTrack.length >= 60
+        && blurTrack[0]?.t === 2 && blurTrack.at(-1)?.t === 4);
+    check('raster text effects compile on the isolated caption stream',
+        compiled.filterComplex.includes('gblur=sigma=2')
+        && compiled.filterComplex.includes('eq=brightness=0.2')
+        && compiled.filterComplex.includes('eq=contrast=1.1')
+        && compiled.filterComplex.includes('eq=saturation=0.8')
+        && compiled.filterComplex.includes('hue=h=12')
+        && !compiled.filterComplex.includes('glitch'));
+    const animated = compiler.compileRasterOverlays([{
+        clipId: 'animated-caption-effects', listPath: '/tmp/caption-animated.ffconcat',
+        outputStart: 2, outputEnd: 4,
+        geometry: [{ t: 2, x: 50, y: 50, scale: 1, opacity: 1, rotation: 0 }],
+        effects: [
+            { kind: 'contrast', params: { amount: 1 }, samples: {
+                amount: [{ t: 2, value: 1 }, { t: 3, value: 2 }, { t: 4, value: 1.5 }],
+            } },
+            { kind: 'blur', params: { radius: 0 }, samples: {
+                radius: [{ t: 2, value: 0 }, { t: 3, value: 4 }, { t: 4, value: 1 }],
+            } },
+            { kind: 'grain', params: { amount: 4 }, samples: {
+                amount: [{ t: 2, value: 4 }, { t: 3, value: 10 }, { t: 4, value: 6 }],
+            } },
+            { kind: 'chromatic-aberration', params: { amount: 2 } },
+            { kind: 'rgb_split', params: { amount: 4, angle: 90, centerX: 0.2, centerY: 0.7 } },
+            { kind: 'distortion', params: { amount: 0.03 } },
+            { kind: 'color_grade', params: { brightness: 110, contrast: 120, saturation: 90, hueRotate: 8, temperature: 12, tint: -4 }, samples: {
+                brightness: [{ t: 2, value: 100 }, { t: 3, value: 110 }, { t: 4, value: 100 }],
+            } },
+        ],
+    }], { frameWidth: 1080, frameHeight: 1920, fps: 30 });
+    check('animated text effect samples compile to output-time FFmpeg expressions',
+        animated.filterComplex.includes("eq=contrast='clip(if(lt(t,3)")
+        && animated.filterComplex.includes('eval=frame'));
+    check('animated text blur compiles time-gated Gaussian blur intervals',
+        animated.filterComplex.includes("gblur=sigma=4:enable='gte(t,3)*lt(t,4)"));
+    check('grain, chromatic shift, and distortion are included in raster text effects',
+        animated.filterComplex.includes('noise=c0s=')
+        && animated.filterComplex.includes('chromashift=cbh=-2:crh=2')
+        && animated.filterComplex.includes("geq=r='r(clip(X+(0)*(sqrt(pow(X/W-0.2,2)+pow(Y/H-0.7,2)))")
+        && animated.filterComplex.includes("clip(Y+(4)*(sqrt(pow(X/W-0.2,2)+pow(Y/H-0.7,2)))")
+        && animated.filterComplex.includes('lenscorrection=cx=0.5:cy=0.5:k1=0.03')
+        && animated.filterComplex.includes("colorchannelmixer=rr=1.1:gg=1.1:bb=1.1:enable='gte(t,3)*lt(t,4)'")
+        && animated.filterComplex.includes('colorbalance=rs=0.036:bs=-0.036:gs=-0.012')
+        && animated.filterComplex.includes("contrast='clip((120)/100,0,2)'"));
+    const ffmpegPath = (() => { try { return require('ffmpeg-static'); } catch (_) { return null; } })();
+    if (ffmpegPath && fs.existsSync(ffmpegPath)) {
+        const render = spawnSync(ffmpegPath, [
+            '-y', '-hide_banner', '-loglevel', 'error',
+            '-f', 'lavfi', '-i', 'color=c=black:s=1080x1920:r=30:d=5',
+            '-f', 'lavfi', '-i', 'color=c=white:s=100x100:r=30:d=3',
+            '-filter_complex', animated.filterComplex, '-map', '[rcout]', '-t', '5', '-f', 'null', '-',
+        ], { encoding: 'utf8' });
+        check('FFmpeg renders the animated text-effect expression', render.status === 0, render.stderr);
+
+        const blurOnly = compiler.compileRasterOverlays([{
+            clipId: 'blur-proof', listPath: '/tmp/caption-blur.ffconcat', outputStart: 0, outputEnd: 3,
+            geometry: [{ t: 0, x: 50, y: 50, scale: 1, opacity: 1, rotation: 0 }],
+            effects: [{ kind: 'blur', params: { radius: 0 }, samples: { radius: [
+                { t: 0, value: 0 }, { t: 1, value: 0 }, { t: 2, value: 8 }, { t: 3, value: 8 },
+            ] } }],
+        }], { frameWidth: 1080, frameHeight: 1920, fps: 1 });
+        const blurRender = spawnSync(ffmpegPath, [
+            '-hide_banner', '-loglevel', 'error',
+            '-f', 'lavfi', '-i', 'color=c=black:s=1080x1920:r=1:d=3',
+            '-f', 'lavfi', '-i', 'testsrc2=s=100x100:r=1:d=3',
+            '-filter_complex', blurOnly.filterComplex, '-map', '[rcout]', '-frames:v', '3',
+            '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-',
+        ], { maxBuffer: 64 * 1024 * 1024 });
+        const variance = frame => {
+            const offset = frame * 1080 * 1920 * 3;
+            let sum = 0, squares = 0, count = 0;
+            for (let y = 910; y < 1010; y++) for (let x = 490; x < 590; x++) {
+                const i = offset + (y * 1080 + x) * 3;
+                const value = (blurRender.stdout[i] + blurRender.stdout[i + 1] + blurRender.stdout[i + 2]) / 3;
+                sum += value; squares += value * value; count++;
+            }
+            return squares / count - (sum / count) ** 2;
+        };
+        check('animated blur changes decoded caption pixels at its sampled time',
+            blurRender.status === 0 && blurRender.stdout.length === 1080 * 1920 * 3 * 3
+            && variance(2) < variance(0) * 0.7,
+            blurRender.stderr?.toString());
+    } else skip('animated effect FFmpeg render', 'ffmpeg-static unavailable');
+}
+
 console.log(`\n${passed} passed, ${failed} failed, ${skipped} skipped`);
 process.exit(failed > 0 ? 1 : 0);

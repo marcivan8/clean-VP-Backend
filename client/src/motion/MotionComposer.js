@@ -40,7 +40,7 @@ export const LIMITS = Object.freeze({
     maxKeyframes: 24,
     /** Safe value range per property. x/y are offsets in % of the frame. */
     ranges: {
-        x: [-120, 120], y: [-120, 120], scale: [0, 6], rotation: [-1080, 1080],
+        x: [-120, 120], y: [-120, 120], scale: [0, 6], scaleX: [0, 6], scaleY: [0, 6], rotation: [-1080, 1080],
         opacity: [0, 1], blur: [0, 60], glow: [0, 60], reveal: [0, 1],
     },
 });
@@ -65,7 +65,7 @@ const round3 = n => Math.round(n * 1000) / 1000;
 function typeFor(props) {
     const keys = new Set(props);
     if (keys.has('reveal')) return ANIMATION_TYPES.REVEAL;
-    if (keys.has('scale')) return ANIMATION_TYPES.SCALE;
+    if (keys.has('scale') || keys.has('scaleX') || keys.has('scaleY')) return ANIMATION_TYPES.SCALE;
     if (keys.has('x') || keys.has('y')) return ANIMATION_TYPES.TRANSLATE;
     if (keys.has('rotation')) return ANIMATION_TYPES.ROTATE;
     if (keys.has('blur')) return ANIMATION_TYPES.BLUR;

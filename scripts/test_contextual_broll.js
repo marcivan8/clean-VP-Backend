@@ -95,6 +95,7 @@ let helpers = null;
         // The tool schema reads the shared template catalogue at module
         // scope. These pure helper tests strip imports and do not use it.
         .replace(/^\s*import\s+\{\s*TEMPLATE_KINDS\s*\}\s+from\s+'\.\.\/motion\/TemplateGraphics\.js';\s*$/m, 'const TEMPLATE_KINDS = [];')
+        .replace(/^\s*import\s+\{\s*describeToolCapabilities,\s*validateToolInvocation\s*\}\s+from\s+'\.\/ToolCapabilityCatalog\.js';\s*$/m, 'const describeToolCapabilities = definitions => definitions; const validateToolInvocation = () => ({ success: true });')
         .replace(/^\s*import\s+[^;]+;\s*$/gm, '')
         .replace(/\bexport\s+(const|function|class)\b/g, '$1');
 

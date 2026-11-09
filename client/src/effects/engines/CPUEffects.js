@@ -35,6 +35,22 @@ export class CPUEffectEngine {
         const params = effect.getParamsSnapshot();
         const effectDef = effectRegistry.get(effect.type);
 
+        // These effects have maintained implementations below. Prefer them
+        // over legacy registry callbacks so declared controls (fade color,
+        // pitch preservation, LUT intensity, etc.) are not silently skipped.
+        switch (effect.type) {
+            case 'fade_in': return this._compileFadeIn(params, context, effect);
+            case 'fade_out': return this._compileFadeOut(params, context, effect);
+            case 'speed_change': return this._compileSpeedChange(params);
+            case 'lut_apply': return this._compileLUT(params);
+            case 'audio_normalize': return this._compileNormalize(params);
+            case 'audio_denoise': return this._compileDenoise(params);
+            case 'crop': return this._compileCrop(params, context);
+            case 'scale': return this._compileScale(params);
+            case 'rotate': return this._compileRotate(params);
+            default: break;
+        }
+
         // Use definition's FFmpeg filter generator if available
         if (effectDef?.ffmpegFilter) {
             if (typeof effectDef.ffmpegFilter === 'function') {
@@ -47,39 +63,8 @@ export class CPUEffectEngine {
             return effectDef.ffmpegFilter;
         }
 
-        // Built-in filter compilation
-        switch (effect.type) {
-            case 'fade_in':
-                return this._compileFadeIn(params, context, effect);
-
-            case 'fade_out':
-                return this._compileFadeOut(params, context, effect);
-
-            case 'speed_change':
-                return this._compileSpeedChange(params);
-
-            case 'lut_apply':
-                return this._compileLUT(params);
-
-            case 'audio_normalize':
-                return this._compileNormalize(params);
-
-            case 'audio_denoise':
-                return this._compileDenoise(params);
-
-            case 'crop':
-                return this._compileCrop(params, context);
-
-            case 'scale':
-                return this._compileScale(params);
-
-            case 'rotate':
-                return this._compileRotate(params);
-
-            default:
-                console.warn(`[CPUEffects] Unknown effect type: ${effect.type}`);
-                return null;
-        }
+        console.warn(`[CPUEffects] Unknown effect type: ${effect.type}`);
+        return null;
     }
 
     // ========================================================================
@@ -135,15 +120,7 @@ export class CPUEffectEngine {
 
     _compileLUT(params) {
         if (!params.lutFile) return null;
-
-        const intensity = params.intensity ?? 1.0;
-
-        if (intensity < 1.0) {
-            // Blend with original using mix filter
-            return `split[a][b];[a]lut3d=${params.lutFile}[lut];[b][lut]blend=all_opacity=${intensity.toFixed(2)}`;
-        }
-
-        return `lut3d=${params.lutFile}`;
+        return `lut3d=file='${this._escapeFilterPath(params.lutFile)}'`;
     }
 
     _compileNormalize(params) {
@@ -152,8 +129,11 @@ export class CPUEffectEngine {
     }
 
     _compileDenoise(params) {
-        const amount = params.amount ?? 0.5;
-        const noiseFloor = -20 + amount * 20;
+        const amount = Math.max(0, Math.min(1, Number(params.amount ?? 0.5)));
+        // FFmpeg afftdn accepts nf in [-80, -20]. Move toward -20 for
+        // stronger denoising; the old -20 + amount*20 formula exceeded the
+        // filter's legal range for every positive strength and failed export.
+        const noiseFloor = -80 + amount * 60;
         return `afftdn=nf=${noiseFloor.toFixed(1)}`;
     }
 
@@ -200,14 +180,69 @@ export class CPUEffectEngine {
 
         const videoFilters = [];
         const audioFilters = [];
+        const needsFilterGraph = cpuEffects.some(effect => effect.type === 'lut_apply'
+            && effect.getParamsSnapshot().lutFile
+            && Number(effect.getParamsSnapshot().intensity ?? 1) < 1);
 
-        for (const effect of cpuEffects) {
+        let filterComplex = null;
+        if (needsFilterGraph) {
+            const graph = [];
+            let current = '0:v';
+            let labelIndex = 0;
+            for (const effect of cpuEffects) {
+                const filter = this.compileEffect(effect, context);
+                if (!filter) continue;
+                if (this._isAudioFilter(effect.type)) {
+                    audioFilters.push(filter);
+                    continue;
+                }
+                if (effect.type === 'speed_change') {
+                    const [videoFilter, ...speedFilters] = filter.split(',');
+                    if (videoFilter) {
+                        const output = `fxv${labelIndex++}`;
+                        graph.push(`[${current}]${videoFilter}[${output}]`);
+                        current = output;
+                    }
+                    if (speedFilters.length) audioFilters.push(speedFilters.join(','));
+                    continue;
+                }
+                if (effect.type === 'lut_apply') {
+                    const params = effect.getParamsSnapshot();
+                    const intensity = Math.max(0, Math.min(1, Number(params.intensity ?? 1)));
+                    if (!params.lutFile || intensity >= 1) {
+                        const output = `fxv${labelIndex++}`;
+                        graph.push(`[${current}]${filter}[${output}]`);
+                        current = output;
+                        continue;
+                    }
+                    const index = labelIndex++;
+                    const base = `lutbase${index}`, lutInput = `lutinput${index}`;
+                    const lutOutput = `lutout${index}`, output = `fxv${index}`;
+                    graph.push(`[${current}]split=2[${base}][${lutInput}]`);
+                    graph.push(`[${lutInput}]lut3d=file='${this._escapeFilterPath(params.lutFile)}'[${lutOutput}]`);
+                    graph.push(`[${base}][${lutOutput}]blend=all_opacity=${intensity.toFixed(3)}[${output}]`);
+                    current = output;
+                    continue;
+                }
+                const output = `fxv${labelIndex++}`;
+                graph.push(`[${current}]${filter}[${output}]`);
+                current = output;
+            }
+            graph.push(`[${current}]null[vout]`);
+            filterComplex = graph.join(';');
+        }
+
+        if (!needsFilterGraph) for (const effect of cpuEffects) {
             const filter = this.compileEffect(effect, context);
             if (!filter) continue;
 
             // Classify as audio or video filter
             if (this._isAudioFilter(effect.type)) {
                 audioFilters.push(filter);
+            } else if (effect.type === 'speed_change') {
+                const [videoFilter, ...speedFilters] = filter.split(',');
+                if (videoFilter) videoFilters.push(videoFilter);
+                if (speedFilters.length) audioFilters.push(speedFilters.join(','));
             } else {
                 videoFilters.push(filter);
             }
@@ -215,8 +250,10 @@ export class CPUEffectEngine {
 
         return {
             videoFilter: videoFilters.length > 0 ? videoFilters.join(',') : null,
+            filterComplex,
+            videoFilterComplex: needsFilterGraph,
             audioFilter: audioFilters.length > 0 ? audioFilters.join(',') : null,
-            hasVideo: videoFilters.length > 0,
+            hasVideo: videoFilters.length > 0 || needsFilterGraph,
             hasAudio: audioFilters.length > 0
         };
     }
@@ -225,12 +262,13 @@ export class CPUEffectEngine {
      * Build complete FFmpeg command arguments
      */
     buildCommand(inputPath, outputPath, effects, context = {}) {
-        const { videoFilter, audioFilter, hasVideo, hasAudio } = this.compileChain(effects, context);
+        const { videoFilter, filterComplex, videoFilterComplex, audioFilter, hasVideo, hasAudio } = this.compileChain(effects, context);
 
         const args = ['-i', inputPath];
 
         if (hasVideo) {
-            args.push('-vf', videoFilter);
+            if (videoFilterComplex) args.push('-filter_complex', filterComplex, '-map', '[vout]', '-map', '0:a?');
+            else args.push('-vf', videoFilter);
         }
 
         if (hasAudio) {
@@ -286,15 +324,41 @@ export class CPUEffectEngine {
         }
 
         // Apply effects to final composite
-        const { videoFilter } = this.compileChain(effects, context);
-        if (videoFilter) {
-            const lastLabel = graph.length > 0 ? `[v${streamIndex - 1}]` : '[0:v]';
-            graph.push(`${lastLabel}${videoFilter}[vout]`);
+        const compiled = this.compileChain(effects, context);
+        const { videoFilter, audioFilter } = compiled;
+        let videoOutput = graph.length > 0 ? `[v${streamIndex - 1}]` : '[0:v]';
+        if (compiled.videoFilterComplex && compiled.filterComplex) {
+            graph.push(compiled.filterComplex.replaceAll('[0:v]', videoOutput));
+            videoOutput = '[vout]';
+        } else if (videoFilter) {
+            graph.push(`${videoOutput}${videoFilter}[vout]`);
+            videoOutput = '[vout]';
+        } else if (inputs.length > 1) {
+            // An overlay graph always needs a named terminal stream. Returning
+            // [vout] without creating it made effect-free multi-input renders
+            // fail at FFmpeg's output-map stage.
+            graph.push(`${videoOutput}null[vout]`);
+            videoOutput = '[vout]';
+        }
+
+        // Audio is opt-in because some image/video inputs have no audio
+        // stream. The caller can mark the base input (`hasAudio: true`) or
+        // provide an explicit stream index in context.
+        const explicitAudioInput = Number.isInteger(context.audioInputIndex);
+        const audioInputIndex = explicitAudioInput
+            ? context.audioInputIndex
+            : inputs.findIndex(input => input?.hasAudio === true);
+        let audioOutput = null;
+        if (audioFilter && audioInputIndex >= 0 && (explicitAudioInput || audioInputIndex < inputs.length)) {
+            graph.push(`[${audioInputIndex}:a]${audioFilter}[aout]`);
+            audioOutput = '[aout]';
         }
 
         return {
             filterComplex: graph.join(';'),
-            outputMap: graph.length > 0 ? '[vout]' : '[0:v]'
+            outputMap: videoOutput,
+            audioMap: audioOutput,
+            hasAudio: audioOutput !== null,
         };
     }
 
@@ -318,6 +382,10 @@ export class CPUEffectEngine {
         const g = Math.round((rgb[1] || 0) * 255);
         const b = Math.round((rgb[2] || 0) * 255);
         return `0x${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    }
+
+    _escapeFilterPath(path) {
+        return String(path || '').replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'");
     }
 
     // ========================================================================

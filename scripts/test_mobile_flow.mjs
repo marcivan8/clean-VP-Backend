@@ -109,7 +109,7 @@ check('the flow opens only on a phone, and only with fresh media', () => {
     const effect = ide.slice(ide.indexOf('takePendingNewVideoFiles(projectId)'));
     const body = effect.slice(0, effect.indexOf('}, [projectId, sessionChecked]'));
     assert.ok(/if \(!files\.length\) return;/.test(body), 'no media means no flow');
-    assert.ok(/if \(isMobile\) useMobileFlowStore/.test(body), 'desktop must never see the flow');
+    assert.ok(/if \(isMobile\)\s*\{\s*useMobileFlowStore\.getState\(\)\.open\(\)/.test(body), 'desktop must never see the flow');
 });
 
 check('the flow is mounted in the mobile tree', () => {
@@ -195,9 +195,12 @@ check('the working screen is driven by the engine, not by a timer', () => {
         'no faked progress');
 });
 
-check("each finished step shows the sentence the handler reported", () => {
-    assert.ok(/\{s\.message && s\.state !== 'running'/.test(flow),
-        'the numbers come from the message, and only once the step is done');
+check('the working view reports grounded progress stages without inventing step details', () => {
+    assert.ok(/const stage = !visibleSteps\.length/.test(flow));
+    assert.ok(/reviewingFootage/.test(flow));
+    assert.ok(/shapingStory/.test(flow));
+    assert.ok(/finishingShort/.test(flow));
+    assert.ok(/t\(`mobileFlow\.\$\{stage\}`/.test(flow));
 });
 
 check('the step list is announced to a screen reader', () => {
@@ -205,9 +208,11 @@ check('the step list is announced to a screen reader', () => {
 });
 
 check('the progress screen stays until completion while the setup screen remains skippable', () => {
-    assert.ok(/mobileFlow\.workingUntilDone/.test(flow));
+    const working = flow.slice(flow.indexOf('function WorkingStep()'), flow.indexOf('/* ── The finished short'));
+    const outcome = flow.slice(flow.indexOf('function OutcomeStep()'), flow.indexOf('/* ── It edits'));
     assert.ok(!/mobileFlow\.editWhileWaiting/.test(flow));
-    assert.ok(/mobileFlow\.skip/.test(flow));
+    assert.ok(/mobileFlow\.skip/.test(outcome));
+    assert.ok(!/mobileFlow\.skip|onClick=\{close\}/.test(working), 'an edit cannot be abandoned mid-run');
 });
 
 
@@ -222,9 +227,10 @@ check('the flow sits BELOW the sheets that open on top of it', () => {
         'the plan-first approval and the export sheet are MobileSheets: hiding an Apply button behind the flow would strand a run');
 });
 
-check('a change uses the normal pipeline and applies the requested edit from the visible flow', () => {
-    assert.ok(/editJobManager\.processEditRequest\(text,\s*\{\s*autoApprove:\s*true\s*\}\)/.test(flow),
-        'the mobile flow has no visible approval sheet, so a sent change must not wait behind one');
+check('a change uses the normal plan-gated pipeline and restores partial failures', () => {
+    assert.ok(/editJobManager\.processEditRequest\(text\)/.test(flow));
+    assert.ok(/checkpoint\(\)/.test(flow));
+    assert.ok(/restoreCheckpoint/.test(flow));
     assert.ok(/changeNotApplied/.test(flow), 'a conversational response must not be presented as an applied edit');
 });
 
@@ -257,7 +263,7 @@ check('the result does not rebuild the player', () => {
 
 check('the typed request cannot submit empty', () => {
     assert.ok(/disabled=\{!typed\.trim\(\)\}/.test(flow));
-    assert.ok(/if \(!text\) return;/.test(flow));
+    assert.ok(/if \(!text \|\| refinementInFlight\.current\) return;/.test(flow), 'empty or duplicate submissions are ignored');
 });
 
 check('every mobileFlow string used in the component exists in both locales', () => {
@@ -486,11 +492,11 @@ check('the generic failure that follows a 402 cannot overwrite the quota message
     assert.equal(FLOW.getState().error, null, 'and must not pick up a generic error string');
 });
 
-check('a normal failure still routes as it did', () => {
+check('a normal failure before a result returns to the actionable outcome question', () => {
     FLOW.getState().open();
     FLOW.getState().choose('reel');
     FLOW.getState().failed('nope');
-    assert.equal(FLOW.getState().step, 'result');
+    assert.equal(FLOW.getState().step, 'outcome');
     assert.equal(FLOW.getState().error, 'nope');
 });
 

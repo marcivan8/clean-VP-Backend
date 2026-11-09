@@ -1,8 +1,10 @@
 import { makeScene2D, Video, Img, Txt, Node } from '@revideo/2d';
+import { TxtLeaf } from '@revideo/2d/lib/components/TxtLeaf.js';
 import { waitFor, useScene, all, createRef } from '@revideo/core';
 import { clipToLayer } from '../motion/RevideoLayerAdapter.js';
 import { resolveMotionAt } from '../motion/MotionResolver.js';
-import { revealedWordCount } from '../motion/CaptionModel.js';
+import { activeWordIndex, revealedWordCount } from '../motion/CaptionModel.js';
+import { createRevideoEffectFilters } from '../motion/EffectAdapter.js';
 
 /**
  * render-worker/revideo/src/scenes/timeline.tsx
@@ -36,9 +38,10 @@ import { revealedWordCount } from '../motion/CaptionModel.js';
  * origin is canvas-centre, so converting is one line: pixelX = (x-50)/100*cw.
  *
  * ─── SCOPE LIMITS, STATED PLAINLY ───────────────────────────────────────────
- * - No per-word colour highlight of the actively-spoken word yet — captions
- *   reveal word-by-word (real timing, via `revealedWordCount`) but render as
- *   one flat colour. `CAPTION_STYLE_PACKS.wordHighlight` is not applied here.
+ * - Color, opacity and scale active-word caption treatments use the same word
+ *   timings and style-pack values as the editor. Box and glow highlights still
+ *   require measured per-word geometry and are deliberately left to the
+ *   compositor caption program until that can be shared without approximation.
  * - Font loading here is just a named `fontFamily` on `Txt` — but unlike a
  *   stateless Lambda cold start (render-lambda's `FontInstaller` base64-
  *   embeds fonts per-invocation), this worker's fonts are registered once,
@@ -129,9 +132,12 @@ export default makeScene2D('timeline', function* (view) {
 
                 const resolved = () => resolveMotionAt(layer, playback.time);
                 const nodeRef = createRef<Node>();
+                const effectFilters = createRevideoEffectFilters(clip.effects, clip.start, clip.duration, () => playback.time);
 
                 if (track.type === 'text') {
                     const wordCount = Array.isArray(layer.words) ? layer.words.length : 0;
+                    const highlight = clip.captionStyle?.wordHighlight || {};
+                    const highlightMode = highlight.mode || 'none';
                     const textFn = () => {
                         if (wordCount > 0) {
                             const r = resolved();
@@ -140,19 +146,50 @@ export default makeScene2D('timeline', function* (view) {
                         }
                         return layer.content || '';
                     };
+                    const captionChildren = wordCount > 0
+                        ? layer.words.map((word: any, index: number) => (
+                            <TxtLeaf
+                                key={`${clip.id || layer.id || 'caption'}-word-${index}`}
+                                text={() => {
+                                    const n = revealedWordCount(layer.words, playback.time, resolved().reveal, wordCount);
+                                    return index < n ? `${word.text ?? word.word ?? ''}${index < n - 1 ? ' ' : ''}` : '';
+                                }}
+                                fill={() => {
+                                    const active = activeWordIndex(layer.words, playback.time) === index;
+                                    if (!active) return clip.color || '#ffffff';
+                                    if (highlightMode === 'color') return highlight.color || clip.color || '#ffffff';
+                                    return clip.color || '#ffffff';
+                                }}
+                                opacity={() => {
+                                    if (highlightMode !== 'opacity') return 1;
+                                    return activeWordIndex(layer.words, playback.time) === index ? 1 : 0.58;
+                                }}
+                                fontSize={() => {
+                                    if (!['color', 'opacity', 'scale'].includes(highlightMode)) return clip.fontSize || 48;
+                                    const active = activeWordIndex(layer.words, playback.time) === index;
+                                    const scale = active ? Math.max(1, Number(highlight.scale) || 1) : 1;
+                                    return (clip.fontSize || 48) * scale;
+                                }}
+                                fontWeight={clip.fontWeight || 400}
+                                fontFamily={clip.fontFamily || 'Inter'}
+                            />
+                        ))
+                        : undefined;
                     layerRefs[track.id]().add(
                         <Txt
                             ref={nodeRef}
-                            text={textFn}
+                            text={wordCount > 0 ? undefined : textFn}
+                            children={captionChildren}
                             fill={clip.color || '#ffffff'}
                             fontSize={clip.fontSize || 48}
                             fontFamily={clip.fontFamily || 'Inter'}
                             fontWeight={clip.fontWeight || 400}
                             x={() => toPxX(resolved().x)}
                             y={() => toPxY(resolved().y)}
-                            scale={() => resolved().scale}
+                            scale={() => [resolved().scale * resolved().scaleX, resolved().scale * resolved().scaleY]}
                             rotation={() => resolved().rotation}
                             opacity={() => resolved().opacity}
+                            filters={effectFilters}
                         />
                     );
                 } else if (track.type === 'overlay') {
@@ -167,9 +204,10 @@ export default makeScene2D('timeline', function* (view) {
                             src={fixUrl(url)}
                             x={() => toPxX(resolved().x)}
                             y={() => toPxY(resolved().y)}
-                            scale={() => resolved().scale}
+                            scale={() => [resolved().scale * resolved().scaleX, resolved().scale * resolved().scaleY]}
                             rotation={() => resolved().rotation}
                             opacity={() => resolved().opacity}
+                            filters={effectFilters}
                         />
                     );
                 }

@@ -410,12 +410,17 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                             borderRadius: 'var(--r-sm)',
                                             padding: 3,
                                         }}>
-                                            {['mp4', 'webm'].map(fmt => (
+                                            {[['mp4', 'MP4'], ['webm', 'WEBM'], ['png-sequence', 'PNG sequence'], ['transparent-png-sequence', 'Alpha graphics']].map(([fmt, label]) => (
                                                 <button key={fmt} onClick={() => setSettings(s => ({ ...s, format: fmt }))} style={pill(settings.format === fmt)}>
-                                                    {fmt.toUpperCase()}
+                                                    {label}
                                                 </button>
                                             ))}
                                         </div>
+                                        {settings.format === 'transparent-png-sequence' && (
+                                            <p style={{ margin: 0, fontSize: 10, lineHeight: 1.4, color: 'var(--fg-3)' }}>
+                                                Exports overlay layers as transparent PNG frames. The footage base, audio, and captions are excluded.
+                                            </p>
+                                        )}
                                     </div>
                                 </div>
 
@@ -432,7 +437,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                     }}
                                 >
                                     <Download size={14} />
-                                    {selectedPlatform ? t('exportModal.exportFor', { platform: selectedPlatform.label }) : t('exportModal.exportVideo')}
+                                    {settings.format === 'transparent-png-sequence' ? 'Export graphics' : selectedPlatform ? t('exportModal.exportFor', { platform: selectedPlatform.label }) : t('exportModal.exportVideo')}
                                     <ArrowRight size={13} style={{ opacity: 0.6 }} />
                                 </button>
                             </div>
@@ -573,7 +578,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                     revideoWarning means captions are missing entirely;
                                     the others mean "rendered, but degraded" — worded
                                     accordingly rather than lumped together. */}
-                                {(exportResult.revideoWarning || exportResult.captionWarning || exportResult.compositorWarning || exportResult.transitionWarning || exportResult.captionProgramWarning || exportResult.clipWarning) && (
+                                {(exportResult.revideoWarning || exportResult.captionWarning || exportResult.compositorWarning || exportResult.transitionWarning || exportResult.captionProgramWarning || exportResult.clipWarning || exportResult.effectWarning) && (
                                     <div style={{
                                         width: '100%',
                                         background: 'color-mix(in srgb, #f5a623 10%, transparent)',
@@ -589,6 +594,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                             exportResult.transitionWarning && { text: exportResult.transitionWarning },
                                             exportResult.captionProgramWarning && { text: exportResult.captionProgramWarning },
                                             exportResult.clipWarning && { text: exportResult.clipWarning },
+                                            exportResult.effectWarning && { text: exportResult.effectWarning },
                                         ].filter(Boolean).map((w, i) => (
                                             <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                                                 <AlertCircle size={14} style={{ color: '#f5a623', flexShrink: 0, marginTop: 1 }} />

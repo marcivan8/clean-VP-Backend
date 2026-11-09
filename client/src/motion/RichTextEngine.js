@@ -19,6 +19,7 @@
 
 import { measureSingleLineWidth } from './TextMeasurement.js';
 import { resolveEasing, clamp } from './Easing.js';
+import { activeWordIndex, revealedWordCount } from './CaptionModel.js';
 
 /**
  * Normalize an input (string, object, or runs array) into a standard array of text runs.
@@ -332,7 +333,7 @@ function finalizeLayout(rawLayout, containerOpts) {
  * @param {number} localTime Current time in seconds (0..sceneDuration)
  * @returns {Map<number, object>} Map of index -> { scale, opacity, translateY, translateX }
  */
-export function sampleTypographyMotion(layout, animSpec = {}, localTime = 0) {
+export function sampleTypographyMotion(layout, animSpec = {}, localTime = 0, clipDuration = animSpec.clipDuration) {
     const results = new Map();
     if (!layout || !animSpec.preset) return results;
 
@@ -385,6 +386,33 @@ export function sampleTypographyMotion(layout, animSpec = {}, localTime = 0) {
 
             default:
                 break;
+        }
+
+        const exit = animSpec.exit;
+        if (exit?.preset && Number(clipDuration) > 0) {
+            const exitDuration = Math.max(0.05, Number(exit.duration) || 0.24);
+            const exitStagger = Math.max(0, Number(exit.stagger ?? stagger) || 0);
+            const exitIndex = exit.order === 'forward' ? i : items.length - 1 - i;
+            const exitStart = Math.max(0, Number(clipDuration) - exitDuration - exitIndex * exitStagger);
+            const exitProgress = clamp((localTime - exitStart) / exitDuration, 0, 1);
+            if (exitProgress > 0) {
+                const exitEase = resolveEasing(exit.easing || 'easeInCubic')(exitProgress);
+                if (exit.preset === 'fade' || exit.preset === 'shrink' || exit.preset === 'drop') transform.opacity *= 1 - exitEase;
+                if (exit.preset === 'shrink') transform.scale *= 1 - exitEase * 0.35;
+                if (exit.preset === 'drop') transform.translateY += exitEase * (Number(exit.distance) || 28);
+                if (exit.preset === 'wipe') transform.translateX += exitEase * (Number(exit.distance) || 32) * (exit.direction === 'left' ? -1 : 1);
+            }
+        }
+
+        for (const beat of Array.isArray(animSpec.emphasis) ? animSpec.emphasis : []) {
+            const beatDuration = Math.max(0.05, Number(beat.duration) || 0.32);
+            const beatProgress = clamp((localTime - (Number(beat.start) || 0)) / beatDuration, 0, 1);
+            if (beatProgress <= 0 || beatProgress >= 1) continue;
+            const wave = Math.sin(beatProgress * Math.PI * 2);
+            const strength = clamp(Number(beat.amount) || 1, 0, 2);
+            if (beat.preset === 'pulse') transform.scale *= 1 + Math.max(0, wave) * 0.12 * strength;
+            if (beat.preset === 'shake') transform.translateX += wave * 4 * strength;
+            if (beat.preset === 'lift') transform.translateY -= Math.max(0, wave) * 5 * strength;
         }
 
         results.set(key, transform);
@@ -501,4 +529,177 @@ export function drawRichText(ctx, layout, opts = {}) {
     }
 
     ctx.restore();
+}
+
+/** Render timed caption words inside an isolated graphic layer. This keeps
+ * word timing and the common caption highlight treatments when a caption is
+ * promoted from the text track so a parent composition can apply group effects.
+ */
+function drawRichCaptionFrame(ctx, graphic, localTime, opts) {
+    const width = Math.max(1, Number(opts.width || graphic.w) || 1080);
+    const height = Math.max(1, Number(opts.height || graphic.h) || 480);
+    const style = graphic.style || {};
+    const captionStyle = graphic.captionStyle || {};
+    const highlight = captionStyle.wordHighlight || {};
+    let text = String(graphic.text ?? '');
+    if (captionStyle.uppercase) text = text.toUpperCase();
+    const layout = layoutRichText(text, {
+        fontFamily: style.fontFamily,
+        fontSize: Number(style.fontSize) || 56,
+        fontWeight: style.fontWeight || '600',
+        color: style.color || '#FFFFFF',
+        stroke: typeof style.stroke === 'string' ? style.stroke : style.stroke?.color || null,
+        strokeWidth: Number(style.stroke?.width ?? style.strokeWidth) || 0,
+        shadow: style.shadow || null,
+        maxWidth: width,
+        maxHeight: height,
+        lineHeightMultiplier: Number(style.lineHeight) > 0 ? Number(style.lineHeight) : 1.2,
+        align: style.textAlign || style.align || 'center',
+        valign: style.valign || 'middle',
+        shrinkToFit: true,
+    });
+    const words = Array.isArray(graphic.captionWords) ? graphic.captionWords : [];
+    const time = Number.isFinite(Number(opts.globalTime)) ? Number(opts.globalTime) : Number(localTime) || 0;
+    const activeIndex = activeWordIndex(words, time);
+    const highlightMode = highlight.mode || 'none';
+    const reveal = graphic.captionReveal === true || (words.length > 0 && highlightMode !== 'none');
+    const visibleCount = reveal ? revealedWordCount(words, time, 1, layout.words.length) : layout.words.length;
+    const baseColor = style.color || '#FFFFFF';
+    const scale = clamp(Number(highlight.scale) || 1, 0.5, 2);
+    ctx.save();
+    const panelColor = style.backgroundColor || captionStyle.backgroundColor;
+    if (panelColor) {
+        const paddingEm = Math.max(0.06, Number(style.backgroundPadding ?? captionStyle.backgroundPadding) || 0.16);
+        layout.lines.forEach((line, lineIndex) => {
+            const visibleWords = layout.words.filter((word, index) => word.lineIndex === lineIndex && index < visibleCount);
+            if (!visibleWords.length) return;
+            const left = Math.min(...visibleWords.map(word => word.x));
+            const right = Math.max(...visibleWords.map(word => word.x + word.width));
+            const fontSize = Number(line.maxFontSize) || 56;
+            const padX = fontSize * paddingEm;
+            const padY = fontSize * 0.08;
+            const box = { x: left - padX, y: visibleWords[0].y - fontSize - padY, w: right - left + padX * 2, h: fontSize + padY * 2 };
+            ctx.save();
+            ctx.fillStyle = panelColor;
+            ctx.beginPath();
+            if (ctx.roundRect) ctx.roundRect(box.x, box.y, box.w, box.h, Math.min(box.h * 0.04, box.w / 2));
+            else ctx.rect(box.x, box.y, box.w, box.h);
+            ctx.fill();
+            ctx.restore();
+        });
+    }
+    for (let index = 0; index < layout.words.length; index++) {
+        if (index >= visibleCount) continue;
+        const word = layout.words[index];
+        const run = word.run;
+        const isActive = index === activeIndex && highlightMode !== 'none';
+        const x = word.x, baseline = word.y;
+        ctx.save();
+        let activeScale = scale;
+        if (isActive && highlightMode === 'bounce-box') {
+            const timedWord = words[activeIndex] || {};
+            const duration = Math.max(0.08, Number(timedWord.end) - Number(timedWord.start) || 0.25);
+            const progress = clamp((time - Number(timedWord.start || 0)) / Math.min(0.22, duration), 0, 1);
+            activeScale *= 1 + Math.sin(progress * Math.PI) * (Number(highlight.bounce) || 0.12);
+        }
+        if (isActive && activeScale !== 1) {
+            ctx.translate(x + word.width / 2, baseline - run.fontSize / 2);
+            ctx.scale(activeScale, activeScale);
+            ctx.translate(-(x + word.width / 2), -(baseline - run.fontSize / 2));
+        }
+        if (isActive && ['box', 'background', 'vox-marker', 'bounce-box'].includes(highlightMode)) {
+            const padX = Math.max(4, run.fontSize * 0.12), padY = Math.max(2, run.fontSize * 0.06);
+            const radius = Math.max(2, run.fontSize * 0.08);
+            ctx.fillStyle = highlightMode === 'bounce-box' && highlight.altBackground && activeIndex % 2
+                ? highlight.altBackground : (highlight.background || '#FFE500');
+            ctx.beginPath();
+            const marker = highlightMode === 'vox-marker';
+            const boxX = x - padX, boxY = marker ? baseline - run.fontSize * 0.28 : baseline - run.fontSize + padY;
+            const boxW = word.width + padX * 2, boxH = marker ? Math.max(5, run.fontSize * 0.22) : run.fontSize + padY * 2;
+            if (ctx.roundRect) ctx.roundRect(boxX, boxY, boxW, boxH, radius);
+            else ctx.rect(boxX, boxY, boxW, boxH);
+            ctx.fill();
+        }
+        ctx.font = `${run.fontStyle} ${run.fontWeight} ${run.fontSize}px "${run.fontFamily}", sans-serif`;
+        if (isActive && highlightMode === 'neon-glow') {
+            ctx.shadowColor = highlight.glowColor || highlight.color || '#00E5FF';
+            ctx.shadowBlur = Math.max(8, Number(highlight.glow) || run.fontSize * 0.32);
+        } else if (run.shadow) {
+            ctx.shadowColor = run.shadow.color || 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = Number(run.shadow.blur) || 8;
+            ctx.shadowOffsetX = Number(run.shadow.offsetX) || 0;
+            ctx.shadowOffsetY = Number(run.shadow.offsetY) || 2;
+        } else if (style.textShadow && style.textShadow !== 'none') {
+            const shadow = String(style.textShadow).match(/(-?\d+(?:\.\d+)?)px\s+(-?\d+(?:\.\d+)?)px(?:\s+(\d+(?:\.\d+)?)px)?\s*(.*)/);
+            if (shadow) {
+                ctx.shadowOffsetX = Number(shadow[1]) || 0;
+                ctx.shadowOffsetY = Number(shadow[2]) || 0;
+                ctx.shadowBlur = Number(shadow[3]) || 0;
+                ctx.shadowColor = shadow[4]?.trim() || 'rgba(0,0,0,0.5)';
+            }
+        }
+        const dimmed = isActive && highlightMode === 'opacity';
+        ctx.globalAlpha *= dimmed ? clamp(Number(highlight.opacity) || 0.5, 0, 1) : 1;
+        ctx.fillStyle = isActive && highlightMode === 'color' ? (highlight.color || '#FFE500')
+            : isActive && ['box', 'background', 'bounce-box'].includes(highlightMode) ? (highlight.color || '#111111')
+                : baseColor;
+        if (run.stroke && run.strokeWidth > 0) {
+            ctx.strokeStyle = run.stroke;
+            ctx.lineWidth = run.strokeWidth;
+            ctx.lineJoin = 'round';
+            ctx.strokeText(word.text, x, baseline);
+        }
+        ctx.fillText(word.text, x, baseline);
+        if (isActive && highlightMode === 'underline') {
+            ctx.strokeStyle = highlight.color || baseColor;
+            ctx.lineWidth = Math.max(2, run.fontSize * 0.06);
+            ctx.beginPath(); ctx.moveTo(x, baseline + 3); ctx.lineTo(x + word.width, baseline + 3); ctx.stroke();
+        }
+        if (isActive && highlightMode === 'terminal-cursor') {
+            ctx.fillStyle = highlight.cursorColor || highlight.color || baseColor;
+            ctx.fillText(String(highlight.cursor || '▌'), x + word.width + Math.max(2, run.fontSize * 0.04), baseline);
+        }
+        ctx.restore();
+    }
+    ctx.restore();
+    return layout;
+}
+
+/**
+ * Draw a complete rich-text graphic from a serialisable scene node.
+ * The preview canvas and export renderer call this same function so per-glyph
+ * animation, wrapping, tracking, stroke and shadows stay frame-identical.
+ */
+export function drawRichTextFrame(ctx, graphic = {}, localTime = 0, opts = {}) {
+    if (!ctx) return null;
+    if (graphic.captionMode) return drawRichCaptionFrame(ctx, graphic, localTime, opts);
+    const width = Math.max(1, Number(opts.width || graphic.w) || 1080);
+    const height = Math.max(1, Number(opts.height || graphic.h) || 480);
+    const style = graphic.style || {};
+    const input = Array.isArray(graphic.runs) && graphic.runs.length
+        ? graphic.runs
+        : String(graphic.text ?? '');
+    const stroke = style.stroke;
+    const layout = layoutRichText(input, {
+        fontFamily: style.fontFamily,
+        fontSize: Number(style.fontSize) || 56,
+        fontWeight: style.fontWeight || '600',
+        color: style.color || '#FFFFFF',
+        stroke: typeof stroke === 'string' ? stroke : stroke?.color || null,
+        strokeWidth: Number(stroke?.width ?? style.strokeWidth) || 0,
+        shadow: style.shadow || null,
+        maxWidth: width,
+        maxHeight: height,
+        lineHeightMultiplier: Number(style.lineHeight) > 0 ? Number(style.lineHeight) : 1.2,
+        align: style.textAlign || style.align || 'center',
+        valign: style.valign || 'middle',
+        shrinkToFit: true,
+    });
+    const animSpec = graphic.charAnim || null;
+    const unit = animSpec?.unit === 'word' ? 'word' : 'char';
+    const motionMap = animSpec?.preset
+        ? sampleTypographyMotion(layout, animSpec, Math.max(0, Number(localTime) || 0), Number(opts.duration ?? opts.durationSec ?? graphic.duration) || 0)
+        : null;
+    drawRichText(ctx, layout, { motionMap, unit });
+    return layout;
 }

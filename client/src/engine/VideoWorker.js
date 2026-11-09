@@ -58,11 +58,12 @@ self.onmessage = async (e) => {
             // Ideally MainThread sends the File URL.
             // Let's assume payload.url is passed.
             if (payload.url) {
-                initializePipeline(payload.url);
+                initializePipeline(payload.url, payload.startTime || 0);
             } else if (!demuxer) {
                 console.warn('[Worker] START_GENERATING called without URL and no Demuxer ready.');
             } else {
                 console.log('[Worker] Resuming playback with existing pipeline.');
+                if (Number.isFinite(Number(payload.startTime)) && Number(payload.startTime) > 0) demuxer.seek(Number(payload.startTime));
             }
             break;
 
@@ -128,9 +129,10 @@ function closeDecoders() {
     isReady = false;
 }
 
-function initializePipeline(url) {
+function initializePipeline(url, startTime = 0) {
     if (decoder && demuxer && demuxer.fileUri === url) {
         console.log('[Worker] Pipeline already initialized for:', url);
+        if (Number.isFinite(Number(startTime)) && Number(startTime) > 0) demuxer.seek(Number(startTime));
         return;
     }
 
@@ -273,6 +275,7 @@ function initializePipeline(url) {
 
     // 3. Create Demuxer
     demuxer = new MP4Demuxer(url, {
+        startTime,
         onConfig: async (config) => {
             console.log('[Worker] Configuring Video Decoder:', config);
             // Root cause of the silent black-screen bug: decoder.configure()

@@ -5,6 +5,7 @@
 
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { sampleKeyframeTrack } from '../../motion/MotionResolver.js';
 import {
     Key,
     Plus,
@@ -21,14 +22,38 @@ const EASING_OPTIONS = [
     { value: 'ease-in', labelKey: 'effects.easingEaseIn', path: 'M0,1 C0.42,1 1,0 1,0' },
     { value: 'ease-out', labelKey: 'effects.easingEaseOut', path: 'M0,1 C0,1 0.58,0 1,0' },
     { value: 'ease-in-out', labelKey: 'effects.easingEaseInOut', path: 'M0,1 C0.42,1 0.58,0 1,0' },
+    { value: 'step-start', labelKey: 'effects.easingStepStart', path: 'M0,0.5 H0.5 V0 H1' },
+    { value: 'step-end', labelKey: 'effects.easingStepEnd', path: 'M0,1 H0.5 V0.5 H1 V0' },
+    { value: '__custom_steps__', labelKey: 'effects.easingCustomSteps', path: 'M0,1 H0.25 V0.75 H0.5 V0.5 H0.75 V0.25 H1 V0' },
     { value: 'bounce', labelKey: 'effects.easingBounce', path: 'M0,1 C0.33,1 0.66,0.5 0.7,0 S1,0 1,0' },
     // R92: real springs and expo curves (motion/Easing.js)
     { value: 'spring', labelKey: 'effects.easingSpring', path: 'M0,1 C0.2,0 0.5,-0.08 1,0' },
     { value: 'springWobbly', labelKey: 'effects.easingSpringWobbly', path: 'M0,1 C0.2,-0.3 0.4,0.15 0.6,-0.05 S1,0 1,0' },
     { value: 'springSnappy', labelKey: 'effects.easingSpringSnappy', path: 'M0,1 C0.1,0 0.3,-0.04 1,0' },
     { value: 'easeOutExpo', labelKey: 'effects.easingExpoOut', path: 'M0,1 C0.16,1 0.3,0 1,0' },
-    { value: 'backOut', labelKey: 'effects.easingBackOut', path: 'M0,1 C0.34,-0.4 0.64,0 1,0' }
+    { value: 'backOut', labelKey: 'effects.easingBackOut', path: 'M0,1 C0.34,-0.4 0.64,0 1,0' },
+    { value: '__custom_bezier__', labelKey: 'effects.easingCustomBezier', path: 'M0,1 C0.25,1 0.25,0 1,0' }
 ];
+
+const DEFAULT_BEZIER = [0.25, 0.1, 0.25, 1];
+const BEZIER_CONTROL_NAMES = ['X1', 'Y1', 'X2', 'Y2'];
+const readBezierControls = (easing) => {
+    const match = /^\s*cubic-bezier\(([^)]+)\)\s*$/i.exec(String(easing || ''));
+    const values = match?.[1].split(',').map(value => Number(value.trim()));
+    return values?.length === 4 && values.every(Number.isFinite) ? values : [...DEFAULT_BEZIER];
+};
+const encodeBezierControls = (values) => `cubic-bezier(${values.map(value => Number(value.toFixed(3))).join(', ')})`;
+const DEFAULT_STEPS = { count: 4, position: 'jump-end' };
+const readStepControls = easing => {
+    const match = /^\s*steps\(\s*(\d+)\s*(?:,\s*(start|end|jump-start|jump-end|jump-none|jump-both)\s*)?\)\s*$/i.exec(String(easing || ''));
+    const count = Number(match?.[1]);
+    if (!Number.isSafeInteger(count) || count < 1) return { ...DEFAULT_STEPS };
+    const rawPosition = String(match?.[2] || 'end').toLowerCase();
+    const position = rawPosition === 'start' ? 'jump-start' : rawPosition === 'end' ? 'jump-end' : rawPosition;
+    if (position === 'jump-none' && count < 2) return { ...DEFAULT_STEPS };
+    return { count, position };
+};
+const encodeStepControls = ({ count, position }) => `steps(${count}, ${position})`;
 
 /**
  * Single keyframe diamond marker
@@ -110,6 +135,10 @@ const KeyframeTrack = ({
 }) => {
     const { t } = useTranslation('editor');
     const [isExpanded, setIsExpanded] = useState(false);
+    const [bezierControls, setBezierControls] = useState(DEFAULT_BEZIER);
+    const [bezierDraft, setBezierDraft] = useState(DEFAULT_BEZIER.map(String));
+    const [stepControls, setStepControls] = useState(DEFAULT_STEPS);
+    const [stepCountDraft, setStepCountDraft] = useState(String(DEFAULT_STEPS.count));
     const trackRef = useRef(null);
     const [trackWidth, setTrackWidth] = useState(0);
 
@@ -126,8 +155,10 @@ const KeyframeTrack = ({
         const x = e.clientX - rect.left;
         const time = (x / rect.width) * duration;
 
-        // Get current value at this time (interpolated or default)
-        const value = effect.params?.[paramName]?.value ?? paramDef.value;
+        // Preserve the exact value visible at this time so inserting a key
+        // does not create a jump in an already animated parameter.
+        const baseValue = effect.params?.[paramName]?.value ?? paramDef.value;
+        const value = sampleKeyframeTrack(keyframes, time, baseValue);
         onAddKeyframe(paramName, time, value);
     };
 
@@ -140,6 +171,44 @@ const KeyframeTrack = ({
 
     const isSelected = selectedKeyframe?.paramName === paramName;
     const selectedKf = isSelected ? keyframes.find(k => k.time === selectedKeyframe.time) : null;
+    const isCustomBezier = /^\s*cubic-bezier\(/i.test(String(selectedKf?.easing || ''));
+    const isCustomSteps = /^\s*steps\(/i.test(String(selectedKf?.easing || ''));
+
+    useEffect(() => {
+        const controls = readBezierControls(selectedKf?.easing);
+        setBezierControls(controls);
+        setBezierDraft(controls.map(String));
+    }, [paramName, selectedKf?.time, selectedKf?.easing]);
+
+    useEffect(() => {
+        const controls = readStepControls(selectedKf?.easing);
+        setStepControls(controls);
+        setStepCountDraft(String(controls.count));
+    }, [paramName, selectedKf?.time, selectedKf?.easing]);
+
+    const updateBezierControl = (index, rawValue) => {
+        const parsed = Number(rawValue);
+        if (!Number.isFinite(parsed)) return;
+        const next = [...bezierControls];
+        next[index] = Math.max(index % 2 === 0 ? 0 : -2, Math.min(index % 2 === 0 ? 1 : 2, parsed));
+        setBezierControls(next);
+        setBezierDraft(next.map(String));
+        onUpdateKeyframe(paramName, selectedKf.time, selectedKf.time, selectedKf.value, encodeBezierControls(next));
+    };
+
+    const updateStepControls = next => {
+        if (next.position === 'jump-none' && next.count < 2) next = { ...next, count: 2 };
+        setStepControls(next);
+        setStepCountDraft(String(next.count));
+        onUpdateKeyframe(paramName, selectedKf.time, selectedKf.time, selectedKf.value, encodeStepControls(next));
+    };
+
+    const updateStepCount = rawValue => {
+        setStepCountDraft(rawValue);
+        const parsed = Number(rawValue);
+        if (!Number.isSafeInteger(parsed) || parsed < 1) return;
+        updateStepControls({ ...stepControls, count: parsed });
+    };
 
     return (
         <div className="border-b border-border last:border-b-0">
@@ -230,8 +299,21 @@ const KeyframeTrack = ({
                     <div className="flex items-center gap-2 text-xs">
                         <span className="text-muted-foreground w-16">{t('effects.easing')}:</span>
                         <select
-                            value={selectedKf.easing || 'linear'}
-                            onChange={(e) => onUpdateKeyframe(paramName, selectedKf.time, selectedKf.time, selectedKf.value, e.target.value)}
+                            value={isCustomBezier ? '__custom_bezier__' : isCustomSteps ? '__custom_steps__' : (selectedKf.easing || 'linear')}
+                            onChange={(e) => {
+                                if (e.target.value === '__custom_bezier__') {
+                                    const controls = [...DEFAULT_BEZIER];
+                                    setBezierControls(controls);
+                                    onUpdateKeyframe(paramName, selectedKf.time, selectedKf.time, selectedKf.value, encodeBezierControls(controls));
+                                } else if (e.target.value === '__custom_steps__') {
+                                    const controls = { ...DEFAULT_STEPS };
+                                    setStepControls(controls);
+                                    setStepCountDraft(String(controls.count));
+                                    onUpdateKeyframe(paramName, selectedKf.time, selectedKf.time, selectedKf.value, encodeStepControls(controls));
+                                } else {
+                                    onUpdateKeyframe(paramName, selectedKf.time, selectedKf.time, selectedKf.value, e.target.value);
+                                }
+                            }}
                             className="flex-1 px-2 py-1 bg-secondary border border-border rounded text-xs"
                         >
                             {EASING_OPTIONS.map(opt => (
@@ -239,6 +321,62 @@ const KeyframeTrack = ({
                             ))}
                         </select>
                     </div>
+                    {isCustomBezier && (
+                        <fieldset className="grid grid-cols-4 gap-2" aria-label={t('effects.bezierControls')}>
+                            {BEZIER_CONTROL_NAMES.map((name, index) => (
+                                <label key={name} className="flex flex-col gap-1 text-[10px] text-muted-foreground">
+                                    <span>{name}</span>
+                                    <input
+                                        type="number"
+                                        aria-label={`${t('effects.bezierControls')} ${name}`}
+                                        min={index % 2 === 0 ? 0 : -2}
+                                        max={index % 2 === 0 ? 1 : 2}
+                                        step="0.01"
+                                        value={bezierDraft[index]}
+                                        onChange={(e) => setBezierDraft(current => current.map((value, controlIndex) => controlIndex === index ? e.target.value : value))}
+                                        onBlur={(e) => updateBezierControl(index, e.target.value)}
+                                        className="w-full px-2 py-1 bg-secondary border border-border rounded text-xs text-foreground"
+                                    />
+                                </label>
+                            ))}
+                        </fieldset>
+                    )}
+                    {isCustomSteps && (
+                        <fieldset className="grid grid-cols-2 gap-2" aria-label={t('effects.stepControls')}>
+                            <label className="flex flex-col gap-1 text-[10px] text-muted-foreground">
+                                <span>{t('effects.stepCount')}</span>
+                                <input
+                                    type="number"
+                                    aria-label={t('effects.stepCount')}
+                                    min="1"
+                                    max={Number.MAX_SAFE_INTEGER}
+                                    step="1"
+                                    value={stepCountDraft}
+                                    onChange={e => updateStepCount(e.target.value)}
+                                    onBlur={() => {
+                                        if (!Number.isSafeInteger(Number(stepCountDraft)) || Number(stepCountDraft) < 1) {
+                                            setStepCountDraft(String(stepControls.count));
+                                        }
+                                    }}
+                                    className="w-full px-2 py-1 bg-secondary border border-border rounded text-xs text-foreground"
+                                />
+                            </label>
+                            <label className="flex flex-col gap-1 text-[10px] text-muted-foreground">
+                                <span>{t('effects.stepPosition')}</span>
+                                <select
+                                    aria-label={t('effects.stepPosition')}
+                                    value={stepControls.position}
+                                    onChange={e => updateStepControls({ ...stepControls, position: e.target.value })}
+                                    className="w-full px-2 py-1 bg-secondary border border-border rounded text-xs text-foreground"
+                                >
+                                    <option value="jump-start">{t('effects.stepJumpStart')}</option>
+                                    <option value="jump-end">{t('effects.stepJumpEnd')}</option>
+                                    <option value="jump-none">{t('effects.stepJumpNone')}</option>
+                                    <option value="jump-both">{t('effects.stepJumpBoth')}</option>
+                                </select>
+                            </label>
+                        </fieldset>
+                    )}
                     <button
                         onClick={() => onRemoveKeyframe(paramName, selectedKf.time)}
                         className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300"

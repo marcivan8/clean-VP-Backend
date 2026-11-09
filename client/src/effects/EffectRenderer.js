@@ -7,6 +7,9 @@
 
 import { EffectPipeline } from './EffectPipeline.js';
 import { ENGINE_TYPES } from './EffectNode.js';
+import { GPUEffectEngine } from './engines/GPUEffects.js';
+import { authFetch } from '../utils/authFetch.js';
+import { pollJobResult } from '../utils/jobPoller.js';
 
 // ============================================================================
 // RENDER MODES
@@ -36,6 +39,9 @@ export class EffectRenderer {
         this.isRendering = false;
         this.renderQueue = [];
         this.currentJob = null;
+        this.renderJobs = new Map();
+        this.maxRenderJobHistory = 100;
+        this.renderAbortController = null;
 
         // Progress callbacks
         this.onProgress = options.onProgress || null;
@@ -62,7 +68,6 @@ export class EffectRenderer {
 
         // Initialize GPU engine in pipeline
         if (this.pipeline && gl) {
-            const { GPUEffectEngine } = require('./engines/GPUEffects.js');
             this.pipeline.setGPUEngine(new GPUEffectEngine(gl));
         }
     }
@@ -75,7 +80,6 @@ export class EffectRenderer {
 
         // Initialize GPU engine if we have GL context
         if (this.gl && pipeline) {
-            const { GPUEffectEngine } = require('./engines/GPUEffects.js');
             pipeline.setGPUEngine(new GPUEffectEngine(this.gl));
         }
     }
@@ -101,8 +105,21 @@ export class EffectRenderer {
 
         let output = inputTexture;
 
+        // PlaybackEngine decodes one source clip per frame. Timeline placements
+        // may also include overlays and audio, so their effects must not be
+        // chained onto this unrelated source texture. Callers that render a
+        // layer independently can use renderPlacementPreview with that layer's
+        // own source texture.
+        const hasSourceClip = Object.prototype.hasOwnProperty.call(context, 'sourceClipId');
+        const sourceClipId = context.sourceClipId;
+        const sourcePlacements = hasSourceClip
+            ? (sourceClipId ? placements.filter(placement => placement.id === sourceClipId
+                || placement.clipId === sourceClipId
+                || placement.clip?.id === sourceClipId) : [])
+            : placements;
+
         // Process each placement's effects
-        for (const placement of placements) {
+        for (const placement of sourcePlacements) {
             if (this.pipeline.hasActiveEffectsAt(placement.id, currentTime, placement)) {
                 output = this.pipeline.processPreview(
                     output,
@@ -151,28 +168,34 @@ export class EffectRenderer {
      * Queue a final render job
      */
     queueRender(job) {
-        this.renderQueue.push({
+        const queuedJob = {
             ...job,
             id: `job-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
             status: 'queued',
             progress: 0
-        });
+        };
+        this.renderJobs.set(queuedJob.id, queuedJob);
+        this._pruneRenderJobs();
+        this.renderQueue.push(queuedJob);
 
         // Start processing if not already
         if (!this.isRendering) {
             this._processQueue();
         }
 
-        return job.id;
+        return queuedJob.id;
     }
 
     /**
      * Start final render for timeline
      */
-    async renderFinal(timeline, outputPath, options = {}) {
+    async renderFinal(timeline, outputPath, options = {}, queuedJob = null) {
+        if (this.isRendering) {
+            throw new Error('A render is already in progress');
+        }
         this.mode = RENDER_MODE.FINAL;
 
-        const job = {
+        const job = queuedJob || {
             timeline,
             outputPath,
             options,
@@ -180,14 +203,23 @@ export class EffectRenderer {
             status: 'processing',
             progress: 0
         };
+        job.timeline = timeline;
+        job.outputPath = outputPath;
+        job.options = options;
+        job.status = 'processing';
+        job.progress = 0;
+        this.renderJobs.set(job.id, job);
 
         this.currentJob = job;
         this.isRendering = true;
+        this.renderAbortController = new AbortController();
 
         try {
             // 1. Build render job
             const renderData = await this.pipeline.buildRenderJob(timeline, outputPath, {
                 ...options,
+                settings: options.settings || options.exportSettings || options,
+                assets: timeline.assets || options.assets || [],
                 getVideoUrl: (targetId) => timeline.getPlacement?.(targetId)?.sourceUrl
             });
 
@@ -202,7 +234,7 @@ export class EffectRenderer {
 
             const result = await this._executeRender(renderData, (progress) => {
                 this._reportProgress(job, 0.3 + progress * 0.65, 'Rendering...');
-            });
+            }, this.renderAbortController.signal);
 
             // 5. Finalize
             this._reportProgress(job, 0.95, 'Finalizing...');
@@ -218,10 +250,11 @@ export class EffectRenderer {
             return result;
 
         } catch (error) {
-            job.status = 'error';
+            const wasCancelled = Boolean(this.renderAbortController?.signal.aborted);
+            job.status = wasCancelled ? 'cancelled' : 'error';
             job.error = error.message;
 
-            if (this.onError) {
+            if (!wasCancelled && this.onError) {
                 this.onError(error, job);
             }
 
@@ -230,40 +263,33 @@ export class EffectRenderer {
         } finally {
             this.isRendering = false;
             this.currentJob = null;
+            this.renderAbortController = null;
             this.mode = RENDER_MODE.PREVIEW;
         }
     }
 
-    async _executeRender(renderData, onProgress) {
-        // Send to backend for FFmpeg processing
-        const response = await fetch('/api/export/render', {
+    async _executeRender(renderData, onProgress, signal) {
+        // Use the app's queued export endpoint and poll its canonical job status.
+        const response = await authFetch('/api/render', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(renderData)
+            body: JSON.stringify(renderData),
+            signal
         });
 
         if (!response.ok) {
-            throw new Error(`Render failed: ${response.statusText}`);
+            const detail = await response.json().catch(() => ({}));
+            throw new Error(detail.error || `Render enqueue failed: ${response.status} ${response.statusText}`);
         }
-
-        // Handle streaming progress if supported
-        if (response.body) {
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                const text = decoder.decode(value);
-                const match = text.match(/progress:\s*([\d.]+)/);
-                if (match && onProgress) {
-                    onProgress(parseFloat(match[1]));
-                }
-            }
+        const { jobId } = await response.json();
+        if (!jobId) throw new Error('Render API did not return a job ID');
+        const result = await pollJobResult(jobId, signal, 30 * 60 * 1000, progress => {
+            onProgress?.(Math.max(0, Math.min(1, progress / 100)));
+        });
+        if (!result || result.success === false || (!result.url && !result.outputUrl && !result.outputPath)) {
+            throw new Error(result?.error || 'Render job completed without a verified output video');
         }
-
-        return response.json();
+        return result;
     }
 
     async _processQueue() {
@@ -271,9 +297,11 @@ export class EffectRenderer {
             const job = this.renderQueue.shift();
 
             try {
-                await this.renderFinal(job.timeline, job.outputPath, job.options);
+                await this.renderFinal(job.timeline, job.outputPath, job.options, job);
             } catch (error) {
-                console.error('[EffectRenderer] Queue job failed:', error);
+                if (error?.name !== 'AbortError' && !/cancelled/i.test(String(error?.message || ''))) {
+                    console.error('[EffectRenderer] Queue job failed:', error);
+                }
             }
         }
     }
@@ -291,6 +319,15 @@ export class EffectRenderer {
         }
     }
 
+    _pruneRenderJobs() {
+        if (this.renderJobs.size <= this.maxRenderJobHistory) return;
+        for (const [id, job] of this.renderJobs) {
+            if (this.renderJobs.size <= this.maxRenderJobHistory) break;
+            if (job.status === 'queued' || job.status === 'processing') continue;
+            this.renderJobs.delete(id);
+        }
+    }
+
     // ========================================================================
     // RENDER CONTROLS
     // ========================================================================
@@ -301,23 +338,31 @@ export class EffectRenderer {
     cancelRender() {
         if (this.currentJob) {
             this.currentJob.status = 'cancelled';
-            // Send cancel signal to backend
-            fetch('/api/export/cancel', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ jobId: this.currentJob.id })
-            }).catch(console.error);
+            this.renderAbortController?.abort();
+            // Keep the renderer busy until renderFinal's finally block has
+            // released the active request. Otherwise a new queueRender call
+            // can start a second export while the aborted request is settling.
+            return true;
         }
-
-        this.isRendering = false;
-        this.currentJob = null;
+        return false;
     }
 
     /**
      * Clear render queue
      */
     clearQueue() {
+        const removed = this.renderQueue.length;
+        for (const job of this.renderQueue) {
+            job.status = 'cancelled';
+            job.error = 'Render removed from queue';
+        }
         this.renderQueue = [];
+        return removed;
+    }
+
+    /** Return the latest known state for a queued or completed render. */
+    getRenderJob(jobId) {
+        return this.renderJobs.get(jobId) || null;
     }
 
     /**

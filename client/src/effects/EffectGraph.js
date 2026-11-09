@@ -210,41 +210,59 @@ export class EffectGraph {
     }
 
     /**
+     * Return the executable effect stack. Unconnected graphs retain the
+     * authored order. Connected graphs are currently a single-input chain;
+     * reject branching and disconnected nodes instead of silently dropping
+     * part of the user's effect graph.
+     */
+    getExecutionOrder() {
+        if (!this.connections.length) {
+            return this.getAllNodes()
+                .map((node, index) => ({ node, index }))
+                .sort((a, b) => (Number(a.node.order) || 0) - (Number(b.node.order) || 0) || a.index - b.index)
+                .map(({ node }) => node);
+        }
+
+        // Also performs cycle detection.
+        const topological = this.getProcessingOrder();
+        const incoming = new Map([...this.nodes.keys()].map(id => [id, 0]));
+        const outgoing = new Map([...this.nodes.keys()].map(id => [id, 0]));
+        for (const edge of this.connections) {
+            incoming.set(edge.to, (incoming.get(edge.to) || 0) + 1);
+            outgoing.set(edge.from, (outgoing.get(edge.from) || 0) + 1);
+        }
+
+        const roots = [...this.nodes.keys()].filter(id => incoming.get(id) === 0);
+        if ([...incoming.values()].some(count => count > 1) || [...outgoing.values()].some(count => count > 1)) {
+            throw new Error('Effect graph must be a single linear chain; branching and multi-input graphs are not supported');
+        }
+        if (roots.length !== 1) {
+            throw new Error('Effect graph contains disconnected nodes and cannot be executed as one stack');
+        }
+
+        const chain = [];
+        const visited = new Set();
+        let current = roots[0];
+        while (current != null) {
+            if (visited.has(current)) break;
+            visited.add(current);
+            const node = this.nodes.get(current);
+            if (node) chain.push(node);
+            const edge = this.connections.find(item => item.from === current);
+            current = edge?.to ?? null;
+        }
+
+        if (chain.length !== this.nodes.size || topological.length !== this.nodes.size) {
+            throw new Error('Effect graph contains disconnected nodes and cannot be executed as one stack');
+        }
+        return chain;
+    }
+
+    /**
      * Get linear chain of nodes (for simple sequential graphs)
      */
     getLinearChain() {
-        // Find the start node (no inputs)
-        let startId = null;
-        for (const nodeId of this.nodes.keys()) {
-            if (this.getInputConnections(nodeId).length === 0) {
-                startId = nodeId;
-                break;
-            }
-        }
-
-        if (!startId) {
-            // Return in order of addition if no clear start
-            return this.getAllNodes().sort((a, b) => a.order - b.order);
-        }
-
-        // Traverse chain
-        const chain = [];
-        let currentId = startId;
-        const visited = new Set();
-
-        while (currentId && !visited.has(currentId)) {
-            visited.add(currentId);
-            const node = this.nodes.get(currentId);
-            if (node) {
-                chain.push(node);
-            }
-
-            // Get next node
-            const outputs = this.getOutputConnections(currentId);
-            currentId = outputs.length > 0 ? outputs[0].to : null;
-        }
-
-        return chain;
+        return this.getExecutionOrder();
     }
 
     // ========================================================================
@@ -255,7 +273,7 @@ export class EffectGraph {
      * Get effects active at a specific time
      */
     getActiveEffectsAt(time, placement = null) {
-        return this.getProcessingOrder().filter(node =>
+        return this.getExecutionOrder().filter(node =>
             node.enabled && node.isActiveAt(time, placement)
         );
     }
@@ -371,11 +389,15 @@ export class EffectGraph {
             }
         }
 
-        // Check for circular dependencies
+        // Check that the graph can actually be executed by this renderer. A
+        // topological ordering alone is insufficient: this engine currently
+        // executes a single stack, so acyclic branches and disconnected nodes
+        // must be reported as invalid instead of passing validation and
+        // failing only when preview/export starts.
         try {
-            this.getProcessingOrder();
+            this.getExecutionOrder();
         } catch (e) {
-            errors.push(e.message);
+            if (!errors.includes(e.message)) errors.push(e.message);
         }
 
         return {

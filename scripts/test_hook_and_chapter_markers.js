@@ -59,6 +59,7 @@ let helpers = null;
         // scope. This harness strips imports because the pure helpers below
         // do not use the catalogue, so provide the harmless binding first.
         .replace(/^\s*import\s+\{\s*TEMPLATE_KINDS\s*\}\s+from\s+'\.\.\/motion\/TemplateGraphics\.js';\s*$/m, 'const TEMPLATE_KINDS = [];')
+        .replace(/^\s*import\s+\{\s*describeToolCapabilities,\s*validateToolInvocation\s*\}\s+from\s+'\.\/ToolCapabilityCatalog\.js';\s*$/m, 'const describeToolCapabilities = definitions => definitions; const validateToolInvocation = () => ({ success: true });')
         // Strip every top-level import line — none of these three pure
         // helpers reference them, so nothing needs stubbing.
         .replace(/^\s*import\s+[^;]+;\s*$/gm, '')

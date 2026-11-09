@@ -49,7 +49,7 @@ export default function MobileSheet({ open, title, onClose, children }) {
             >
                 <div aria-hidden="true" style={{ width: 36, height: 4, borderRadius: 2, background: 'var(--line-strong)', alignSelf: 'center' }} />
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                    <h2 id={titleId} style={{ margin: 0, fontSize: 17, fontWeight: 600 }}>{title}</h2>
+                    <h2 id={titleId} style={{ margin: 0, fontSize: 18, fontWeight: 650, letterSpacing: '-0.01em' }}>{title}</h2>
                     <button
                         type="button"
                         onClick={onClose}
@@ -68,8 +68,10 @@ export default function MobileSheet({ open, title, onClose, children }) {
 
 /** Section label used inside sheets. */
 export function SheetLabel({ children }) {
+    // R156: was 10.5px in --fg-3, which on these panels read as a smudge
+    // rather than a label.
     return (
-        <div style={{ fontFamily: 'var(--f-mono)', fontSize: 10.5, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--fg-3)' }}>
+        <div style={{ fontFamily: 'var(--f-mono)', fontSize: 11.5, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--fg-2)' }}>
             {children}
         </div>
     );
@@ -84,10 +86,10 @@ export function SheetChip({ active, onClick, children, disabled }) {
             disabled={disabled}
             onClick={onClick}
             style={{
-                minHeight: 40, padding: '0 14px', borderRadius: 20, whiteSpace: 'nowrap',
+                minHeight: 44, padding: '0 16px', borderRadius: 22, whiteSpace: 'nowrap',
                 border: `1px solid ${active ? 'var(--accent)' : 'var(--line-strong)'}`,
                 background: active ? 'var(--accent)' : 'var(--bg-3)',
-                color: active ? '#fff' : 'var(--fg)', fontFamily: 'var(--f-sans)', fontSize: 13.5, fontWeight: 500,
+                color: active ? '#fff' : 'var(--fg)', fontFamily: 'var(--f-sans)', fontSize: 15, fontWeight: active ? 600 : 500,
                 opacity: disabled ? 0.4 : 1, cursor: disabled ? 'not-allowed' : 'pointer',
             }}
         >
@@ -111,8 +113,8 @@ export function SheetRow({ icon, label, sub, onClick, danger, disabled }) {
         >
             <span style={{ color: danger ? 'var(--coral)' : 'var(--accent)', display: 'inline-flex' }}>{icon}</span>
             <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                <span style={{ fontSize: 15, fontWeight: 600 }}>{label}</span>
-                {sub && <span style={{ fontSize: 12.5, color: 'var(--fg-3)' }}>{sub}</span>}
+                <span style={{ fontSize: 16, fontWeight: 600 }}>{label}</span>
+                {sub && <span style={{ fontSize: 13.5, color: 'var(--fg-2)' }}>{sub}</span>}
             </span>
         </button>
     );

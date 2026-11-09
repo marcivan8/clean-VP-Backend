@@ -37,6 +37,35 @@ const useVersionsStore = create((set, get) => ({
     versions: [],          // newest first
     currentId: null,
 
+    /** Capture an in-memory checkpoint without adding a visible version row. */
+    checkpoint: () => {
+        const s = useTimelineStore.getState();
+        return { ...snapshot(), _historyState: { past: s.past, future: s.future } };
+    },
+
+    /** Restore a checkpoint after a failed multi-step refinement. */
+    restoreCheckpoint: (snap) => {
+        if (!snap) return false;
+        const store = useTimelineStore.getState();
+        if (snap._timelineState) {
+            timelineManager.dispatch(
+                { type: ACTION_TYPES.LOAD_STATE, payload: { state: snap._timelineState } },
+                { skipHistory: true },
+            );
+        }
+        useTimelineStore.setState({
+            currentTime: snap.currentTime,
+            activeClipId: snap.activeClipId,
+            selectedClipIds: snap.selectedClipIds,
+            tracks: timelineManager.toLegacyTracks(),
+            aspectRatio: snap.aspectRatio || store.aspectRatio,
+            scenes: snap.scenes ?? store.scenes,
+            ...(snap._historyState || {}),
+            ...(snap._extraState || {}),
+        });
+        return true;
+    },
+
     /**
      * Record what the project looks like right now.
      * @param {string} label  what produced it, in the user's words

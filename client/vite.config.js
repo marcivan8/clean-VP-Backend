@@ -1,18 +1,23 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { sentryVitePlugin } from '@sentry/vite-plugin'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
+
+const configDir = dirname(fileURLToPath(import.meta.url))
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = { ...loadEnv(mode, '../', ''), ...loadEnv(mode, process.cwd(), '') }
 
-  // Only upload source maps when SENTRY_AUTH_TOKEN is set (production CI builds).
-  // In local dev and staging without the token the plugin is simply omitted.
-  const sentryPlugin = (env.SENTRY_AUTH_TOKEN && env.SENTRY_ORG && env.SENTRY_PROJECT)
+  // Sentry credentials must be explicitly provided by the build environment.
+  // Reading them from .env files made an ordinary offline local build attempt
+  // to create a remote release as a side effect.
+  const sentryPlugin = (process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT)
     ? sentryVitePlugin({
-        org:        env.SENTRY_ORG,
-        project:    env.SENTRY_PROJECT,
-        authToken:  env.SENTRY_AUTH_TOKEN,
+        org:        process.env.SENTRY_ORG,
+        project:    process.env.SENTRY_PROJECT,
+        authToken:  process.env.SENTRY_AUTH_TOKEN,
         // Only upload source maps; don't delete the local .map files afterward
         // so other tools (e.g. Railway error pages) can still use them.
         sourcemaps: { filesToDeleteAfterUpload: [] },
@@ -27,6 +32,11 @@ export default defineConfig(({ mode }) => {
       // Keep React hooks on the same dispatcher when Vite optimizes peers
       // such as framer-motion across dependency graph generations.
       dedupe: ['react', 'react-dom'],
+      // Revideo's Video node statically imports hls.js. Keep the large HLS
+      // client in a dynamic chunk until a playlist source actually needs it.
+      alias: [
+        { find: /^hls\.js$/, replacement: resolve(configDir, 'src/revideo/LazyHls.js') },
+      ],
     },
 
     build: {

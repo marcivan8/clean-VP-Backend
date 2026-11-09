@@ -34,6 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     librsvg2-dev \
     curl \
     ffmpeg \
+    zip \
     fonts-liberation \
     fonts-dejavu-core \
     fonts-freefont-ttf \

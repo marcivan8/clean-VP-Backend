@@ -20,6 +20,47 @@
 
 import { resolveEasing, clamp } from './Easing.js';
 import { ANIMATABLE_PROPS, COMPOSITION_RULES, IDENTITY } from './MotionSchema.js';
+import { evaluateMotionExpression } from './MotionExpression.js';
+
+const isTrackValue = value => Number.isFinite(value)
+    || (Array.isArray(value) && value.length > 0 && value.every(Number.isFinite));
+
+function interpolateTrackValue(from, to, progress) {
+    if (Number.isFinite(from) && Number.isFinite(to)) return from + (to - from) * progress;
+    if (Array.isArray(from) && Array.isArray(to) && from.length === to.length
+        && from.every(Number.isFinite) && to.every(Number.isFinite)) {
+        return from.map((value, index) => value + (to[index] - value) * progress);
+    }
+    // A vector dimension change has no implicit channel mapping. Hold the
+    // nearest authored vector instead of manufacturing invalid components.
+    return progress < 0.5 ? from : to;
+}
+
+/** Sample a scalar or numeric-vector track using the incoming key's easing. */
+export function sampleKeyframeTrack(keyframes, localTime, fallback = 0) {
+    if (!Array.isArray(keyframes) || keyframes.length === 0) return fallback;
+    const track = keyframes.map((keyframe, index) => ({
+        time: Number(keyframe?.time), value: Array.isArray(keyframe?.value) ? [...keyframe.value] : Number(keyframe?.value), easing: keyframe?.easing, index,
+    })).filter(point => Number.isFinite(point.time) && isTrackValue(point.value))
+        .sort((a, b) => a.time - b.time || a.index - b.index);
+    if (!track.length) return fallback;
+    const unique = [];
+    for (const point of track) {
+        if (unique.at(-1)?.time === point.time) unique[unique.length - 1] = point;
+        else unique.push(point);
+    }
+    const at = Number.isFinite(Number(localTime)) ? Number(localTime) : 0;
+    if (at <= unique[0].time) return unique[0].value;
+    const last = unique.at(-1);
+    if (at >= last.time) return last.value;
+    for (let i = 0; i < unique.length - 1; i++) {
+        const from = unique[i], to = unique[i + 1];
+        if (at < from.time || at >= to.time) continue;
+        const progress = (at - from.time) / (to.time - from.time);
+        return interpolateTrackValue(from.value, to.value, resolveEasing(to.easing || 'linear')(clamp(progress, 0, 1)));
+    }
+    return last.value;
+}
 
 /**
  * Interpolate one animation's contribution at a given animation-local time.
@@ -34,10 +75,12 @@ import { ANIMATABLE_PROPS, COMPOSITION_RULES, IDENTITY } from './MotionSchema.js
 export function sampleAnimation(animation, localTime) {
     const kfs = animation?.keyframes;
     if (!Array.isArray(kfs) || kfs.length === 0) return {};
+    const at = Number.isFinite(Number(localTime)) ? Number(localTime) : 0;
 
     // Which properties does this animation address at all?
     const touched = new Set();
     for (const kf of kfs) {
+        if (!kf?.properties || typeof kf.properties !== 'object') continue;
         for (const p of Object.keys(kf.properties || {})) touched.add(p);
     }
     if (touched.size === 0) return {};
@@ -46,41 +89,117 @@ export function sampleAnimation(animation, localTime) {
     for (const prop of touched) {
         // Only keyframes that actually specify this property take part —
         // a keyframe list is usually sparse per-property.
-        const track = kfs.filter(kf => kf.properties && kf.properties[prop] !== undefined);
+        const track = [];
+        for (let index = 0; index < kfs.length; index++) {
+            const kf = kfs[index];
+            if (!kf?.properties || kf.properties[prop] === undefined || kf.properties[prop] === null || kf.properties[prop] === '') continue;
+            const time = Number(kf.time), value = Number(kf.properties[prop]);
+            if (!Number.isFinite(time) || !Number.isFinite(value)) continue;
+            track.push({ time, value, easing: kf.easing, index });
+        }
+        track.sort((a, b) => a.time - b.time || a.index - b.index);
         if (track.length === 0) continue;
 
-        if (localTime <= track[0].time) {
-            out[prop] = track[0].properties[prop];
+        // A later-authored keyframe at the same timestamp deterministically
+        // replaces the earlier value instead of creating a zero-width segment.
+        const uniqueTrack = [];
+        for (const point of track) {
+            if (uniqueTrack.at(-1)?.time === point.time) uniqueTrack[uniqueTrack.length - 1] = point;
+            else uniqueTrack.push(point);
+        }
+
+        if (at <= uniqueTrack[0].time) {
+            out[prop] = uniqueTrack[0].value;
             continue;
         }
-        const last = track[track.length - 1];
-        if (localTime >= last.time) {
-            out[prop] = last.properties[prop];
+        const last = uniqueTrack[uniqueTrack.length - 1];
+        if (at >= last.time) {
+            out[prop] = last.value;
             continue;
         }
 
         // Find the bracketing pair.
-        let from = track[0];
+        let from = uniqueTrack[0];
         let to = last;
-        for (let i = 0; i < track.length - 1; i++) {
-            if (localTime >= track[i].time && localTime <= track[i + 1].time) {
-                from = track[i];
-                to = track[i + 1];
+        for (let i = 0; i < uniqueTrack.length - 1; i++) {
+            if (at >= uniqueTrack[i].time && at <= uniqueTrack[i + 1].time) {
+                from = uniqueTrack[i];
+                to = uniqueTrack[i + 1];
                 break;
             }
         }
 
         const span = to.time - from.time;
-        const progress = span > 0 ? (localTime - from.time) / span : 1;
+        const progress = span > 0 ? (at - from.time) / span : 1;
         // Per-keyframe easing wins over the animation's default — this is what
         // lets a single "pop" animation ease in fast and settle out slowly.
         const ease = resolveEasing(to.easing || animation.easing);
         const t = ease(clamp(progress, 0, 1));
-        const a = from.properties[prop];
-        const b = to.properties[prop];
-        out[prop] = a + (b - a) * t;
+        out[prop] = from.value + (to.value - from.value) * t;
     }
     return out;
+}
+
+function sampleMotionPath(path, localTime, layerDuration) {
+    const points = (Array.isArray(path?.points) ? path.points : [])
+        .map(point => Array.isArray(point) ? [Number(point[0]), Number(point[1])] : [Number(point?.x), Number(point?.y)])
+        .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+    if (points.length < 2) return null;
+    if (path.closed && (points[0][0] !== points.at(-1)[0] || points[0][1] !== points.at(-1)[1])) points.push([...points[0]]);
+    const start = Math.max(0, Number(path.startTime) || 0);
+    const duration = Math.max(0.001, Number.isFinite(Number(path.duration)) && Number(path.duration) > 0
+        ? Number(path.duration) : Math.max(0.001, layerDuration - start));
+    const raw = clamp((localTime - start) / duration, 0, 1);
+    const eased = clamp(resolveEasing(path.easing || 'easeInOutCubic')(raw), 0, 1);
+    const sampleAt = progress => {
+        const last = points.length - 1;
+        const scaled = clamp(progress, 0, 1) * last;
+        const segment = Math.min(last - 1, Math.floor(scaled));
+        const t = scaled - segment;
+        const p0 = points[Math.max(0, segment - 1)], p1 = points[segment];
+        const p2 = points[segment + 1], p3 = points[Math.min(last, segment + 2)];
+        const cr = (a, b, c, d) => 0.5 * ((2 * b) + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t * t + (-a + 3 * b - 3 * c + d) * t * t * t);
+        return [cr(p0[0], p1[0], p2[0], p3[0]), cr(p0[1], p1[1], p2[1], p3[1])];
+    };
+    // Scene-authored paths already offer arc-length travel. Keep the same
+    // option on clip MotionLayers, using a bounded lookup table so evaluation
+    // remains deterministic and cheap on every preview/export frame.
+    const useArcLength = path.arcLength === true || path.mode === 'bezier';
+    let distanceLut = null;
+    if (useArcLength) {
+        const steps = Math.min(512, Math.max(32, (points.length - 1) * 32));
+        distanceLut = [{ progress: 0, point: sampleAt(0), distance: 0 }];
+        let distance = 0;
+        for (let i = 1; i <= steps; i++) {
+            const progress = i / steps;
+            const point = sampleAt(progress);
+            const previous = distanceLut[i - 1].point;
+            distance += Math.hypot(point[0] - previous[0], point[1] - previous[1]);
+            distanceLut.push({ progress, point, distance });
+        }
+    }
+    const samplePath = progress => {
+        if (!distanceLut || distanceLut.length < 2) return sampleAt(progress);
+        const target = clamp(progress, 0, 1) * distanceLut.at(-1).distance;
+        let low = 1, high = distanceLut.length - 1;
+        while (low < high) {
+            const middle = (low + high) >> 1;
+            if (distanceLut[middle].distance < target) low = middle + 1;
+            else high = middle;
+        }
+        const before = distanceLut[low - 1], after = distanceLut[low];
+        const span = after.distance - before.distance;
+        const fraction = span > 1e-8 ? (target - before.distance) / span : 0;
+        return sampleAt(before.progress + (after.progress - before.progress) * fraction);
+    };
+    const [x, y] = samplePath(eased);
+    let rotation = (Number(path.spin) || 0) * eased;
+    if (Number(path.bank)) {
+        const ahead = samplePath(Math.min(1, eased + 0.002));
+        const behind = samplePath(Math.max(0, eased - 0.002));
+        rotation += Math.atan2(ahead[1] - behind[1], ahead[0] - behind[0]) * 180 / Math.PI * Number(path.bank);
+    }
+    return { x, y, rotation };
 }
 
 /**
@@ -88,7 +207,7 @@ export function sampleAnimation(animation, localTime) {
  *
  * @param {object} layer a MotionLayer
  * @param {number} absoluteTime seconds on the timeline
- * @returns {{visible: boolean, x:number, y:number, scale:number, rotation:number,
+ * @returns {{visible: boolean, x:number, y:number, scale:number, scaleX:number, scaleY:number, rotation:number,
  *            opacity:number, blur:number, glow:number, reveal:number}}
  */
 export function resolveMotionAt(layer, absoluteTime) {
@@ -96,6 +215,8 @@ export function resolveMotionAt(layer, absoluteTime) {
         x:        Number.isFinite(layer?.x) ? layer.x : 50,
         y:        Number.isFinite(layer?.y) ? layer.y : 50,
         scale:    Number.isFinite(layer?.scale) ? layer.scale : 1,
+        scaleX:   Number.isFinite(layer?.scaleX) ? layer.scaleX : 1,
+        scaleY:   Number.isFinite(layer?.scaleY) ? layer.scaleY : 1,
         rotation: Number.isFinite(layer?.rotation) ? layer.rotation : 0,
         opacity:  Number.isFinite(layer?.opacity) ? layer.opacity : 1,
         blur:     0,
@@ -108,16 +229,17 @@ export function resolveMotionAt(layer, absoluteTime) {
     const start = Number(layer.startTime) || 0;
     const duration = Number(layer.duration) || 0;
     const end = start + duration;
-    const visible = absoluteTime >= start && absoluteTime <= end;
+    const visible = absoluteTime >= start && absoluteTime < end;
 
     const animations = Array.isArray(layer.animations) ? layer.animations : [];
-    if (animations.length === 0) return { ...base, visible };
+    const layerLocal = absoluteTime - start;
+    const expressions = layer.expressions && typeof layer.expressions === 'object' ? layer.expressions : {};
+    const expressionLayers = Array.isArray(layer.expressionLayers) ? layer.expressionLayers : [];
+    if (animations.length === 0 && !Object.keys(expressions).length && !layer.motionPath && expressionLayers.length === 0) return { ...base, visible };
 
     // Accumulate per-property deltas according to COMPOSITION_RULES.
     const acc = {};
     for (const prop of ANIMATABLE_PROPS) acc[prop] = null;
-
-    const layerLocal = absoluteTime - start;
 
     for (const anim of animations) {
         if (!anim) continue;
@@ -190,10 +312,82 @@ export function resolveMotionAt(layer, absoluteTime) {
         else                           out[prop] = acc[prop];
     }
 
-    // Guard rails. A NaN or negative scale silently blanks the element rather
-    // than erroring, which is miserable to debug from a user's screenshot.
+    const pathMotion = sampleMotionPath(layer.motionPath, layerLocal, duration);
+    if (pathMotion) {
+        out.x += pathMotion.x;
+        out.y += pathMotion.y;
+        out.rotation += pathMotion.rotation;
+    }
+
+    // Procedural expressions are deterministic functions of clip-local time.
+    // They override keyframed values for the same property, making the result
+    // predictable while leaving keyframes available as the authored fallback.
+    const progress = duration > 0 ? clamp(layerLocal / duration, 0, 1) : 0;
+    for (const prop of ANIMATABLE_PROPS) {
+        if (typeof expressions[prop] !== 'string') continue;
+        const value = evaluateMotionExpression(expressions[prop], {
+            t: layerLocal, time: layerLocal, duration, progress, value: out[prop],
+        });
+        if (value !== null) out[prop] = value;
+    }
+
+    // Parent scene expressions are relative to each owning group, not the
+    // flattened child's clock. Static parent transforms are already composed
+    // into the child's base values by SceneSchema; apply only the live delta
+    // here so child and parent animation remain additive and export samples
+    // the same result as preview.
+    const priorGroupTransforms = [];
+    for (const expressionLayer of expressionLayers) {
+        const groupDuration = Math.max(0, Number(expressionLayer.duration) || 0);
+        const groupLocal = absoluteTime - (Number(expressionLayer.startTime) || 0);
+        if (groupLocal < 0) continue;
+        const groupProgress = groupDuration > 0 ? clamp(groupLocal / groupDuration, 0, 1) : 0;
+        const evaluated = {};
+        for (const [prop, expression] of Object.entries(expressionLayer.expressions || {})) {
+            if (!['x', 'y', 'scale', 'scaleX', 'scaleY', 'rotation'].includes(prop) || typeof expression !== 'string') continue;
+            const value = evaluateMotionExpression(expression, {
+                t: groupLocal, time: groupLocal, duration: groupDuration, progress: groupProgress,
+            });
+            if (value !== null) evaluated[prop] = value;
+        }
+        const scale = Number.isFinite(evaluated.scale) ? evaluated.scale : 1;
+        const scaleX = Number.isFinite(evaluated.scaleX) ? evaluated.scaleX : 1;
+        const scaleY = Number.isFinite(evaluated.scaleY) ? evaluated.scaleY : 1;
+        const rotation = Number.isFinite(evaluated.rotation) ? evaluated.rotation : 0;
+        if (scale !== 1 || scaleX !== 1 || scaleY !== 1 || rotation !== 0) {
+            const frame = { w: Number(expressionLayer.frameW) || 1920, h: Number(expressionLayer.frameH) || 1080 };
+            let ox = Number(expressionLayer.originX) || 0;
+            let oy = Number(expressionLayer.originY) || 0;
+            for (const prior of priorGroupTransforms) {
+                const dx = ((ox - prior.originX) / 100) * frame.w * prior.scale * prior.scaleX;
+                const dy = ((oy - prior.originY) / 100) * frame.h * prior.scale * prior.scaleY;
+                const rad = (prior.rotation * Math.PI) / 180;
+                ox = prior.originX + ((dx * Math.cos(rad) - dy * Math.sin(rad)) / frame.w) * 100 + prior.x;
+                oy = prior.originY + ((dx * Math.sin(rad) + dy * Math.cos(rad)) / frame.h) * 100 + prior.y;
+            }
+            const px = ((out.x - ox) / 100) * frame.w * scale * scaleX;
+            const py = ((out.y - oy) / 100) * frame.h * scale * scaleY;
+            const rad = (rotation * Math.PI) / 180;
+            out.x = ox + ((px * Math.cos(rad) - py * Math.sin(rad)) / frame.w) * 100;
+            out.y = oy + ((px * Math.sin(rad) + py * Math.cos(rad)) / frame.h) * 100;
+            out.scale *= scale;
+            out.scaleX *= scaleX;
+            out.scaleY *= scaleY;
+            out.rotation += rotation;
+            priorGroupTransforms.push({ originX: Number(expressionLayer.originX) || 0, originY: Number(expressionLayer.originY) || 0, scale, scaleX, scaleY, rotation, x: evaluated.x || 0, y: evaluated.y || 0 });
+        } else {
+            priorGroupTransforms.push({ originX: Number(expressionLayer.originX) || 0, originY: Number(expressionLayer.originY) || 0, scale: 1, scaleX: 1, scaleY: 1, rotation: 0, x: evaluated.x || 0, y: evaluated.y || 0 });
+        }
+        if (Number.isFinite(evaluated.x)) out.x += evaluated.x;
+        if (Number.isFinite(evaluated.y)) out.y += evaluated.y;
+    }
+
+    // Guard against non-finite values while preserving signed scale. A negative
+    // scale is a deliberate mirror transform handled by the compositor.
     out.opacity = clamp(out.opacity, 0, 1);
-    out.scale   = Math.max(0, Number.isFinite(out.scale) ? out.scale : 1);
+    out.scale   = Number.isFinite(out.scale) ? out.scale : 1;
+    out.scaleX  = Number.isFinite(out.scaleX) ? out.scaleX : 1;
+    out.scaleY  = Number.isFinite(out.scaleY) ? out.scaleY : 1;
     out.blur    = Math.max(0, Number.isFinite(out.blur) ? out.blur : 0);
     out.glow    = Math.max(0, Number.isFinite(out.glow) ? out.glow : 0);
     out.reveal  = clamp(out.reveal, 0, 1);
@@ -221,7 +415,7 @@ export function resolvedToCSS(resolved, opts = {}) {
         parts.push(`translate(${resolved.dx || 0}px, ${resolved.dy || 0}px)`);
     }
     if (resolved.rotation) parts.push(`rotate(${resolved.rotation}deg)`);
-    parts.push(`scale(${resolved.scale})`);
+    parts.push(`scale(${resolved.scale}) scaleX(${resolved.scaleX ?? 1}) scaleY(${resolved.scaleY ?? 1})`);
 
     const filters = [];
     if (resolved.blur > 0) filters.push(`blur(${resolved.blur}px)`);

@@ -26,7 +26,7 @@ import {
 import { IntentParser } from '../IntentParser.js';
 import { EditPlanner } from '../EditPlanner.js';
 import { CommandCompiler } from '../CommandCompiler.js';
-import { MediaExecutionEngine, mediaExecutionEngine } from '../MediaExecutionEngine.js';
+import { executeVerifiedEdit } from '../executeVerifiedEdit.js';
 import { ValidationService } from '../ValidationService.js';
 import { VersionManager } from '../VersionManager.js';
 import useTimelineStore from '../../store/useTimelineStore.js';
@@ -178,7 +178,7 @@ export class OrchestratorController {
         orchestratorEvents.emitProgress(jobId, 85, 'Validating results...');
         EventBus.emit(GLOBAL_EVENTS.PHASE_VALIDATING, { jobId });
 
-        const validationResult = await this.executeValidationPhase(jobId, fsm, planningResult.plan, executionResult.result);
+        const validationResult = await this.executeValidationPhase(jobId, fsm, planningResult.plan, executionResult.result, executionResult.validation);
 
         if (!validationResult.success) {
             // ValidationService returns `message`, not `error` — coalesce both
@@ -328,14 +328,15 @@ export class OrchestratorController {
                 orchestratorEvents.emitAgentStart(jobId, 'MediaExecutionEngine', { commands: compileResult.commands });
                 console.log(`[AG_DEBUG] [Orchestrator] Executing media commands`);
 
-                const executionResult = await mediaExecutionEngine.execute(
+                const verifiedEdit = await executeVerifiedEdit(
                     compileResult.commands,
-                    (progress) => {
+                    planningResult.plan,
+                    { signal, onProgress: (progress) => {
                         const mappedProgress = 50 + Math.floor(progress * 0.3);
                         orchestratorEvents.emitProgress(jobId, mappedProgress, 'Executing...');
-                    },
-                    signal
+                    } }
                 );
+                const executionResult = verifiedEdit.execution || { success: false, error: verifiedEdit.error, results: verifiedEdit.results || [] };
                 console.log(`[AG_DEBUG] [Orchestrator] Execution finished. Success: ${executionResult.success}`);
 
                 orchestratorEvents.emitAgentComplete(jobId, 'MediaExecutionEngine', executionResult);
@@ -344,17 +345,20 @@ export class OrchestratorController {
                     throw new Error('Cancelled');
                 }
 
-                if (!executionResult.success) {
+                if (!verifiedEdit.success) {
                     console.error(`[AG_DEBUG] [Orchestrator] Execution failed: ${executionResult.error}`);
                     return {
                         success: false,
-                        error: executionResult.error || 'Execution failed'
+                        error: verifiedEdit.error || executionResult.error || 'Execution failed',
+                        validation: verifiedEdit.validation,
+                        partialResult: verifiedEdit.partialResult,
                     };
                 }
 
                 return {
                     success: true,
-                    result: executionResult
+                    result: executionResult,
+                    validation: verifiedEdit.validation,
                 };
             },
             EXECUTING_TIMEOUT_MS,
@@ -371,14 +375,14 @@ export class OrchestratorController {
      *      `validationResult.success` was therefore always `undefined`, causing
      *      the FSM to send VALIDATION_FAILED and the job to appear stuck/failed.
      */
-    async executeValidationPhase(jobId, fsm, plan, executionResult) {
+    async executeValidationPhase(jobId, fsm, plan, executionResult, prevalidated = null) {
         return this.withTimeout(
             async () => {
                 orchestratorEvents.emitAgentStart(jobId, 'ValidationService', { plan, result: executionResult });
                 console.log(`[AG_DEBUG] [Orchestrator] Validating execution results...`);
 
                 // FIX: added `await` — validate() is an async method
-                const validationResult = await ValidationService.validate(plan, executionResult);
+                const validationResult = prevalidated || await ValidationService.validate(plan, executionResult);
                 console.log(`[AG_DEBUG] [Orchestrator] Validation result: success=${validationResult.success}`);
 
                 orchestratorEvents.emitAgentComplete(jobId, 'ValidationService', validationResult);

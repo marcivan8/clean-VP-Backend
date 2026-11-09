@@ -17,11 +17,29 @@ export function transitionTransform(fx, clipTransform, transformOrigin) {
     return `${fxPart} ${base}`.trim();
 }
 
-/** CSS filter list for the base video: the LUT first (applied at clip level in export), then the transition. */
-export function transitionFilter(fx, lutFilter) {
+/**
+ * CSS filter list for the base video: the LUT first (applied at clip level in
+ * export), then the transition.
+ *
+ * `cheap` (phones) swaps the SVG filter for a plain CSS blur. The SVG chain is
+ * a Gaussian blur plus four colour matrices, two offsets and two blends over a
+ * live video, re-evaluated every frame with changing attributes — on a phone
+ * GPU that is the single most expensive thing in the preview, and it is why
+ * playback stutters through a cut. CSS blur() composites on the GPU and keeps
+ * the directional feel; what is lost is the red/blue split, in the preview
+ * only. The export samples motion/TransitionFX.js directly and is unchanged.
+ */
+export function transitionFilter(fx, lutFilter, { cheap = false, frameWidth = 0 } = {}) {
     const lut = lutFilter && lutFilter !== 'none' ? lutFilter : '';
     const active = fx && (fx.blurX > 1e-6 || fx.blurY > 1e-6 || Math.abs(fx.chroma) > 1e-6);
-    const parts = [lut, active ? `url(#${TFX_FILTER_ID})` : ''].filter(Boolean);
+    // blurX/blurY are fractions of the frame width — the same convention the
+    // SVG chain uses when it scales them for stdDeviation.
+    const px = Math.max(Number(fx?.blurX) || 0, Number(fx?.blurY) || 0) * (Number(frameWidth) || 0);
+    const effect = !active ? ''
+        : cheap
+            ? (px > 0.05 ? `blur(${px.toFixed(2)}px)` : '')
+            : `url(#${TFX_FILTER_ID})`;
+    const parts = [lut, effect].filter(Boolean);
     return parts.length ? parts.join(' ') : 'none';
 }
 

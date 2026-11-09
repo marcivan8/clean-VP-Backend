@@ -92,7 +92,7 @@ export class ValidationService {
             'silence_removal', 'remove_filler_words', 'long_form_edit',
             'smart_cleanup', 'remove_repetition', 'auto_captions', 'generate_captions', 'generate_transcript',
             'reorder_clips',
-            'polish_short', 'repurpose_shorts', 'auto_reel', 'apply_style_recipe',
+            'polish_short', 'repurpose_shorts', 'auto_reel', 'apply_style_recipe', 'resume_failed_job',
         ]);
         const opKey = plan.operation || plan.steps?.[0]?.action;
         const skipIntegrityCheck = RESTRUCTURING_OPS.has(opKey);
@@ -232,6 +232,22 @@ export class ValidationService {
                     issues: [],
                     warnings: []
                 };
+
+            case 'resume_failed_job': {
+                const results = executionResult.results || [];
+                const failed = results.filter(result => result?.success !== true);
+                return {
+                    outputs: results.map(result => ({
+                        action: result?.action || 'resumed operation',
+                        status: result?.success === true ? 'verified' : 'unverified',
+                    })),
+                    issues: failed.map(result => ({
+                        type: ISSUE_TYPES.INTEGRITY_ERROR,
+                        message: result?.error || `Resumed operation ${result?.action || ''} did not report success.`,
+                    })),
+                    warnings: [],
+                };
+            }
 
             default:
                 // Generic validation for unknown operations
@@ -665,7 +681,7 @@ export class ValidationService {
         }
 
         // Emit event for any listeners
-        if (typeof window !== 'undefined') {
+        if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
             window.dispatchEvent(new CustomEvent('validation_result', { detail: data }));
         }
     }

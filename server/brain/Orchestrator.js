@@ -122,7 +122,11 @@ class BrainOrchestrator {
             return brainOutput;
         }
 
-        // PHASE 5 — DELEGATE TO EXISTING PIPELINE
+        // PHASE 5 — LEGACY BRIDGE (FAILS CLOSED)
+        // The server cannot access the browser's live timeline. Until a shared
+        // executor exists, the adapter deliberately refuses to pretend that
+        // its proposed command was applied. The production editor workflow is
+        // the client-side EditJobManager/MediaExecutionEngine path.
         const command = brainOutput?.intent?.command;
         const executionResult = await this._executeViaExistingPipeline(
             command,
@@ -186,7 +190,8 @@ class BrainOrchestrator {
     }
 
     /**
-     * Execute the brain's resolved command via PipelineAdapter.
+     * Legacy execution hook. PipelineAdapter currently fails closed because
+     * no server-side dispatcher can mutate the browser editor state.
      * @private
      */
     async _executeViaExistingPipeline(commandString, projectContext, userId) {

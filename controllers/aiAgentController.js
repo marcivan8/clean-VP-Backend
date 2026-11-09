@@ -1435,12 +1435,20 @@ DO NOT execute anything - only generate the plan.
 OUTPUT FORMAT:
 {
   "plan_id": "${planId}",
+  "editorialBrief": {
+    "intendedResult": "string",
+    "targetAssets": ["asset id"],
+    "timelineChanges": ["string"],
+    "techniques": ["string"],
+    "constraints": ["string"],
+    "unresolvedQuestions": ["string"]
+  },
   "steps": [
     { "step_id": "step_1", "action": "action_name", ...params }
   ]
 }
 
-Keep steps atomic and ordered. Include all necessary parameters.`;
+Keep steps atomic and ordered. Include all necessary parameters. Use only tools in context.toolCapabilities and assets in context.mediaBin. Treat context.assetManifest as the complete inventory; it may be large. Never turn a reference asset into timeline footage. Explicit user instructions override the selected style's defaults; style guidance fills only unspecified choices. If required analysis is incomplete or a requested target is ambiguous, add an unresolved question instead of guessing.`;
 
         const completion = await openai.chat.completions.create({
             messages: [

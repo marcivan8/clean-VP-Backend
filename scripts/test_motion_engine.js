@@ -104,6 +104,20 @@ section('1 · Easing resolves every spelling in use, and never throws');
             near(fn(0), 0, 1e-6) && near(fn(1), 1, 1e-6),
             `f(0)=${fn(0)}, f(1)=${fn(1)}`);
     }
+    check('steps(n) keeps the backward-compatible jump-end behavior',
+        near(M.resolveEasing('steps(4)')(0.26), 0.25));
+    check('steps(n, start/end) supports both CSS jump positions',
+        near(M.resolveEasing('steps(4, start)')(0), 0.25)
+        && near(M.resolveEasing('steps(4, end)')(0), 0));
+    check('steps(n, jump-none/both) supports alternate hold timing',
+        near(M.resolveEasing('steps(4, jump-none)')(0.26), 1 / 3)
+        && near(M.resolveEasing('steps(4, jump-both)')(0), 0.2));
+    check('large valid step counts are preserved instead of silently capped',
+        near(M.resolveEasing('steps(120)')(0.015), 1 / 120));
+    check('step-start and step-end aliases resolve, malformed variants stay linear',
+        near(M.resolveEasing('step-start')(0), 1)
+        && near(M.resolveEasing('step-end')(0), 0)
+        && M.resolveEasing('steps(1, jump-none)') === M.EASING_FUNCTIONS.linear);
 }
 
 section('2 · Keyframe interpolation');
@@ -130,6 +144,30 @@ section('2 · Keyframe interpolation');
     check('keyframes are sorted on construction',
         M.createAnimation({ keyframes: [M.createKeyframe(1, { opacity: 1 }), M.createKeyframe(0, { opacity: 0 })] })
             .keyframes[0].time === 0);
+
+    const rawTrack = { easing: 'linear', keyframes: [
+        { time: 2, properties: { x: 20 } },
+        { time: 0, properties: { x: 0, opacity: 0 } },
+        { time: 1, properties: { x: 10 } },
+    ] };
+    const originalOrder = rawTrack.keyframes.map(kf => kf.time).join(',');
+    check('unsorted persisted keyframes interpolate by time', near(M.sampleAnimation(rawTrack, 1.5).x, 15));
+    check('sparse properties keep their own timeline', M.sampleAnimation(rawTrack, 1.5).opacity === 0);
+    check('sampling does not reorder or mutate source keyframes', rawTrack.keyframes.map(kf => kf.time).join(',') === originalOrder);
+
+    const duplicateTimes = { easing: 'linear', keyframes: [
+        { time: 0, properties: { x: 0 } },
+        { time: 1, properties: { x: 10 } },
+        { time: 1, properties: { x: 12 } },
+        { time: 2, properties: { x: 20 } },
+    ] };
+    check('later-authored duplicate timestamp wins deterministically', near(M.sampleAnimation(duplicateTimes, 1).x, 12));
+
+    const malformed = { keyframes: [null, { time: NaN, properties: { x: 100 } },
+        { time: 0, properties: { x: 2 } }, { time: 1, properties: { x: Infinity } },
+        { time: 2, properties: { x: 6 } }] };
+    check('malformed keyframes are ignored without emitting NaN', near(M.sampleAnimation(malformed, 1).x, 4));
+    check('invalid sample time falls back to the first finite keyframe', near(M.sampleAnimation(rawTrack, NaN).x, 0));
 }
 
 section('3 · Layer resolution composes animations correctly');
@@ -172,6 +210,23 @@ section('3 · Layer resolution composes animations correctly');
     check('scale MULTIPLIES against the layer base (2 × 0.5 = 1)',
         near(M.resolveMotionAt(twoScale, 0.5).scale, 1));
 
+    const pathLayer = M.createMotionLayer({ startTime: 4, duration: 3, x: 40, y: 60,
+        motionPath: { points: [[0, 0], [20, 10]], startTime: 0.5, duration: 1, easing: 'linear' } });
+    check('motion paths are relative to the authored layer position',
+        near(M.resolveMotionAt(pathLayer, 4.5).x, 40) && near(M.resolveMotionAt(pathLayer, 4.5).y, 60));
+    check('motion paths interpolate both axes through shared layer resolution',
+        near(M.resolveMotionAt(pathLayer, 5).x, 50) && near(M.resolveMotionAt(pathLayer, 5).y, 65));
+    check('motion paths hold their final point after their duration',
+        near(M.resolveMotionAt(pathLayer, 5.6).x, 60) && near(M.resolveMotionAt(pathLayer, 5.6).y, 70));
+    check('motion paths validate finite points and require at least two', M.validateMotionLayer(pathLayer).valid
+        && !M.validateMotionLayer({ ...pathLayer, motionPath: { points: [[0, NaN]] } }).valid);
+    const curvedPath = M.createMotionLayer({ startTime: 0, duration: 1, x: 0, y: 0,
+        motionPath: { points: [[0, 0], [100, 0], [100, 100]], duration: 1, easing: 'linear', arcLength: true } });
+    const arcSamples = [0, 0.25, 0.5, 0.75, 1].map(time => M.resolveMotionAt(curvedPath, time));
+    const arcSteps = arcSamples.slice(1).map((point, index) => Math.hypot(point.x - arcSamples[index].x, point.y - arcSamples[index].y));
+    check('arc-length paths travel at near-constant speed through curved points',
+        Math.max(...arcSteps) / Math.min(...arcSteps) < 1.15, `step lengths: ${arcSteps.join(', ')}`);
+
     // Guard rails — a NaN reaching a CSS transform blanks the element silently.
     const junk = M.createMotionLayer({
         startTime: 0, duration: 1,
@@ -181,6 +236,11 @@ section('3 · Layer resolution composes animations correctly');
     const r = M.resolveMotionAt(junk, 0.5);
     check('every resolved value is finite', [r.x, r.y, r.scale, r.rotation, r.opacity, r.blur, r.glow, r.reveal].every(Number.isFinite));
     check('opacity is clamped to 0..1', r.opacity >= 0 && r.opacity <= 1);
+    const mirrored = M.resolveMotionAt({ ...junk, scale: -1.25, scaleX: -0.5 }, 0.5);
+    check('signed base scales survive motion resolution for intentional mirroring', mirrored.scale === -1.25 && mirrored.scaleX === -0.5);
+    const animatedMirror = M.resolveMotionAt({ ...junk, animations: [M.createAnimation({ type: 'scale', duration: 1,
+        keyframes: [M.createKeyframe(0, { scale: 1 }), M.createKeyframe(1, { scale: -1 })] })] }, 1);
+    check('signed animated scales survive motion resolution', animatedMirror.scale === -1);
     check('resolving a null layer does not throw', M.resolveMotionAt(null, 0).visible === false);
 }
 
@@ -209,6 +269,22 @@ section('4 · Every motion preset builds valid, non-empty animations');
         'a preset removed in a later version must not break an old project on load');
 
     check('presets are filtered by layer kind', M.presetsForKind(M.LAYER_KINDS.VIDEO).includes('camera-push'));
+}
+
+section('4b · Motion validation rejects non-finite transforms and keyframes');
+{
+    const valid = M.createMotionLayer({ duration: 1, animations: [M.createAnimation({
+        id: 'valid-animation', duration: 1,
+        keyframes: [M.createKeyframe(0, { x: 0 }), M.createKeyframe(1, { x: 10 })],
+    })] });
+    check('a finite motion layer validates', M.validateMotionLayer(valid).valid);
+    check('a non-finite base transform is rejected', !M.validateMotionLayer({ ...valid, scale: NaN }).valid);
+    const invalidFrame = { ...valid, animations: [{ ...valid.animations[0], keyframes: [
+        { time: 0, properties: { x: Infinity } },
+    ] }] };
+    check('a non-finite keyframe value is rejected', M.validateMotionLayer(invalidFrame).errors.some(error => error.includes('finite number')));
+    const duplicateAnimations = { ...valid, animations: [valid.animations[0], { ...valid.animations[0] }] };
+    check('duplicate animation IDs are rejected', M.validateMotionLayer(duplicateAnimations).errors.some(error => error.includes('duplicate animation id')));
 }
 
 section('5 · Caption model preserves word timings (the R58 core fix)');
@@ -298,6 +374,12 @@ section('6 · The adapter keeps existing clips working (backwards compatibility)
         M.clipToMotionLayer({ id: 'c4', type: 'text', start: 0, duration: 1,
             words: [{ text: 'a', start: 0, end: 0.2 }] }).kind === M.LAYER_KINDS.CAPTION);
 
+    const pathData = { points: [[0, 0], [12, -8], [24, 0]], duration: 1.5, easing: 'easeInOutSine' };
+    check('clip adapter carries authored motion paths into the shared resolver',
+        JSON.stringify(M.clipToMotionLayer({ id: 'c-path', type: 'text', start: 0, duration: 2, motionPath: pathData }).motionPath) === JSON.stringify(pathData));
+    check('motion path edits persist back onto clips',
+        JSON.stringify(M.motionLayerToClipUpdates({ motionPath: pathData }).motionPath) === JSON.stringify(pathData));
+
     check('garbage input returns null rather than throwing', M.clipToMotionLayer(null) === null);
 
     const updates = M.motionLayerToClipUpdates(layer);
@@ -318,6 +400,7 @@ section('7 · The engine is actually WIRED (not instance nine of the dead-code p
     const mediaEng = read('client/src/agent/MediaExecutionEngine.js');
     const tsm      = read('client/src/timeline/TimelineStateManager.js');
     const store    = read('client/src/store/useTimelineStore.js');
+    const workerAdapter = read('render-worker/revideo/src/motion/RevideoLayerAdapter.js');
 
     check('TextOverlay imports the resolver',
         /from '\.\.\/\.\.\/motion\/MotionResolver\.js'/.test(overlay)
@@ -325,6 +408,10 @@ section('7 · The engine is actually WIRED (not instance nine of the dead-code p
         'TextOverlay is the ONLY mounted text renderer — if it does not call the engine, nothing does');
     check('TextOverlay imports the clip adapter',
         /clipToMotionLayer/.test(overlay));
+    check('motion paths survive both project projection directions and worker adaptation',
+        /motionPath: clip\.motionPath/.test(tsm) && /motionPath: legacyClip\.motionPath/.test(tsm)
+        && /motionPath: clip\.motionPath/.test(workerAdapter),
+        'a path must persist on the timeline and reach the same resolver during export');
     check('TextOverlay renders per-word when word timings exist',
         /CaptionWords/.test(overlay) && /clip\.words/.test(overlay));
     check('the superseded CSS keyframe path was REMOVED, not left dormant',
@@ -340,7 +427,8 @@ section('7 · The engine is actually WIRED (not instance nine of the dead-code p
     // vanishes on reload. That is exactly what was happening to `animation`.
     for (const field of ['animations', 'words', 'captionStyle']) {
         check(`"${field}" is projected out by toLegacyTracks`,
-            new RegExp(`${field}: clip\\.${field}`).test(tsm));
+            field === 'words' ? /words:\s*shiftWords\(clip\.words, placement\.wordShift\)/.test(tsm)
+                : new RegExp(`${field}: clip\\.${field}`).test(tsm));
         check(`"${field}" is read back by fromLegacyTracks`,
             new RegExp(`${field}: legacyClip\\.${field}`).test(tsm),
             'projected but not read back = silently lost on project reload');
@@ -363,7 +451,7 @@ section('8 · Nothing that already worked was changed out from under it');
         /applyCaptionUpdate/.test(overlay),
         'R32: the global/per-segment caption scope toggle depends on this');
     check('drag / pinch / resize handlers are intact',
-        /handlePointerDown/.test(overlay) && /handleResizePointerDown/.test(overlay));
+        /handlePointerDown/.test(overlay) && /<ResizeHandle/.test(overlay) && /onCommit=/.test(overlay));
     check('the caption overlap clamp is untouched',
         /Math\.min\(cap\.end \|\| 0, nextStart\)/.test(store));
     check('existing caption style inheritance still works',
@@ -461,6 +549,7 @@ section('10 · REACHABILITY — the engine has callers outside the test suite (R
     const panel  = read('client/src/components/MotionPanel.jsx');
     const ide    = read('client/src/layouts/IDELayout.jsx');
     const reason = read('client/src/components/Assistant/ReasoningPanel.jsx');
+    const captionPacks = read('client/src/components/Assistant/captionStylePacks.js');
 
     // This section is the point of R61. The engine was complete and almost
     // entirely uncallable — 21 of 26 presets, all 8 style packs and the whole
@@ -478,20 +567,20 @@ section('10 · REACHABILITY — the engine has callers outside the test suite (R
     // whose buttons were trimmed from the array, so they can never be selected.
     check('IDELayout imports MotionPanel', /import MotionPanel from/.test(ide));
     check("'motion' is in the CLICKABLE tab array",
-        /\['media', 'captions', 'transcript', 'color', 'motion'/.test(ide),
+        /\['media', 'captions', 'transcript', 'color', 'motion'/.test(ide) || /'motion'/.test(ide.slice(ide.indexOf("{['media'"), ide.indexOf("{['media'") + 300)),
         'a render branch with no tab button is unreachable — see effects/interview/marketplace');
     check("'motion' has a render branch",
-        /activeTab === 'motion' && <MotionPanel \/>/.test(ide));
+        /activeTab === 'motion' && <>[\s\S]*?<MotionPanel \/>/.test(ide));
 
     check('the caption style picker applies the MOTION half of a pack',
-        /captionStyle: legacyPackToCaptionStyle\(style\.id\)/.test(reason),
+        /captionPackUpdates\(style\)/.test(reason) && /captionStyle/.test(captionPacks),
         'this card set only visual properties, which is why every pack\'s uppercase flag was applied to nothing');
-    check('and it imports the mapping', /legacyPackToCaptionStyle/.test(reason)
-        && /from '\.\.\/\.\.\/motion\/CaptionModel\.js'/.test(reason));
+    check('and it imports the shared mapping', /captionPackUpdates/.test(reason)
+        && /from '\.\/captionStylePacks\.js'/.test(reason));
 
     // Every pack the existing picker offers must have motion behaviour, or
     // picking it silently drops the animation half.
-    const packIds = [...reason.matchAll(/id: '([a-z-]+)',\s+name: '/g)].map(m => m[1]);
+    const packIds = [...captionPacks.matchAll(/id: '([a-z-]+)',\s+name: '/g)].map(m => m[1]);
     check('the existing picker\'s packs were all found', packIds.length >= 10, `found ${packIds.length}`);
     const unmapped = packIds.filter(id => !M.LEGACY_PACK_MOTION[id]);
     check('every style pack in that picker has a motion mapping',
@@ -526,7 +615,7 @@ section('11 · REACHABILITY — the "overlay" graphics track has real callers (R
     check('useTimelineStore exposes addOverlayClip',
         /addOverlayClip:\s*\(asset/.test(store));
     check('addOverlayClip creates/reuses an \'overlay\' track and adds a clip',
-        /get\(\)\.addTrack\('overlay'\)/.test(store) && /get\(\)\.addClip\(trackId/.test(store));
+        /get\(\)\.addTrack\('overlay'/.test(store) && /get\(\)\.addClip\(trackId/.test(store));
 
     check('DraggableAsset has a real UI entry point that calls it',
         /addOverlayClip\(asset\)/.test(dragAsset),
@@ -566,9 +655,12 @@ section('11 · REACHABILITY — the "overlay" graphics track has real callers (R
     // motion fields — overlay tracks must not repeat that gap).
     check("Compositor's VISUAL_TRACK_TYPES includes 'overlay'",
         /VISUAL_TRACK_TYPES = new Set\(\['video', 'image', 'overlay'\]\)/.test(compositor));
-    check('the base track is chosen by TYPE, not array position — an overlay track can never become the base',
-        /baseTrack = visual\.find\(t => t\.type === 'video' \|\| t\.type === 'image'\)/.test(compositor),
-        'visual[0] would let an overlay track become "base" whenever its order value ties with the video track\'s');
+    const player = read('client/src/components/Player/VideoPlayer.jsx');
+    check('preview and export share explicit base and overlay track roles',
+        /export function getVisualTrackRoles\(tracks\)/.test(compositor) &&
+        /baseTrack = visual\.find\(track => track\.type === 'video' \|\| track\.type === 'image'\)/.test(compositor) &&
+        /getVisualTrackRoles\(tracks\)/.test(player),
+        'the base source must be selected by track type and reused by the player');
 }
 
 section('12 · Regenerating captions REPLACES the prior batch, not stacks on it');
@@ -581,7 +673,7 @@ section('12 · Regenerating captions REPLACES the prior batch, not stacks on it'
     // "double" captions on screen, and a font mismatch between the two
     // batches whenever the user had changed the font in between runs.
     const store = read('client/src/store/useTimelineStore.js');
-    const fnStart = store.indexOf('addCaptionClips: (captions) => {');
+    const fnStart = store.indexOf('addCaptionClips: (captions,');
     // addCaptionClips is defined once; slice from its start to the next
     // same-indent store method so later methods can't accidentally satisfy
     // these checks.
@@ -595,19 +687,19 @@ section('12 · Regenerating captions REPLACES the prior batch, not stacks on it'
 
     check('addCaptionClips was found', fnStart !== -1);
     check('it identifies its OWN previously-generated clips by id prefix',
-        /priorCaptionClips\s*=\s*\(textTrack\.clips \|\| \[\]\)\.filter\(c => c\.id\.startsWith\('caption-'\)\)/.test(fn));
+        /allPriorCaptionClips\s*=\s*\(textTrack\.clips \|\| \[\]\)\.filter\(c => String\(c\.clipId \|\| c\.id\)\.startsWith\('caption-'\)\)/.test(fn));
     check('it removes those prior clips before adding the new batch',
         /for \(const old of priorCaptionClips\)/.test(fn) &&
         /TimelineActions\.removePlacement\(old\.id\)/.test(fn));
     check('the removal loop runs BEFORE the forEach that adds new clips',
         fn.indexOf('for (const old of priorCaptionClips)') <
-        fn.indexOf('captions.forEach((cap, i) =>'),
+        fn.indexOf('captionBatch.forEach((cap, i) =>'),
         'adding first then removing would delete the clips just created, not the stale ones');
     check('manually-added text overlays are untouched (only `caption-` ids are cleared)',
-        !/priorCaptionClips\s*=\s*\(textTrack\.clips \|\| \[\]\)\.filter\(c => c\.id\.startsWith\('text-'\)\)/.test(fn),
+        !/allPriorCaptionClips\s*=\s*\(textTrack\.clips \|\| \[\]\)\.filter\(c => String\(c\.clipId \|\| c\.id\)\.startsWith\('text-'\)\)/.test(fn),
         'addTextOverlay clips use the "text-" id prefix and must survive caption regeneration');
     check('style inheritance is captured ONCE, before removal, not re-read per clip',
-        /const existingTextClip = priorCaptionClips\[0\] \|\| textTrack\?\.clips\?\.\[0\];/.test(fn) &&
+        /const existingTextClip = priorCaptionClips\[0\] \|\| allPriorCaptionClips\[0\] \|\| textTrack\?\.clips\?\.\[0\];/.test(fn) &&
         !/const existingTextClip = textTrack\?\.clips\?\.\[0\];\s*\n\s*timelineManager\.dispatch\(TimelineActions\.addClip/.test(fn),
         'reading it fresh inside the forEach (the old bug) means later runs can inherit from ' +
         'whichever old clip happens to be first rather than a stable snapshot');
@@ -646,8 +738,8 @@ section('12 · Regenerating captions REPLACES the prior batch, not stacks on it'
     check('TextOverlay reads aspectRatio from the timeline store',
         /aspectRatio:\s*state\.aspectRatio,/.test(overlay));
     check('a previewScale is computed from the container\'s actual rendered width vs the reference width',
-        /const \{ width: refWidth \} = getPlayerDimensions\(aspectRatio\);/.test(overlay) &&
-        /setPreviewScale\(rect\.width \/ refWidth\)/.test(overlay));
+        /const \{ width: refWidth, height: refHeight \} = getPlayerDimensions\(aspectRatio\);/.test(overlay) &&
+        /setPreviewScale\(Math\.min\(rect\.width \/ refWidth, rect\.height \/ refHeight\)\)/.test(overlay));
     check('the scale recomputes on resize, not just once at mount (ResizeObserver, not a one-shot read)',
         /new ResizeObserver\(recompute\)/.test(overlay) &&
         /observer\.observe\(el\)/.test(overlay));
@@ -692,9 +784,9 @@ section('12 · Regenerating captions REPLACES the prior batch, not stacks on it'
 
     const layout = read('client/src/layouts/IDELayout.jsx');
     check('IDELayout reads the project aspectRatio out of the timeline store for export',
-        /const \{ tracks, duration, assets, projectLUTId, aspectRatio: projectAspectRatio \} = useTimelineStore\.getState\(\);/.test(layout));
+        /aspectRatio: projectAspectRatio/.test(layout) && /const planAspectRatio = override\?\.aspectRatio \|\| live\.aspectRatio \|\| aspectRatio/.test(layout));
     check('the export request body actually sends aspectRatio to the server',
-        /aspectRatio: projectAspectRatio \|\| '16:9',/.test(layout),
+        /aspectRatio: planAspectRatio \|\| projectAspectRatio \|\| '16:9',/.test(layout),
         'without this the server-side fix has nothing to key off — settings.aspectRatio would always be undefined');
 
     // ── Extract and actually RUN getResolutionDimensions (not just regex it) ──
@@ -760,29 +852,29 @@ section('12 · Regenerating captions REPLACES the prior batch, not stacks on it'
         /'2k':\s*10 \* 60 \* 1000,/.test(layout) &&
         /'4k':\s*20 \* 60 \* 1000,/.test(layout));
     check('the timeout lookup is keyed on settings.resolution AND falls back to the default (undefined) for anything else',
-        /const getExportPollTimeoutMs = \(settings\) =>/.test(layout) &&
-        /EXPORT_POLL_TIMEOUT_MS_BY_RESOLUTION\[settings\.resolution\]/.test(layout));
+        /const getExportPollTimeoutMs = \(settings, timelineSeconds = 0\) =>/.test(layout) &&
+        /EXPORT_POLL_TIMEOUT_MS_BY_RESOLUTION\[res\]/.test(layout) && /Math\.max\(floor, scaled\)/.test(layout));
     check('an explicit platform preset (tiktok/reels/shorts/youtube) is excluded — those are ~1080p-equivalent',
-        /!settings\.platform && EXPORT_POLL_TIMEOUT_MS_BY_RESOLUTION\[settings\.resolution\]/.test(layout),
+        /settings\.platform \? '1080p'/.test(layout),
         'a platform preset always resolves to ~1080p dimensions regardless of the resolution field, so it should never get the longer budget by accident');
     check('the FFmpeg export path actually passes the computed timeout into pollJobResult',
-        /pollJobResult\(data\.jobId, null, getExportPollTimeoutMs\(settings\)\)/.test(layout),
+        /pollJobResult\(data\.jobId, null, getExportPollTimeoutMs\(settings, timelineSeconds\)/.test(layout),
         'computing the timeout without passing it into the actual poll call would be a no-op fix');
 
     // ── Actually evaluate the real function, not just regex its shape ──────
-    const fnMatch = layout.match(/const EXPORT_POLL_TIMEOUT_MS_BY_RESOLUTION = \{[\s\S]*?\n    \};\n    const getExportPollTimeoutMs = \(settings\) =>\n        .*;/);
+    const fnMatch = layout.match(/const EXPORT_POLL_TIMEOUT_MS_BY_RESOLUTION = \{[\s\S]*?\n    \};[\s\S]*?const EXPORT_POLL_TIMEOUT_MAX_MS = 60 \* 60 \* 1000;\n    const getExportPollTimeoutMs = \(settings, timelineSeconds = 0\) => \{[\s\S]*?\n    \};/);
     check('the timeout function was found in source for real evaluation', !!fnMatch);
     if (fnMatch) {
         // eslint-disable-next-line no-new-func
         const getExportPollTimeoutMs = new Function(`${fnMatch[0]}\nreturn getExportPollTimeoutMs;`)();
-        check('1080p (no platform) gets undefined → pollJobResult\'s own 300s default applies',
-            getExportPollTimeoutMs({ resolution: '1080p', platform: null }) === undefined);
-        check('2k (no platform) gets 10 minutes',
-            getExportPollTimeoutMs({ resolution: '2k', platform: null }) === 10 * 60 * 1000);
-        check('4k (no platform) gets 20 minutes',
-            getExportPollTimeoutMs({ resolution: '4k', platform: null }) === 20 * 60 * 1000);
-        check('4k WITH a platform preset selected still gets undefined (the default) — platform wins',
-            getExportPollTimeoutMs({ resolution: '4k', platform: 'tiktok' }) === undefined);
+        check('1080p gets its minimum ten-minute budget',
+            getExportPollTimeoutMs({ resolution: '1080p', platform: null }, 0) === 10 * 60 * 1000);
+        check('2k gets a duration-scaled budget',
+            getExportPollTimeoutMs({ resolution: '2k', platform: null }, 90) === 18 * 60 * 1000);
+        check('4k gets a duration-scaled budget',
+            getExportPollTimeoutMs({ resolution: '4k', platform: null }, 90) === 27 * 60 * 1000);
+        check('a platform preset uses the 1080p timing floor when 4k is selected',
+            getExportPollTimeoutMs({ resolution: '4k', platform: 'tiktok' }, 0) === 10 * 60 * 1000);
     }
 }
 

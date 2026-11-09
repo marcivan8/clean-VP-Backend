@@ -3,8 +3,7 @@ import { createJobActor, mapStateToJobState, isTerminalState } from './JobStateM
 import { IntentParser } from './IntentParser.js';
 import { EditPlanner } from './EditPlanner.js';
 import { CommandCompiler } from './CommandCompiler.js';
-import { mediaExecutionEngine } from './MediaExecutionEngine.js';
-import { ValidationService } from './ValidationService.js';
+import { executeVerifiedEdit } from './executeVerifiedEdit.js';
 import useTimelineStore from '../store/useTimelineStore.js';
 import { AgentFeedbackService } from './AgentFeedbackService.js';
 import useJobStore from '../store/useJobStore.js';
@@ -412,21 +411,27 @@ export class EditJobManager {
         // ── Execute Commands ──────────────────────────────────────────────────
         logStep(`Executing ${compileResult.commands.length} operation(s)…`);
         console.log(`[EditJobManager] Executing ${compileResult.commands.length} commands...`);
-        const executionResult = await mediaExecutionEngine.execute(
+        const verifiedEdit = await executeVerifiedEdit(
             compileResult.commands,
-            (progress) => actor.send({ type: 'PROGRESS', progress }),
-            abortController.signal
+            planForCompilation,
+            {
+                onProgress: (progress) => actor.send({ type: 'PROGRESS', progress }),
+                signal: abortController.signal,
+            }
         );
+        const executionResult = verifiedEdit.execution || { success: false, error: verifiedEdit.error, results: verifiedEdit.results };
 
         if (abortController.signal.aborted) throw new Error('Cancelled by user');
 
-        if (!executionResult.success) {
+        if (!verifiedEdit.success) {
             actor.send({ type: 'ERROR', error: executionResult.error });
             return {
                 success: false,
                 jobId,
-                message: executionResult.error || 'Edit execution failed.',
+                message: verifiedEdit.error || executionResult.error || 'Edit execution failed.',
                 details: executionResult.results,
+                ...(verifiedEdit.validation ? { validation: verifiedEdit.validation } : {}),
+                ...(verifiedEdit.partialResult ? { partialResult: true } : {}),
             };
         }
 
@@ -437,15 +442,18 @@ export class EditJobManager {
         console.log('[EditJobManager] Validating results...');
 
         // FIX 1 (original): ValidationService.validate() is ASYNC — must await
-        const validationResult = await ValidationService.validate(planResult.plan, executionResult);
+        const validationResult = verifiedEdit.validation;
 
         if (!validationResult.success) {
             actor.send({ type: 'VALIDATION_FAILED', error: validationResult.error, result: validationResult });
-            if (validationResult.issues?.length > 0 && executionResult.success) {
-                console.warn('[EditJobManager] Validation warnings:', validationResult.issues);
-            } else {
-                return { success: false, jobId, message: validationResult.error, validation: validationResult };
-            }
+            return {
+                success: false,
+                jobId,
+                message: validationResult.message || validationResult.error || 'The edit ran but did not pass verification.',
+                details: executionResult.results,
+                validation: validationResult,
+                partialResult: true,
+            };
         }
 
         actor.send({ type: 'VALIDATION_COMPLETE', result: validationResult });

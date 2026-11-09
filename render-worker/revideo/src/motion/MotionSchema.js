@@ -76,7 +76,7 @@ export const ANIMATION_TYPES = {
  * The animatable properties a keyframe may carry.
  * `reveal` is 0..1 and drives content reveal rather than a CSS transform.
  */
-export const ANIMATABLE_PROPS = ['x', 'y', 'scale', 'rotation', 'opacity', 'blur', 'glow', 'reveal'];
+export const ANIMATABLE_PROPS = ['x', 'y', 'scale', 'scaleX', 'scaleY', 'rotation', 'opacity', 'blur', 'glow', 'reveal'];
 
 /**
  * How each property composes when several animations touch it at once.
@@ -88,6 +88,8 @@ export const COMPOSITION_RULES = {
     y:        'add',
     rotation: 'add',
     scale:    'multiply',
+    scaleX:   'multiply',
+    scaleY:   'multiply',
     opacity:  'multiply',
     blur:     'max',
     glow:     'max',
@@ -96,7 +98,7 @@ export const COMPOSITION_RULES = {
 
 /** Neutral value per property — what "this animation isn't affecting me" means. */
 export const IDENTITY = Object.freeze({
-    x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, blur: 0, glow: 0, reveal: 1,
+    x: 0, y: 0, scale: 1, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1, blur: 0, glow: 0, reveal: 1,
 });
 
 let _seq = 0;
@@ -181,10 +183,27 @@ export function createMotionLayer(overrides = {}) {
         x:        Number.isFinite(Number(overrides.x)) ? Number(overrides.x) : 50,
         y:        Number.isFinite(Number(overrides.y)) ? Number(overrides.y) : 50,
         scale:    Number.isFinite(Number(overrides.scale)) ? Number(overrides.scale) : 1,
+        scaleX:   Number.isFinite(Number(overrides.scaleX)) ? Number(overrides.scaleX) : 1,
+        scaleY:   Number.isFinite(Number(overrides.scaleY)) ? Number(overrides.scaleY) : 1,
         rotation: Number.isFinite(Number(overrides.rotation)) ? Number(overrides.rotation) : 0,
         opacity:  Number.isFinite(Number(overrides.opacity)) ? clamp(overrides.opacity, 0, 1) : 1,
 
         animations: Array.isArray(overrides.animations) ? overrides.animations : [],
+        /** Layer-local motion path in frame-percent offsets from base x/y. */
+        motionPath: overrides.motionPath && Array.isArray(overrides.motionPath.points)
+            ? { ...overrides.motionPath, points: overrides.motionPath.points.map(point => Array.isArray(point) ? [...point] : point && typeof point === 'object' ? { ...point } : point) }
+            : null,
+        expressions: overrides.expressions && typeof overrides.expressions === 'object' && !Array.isArray(overrides.expressions) ? { ...overrides.expressions } : {},
+        expressionLayers: Array.isArray(overrides.expressionLayers) ? overrides.expressionLayers
+            .filter(layer => layer && Number.isFinite(Number(layer.startTime)) && layer.expressions && typeof layer.expressions === 'object')
+            .map(layer => ({
+                startTime: Number(layer.startTime), duration: Math.max(0, Number(layer.duration) || 0),
+                ...(Number.isFinite(Number(layer.originX)) ? { originX: Number(layer.originX) } : {}),
+                ...(Number.isFinite(Number(layer.originY)) ? { originY: Number(layer.originY) } : {}),
+                ...(Number.isFinite(Number(layer.frameW)) ? { frameW: Number(layer.frameW) } : {}),
+                ...(Number.isFinite(Number(layer.frameH)) ? { frameH: Number(layer.frameH) } : {}),
+                expressions: { ...layer.expressions },
+            })) : [],
         style:      overrides.style && typeof overrides.style === 'object' ? overrides.style : {},
 
         /** Caption-only: per-word timings. See CaptionModel.js. */
@@ -205,11 +224,36 @@ export function validateMotionLayer(layer) {
     if (!Number.isFinite(layer.startTime) || layer.startTime < 0) errors.push('startTime must be a non-negative number');
     if (!Number.isFinite(layer.duration) || layer.duration < 0) errors.push('duration must be a non-negative number');
     if (!Array.isArray(layer.animations)) errors.push('animations must be an array');
+    for (const property of ['x', 'y', 'scale', 'scaleX', 'scaleY', 'rotation', 'opacity']) {
+        // Missing transform channels use identity defaults in the resolver;
+        // reject only authored values that would poison those calculations.
+        if (layer[property] !== undefined && !Number.isFinite(layer[property])) errors.push(`${property} must be a finite number`);
+    }
+    if (layer.motionPath) {
+        const path = layer.motionPath;
+        const points = Array.isArray(path.points) ? path.points : [];
+        if (points.length < 2) errors.push('motionPath must have at least two points');
+        points.forEach((point, index) => {
+            const x = Array.isArray(point) ? point[0] : point?.x;
+            const y = Array.isArray(point) ? point[1] : point?.y;
+            if (!Number.isFinite(x) || !Number.isFinite(y)) errors.push(`motionPath.points[${index}] must contain finite x and y coordinates`);
+        });
+        for (const property of ['startTime', 'duration']) {
+            if (path[property] !== undefined && (!Number.isFinite(path[property]) || path[property] < 0)) errors.push(`motionPath.${property} must be a non-negative number`);
+        }
+        if (path.bank !== undefined && !Number.isFinite(path.bank)) errors.push('motionPath.bank must be a finite number');
+        if (path.spin !== undefined && !Number.isFinite(path.spin)) errors.push('motionPath.spin must be a finite number');
+    }
 
+    const animationIds = new Set();
     (layer.animations || []).forEach((anim, i) => {
+        if (anim?.id && animationIds.has(anim.id)) errors.push(`animations[${i}]: duplicate animation id "${anim.id}"`);
+        if (anim?.id) animationIds.add(anim.id);
         if (!Object.values(ANIMATION_TYPES).includes(anim?.type)) {
             errors.push(`animations[${i}]: invalid type "${anim?.type}"`);
         }
+        if (!Number.isFinite(anim?.startTime) || anim.startTime < 0) errors.push(`animations[${i}]: startTime must be a non-negative number`);
+        if (!Number.isFinite(anim?.duration) || anim.duration < 0) errors.push(`animations[${i}]: duration must be a non-negative number`);
         if (!Array.isArray(anim?.keyframes) || anim.keyframes.length === 0) {
             errors.push(`animations[${i}]: must have at least one keyframe`);
         }
@@ -224,6 +268,8 @@ export function validateMotionLayer(layer) {
             for (const p of propKeys) {
                 if (!ANIMATABLE_PROPS.includes(p)) {
                     errors.push(`animations[${i}].keyframes[${k}]: unknown property "${p}"`);
+                } else if (!Number.isFinite(kf.properties[p])) {
+                    errors.push(`animations[${i}].keyframes[${k}].properties.${p} must be a finite number`);
                 }
             }
         });

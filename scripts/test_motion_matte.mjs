@@ -287,6 +287,18 @@ await check('the export filter graph runs in ffmpeg for every mode, with speed',
         assert.ok(frames >= 20, `${mode}: only ${frames} frames`);
     }
 });
+await check('matte export applies virtual-camera crops to footage and mask, then preserves clip transform placement', () => {
+    const graph = M.matteFilterGraph({ mode: 'blur', blur: 12 }, {
+        width: 320, height: 180,
+        crop: { x: 0.2, y: 0.1, w: 0.6, h: 0.8 },
+        transform: { scale: 0.75, x: 18, y: -12 },
+        outputFilter: 'eq=brightness=0.05',
+    });
+    assert.match(graph[0], /\[0:v\]crop=iw\*0\.6000:ih\*0\.8000:iw\*0\.2000:ih\*0\.1000/);
+    assert.match(graph[1], /\[1:v\]crop=iw\*0\.6000:ih\*0\.8000:iw\*0\.2000:ih\*0\.1000/);
+    assert.ok(graph.some(line => line.includes('[matte]scale=240:136')));
+    assert.ok(graph.some(line => line.includes('overlay=x=58:y=10') && line.includes('eq=brightness=0.05')));
+});
 
 // ── 7. Matte upload pack ─────────────────────────────────────────────────────
 log('\n7 · Matte upload');

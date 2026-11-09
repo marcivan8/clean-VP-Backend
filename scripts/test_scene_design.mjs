@@ -31,6 +31,7 @@ async function check(name, fn) {
 
 const SS = await import('../client/src/motion/SceneSchema.js');
 const SV = await import('../client/src/motion/SceneValidator.js');
+const CM = await import('../client/src/motion/Compositor.js');
 const CL = await import('../client/src/motion/ComponentLibrary.js');
 const PP = await import('../client/src/agent/PlatformProfiles.js');
 
@@ -118,6 +119,11 @@ await check('a node can be found, patched and removed without touching the rest'
     assert.equal(SS.findNode(s, 'nope'), null);
     const moved = SS.updateNode(s, title.id, { transform: { ...title.transform, y: -10 } });
     assert.equal(SS.findNode(moved, title.id).node.transform.y, -10);
+    let patchCalls = 0;
+    const patchedOnce = SS.updateNode(s, title.id, node => { patchCalls++; return { name: `${node.name} updated`, transform: { x: 42 } }; });
+    assert.equal(patchCalls, 1, 'functional patches are evaluated exactly once');
+    assert.equal(SS.findNode(patchedOnce, title.id).node.transform.x, 42, 'the resolved transform patch is applied');
+    assert.equal(SS.findNode(patchedOnce, title.id).node.name, 'Title updated', 'the resolved node patch is applied');
     assert.equal(SS.findNode(s, title.id).node.transform.y, -4, 'the original scene is untouched');
     assert.equal(SS.listNodes(SS.removeNode(moved, title.id)).length, 2, 'the group and the shape remain');
     assert.equal(SS.updateNode(s, 'nope', { name: 'x' }), s, 'patching nothing returns the same scene');
@@ -216,6 +222,77 @@ await check("a component's placements lift into one group and flatten back uncha
     });
 });
 
+await check('lifting a clip into a scene preserves effects, blend mode, and masks', () => {
+    const clip = {
+        id: 'graded-overlay', type: 'image', start: 0, duration: 2, x: 50, y: 50, scale: 0.8,
+        url: '/media/card.png', blendMode: 'screen',
+        shadow: { color: '#000000', blur: 8, dx: 3, dy: 4, opacity: 0.4 },
+        effects: [{ kind: 'blur', params: { radius: 3 }, enabled: false }],
+        sceneMask: { kind: 'shape', shape: 'ellipse', inset: 0.1 },
+    };
+    const scene = SS.sceneFromPlacements([{ trackType: 'overlay', clip, asset: { url: clip.url } }], { duration: 2 });
+    const lifted = SS.flattenScene(scene).placements[0].clip;
+    assert.equal(lifted.blendMode, 'screen');
+    assert.deepEqual(lifted.shadow, clip.shadow);
+    assert.deepEqual(lifted.effects, clip.effects);
+    assert.deepEqual(lifted.sceneMask, clip.sceneMask);
+});
+
+await check('scene normalization and flattening preserve effect animation and active time windows', () => {
+    const effect = {
+        kind: 'blur', params: { radius: 2 }, startTime: 0.25, endTime: 1.5,
+        keyframes: { radius: [
+            { time: 0, value: 2 }, { time: 1, value: 12, easing: 'ease-in-out' },
+        ] },
+    };
+    const scene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [SS.createNode(NODE_TYPES.SHAPE, {
+        id: 'animated-effect', duration: 2, vector: { kind: 'circle', w: 80, h: 80, fill: '#fff' }, effects: [effect],
+    })] }));
+    const normalized = SS.findNode(scene, 'animated-effect').node.effects[0];
+    const flattened = SS.flattenScene(scene).placements[0].clip.effects[0];
+    assert.deepEqual(normalized, effect, 'scene normalization retains authored effect timing and keyframes');
+    assert.deepEqual(flattened, effect, 'flattening retains effect animation for preview and export');
+});
+
+await check('vector timeline clips lift back into editable vector scene nodes', () => {
+    const clip = {
+        id: 'vector-arrow', type: 'vector', start: 0, duration: 2, x: 44, y: 55, scale: 0.6,
+        vector: { kind: 'arrow', w: 220, h: 90, fill: '#38BDF8', stroke: '#ffffff', strokeWidth: 4 },
+        metadata: { resolution: { w: 220, h: 90 } },
+    };
+    const scene = SS.sceneFromPlacements([{ trackType: 'overlay', clip }], { duration: 2 });
+    const flat = SS.flattenScene(scene).placements[0].clip;
+    assert.equal(SS.rootGroup(scene).children[0].type, NODE_TYPES.SHAPE);
+    assert.equal(flat.type, 'vector');
+    assert.deepEqual(flat.vector, clip.vector);
+});
+
+await check('rich text and cycling word slots survive scene lifting and flattening', () => {
+    const rich = {
+        id: 'rich-copy', type: 'text', start: 0, duration: 3, x: 50, y: 48,
+        content: 'Make it', fontSize: 72, fontFamily: 'Inter', color: '#FFFFFF',
+        runs: [{ text: 'Make', color: '#FFFFFF' }, { text: ' it', color: '#38BDF8' }],
+        charAnim: { preset: 'wave', amplitude: 0.12 },
+    };
+    const richScene = SS.sceneFromPlacements([{ trackType: 'text', clip: rich }], { duration: 3 });
+    const richFlat = SS.flattenScene(richScene).placements[0].clip;
+    assert.equal(richFlat.template.kind, 'rich-text');
+    assert.deepEqual(richFlat.runs, rich.runs);
+    assert.deepEqual(richFlat.charAnim, rich.charAnim);
+
+    const cycle = {
+        id: 'cycle-copy', type: 'text', start: 0, duration: 3, x: 50, y: 58,
+        content: 'Made for', fontSize: 72, color: '#FFFFFF',
+        alternatives: ['Reels', 'Shorts', 'Stories'], slotWidth: 310, dwell: 0.8,
+    };
+    const cycleScene = SS.sceneFromPlacements([{ trackType: 'text', clip: cycle }], { duration: 3 });
+    const cycleFlat = SS.flattenScene(cycleScene).placements[0].clip;
+    assert.equal(cycleFlat.template.kind, 'word-cycle');
+    assert.deepEqual(cycleFlat.alternatives, cycle.alternatives);
+    assert.equal(cycleFlat.content, cycle.content);
+    assert.equal(cycleFlat.template.params.dwell, cycle.dwell);
+});
+
 await check('every flattened clip can be traced back to its scene and node', () => {
     const built = CL.buildComponent('LowerThird', 'pro-minimal', { title: 'Marc', subtitle: 'Founder' });
     const scene = SS.sceneFromPlacements(built.placements, { componentId: 'LowerThird' });
@@ -251,9 +328,13 @@ await check('a group transform is baked into the clips, so one renderer draws ev
     const shrunk = SS.updateNode(scene, group.id, { transform: { ...group.transform, scale: 0.5 } });
     const before = SS.flattenScene(scene).placements;
     const after = SS.flattenScene(shrunk).placements;
-    const textIdx = before.findIndex(p => p.clip.type === 'text');
-    assert.equal(V(after[textIdx].clip.fontSize), V(before[textIdx].clip.fontSize * 0.5), 'text scales through its font size');
-    const shapeIdx = before.findIndex(p => p.clip.type === 'template');
+    const textIdx = before.findIndex(p => p.clip.type === 'text' || p.clip.template?.kind === 'rich-text');
+    if (before[textIdx].clip.template?.kind === 'rich-text') {
+        assert.equal(V(after[textIdx].clip.scale), V(before[textIdx].clip.scale * 0.5), 'rich text scales through the shared graphic transform');
+    } else {
+        assert.equal(V(after[textIdx].clip.fontSize), V(before[textIdx].clip.fontSize * 0.5), 'plain text scales through its font size');
+    }
+    const shapeIdx = before.findIndex(p => p.clip.template && p.clip.template.kind !== 'rich-text');
     if (shapeIdx >= 0) assert.equal(V(after[shapeIdx].clip.scale), V(before[shapeIdx].clip.scale * 0.5), 'a shape scales through clip.scale');
     assert.ok(after.every(p => p.clip.type !== 'group'), 'no group clip reaches the timeline');
 });
@@ -280,6 +361,57 @@ await check('a well-made scene reports nothing that matters', () => {
     assert.equal(report.ok, true, `errors: ${report.issues.filter(i => i.severity === 'error').map(i => i.message).join('; ')}`);
     assert.equal(report.counts.error, 0);
     assert.equal(report.counts.warn, 0, report.issues.filter(i => i.severity === 'warn').map(i => i.code).join(','));
+});
+
+await check('3D scenes warn before renderer object, light, particle and mesh limits silently omit content', () => {
+    const mesh = { id: 'oversized-mesh', name: 'Oversized mesh', type: 'mesh', vertices: Array(5001).fill({ x: 0, y: 0, z: 0 }), faces: Array(5001).fill([0, 0, 0]) };
+    const scene = SS.normalizeScene(SS.createScene({
+        duration: 2,
+        nodes: [SS.createNode(NODE_TYPES.SHAPE, {
+            id: 'scene-3d', duration: 2,
+            template: { kind: '3d-scene', params: { scene: {
+                objects: [...Array(79)].map((_, index) => ({ id: `object-${index}`, type: 'box' })).concat(mesh, { id: 'object-overflow', type: 'box' }),
+                lights: Array(9).fill({ type: 'point' }),
+                particles: { count: 501 },
+            } } },
+        })],
+    }));
+    const limits = SV.validateScene(scene).issues.filter(issue => issue.code === SV.ISSUE_CODES.SCENE_RENDER_LIMIT);
+    assert.deepEqual(limits.map(issue => issue.detail.label), [
+        'objects', 'lights', 'particles',
+        'vertices on mesh “Oversized mesh”', 'faces on mesh “Oversized mesh”',
+    ]);
+    assert.ok(limits.every(issue => issue.severity === 'warn'));
+    assert.match(limits[0].message, /extra content will not appear/);
+});
+
+await check('3D mesh validation reports expanded polygon work before the renderer caps it', () => {
+    const mesh = {
+        id: 'polygon-heavy-mesh', name: 'Polygon heavy', type: 'mesh',
+        vertices: Array.from({ length: 64 }, (_, index) => ({ x: index, y: 0, z: 0 })),
+        faces: Array.from({ length: 200 }, () => Array.from({ length: 64 }, (_, index) => index)),
+    };
+    const scene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [SS.createNode(NODE_TYPES.SHAPE, {
+        id: 'scene-with-many-triangles', duration: 2,
+        template: { kind: '3d-scene', params: { scene: { objects: [mesh] } } },
+    })] }));
+    const issues = SV.validateScene(scene).issues.filter(issue => issue.code === SV.ISSUE_CODES.SCENE_RENDER_LIMIT);
+    assert.ok(issues.some(issue => issue.detail.label === 'triangles on mesh “Polygon heavy”' && issue.detail.actual === 12400),
+        'the report counts n-gon expansion, rather than treating 200 authored faces as cheap');
+});
+
+await check('animation tracks and keyframes above renderer caps are reported before flattening', () => {
+    const scene = SS.normalizeScene(SS.createScene({ duration: 3, nodes: [SS.createNode(NODE_TYPES.TEXT, {
+        id: 'crowded-animation-layer', duration: 3, content: 'Tracks',
+        animations: Array.from({ length: 17 }, (_, index) => ({
+            type: 'custom', startTime: 0, duration: 1,
+            keyframes: Array.from({ length: index === 0 ? 25 : 2 }, (_, time) => ({ time, properties: { opacity: time ? 1 : 0 } })),
+        })),
+    })] }));
+    const limits = SV.validateScene(scene).issues.filter(issue => issue.code === SV.ISSUE_CODES.ANIMATION_RENDER_LIMIT);
+    assert.deepEqual(limits.map(issue => [issue.detail.label, issue.detail.actual, issue.detail.limit]), [
+        ['animation tracks', 17, 16], ['keyframes in animation 1', 25, 24],
+    ]);
 });
 
 await check('a malformed scene reports its structure and stops there', () => {
@@ -418,6 +550,197 @@ await check('an effect or mask this build cannot render is dropped rather than s
     const fixed = SV.autoFixScene(s);
     const effects = SS.findNode(fixed.scene, 't').node.effects.map(e => e.kind);
     assert.deepEqual(effects, ['glow'], 'the known effect is kept');
+});
+
+await check('unsupported vector blend modes are reported and reset before flattening', () => {
+    const scene = SS.normalizeScene(SS.createScene({ duration: 1, nodes: [SS.createNode(NODE_TYPES.SHAPE, {
+        id: 'unsupported-vector-blend', duration: 1,
+        vector: { kind: 'rect', w: 80, h: 40, fill: '#FFFFFF', blendMode: 'vivid-light' },
+    })] }));
+    const report = SV.validateScene(scene);
+    assert.ok(report.issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_BLEND_MODE
+        && issue.detail?.mode === 'vivid-light'), 'validation names the unsupported authored mode');
+    const fixed = SV.autoFixScene(scene);
+    assert.equal(SS.findNode(fixed.scene, 'unsupported-vector-blend').node.vector.blendMode, 'source-over');
+    assert.equal(SS.flattenScene(fixed.scene).placements[0].clip.blendMode || 'source-over', 'source-over',
+        'the corrected vector mode survives into the executable timeline composition');
+    assert.ok(!fixed.issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_BLEND_MODE));
+});
+
+await check('video scene mattes reach the existing preview and export matte path', () => {
+    const layerMask = { maskAssetPath: 'masks/person.mp4', settings: { mode: 'blur' } };
+    const scene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [SS.createNode(NODE_TYPES.VIDEO, {
+        id: 'matted-video', duration: 2, source: { assetId: 'speaker' }, mask: { kind: 'matte', layerMask },
+    })] }));
+    const clip = SS.flattenScene(scene).placements[0].clip;
+    assert.equal(clip.layerTarget, 'background');
+    assert.deepEqual(clip.layerMask, layerMask);
+    assert.ok(!SV.validateScene(scene).issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_MASK));
+
+    const unsupported = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [SS.createNode(NODE_TYPES.IMAGE, {
+        id: 'matted-image', duration: 2, source: { assetId: 'still' }, mask: { kind: 'matte', layerMask },
+    })] }));
+    assert.ok(SV.validateScene(unsupported).issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_MASK),
+        'a matte on a still image is surfaced as unsupported instead of silently ignored');
+});
+
+await check('vector shape masks are accepted when the shared graphic renderer can execute them', () => {
+    const scene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [SS.createNode(NODE_TYPES.SHAPE, {
+        id: 'masked-vector', duration: 2,
+        vector: { kind: 'rectangle', w: 200, h: 100, fill: '#ffffff' },
+        size: { w: 200, h: 100 },
+        mask: { kind: 'shape', shape: 'ellipse', inset: 0.1 },
+    })] }));
+    const report = SV.validateScene(scene);
+    assert.ok(!report.issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_MASK));
+    assert.deepEqual(SS.flattenScene(scene).placements[0].clip.sceneMask, { kind: 'shape', shape: 'ellipse', inset: 0.1 });
+});
+
+await check('circle and rounded-rectangle masks survive scene validation and flattening', () => {
+    for (const shape of ['circle', 'rounded-rectangle']) {
+        const scene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [SS.createNode(NODE_TYPES.SHAPE, {
+            id: `masked-${shape}`, duration: 2,
+            vector: { kind: 'rectangle', w: 200, h: 100, fill: '#ffffff' },
+            size: { w: 200, h: 100 },
+            mask: { kind: 'shape', shape, radius: 0.2 },
+        })] }));
+        assert.ok(!SV.validateScene(scene).issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_MASK), `${shape} should be supported`);
+        assert.equal(SS.flattenScene(scene).placements[0].clip.sceneMask.shape, shape);
+    }
+});
+
+await check('node masks preserve their source layer identity instead of becoming bounding boxes', () => {
+    for (const kind of ['circle', 'capsule', 'rect']) {
+        const scene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [
+            SS.createNode(NODE_TYPES.IMAGE, {
+                id: `masked-image-${kind}`, duration: 2, source: { url: 'image.png' }, size: { w: 400, h: 300 },
+                mask: { kind: 'node', nodeId: `mask-${kind}` },
+            }),
+            SS.createNode(NODE_TYPES.SHAPE, {
+                id: `mask-${kind}`, duration: 2, size: { w: 200, h: 200 },
+                vector: { kind, ...(kind === 'rect' ? { radius: 24 } : {}), w: 200, h: 200, fill: '#ffffff' },
+            }),
+        ] }));
+        const mask = SS.flattenScene(scene).placements[0].clip.sceneMask;
+        assert.equal(mask.kind, 'layer');
+        assert.equal(mask.nodeId, `mask-${kind}`);
+        assert.equal(mask.invert, false);
+    }
+    const lumaScene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [
+        SS.createNode(NODE_TYPES.IMAGE, {
+            id: 'luma-target', duration: 2, source: { url: 'image.png' }, size: { w: 400, h: 300 },
+            mask: { kind: 'node', nodeId: 'luma-source', mode: 'luminance', invert: true },
+        }),
+        SS.createNode(NODE_TYPES.SHAPE, {
+            id: 'luma-source', duration: 2, size: { w: 200, h: 200 },
+            vector: { kind: 'circle', w: 200, h: 200, fill: '#ffffff' },
+        }),
+    ] }));
+    const lumaMask = SS.flattenScene(lumaScene).placements[0].clip.sceneMask;
+    assert.deepEqual(lumaMask, { kind: 'layer', nodeId: 'luma-source', mode: 'luminance', invert: true });
+    assert.ok(!SV.validateScene(lumaScene).issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_MASK));
+
+    const invalidMode = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [
+        SS.createNode(NODE_TYPES.IMAGE, {
+            id: 'bad-mode-target', duration: 2, source: { url: 'image.png' },
+            mask: { kind: 'node', nodeId: 'bad-mode-source', mode: 'depth' },
+        }),
+        SS.createNode(NODE_TYPES.SHAPE, {
+            id: 'bad-mode-source', duration: 2,
+            vector: { kind: 'circle', w: 200, h: 200, fill: '#fff' },
+        }),
+    ] }));
+    assert.ok(SV.validateScene(invalidMode).issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_MASK),
+        'an unknown matte mode is reported instead of silently treated as alpha');
+});
+
+await check('hidden node masks remain available for compositor matte resolution', () => {
+    const scene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [
+        SS.createNode(NODE_TYPES.IMAGE, {
+            id: 'hidden-mask-target', duration: 2, source: { url: 'image.png' }, size: { w: 400, h: 300 },
+            mask: { kind: 'node', nodeId: 'hidden-mask-source' },
+        }),
+        SS.createNode(NODE_TYPES.SHAPE, {
+            id: 'hidden-mask-source', duration: 2, hidden: true,
+            vector: { kind: 'circle', w: 200, h: 200, fill: '#fff' },
+        }),
+    ] }));
+    const placements = SS.flattenScene(scene).placements;
+    assert.deepEqual(placements.map(({ clip }) => clip.sceneNodeId), ['hidden-mask-target', 'hidden-mask-source']);
+    assert.equal(placements[0].clip.sceneMask.nodeId, 'hidden-mask-source');
+
+    const nested = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [
+        SS.createNode(NODE_TYPES.IMAGE, {
+            id: 'nested-hidden-target', duration: 2, source: { url: 'image.png' },
+            mask: { kind: 'node', nodeId: 'nested-hidden-source' },
+        }),
+        SS.createGroup({ id: 'hidden-mask-group', hidden: true, children: [
+            SS.createNode(NODE_TYPES.SHAPE, {
+                id: 'nested-hidden-source', duration: 2,
+                vector: { kind: 'circle', w: 200, h: 200, fill: '#fff' },
+            }),
+            SS.createNode(NODE_TYPES.TEXT, { id: 'unrelated-hidden-sibling', content: 'hidden', duration: 2 }),
+        ] }),
+    ] }));
+    assert.deepEqual(SS.flattenScene(nested).placements.map(({ clip }) => clip.sceneNodeId), [
+        'nested-hidden-target', 'nested-hidden-source',
+    ], 'a hidden parent is traversed only along the matte source path');
+
+    const plan = CM.buildCompositionPlan([
+        { id: 'matte-base', type: 'video', order: 0, clips: [{ id: 'base', type: 'video', start: 0, duration: 2, url: 'base.mp4' }] },
+        { id: 'matte-scene', type: 'overlay', order: 1, clips: placements.map(({ clip }) => clip) },
+    ], { width: 1080, height: 1920, fps: 30 });
+    const target = plan.overlays.find(overlay => overlay.sceneNodeId === 'hidden-mask-target');
+    const source = plan.overlays.find(overlay => overlay.sceneNodeId === 'hidden-mask-source');
+    assert.equal(target.sceneMask.sourceOverlayId, source.id, 'the source is resolved through the shared compositor plan');
+    assert.equal(source.matteOnly, true, 'the hidden source is consumed as a matte, not drawn visibly');
+});
+
+await check('media overlays report and remove effects unsupported by their render path', () => {
+    const s = SS.normalizeScene(SS.createScene({
+        duration: 2,
+        nodes: [SS.createNode(NODE_TYPES.IMAGE, {
+            id: 'media-effects', duration: 2, source: { url: 'media.png' },
+            effects: [
+                { kind: 'shadow', params: { color: '#000', blur: 8 } },
+                { kind: 'glow', params: { color: '#fff', intensity: 0.5 } },
+                { kind: 'gradient-fill', params: { from: '#fff', to: '#000' } },
+                { kind: 'stroke', params: { color: '#fff', width: 2 } },
+                { kind: 'inner-shadow', params: { color: '#000', blur: 2 } },
+                { kind: 'contrast', params: { amount: 1.2 } },
+            ],
+        }), SS.createNode(NODE_TYPES.VIDEO, {
+            id: 'video-gradient', duration: 2, source: { url: 'video.mp4' },
+            effects: [
+                { kind: 'shadow', params: { color: '#000', blur: 8 } },
+                { kind: 'glow', params: { color: '#fff', intensity: 0.5 } },
+                { kind: 'gradient-fill', params: { from: '#fff', to: '#000' } },
+                { kind: 'inner-shadow', params: { color: '#000', blur: 2 } },
+                { kind: 'stroke', params: { color: '#fff', width: 2 } },
+            ],
+        })],
+    }));
+    const report = SV.validateScene(s);
+    assert.ok(!report.issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_EFFECT && issue.nodeId === 'media-effects'), 'image stroke and inner shadow are supported');
+    assert.ok(report.issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_EFFECT && issue.nodeId === 'video-gradient' && issue.detail?.kind === 'gradient-fill'));
+    assert.ok(report.issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_EFFECT && issue.nodeId === 'video-gradient' && issue.detail?.kind === 'stroke'));
+    const fixed = SV.autoFixScene(s);
+    assert.deepEqual(SS.findNode(fixed.scene, 'media-effects').node.effects.map(effect => effect.kind), ['shadow', 'glow', 'gradient-fill', 'stroke', 'inner-shadow', 'contrast']);
+    assert.deepEqual(SS.findNode(fixed.scene, 'video-gradient').node.effects.map(effect => effect.kind), ['shadow', 'glow', 'inner-shadow']);
+});
+
+await check('disabled effects stay in the stack without render warnings', () => {
+    const s = SS.normalizeScene(SS.createScene({
+        duration: 2,
+        nodes: [SS.createNode(NODE_TYPES.TEXT, {
+            id: 'disabled-effect', duration: 2, content: 'Title',
+            effects: [{ kind: 'lens-distortion', enabled: false, params: { amount: 4 } }],
+        })],
+    }));
+    const report = SV.validateScene(s);
+    assert.ok(!report.issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_EFFECT && issue.nodeId === 'disabled-effect'));
+    const fixed = SV.autoFixScene(s);
+    assert.deepEqual(SS.findNode(fixed.scene, 'disabled-effect').node.effects, s.nodes[0].effects);
 });
 
 await check('animation timing is brought inside its own layer', () => {
@@ -596,6 +919,22 @@ await check('scenes are saved, come back on load, and do not pile up once a grap
     S.getState().undo();
     assert.equal(Object.keys(S.getState().saveProject().scenes || {}).length, 0, 'an undone graphic leaves no scene behind');
     assert.ok(r2.sceneId);
+});
+
+await check('CSS HSL vector blend modes survive scene normalization and flattening', () => {
+    for (const mode of ['hue', 'saturation', 'color', 'luminosity']) {
+        const scene = SS.normalizeScene(SS.createScene({ nodes: [SS.createGroup({
+            blendMode: mode,
+            children: [SS.createNode(NODE_TYPES.SHAPE, {
+                duration: 1, vector: { type: 'rect', blendMode: mode, paths: [] },
+            })],
+        })] }));
+        const group = scene.nodes[0];
+        const leaf = SS.flattenScene(scene).placements[0].clip;
+        assert.equal(group.blendMode, mode, `${mode} group blend mode is normalized`);
+        assert.ok(leaf.compositionStack.some(entry => entry.blendMode === mode), `${mode} group blend mode reaches compositor plan`);
+        assert.equal(leaf.blendMode, mode, `${mode} vector blend mode reaches compositor plan`);
+    }
 });
 
 await check('a scene can be stored, read back and removed through the store', () => {

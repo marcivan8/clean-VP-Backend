@@ -107,20 +107,22 @@ console.log('\nTest 3: Staggered Multi-Layer Timing Isolation');
     const hLayer = clipToMotionLayer(headline);
     const sLayer = clipToMotionLayer(subtitle);
 
-    // R95: the accent LEADS the stagger, so it starts at 0 - a first element
-    // that waits before anything else moves is a delay, not a stagger. The
-    // layers after it still hold their initial state until their own turn,
-    // which is what this test is really for.
+    // R103: an underline is a decorative accent, so it lands after the title
+    // it emphasizes. The title itself still holds until its stagger slot.
     const uSample0 = resolveMotionAt(uLayer, 0.02);
     const hSample0 = resolveMotionAt(hLayer, 0.02);
     const sSample0 = resolveMotionAt(sLayer, 0.02);
 
-    assert(uSample0.opacity > 0 && uSample0.opacity < 1, `Underline leads the stagger and is already moving (got ${uSample0.opacity})`);
+    assert.strictEqual(uSample0.opacity, 0, 'Underline waits until the headline has arrived');
     assert.strictEqual(hSample0.opacity, 0, 'Headline should hold opacity 0 before its delay');
     assert.strictEqual(sSample0.opacity, 0, 'Subtitle should hold opacity 0 before its delay');
 
-    // At t=0.20s: underline & headline animating, subtitle still waiting
+    // At t=0.20s: headline is animating, underline and subtitle still waiting
+    const hSampleMid = resolveMotionAt(hLayer, 0.20);
+    const uSampleMid = resolveMotionAt(uLayer, 0.20);
     const sSampleMid = resolveMotionAt(sLayer, 0.20);
+    assert(hSampleMid.opacity > 0 && hSampleMid.opacity < 1, 'Headline enters before its decorative underline');
+    assert.strictEqual(uSampleMid.opacity, 0, 'Underline does not precede its headline');
     assert.strictEqual(sSampleMid.opacity, 0, 'Subtitle should still hold opacity 0 at t=0.20s before delay 0.25s');
 
     // At t=0.80s: all layers fully entered and visible

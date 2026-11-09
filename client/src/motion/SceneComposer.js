@@ -171,12 +171,14 @@ export const LOOKS = {
             palette: { text: '#FFE500', sub: '#ffffff', kicker: '#ffffff', accent: '#FFE500' },
             fonts: { display: 'Anton', subtitle: 'Inter', kicker: 'Inter' },
             accent: 'burst',
+            charMotion: { preset: 'pop', unit: 'word', stagger: 0.055, duration: 0.32, easing: 'easeOutBack' },
             motion: { enter: 'slam-in', emphasis: 'punch', exit: 'whip-out', energy: 0.85 },
         },
         creator: {
             palette: { text: '#ffffff', sub: '#ffffff', kicker: '#00E5FF', accent: '#FF3B5C' },
             fonts: { display: 'Anton', subtitle: 'Inter', kicker: 'Inter' },
             accent: 'highlight-box',
+            charMotion: { preset: 'slideUp', unit: 'char', stagger: 0.018, duration: 0.28, easing: 'easeOutCubic' },
             motion: { enter: 'pop-in', emphasis: 'wobble', exit: 'shrink-out', energy: 0.7 },
         },
         // R101 — a third point/CTA look built around a display face with a
@@ -299,7 +301,7 @@ export const LOOKS = {
 /** The component ids this module composes. Everything else stays as it was. */
 export const COMPOSED_COMPONENTS = Object.keys(LOOKS);
 
-const DEFAULT_DURATION = { TitleSequence: 4, KineticTitle: 3, StatCallout: 3.5, LowerThird: 4, Callout: 3, QuoteCard: 4, CTAWidget: 3 };
+const SCENE_DEFAULT_DURATION = { TitleSequence: 4, KineticTitle: 3, StatCallout: 3.5, LowerThird: 4, Callout: 3, QuoteCard: 4, CTAWidget: 3 };
 
 const num = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
 
@@ -447,6 +449,7 @@ function textNode(item, { role, look, colour, duration, index, align, origin, x 
     return createNode(NODE_TYPES.TEXT, {
         name: item.name || role.charAt(0).toUpperCase() + role.slice(1),
         content: item.text,
+        charAnim: role === 'display' && look.charMotion ? { ...look.charMotion } : null,
         start: 0,
         duration,
         transform: { x: num(item.x, x), y: item.y },
@@ -529,7 +532,7 @@ function sceneContext(componentId, presetId, params, opts) {
     return {
         frame,
         rect: opts.rect || rectForLook(frame, look, opts.safeZone),
-        duration: Math.max(0.5, num(params.duration, DEFAULT_DURATION[componentId] || 4)),
+        duration: Math.max(0.5, num(params.duration, SCENE_DEFAULT_DURATION[componentId] || 4)),
         look,
         origin: { componentId, presetId },
     };

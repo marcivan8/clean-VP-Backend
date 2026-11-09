@@ -58,6 +58,12 @@ import KeyframeEditor from './Effects/KeyframeEditor.jsx';
 import LayoutPresetPicker from './LayoutPresetPicker.jsx';
 import { PanelSection, NumberField, TrackSlider, Segmented } from './ui/PanelControls.jsx';
 import { clampTo } from './ui/panelControls.js';
+import {
+    appendMotionPathPoint,
+    createMotionPath,
+    removeMotionPathPoint,
+    updateMotionPathPoint,
+} from '../motion/MotionPath.js';
 
 /**
  * Scrubbable & Directly-Typed Number Input
@@ -371,15 +377,30 @@ export default function TransformPanel() {
         saveToHistory?.();
         updateClip(trackId, clip.id, {
             scale: 1,
+            scaleX: 1,
+            scaleY: 1,
             x: trackType === 'video' ? 0 : 50,
             y: trackType === 'video' ? 0 : 50,
             rotation: 0,
             opacity: 1,
             animations: [],
             animation: 'none',
+            motionPath: null,
             placement: 'foreground',
         });
     }, [clip, trackId, trackType, saveToHistory, updateClip]);
+
+    const handleMotionPathUpdate = useCallback((motionPath) => {
+        if (!clip || !trackId) return;
+        saveToHistory?.();
+        updateClip(trackId, clip.id, { motionPath });
+    }, [clip, trackId, saveToHistory, updateClip]);
+
+    const handleMotionPathPointChange = useCallback((index, axis, value) => {
+        if (!clip?.motionPath || !trackId) return;
+        const motionPath = updateMotionPathPoint(clip.motionPath, index, axis, value);
+        updateClip(trackId, clip.id, { motionPath }, { skipHistory: true });
+    }, [clip, trackId, updateClip]);
 
     // Keyframe editor callbacks
     const editorModel = useMemo(() => buildEditorModel(clip), [clip]);
@@ -450,6 +471,8 @@ export default function TransformPanel() {
 
     // Property values
     const scaleVal = clip.scale ?? 1;
+    const scaleXVal = clip.scaleX ?? scaleVal;
+    const scaleYVal = clip.scaleY ?? scaleVal;
     const xVal = clip.x ?? (trackType === 'video' ? 0 : 50);
     const yVal = clip.y ?? (trackType === 'video' ? 0 : 50);
     const rotationVal = clip.rotation ?? 0;
@@ -564,7 +587,36 @@ export default function TransformPanel() {
                     />
                 </div>
 
-                {/* Row 3: Opacity full width */}
+                <div className="grid grid-cols-2 gap-2">
+                    <ScrubbableField
+                        label={t('ideLayout.transform.scaleX', 'Scale X')}
+                        value={scaleXVal}
+                        min={0.1}
+                        max={4.0}
+                        step={0.01}
+                        displayFactor={100}
+                        unit="%"
+                        onChange={(v, c) => handleValueChange('scaleX', v, c)}
+                        kfState={getKeyframeState('scaleX')}
+                        onToggleKf={() => handleToggleKeyframe('scaleX', scaleXVal / (scaleVal || 1))}
+                        onJumpKf={handleJumpKeyframe}
+                    />
+                    <ScrubbableField
+                        label={t('ideLayout.transform.scaleY', 'Scale Y')}
+                        value={scaleYVal}
+                        min={0.1}
+                        max={4.0}
+                        step={0.01}
+                        displayFactor={100}
+                        unit="%"
+                        onChange={(v, c) => handleValueChange('scaleY', v, c)}
+                        kfState={getKeyframeState('scaleY')}
+                        onToggleKf={() => handleToggleKeyframe('scaleY', scaleYVal / (scaleVal || 1))}
+                        onJumpKf={handleJumpKeyframe}
+                    />
+                </div>
+
+                {/* Opacity full width */}
                 <ScrubbableField
                     label="Opacity"
                     value={opacityVal}
@@ -579,6 +631,65 @@ export default function TransformPanel() {
                     onJumpKf={handleJumpKeyframe}
                 />
             </div>
+
+            <PanelSection
+                title={t('transform.motionPath', 'Motion path')}
+                collapsible
+                defaultOpen={!!clip.motionPath}
+                right={(
+                    <button
+                        type="button"
+                        onClick={() => handleMotionPathUpdate(clip.motionPath ? null : createMotionPath(clipDuration))}
+                        style={{ border: '0.5px solid var(--line)', borderRadius: 'var(--r-xs)', padding: '2px 7px', background: 'var(--glass)', color: 'var(--fg-2)', fontSize: 10, cursor: 'pointer' }}
+                    >
+                        {clip.motionPath ? t('transform.removeMotionPath', 'Remove path') : t('transform.addMotionPath', 'Add path')}
+                    </button>
+                )}
+            >
+                {clip.motionPath && (
+                    <div style={{ display: 'grid', gap: 8 }}>
+                        <div style={{ fontSize: 10, color: 'var(--fg-3)' }}>
+                            {t('transform.motionPathHint', 'Offsets from the clip position, in percent of the frame. The path spans the clip duration.')}
+                        </div>
+                        {clip.motionPath.points.map((point, index) => {
+                            const x = Array.isArray(point) ? point[0] : point?.x;
+                            const y = Array.isArray(point) ? point[1] : point?.y;
+                            return (
+                                <div key={`motion-point-${index}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) auto', alignItems: 'end', gap: 6 }}>
+                                    <label style={{ display: 'grid', gap: 3, fontSize: 9, color: 'var(--fg-3)' }}>
+                                        <span>{t('transform.motionPointX', 'Point {{number}} · X (%)', { number: index + 1 })}</span>
+                                        <input type="number" step="0.5" value={Number(x) || 0} onFocus={() => saveToHistory?.()} onChange={event => handleMotionPathPointChange(index, 'x', Number(event.target.value))} style={{ width: '100%', minWidth: 0, padding: '4px 6px', border: '0.5px solid var(--line)', borderRadius: 'var(--r-xs)', background: 'var(--glass)', color: 'var(--fg-1)', fontSize: 10 }} />
+                                    </label>
+                                    <label style={{ display: 'grid', gap: 3, fontSize: 9, color: 'var(--fg-3)' }}>
+                                        <span>{t('transform.motionPointY', 'Point {{number}} · Y (%)', { number: index + 1 })}</span>
+                                        <input type="number" step="0.5" value={Number(y) || 0} onFocus={() => saveToHistory?.()} onChange={event => handleMotionPathPointChange(index, 'y', Number(event.target.value))} style={{ width: '100%', minWidth: 0, padding: '4px 6px', border: '0.5px solid var(--line)', borderRadius: 'var(--r-xs)', background: 'var(--glass)', color: 'var(--fg-1)', fontSize: 10 }} />
+                                    </label>
+                                    <button type="button" disabled={clip.motionPath.points.length <= 2} onClick={() => handleMotionPathUpdate(removeMotionPathPoint(clip.motionPath, index))} aria-label={t('transform.removeMotionPoint', 'Remove point {{number}}', { number: index + 1 })} style={{ height: 25, padding: '0 6px', border: '0.5px solid var(--line)', borderRadius: 'var(--r-xs)', background: 'var(--glass)', color: 'var(--fg-3)', opacity: clip.motionPath.points.length <= 2 ? 0.4 : 1, cursor: clip.motionPath.points.length <= 2 ? 'default' : 'pointer' }}>×</button>
+                                </div>
+                            );
+                        })}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <button type="button" disabled={clip.motionPath.points.length >= 32} onClick={() => handleMotionPathUpdate(appendMotionPathPoint(clip.motionPath))} style={{ border: '0.5px solid var(--line)', borderRadius: 'var(--r-xs)', padding: '4px 7px', background: 'var(--glass)', color: 'var(--fg-2)', fontSize: 10, opacity: clip.motionPath.points.length >= 32 ? 0.4 : 1, cursor: 'pointer' }}>
+                                {t('transform.addMotionPoint', 'Add point')}
+                            </button>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: 'var(--fg-2)' }}>
+                                <input type="checkbox" checked={clip.motionPath.closed === true} onChange={event => handleMotionPathUpdate({ ...clip.motionPath, closed: event.target.checked })} />
+                                {t('transform.closedMotionPath', 'Loop path')}
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: 'var(--fg-2)' }}>
+                                <input type="checkbox" checked={Number(clip.motionPath.bank) !== 0} onChange={event => handleMotionPathUpdate({ ...clip.motionPath, bank: event.target.checked ? 1 : 0 })} />
+                                {t('transform.orientAlongPath', 'Orient along path')}
+                            </label>
+                        </div>
+                        <select value={clip.motionPath.easing || 'easeInOutCubic'} onChange={event => handleMotionPathUpdate({ ...clip.motionPath, easing: event.target.value })} aria-label={t('transform.motionPathEasing', 'Motion path easing')} style={{ width: '100%', padding: '5px 7px', border: '0.5px solid var(--line)', borderRadius: 'var(--r-xs)', background: 'var(--glass)', color: 'var(--fg-1)', fontSize: 10 }}>
+                            <option value="linear">{t('transform.motionPathLinear')}</option>
+                            <option value="easeInOutCubic">{t('transform.motionPathEaseInOut')}</option>
+                            <option value="easeOutCubic">{t('transform.motionPathEaseOut')}</option>
+                            <option value="cubic-bezier(0.42, 0, 0.58, 1)">{t('transform.motionPathCustomBezier')}</option>
+                        </select>
+                    </div>
+                )}
+            </PanelSection>
 
             {/* ─── ALIGN & DEPTH ─── */}
             <PanelSection

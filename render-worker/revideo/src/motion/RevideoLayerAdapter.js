@@ -85,9 +85,13 @@ export function clipToLayer(clip, track) {
         duration:  Number(clip.duration) || 0,
         x, y,
         scale:     Number.isFinite(Number(clip.scale)) ? Number(clip.scale) : 1,
+        scaleX:    Number.isFinite(Number(clip.scaleX)) ? Number(clip.scaleX) / (Number(clip.scale) || 1) : 1,
+        scaleY:    Number.isFinite(Number(clip.scaleY)) ? Number(clip.scaleY) / (Number(clip.scale) || 1) : 1,
         rotation:  Number.isFinite(Number(clip.rotation)) ? Number(clip.rotation) : 0,
         opacity:   Number.isFinite(Number(clip.opacity)) ? Number(clip.opacity) : 1,
         animations: resolveAnimations(clip),
+        motionPath: clip.motionPath && Array.isArray(clip.motionPath.points) ? clip.motionPath : null,
+        expressions: clip.expressions && typeof clip.expressions === 'object' ? clip.expressions : {},
         words:     Array.isArray(clip.words) ? clip.words : null,
         content:   clip.content ?? clip.text ?? clip.caption ?? clip.name ?? '',
     });

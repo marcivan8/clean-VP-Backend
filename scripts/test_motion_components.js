@@ -38,23 +38,8 @@ const read = (rel) => {
     catch (err) { console.log(`  ✗ could not read ${rel} — ${err.code || err.message}`); failed++; return ''; }
 };
 
-function loadClientModules() {
-    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'MotionPresets', 'AnimationSynthesizer', 'CaptionModel', 'ClipAdapter', 'ClipGrouping', 'SceneComposer', 'ComponentLibrary'];
-    let combined = '';
-    for (const name of order) {
-        let src = read(`client/src/motion/${name}.js`);
-        src = src
-            .replace(/^\s*import\s+[^;]+;\s*$/gm, '')
-            .replace(/^\s*export\s+default\s+\{[\s\S]*?\};\s*$/gm, '')
-            .replace(/^\s*export\s+default\s+[^;]+;\s*$/gm, '')
-            .replace(/\bexport\s+(const|function|class|let)\b/g, '$1');
-        combined += src + '\n';
-    }
-    combined += 'return { buildComponent, COMPONENT_IDS, COMPONENT_PRESETS };';
-    // eslint-disable-next-line no-new-func
-    return new Function(combined)();
-}
-const CLIENT = loadClientModules();
+async function run() {
+const CLIENT = await import('../client/src/motion/ComponentLibrary.js');
 
 function ffmpegBin() {
     for (const bin of ['ffmpeg', '/usr/bin/ffmpeg']) {
@@ -65,11 +50,12 @@ function ffmpegBin() {
 }
 const FFMPEG = ffmpegBin();
 
-section('1 · All 9 components are registered with at least one preset');
+section('1 · Original components remain registered with at least one preset');
 {
     const EXPECTED = ['AnimatedText', 'AnimatedImage', 'AnimatedSticker', 'AnimatedEmoji', 'AnimatedArrow', 'LowerThird', 'Callout', 'QuoteCard', 'CTAWidget'];
-    check('exactly the 9 requested components exist', JSON.stringify([...CLIENT.COMPONENT_IDS].sort()) === JSON.stringify([...EXPECTED].sort()),
+    check('all 9 original components remain registered', EXPECTED.every(id => CLIENT.COMPONENT_IDS.includes(id)),
         `got ${CLIENT.COMPONENT_IDS.join(', ')}`);
+    check('component ids are unique', new Set(CLIENT.COMPONENT_IDS).size === CLIENT.COMPONENT_IDS.length);
     for (const id of EXPECTED) {
         const presets = CLIENT.COMPONENT_PRESETS[id] || {};
         check(`${id} has at least one preset`, Object.keys(presets).length > 0);
@@ -111,7 +97,7 @@ section('2 · Single-clip components (Text/Image/Sticker/Emoji/Arrow)');
         arrowUp.placements[0].clip.rotation === 270 && arrowUp.placements[0].asset.url === arrowRight.placements[0].asset.url);
 }
 
-section('3 · Composite components (LowerThird/Callout/QuoteCard/CTAWidget) — shipped as PAIRED clips, not grouped');
+section('3 · Composite components (LowerThird/Callout/QuoteCard/CTAWidget)');
 {
     const lt = CLIENT.buildComponent('LowerThird', 'dark', { title: 'Jane Doe', subtitle: 'Director' });
     check('LowerThird with a subtitle produces THREE placements (bar + title + subtitle)', lt.placements.length === 3);
@@ -122,21 +108,28 @@ section('3 · Composite components (LowerThird/Callout/QuoteCard/CTAWidget) — 
     check('LowerThird without a subtitle produces exactly TWO placements (no empty third clip)', ltNoSub.placements.length === 2);
 
     const calloutMissing = CLIENT.buildComponent('Callout', 'dark', {});
-    check('Callout requires params.text', calloutMissing.placements.length === 0);
+    check('Callout supplies an editable fallback when text is omitted',
+        calloutMissing.placements.length === 2 && calloutMissing.placements[1].clip.content === 'Your callout');
     const callout = CLIENT.buildComponent('Callout', 'light', { text: 'Wait for it...' });
-    check('Callout produces bar + text (two placements)', callout.placements.length === 2);
-    check('Callout\'s "light" preset uses a different background graphic than "dark"',
-        callout.placements[0].asset.url !== CLIENT.buildComponent('Callout', 'dark', { text: 'x' }).placements[0].asset.url);
+    check('Callout produces a filled shape and editable text (two placements)',
+        callout.placements.length === 2 && callout.placements[0].trackType === 'overlay' && callout.placements[1].trackType === 'text');
+    check('Callout light and dark presets use contrasting plate and text colours', (() => {
+        const dark = CLIENT.buildComponent('Callout', 'dark', { text: 'x' }).placements;
+        return callout.placements[0].clip.template.params.color !== dark[0].clip.template.params.color
+            && callout.placements[1].clip.color !== dark[1].clip.color;
+    })());
 
     const quote = CLIENT.buildComponent('QuoteCard', 'classic', { quote: 'Ship it.', author: 'Marc' });
-    check('QuoteCard with an author produces THREE placements (quote-mark graphic + quote text + attribution)', quote.placements.length === 3);
-    check('the attribution line is prefixed with an em dash', quote.placements[2].clip.content === '— Marc');
+    check('QuoteCard with an author produces quote and attribution text', quote.placements.length === 2
+        && quote.placements.every(p => p.trackType === 'text'));
+    check('the attribution line is prefixed with an em dash', quote.placements[1].clip.content === '— Marc');
     const quoteNoAuthor = CLIENT.buildComponent('QuoteCard', 'classic', { quote: 'Ship it.' });
-    check('QuoteCard without an author produces exactly TWO placements', quoteNoAuthor.placements.length === 2);
+    check('QuoteCard without an author produces a measured accent and quote text', quoteNoAuthor.placements.length === 2
+        && quoteNoAuthor.placements[1].trackType === 'text');
 
     const cta = CLIENT.buildComponent('CTAWidget', 'subscribe', {});
     check('CTAWidget "subscribe" produces badge + label (two placements)', cta.placements.length === 2);
-    check('CTAWidget\'s label defaults to the preset\'s own label when none is given', cta.placements[1].clip.content === 'Subscribe');
+    check('CTAWidget\'s label defaults to the preset\'s own label when none is given', cta.placements[1].clip.content === 'SUBSCRIBE');
     const ctaCustom = CLIENT.buildComponent('CTAWidget', 'subscribe', { label: 'Ring the bell' });
     check('CTAWidget accepts a caller-supplied label override', ctaCustom.placements[1].clip.content === 'Ring the bell');
 }
@@ -222,12 +215,13 @@ section('6 · Wired into the store and the AI-tool dispatch, fail-open');
     const store = read('client/src/store/useTimelineStore.js');
     check('useTimelineStore imports the real ComponentLibrary (not a re-implementation)',
         /import \{ buildComponent \} from '\.\.\/motion\/ComponentLibrary\.js'/.test(store));
-    check('addMotionComponent exists and calls buildComponent', /addMotionComponent:/.test(store) && /buildComponent\(componentId, presetId, params\)/.test(store));
+    check('addMotionComponent builds the component and places its validated scene', /addMotionComponent:/.test(store)
+        && /buildComponent\(componentId, presetId, params,/.test(store) && /_placeScene\(scene,/.test(store));
     check('a build failure returns success:false rather than throwing into the caller', /success: false, error:/.test(store));
     check('the whole component is ONE history entry in the common case (save once, addClip calls skip their own)',
         /get\(\)\._saveHistory\(\);/.test(store) && (store.match(/skipHistory: true/g) || []).length >= 2);
-    check('text and overlay tracks are each found-or-created at most once per call (memoised, not re-queried per clip)',
-        /ensureTextTrack = \(\) => \{/.test(store) && /ensureOverlayTrack = \(\) => \{/.test(store));
+    check('scene placement memoises one ensured track per media type',
+        /const ensureTrack = \(type\) => \{/.test(store) && /ensureTrack\(placement\.trackType === 'text' \? 'text' : 'overlay'\)/.test(store));
 
     const engine = read('client/src/agent/MediaExecutionEngine.js');
     check('the AI-tool action exists in the same switch every other tool action uses',
@@ -244,3 +238,9 @@ console.log(`\n${'─'.repeat(60)}`);
 console.log(`Motion components (R65): ${passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ''}`);
 console.log('─'.repeat(60));
 process.exit(failed > 0 ? 1 : 0);
+}
+
+run().catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+});

@@ -17,15 +17,17 @@
  *   • Motion presets generate keyframes on demand, from the Motion tab, for
  *     ANY clip on ANY track.
  *   • Image-sourced overlays (stickers/logos) have a real track, UI, preview
- *     and export path (R62). Vector shapes/arrows/emoji still have a model
- *     and no renderer — nothing can rasterize them to a file yet.
+ *     and export path (R62). Vector graphics and animated path morphs use the
+ *     shared Canvas renderer in preview and the PNG-frame export renderer.
  *   • Camera presets (push/pull/punch-zoom/whip/shake) applied to a clip on
  *     the BASE video/image track now animate in the Revideo live preview
  *     (project.tsx `motionOffsets`), and scale-type presets (push/pull/
  *     punch-zoom) now reach the export too, via a derived
  *     `clip.keyframes.scale` fed through the existing zoompan path
- *     (CameraMotionCompiler.js — R64). Translate-type presets (whip/shake)
- *     are preview-only by design — see that file's header for why.
+ *     (CameraMotionCompiler.js — R64). Scale, pan, whip and shake tracks are
+ *     sampled from the shared resolver into export keyframes.
+ *   • Motion layers animate independent horizontal and vertical scale as well
+ *     as uniform scale, with the same keyframes in preview and Revideo export.
  */
 
 export {
@@ -183,6 +185,7 @@ export {
 
 export {
     parseSvgPath,
+    interpolateSvgPaths,
     drawSvgPath,
     drawRoundRect,
     drawPolygon,
@@ -195,7 +198,9 @@ export {
     applyTrimPath,
     withClip,
     withAlphaMask,
+    vectorMatteDataUrl,
     drawVectorGraphic,
+    drawVectorFrame,
 } from './VectorGraphics.js';
 
 export {
@@ -203,6 +208,7 @@ export {
     layoutRichText,
     sampleTypographyMotion,
     drawRichText,
+    drawRichTextFrame,
 } from './RichTextEngine.js';
 
 export {
@@ -221,6 +227,10 @@ export {
     pointsToBezierSpline,
     computeMotionBlur,
 } from './SpatialMotion.js';
+
+export { drawScene3D, normalizeScene3D, remapSceneObjectTime, maxSceneObjectSourceTime, sampleAudioEnvelope, SCENE3D_PRIMITIVES } from './Scene3D.js';
+export { sampleProceduralParticle, sampleProceduralParticles } from './ProceduralParticles.js';
+export { evaluateMotionExpression, validateMotionExpression } from './MotionExpression.js';
 
 export {
     topologicalSortNodes,
@@ -257,4 +267,6 @@ export {
     planTransitionStyling,
     generateStorytellingPlan,
 } from './DirectorStoryteller.js';
+
+export { drawLayerWithEffects } from './LayerEffects.js';
 

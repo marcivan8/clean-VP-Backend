@@ -3,6 +3,13 @@
  * Exports all effects engine components for Viral Pilot.
  */
 
+import { EffectPipeline as RuntimeEffectPipeline } from './EffectPipeline.js';
+import { EffectRenderer as RuntimeEffectRenderer } from './EffectRenderer.js';
+import { GPUEffectEngine as RuntimeGPUEffectEngine } from './engines/GPUEffects.js';
+import { CPUEffectEngine as RuntimeCPUEffectEngine } from './engines/CPUEffects.js';
+import { AIEffectEngine as RuntimeAIEffectEngine } from './engines/AIEffects.js';
+import { presetLibrary as runtimePresetLibrary } from './presets/PresetLibrary.js';
+
 // === Core ===
 export {
     EffectNode,
@@ -62,20 +69,13 @@ export {
  * @returns {object} Initialized engine components
  */
 export function initEffectsEngine(options = {}) {
-    const { GPUEffectEngine } = require('./engines/GPUEffects.js');
-    const { CPUEffectEngine } = require('./engines/CPUEffects.js');
-    const { AIEffectEngine } = require('./engines/AIEffects.js');
-    const { EffectPipeline } = require('./EffectPipeline.js');
-    const { EffectRenderer } = require('./EffectRenderer.js');
-    const { presetLibrary } = require('./presets/PresetLibrary.js');
-
     // Create engine instances
-    const gpuEngine = options.gl ? new GPUEffectEngine(options.gl) : null;
-    const cpuEngine = new CPUEffectEngine(options.cpu);
-    const aiEngine = new AIEffectEngine(options.ai);
+    const gpuEngine = options.gl ? new RuntimeGPUEffectEngine(options.gl) : null;
+    const cpuEngine = new RuntimeCPUEffectEngine(options.cpu);
+    const aiEngine = new RuntimeAIEffectEngine(options.ai);
 
     // Create pipeline with engines
-    const pipeline = new EffectPipeline({
+    const pipeline = new RuntimeEffectPipeline({
         gpuEngine,
         cpuEngine,
         aiEngine,
@@ -83,7 +83,7 @@ export function initEffectsEngine(options = {}) {
     });
 
     // Create renderer
-    const renderer = new EffectRenderer({
+    const renderer = new RuntimeEffectRenderer({
         gl: options.gl,
         pipeline,
         onProgress: options.onProgress,
@@ -92,7 +92,7 @@ export function initEffectsEngine(options = {}) {
     });
 
     // Load user presets
-    presetLibrary.loadUserPresets();
+    runtimePresetLibrary.loadUserPresets();
 
     return {
         pipeline,
@@ -100,13 +100,13 @@ export function initEffectsEngine(options = {}) {
         gpuEngine,
         cpuEngine,
         aiEngine,
-        presetLibrary,
+        presetLibrary: runtimePresetLibrary,
 
         // Convenience methods
         addEffect: (config) => pipeline.addEffect(config),
         removeEffect: (id) => pipeline.removeEffect(id),
         applyPreset: (presetId, targetId, options) => {
-            const preset = presetLibrary.getPreset(presetId);
+            const preset = runtimePresetLibrary.getPreset(presetId);
             if (preset) {
                 return renderer.applyPreset(preset, targetId, options);
             }

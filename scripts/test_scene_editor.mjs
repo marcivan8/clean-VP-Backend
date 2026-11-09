@@ -43,6 +43,7 @@ const TM = await import('../client/src/motion/TextMeasurement.js');
 const TG = await import('../client/src/motion/TemplateGraphics.js');
 const { buildComponent } = await import('../client/src/motion/ComponentLibrary.js');
 const MR = await import('../client/src/motion/MotionResolver.js');
+const MotionSchema = await import('../client/src/motion/MotionSchema.js');
 const { clipToMotionLayer } = await import('../client/src/motion/ClipAdapter.js');
 const { NODE_TYPES } = SS;
 
@@ -199,9 +200,16 @@ await check('composed text carries what it needs to be read over footage, and to
 await check('a long headline shrinks or wraps, and its accent follows the text', () => {
     const short = buildComponent('KineticTitle', 'punchy', { title: 'GROW FAST' }, { aspectRatio: '16:9' });
     const long = buildComponent('KineticTitle', 'punchy', { title: 'HOW WE GREW THE WHOLE BUSINESS IN A SINGLE QUARTER' }, { aspectRatio: '16:9' });
-    const fs = (b) => b.placements.find(p => p.clip.type === 'text' && /GROW|HOW WE/.test(p.clip.content)).clip.fontSize;
-    assert.ok(fs(long) < fs(short), `long ${fs(long)} should be smaller than short ${fs(short)}`);
-    const accentW = (b) => b.placements.find(p => p.clip.template).clip.template.params.w;
+    const headline = (b, pattern) => b.placements.find(p =>
+        (p.clip.type === 'text' && pattern.test(p.clip.content))
+        || (p.clip.template?.kind === 'rich-text' && pattern.test(p.clip.template.params.text))
+    )?.clip;
+    const fs = (b, pattern) => {
+        const clip = headline(b, pattern);
+        return clip?.fontSize || clip?.template?.params?.style?.fontSize;
+    };
+    assert.ok(fs(long, /HOW WE/) < fs(short, /GROW/), `long ${fs(long, /HOW WE/)} should be smaller than short ${fs(short, /GROW/)}`);
+    const accentW = (b) => b.placements.find(p => p.clip.template && p.clip.template.kind !== 'rich-text').clip.template.params.w;
     assert.ok(accentW(long) > accentW(short), 'the accent tracks the text it decorates');
 });
 
@@ -262,6 +270,13 @@ await check('a path becomes a plain keyframe track, and can bank into the turn',
     assert.equal(SM.compilePath({ points: 'nope' }, { duration: 2 }), null);
 });
 
+await check('compiled path easing is applied once to global progress, not again per sample', () => {
+    const path = SM.compilePath({ points: [[0, 0], [100, 0]], duration: 2, easing: 'easeInOutCubic' }, { duration: 2 });
+    const quarter = MR.sampleAnimation(path, 0.5).x;
+    assert.equal(path.easing, 'linear');
+    assert.ok(Math.abs(quarter - 6.25) < 0.8, `expected global ease at 25% progress (~6.25), got ${quarter}`);
+});
+
 await check('a repeat lays the move down again, and a ping-pong comes back', () => {
     const base = { id: 'r', type: 'scale', anchor: 'in', startTime: 0, duration: 0.5, easing: 'linear', keyframes: [{ time: 0, properties: { scale: 1 } }, { time: 0.5, properties: { scale: 1.2 } }] };
     const loop = SM.expandRepeat({ ...base, repeat: { times: 3 } }, { duration: 3 });
@@ -292,6 +307,164 @@ await check('animating a group moves what is inside it, and a rotating group mak
     assert.ok(Math.abs(at2.x - 50) < 1, 'a quarter turn later it is directly below the origin');
     // 20 % of 1920 px across becomes the same 384 px down, which is 35.6 % of 1080.
     assert.ok(Math.abs(at2.y - 85.6) < 1, `orbited to ${V(at2.y)}, not spun in place`);
+});
+
+await check('inherited group motion uses the full nested child offset', () => {
+    const leaf = SS.createNode(NODE_TYPES.TEXT, { id: 'nested-leaf', content: 'x', duration: 2, transform: { x: 10, y: 0 } });
+    const inner = SS.createGroup({ id: 'inner', transform: { x: 10, y: 0 }, children: [leaf] });
+    const outer = SS.createGroup({
+        id: 'outer', duration: 2, transform: { x: 50, y: 50 }, children: [inner],
+        animations: [{ id: 'outer-spin', type: 'rotate', anchor: 'in', startTime: 0, duration: 2, easing: 'linear', keyframes: [{ time: 0, properties: { rotation: 0 } }, { time: 2, properties: { rotation: 90 } }] }],
+    });
+    const scene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [outer] }));
+    const clip = SS.flattenScene(scene).placements[0].clip;
+    const motion = MR.resolveMotionAt(clipToMotionLayer(clip, { id: 'video-track', type: 'text' }), 2);
+    assert.ok(Math.abs(motion.x - 50) < 1, `nested child x should orbit to ${motion.x}`);
+    assert.ok(Math.abs(motion.y - 85.556) < 1, `both nested offsets should orbit to ${motion.y}`);
+});
+
+await check('nested scene transforms preserve independent X and Y scale through the timeline projection', () => {
+    const child = SS.createNode(NODE_TYPES.IMAGE, {
+        id: 'axis-scaled-child', duration: 2, source: { url: '/image.png' }, transform: { x: 10, y: 10, scaleX: 1.5, scaleY: 0.75 },
+    });
+    const group = SS.createGroup({
+        id: 'axis-scaled-parent', duration: 2, transform: { x: 50, y: 50, scaleX: 2, scaleY: 0.5 }, children: [child],
+    });
+    const scene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [group] }));
+    const clip = SS.flattenScene(scene).placements[0].clip;
+    assert.equal(clip.x, 70, 'parent X scale moves the child twice as far from its anchor');
+    assert.equal(clip.y, 55, 'parent Y scale moves the child half as far from its anchor');
+    assert.equal(clip.scaleX, 3, 'parent and child X scale multiply into the clip geometry');
+    assert.equal(clip.scaleY, 0.375, 'parent and child Y scale multiply into the clip geometry');
+    const preview = MR.resolveMotionAt(clipToMotionLayer(clip, { id: 'overlay-track', type: 'overlay' }), 0);
+    assert.equal(preview.scaleX, 3, 'preview receives the composed X scale');
+    assert.equal(preview.scaleY, 0.375, 'preview receives the composed Y scale');
+    const lifted = SS.nodeFromClip(clip);
+    assert.equal(lifted.transform.scaleX, 3, 'lifting retains the composed X scale in the flattened leaf');
+    assert.equal(lifted.transform.scaleY, 0.375, 'lifting retains the composed Y scale in the flattened leaf');
+});
+
+await check('signed nested scene scales preserve mirrored transforms through flattening and relifting', () => {
+    const child = SS.createNode(NODE_TYPES.IMAGE, {
+        id: 'mirrored-child', duration: 2, source: { url: '/image.png' },
+        transform: { x: 10, y: 0, scale: 1, scaleX: 1 },
+    });
+    const group = SS.createGroup({
+        id: 'mirrored-parent', duration: 2, transform: { x: 50, y: 50, scaleX: -2 }, children: [child],
+    });
+    const scene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [group] }));
+    const clip = SS.flattenScene(scene).placements[0].clip;
+    assert.equal(clip.x, 30, 'a mirrored parent reverses its child offset');
+    assert.equal(clip.scaleX, -2, 'the parent mirror is retained in the flattened scale');
+    const motion = MR.resolveMotionAt(clipToMotionLayer(clip, { id: 'overlay-track', type: 'overlay' }), 0);
+    assert.equal(motion.scaleX, -2, 'preview receives the combined signed transform');
+    const lifted = SS.nodeFromClip(clip);
+    assert.equal(lifted.transform.scaleX, -2, 'relifting retains the resulting orientation');
+});
+
+await check('animated parent scale moves child positions around the group anchor', () => {
+    const child = SS.createNode(NODE_TYPES.IMAGE, {
+        id: 'animated-scaled-child', duration: 2, source: { url: '/image.png' }, transform: { x: 10, y: 10 },
+    });
+    const group = SS.createGroup({
+        id: 'animated-scaled-parent', duration: 2, transform: { x: 50, y: 50 }, children: [child],
+        animations: [{ id: 'parent-scale', type: 'scale', anchor: 'in', startTime: 0, duration: 2, easing: 'linear', keyframes: [
+            { time: 0, properties: { scale: 1, scaleX: 1, scaleY: 1 } },
+            { time: 2, properties: { scale: 2, scaleX: 1.5, scaleY: 0.5 } },
+        ] }],
+    });
+    const scene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [group] }));
+    const clip = SS.flattenScene(scene).placements[0].clip;
+    const layer = clipToMotionLayer(clip, { id: 'overlay-track', type: 'overlay' });
+    const atEnd = MR.resolveMotionAt(layer, 2);
+    assert.equal(atEnd.x, 80, 'uniform and X parent scale multiply the child X offset from the anchor');
+    assert.equal(atEnd.y, 60, 'uniform and Y parent scale multiply the child Y offset from the anchor');
+    assert.equal(atEnd.scale, 2, 'the child also receives the parent scale');
+    assert.equal(atEnd.scaleX, 1.5, 'the child receives the parent X scale animation');
+    assert.equal(atEnd.scaleY, 0.5, 'the child receives the parent Y scale animation');
+});
+
+await check('a child entering mid-animation inherits the group at its current time', () => {
+    const child = SS.createNode(NODE_TYPES.TEXT, { id: 'late-child', content: 'x', start: 2, duration: 2, transform: { x: 10, y: 0 } });
+    const group = SS.createGroup({
+        id: 'moving-group', start: 0, duration: 4, transform: { x: 50, y: 50 }, children: [child],
+        animations: [{ id: 'group-slide', type: 'translate', anchor: 'in', startTime: 0, duration: 4, easing: 'linear', keyframes: [{ time: 0, properties: { x: 0 } }, { time: 4, properties: { x: 40 } }] }],
+    });
+    const scene = SS.normalizeScene(SS.createScene({ duration: 4, nodes: [group] }));
+    const clip = SS.flattenScene(scene).placements[0].clip;
+    const layer = clipToMotionLayer(clip, { id: 'video-track', type: 'text' });
+    assert.equal(V(MR.resolveMotionAt(layer, 2).x), 80, 'the child enters at the group position reached at t=2');
+    assert.equal(V(MR.resolveMotionAt(layer, 3).x), 90, 'the group slide continues from t=2 rather than replaying from t=0');
+});
+
+await check('parent transform expressions remain live on flattened children', () => {
+    const group = SS.createGroup({
+        id: 'procedural-parent', start: 1, duration: 4, transform: { x: 50, y: 50 },
+        expressions: { x: 'sin(t)*10', scale: '1+0.25*sin(t)', scaleX: '1+0.2*sin(t)', scaleY: '1-0.1*sin(t)', rotation: 't*5' },
+        children: [SS.createNode(NODE_TYPES.TEXT, { id: 'procedural-child', content: 'x', duration: 4, transform: { x: 10, y: 10 } })],
+    });
+    const scene = SS.normalizeScene(SS.createScene({ duration: 5, nodes: [group] }));
+    const clip = SS.flattenScene(scene).placements[0].clip;
+    const layer = clipToMotionLayer(clip, { id: 'video-track', type: 'text' });
+    assert.deepEqual(layer.expressionLayers, [{ startTime: 1, duration: 4, originX: 50, originY: 50, frameW: 1920, frameH: 1080, expressions: { x: 'sin(t)*10', scale: '1+0.25*sin(t)', scaleX: '1+0.2*sin(t)', scaleY: '1-0.1*sin(t)', rotation: 't*5' } }]);
+    const motion = MR.resolveMotionAt(layer, 2);
+    const parentScale = 1 + 0.25 * Math.sin(1);
+    const parentScaleX = 1 + 0.2 * Math.sin(1);
+    const parentScaleY = 1 - 0.1 * Math.sin(1);
+    const parentRotation = 5 * Math.PI / 180;
+    const offsetX = 10 * parentScale * parentScaleX;
+    const offsetY = 10 * parentScale * parentScaleY;
+    const orbitX = offsetX * Math.cos(parentRotation) - offsetY * Math.sin(parentRotation) * 1080 / 1920;
+    const orbitY = offsetX * Math.sin(parentRotation) * 1920 / 1080 + offsetY * Math.cos(parentRotation);
+    assert.ok(Math.abs(motion.x - (50 + Math.sin(1) * 10 + orbitX)) < 0.001, `parent scale/rotation orbit the child around the group origin: ${motion.x}`);
+    assert.ok(Math.abs(motion.y - (50 + orbitY)) < 0.001, `parent rotation moves the child vertically around the group origin: ${motion.y}`);
+    assert.ok(Math.abs(motion.scale - parentScale) < 0.001, `parent scale expression multiplies the composed child scale: ${motion.scale}`);
+    assert.ok(Math.abs(motion.scaleX - parentScaleX) < 0.001, `parent X scale expression multiplies the composed child scale: ${motion.scaleX}`);
+    assert.ok(Math.abs(motion.scaleY - parentScaleY) < 0.001, `parent Y scale expression multiplies the composed child scale: ${motion.scaleY}`);
+    assert.equal(motion.rotation, 5, 'parent rotation expression adds to the composed child rotation');
+});
+
+await check('a nested composition flattens into clipped child layers on the parent timeline', () => {
+    const composition = SS.createComposition({
+        id: 'precomp', start: 2, duration: 1.5, transform: { x: 50, y: 50, opacity: 0.5 },
+        effects: [{ kind: 'blur', params: { radius: 4 } }],
+        animations: [MotionSchema.createAnimation({ type: MotionSchema.ANIMATION_TYPES.FADE, duration: 1, keyframes: [
+            MotionSchema.createKeyframe(0, { opacity: 0 }), MotionSchema.createKeyframe(1, { opacity: 1 }),
+        ] })],
+        children: [
+            SS.createNode(NODE_TYPES.TEXT, { id: 'precomp-first', content: 'A', start: 0, duration: 2 }),
+            SS.createNode(NODE_TYPES.TEXT, { id: 'precomp-second', content: 'B', start: 1, duration: 1 }),
+            SS.createNode(NODE_TYPES.TEXT, { id: 'precomp-outside', content: 'C', start: 1.5, duration: 1 }),
+        ],
+    });
+    const scene = SS.normalizeScene(SS.createScene({ nodes: [composition] }));
+    const placements = SS.flattenScene(scene).placements;
+    assert.deepEqual(placements.map(({ clip }) => [clip.id, clip.start, clip.duration]), [
+        ['precomp-first', 2, 1.5],
+        ['precomp-second', 3, 0.5],
+    ]);
+    assert.deepEqual(placements[0].clip.compositionStack.map(({ id, opacity }) => [id, opacity]), [['precomp', 0.5]],
+        'flattening preserves the parent composition boundary and its local opacity for isolated compositing');
+    assert.equal(placements[0].clip.compositionStack[0].effects[0].kind, 'blur', 'group effects stay attached to the isolated group');
+    assert.equal(placements[0].trackType, 'overlay', 'plain text requiring isolated composition effects leaves the caption-only track');
+    assert.equal(placements[0].clip.template?.kind, 'rich-text', 'plain text is rendered through the shared graphic path when its composition needs isolation');
+    assert.equal(placements[0].clip.compositionStack[0].id, 'precomp', 'the isolated text graphic retains its parent composition boundary');
+    assert.equal(placements[0].clip.compositionStack[0].opacityAnimations.length, 1, 'group opacity animation stays on the isolated composition boundary');
+    assert.equal(Boolean(placements[0].clip.animations?.some(animation => animation.keyframes?.some(keyframe => Object.hasOwn(keyframe.properties || {}, 'opacity')))), false,
+        'group opacity is not copied onto each flattened child');
+    assert.equal(placements[0].clip.effects, undefined, 'group effects are not duplicated on every flattened child');
+    assert.equal(placements[0].clip.opacity, 0.5, 'legacy flattened opacity remains intact while renderers migrate');
+    assert.equal(scene.duration, 3.5, 'content duration respects the precomposition boundary');
+    assert.equal(SS.validateSceneShape(scene).valid, true, 'composition nodes are valid containers');
+
+    const plain = SS.normalizeScene(SS.createScene({ nodes: [SS.createNode(NODE_TYPES.TEXT, {
+        id: 'to-precompose', content: 'keep', start: 0.4, duration: 1.2, transform: { x: 23, y: 61, scale: 0.8, rotation: 12 },
+    })] }));
+    const wrapped = SS.wrapNodeInComposition(plain, 'to-precompose');
+    const before = SS.flattenScene(plain).placements[0].clip;
+    const after = SS.flattenScene(wrapped).placements[0].clip;
+    assert.deepEqual([after.start, after.duration, after.x, after.y, after.scale, after.rotation],
+        [before.start, before.duration, before.x, before.y, before.scale, before.rotation], 'precomposing preserves the layer appearance and timing');
 });
 
 await check('every compiled animation is gated, and ids survive a re-flatten', () => {
@@ -458,6 +631,15 @@ log('\n5 · Editing a design');
 
 const { default: S } = await import('../client/src/store/useTimelineStore.js');
 const tm = globalThis.timelineManager;
+await check('nested composition transforms and effects survive timeline save/load projection', () => {
+    const compositionStack = [{ id: 'saved-precomp', type: 'composition', start: 1, duration: 3, opacity: 0.8,
+        transformExpressions: { x: 'sin(t)*8', scale: '1+0.1*sin(t)' }, effects: [{ kind: 'blur', params: { radius: 4 } }] }];
+    const source = [{ id: 'track-composition', type: 'overlay', clips: [{ id: 'saved-child', type: 'image', start: 1, duration: 2, compositionStack }] }];
+    tm.fromLegacyTracks(source);
+    const projected = tm.toLegacyTracks();
+    assert.deepEqual(projected[0].clips[0].compositionStack, compositionStack,
+        'parent expression, isolated effects, and their composition boundary survive project persistence');
+});
 function loadProject(aspectRatio = '16:9') {
     tm.fromLegacyTracks([{ id: 'track-default-video', type: 'video', name: 'V', clips: [{ id: 'v1', clipId: 'ev1', assetId: 'a', type: 'video', start: 0, duration: 60, offset: 0, speed: 1 }] }]);
     S.setState({ tracks: tm.toLegacyTracks(), duration: 60, aspectRatio, currentTime: 5, assets: [{ id: 'a' }], past: [], future: [], scenes: {}, captions: [] });
@@ -694,6 +876,152 @@ await check('the scene editor is mounted in the Motion panel and wired to the st
     const registry = read('client/src/agent/CommandRegistry.js');
     assert.match(registry, /id: 'design_scene'/);
     assert.match(read('client/src/agent/CommandCompiler.js'), /\['design_scene'/);
+});
+
+await check('3D procedural particle emitters and lifecycle controls are editable and localized', () => {
+    const panel = read('client/src/components/TemplatePanel.jsx');
+    for (const property of ['particleSimulation', 'emitterShape', 'emissionMode', 'emitterPosition', 'emitterSize', 'ringInnerRadius', 'particleLifetime', 'particleTurbulence', 'turbulenceFrequency', 'particleFadeIn', 'particleFadeOut', 'loopParticles', 'particleVelocity', 'particleGravity']) {
+        assert.match(panel, new RegExp(`templates\\.scene3d\\.${property}`), `${property} editor control`);
+    }
+    assert.match(panel, /update3DEmitter\(\{ position:/, 'emitter position persists into scene data');
+    assert.match(panel, /update3DEmitter\(\{ size:/, 'emitter dimensions persist into scene data');
+    assert.match(panel, /update3DParticles\(\{ velocity:/, 'particle velocity persists into scene data');
+    assert.match(panel, /update3DParticles\(\{ gravity:/, 'particle acceleration persists into scene data');
+    assert.match(panel, /particles3d\.loop !== false/, 'looping is represented as an explicit saved particle option');
+    for (const lang of ['en', 'fr']) {
+        const words = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).templates?.scene3d;
+        for (const key of ['particleSimulation', 'emitterShape', 'emitterShapes', 'emissionMode', 'emissionModes', 'emitterPosition', 'emitterSize', 'emitterRadii', 'ringInnerRadius', 'particleLifetime', 'particleTurbulence', 'turbulenceFrequency', 'particleFadeIn', 'particleFadeOut', 'loopParticles', 'particleVelocity', 'particleGravity']) {
+            assert.ok(words?.[key], `${lang}.templates.scene3d.${key}`);
+        }
+    }
+});
+
+await check('3D camera depth of field is editable and localized', () => {
+    const panel = read('client/src/components/TemplatePanel.jsx');
+    assert.match(panel, /templates\.scene3d\.enableDepthOfField/);
+    assert.match(panel, /templates\.scene3d\.focusDistance/);
+    assert.match(panel, /templates\.scene3d\.focusRange/);
+    assert.match(panel, /templates\.scene3d\.maxBlur/);
+    for (const lang of ['en', 'fr']) {
+        const words = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).templates?.scene3d;
+        for (const key of ['depthOfField', 'enableDepthOfField', 'focusDistance', 'focusRange', 'dofStrength', 'maxBlur', 'fontSize', 'extrusionDepth']) {
+            assert.ok(words?.[key], `${lang}.templates.scene3d.${key}`);
+        }
+    }
+});
+
+await check('3D camera animation uses the renderer defaults for clipping-plane keyframes', () => {
+    const panel = read('client/src/components/TemplatePanel.jsx');
+    const renderer = read('client/src/motion/Scene3D.js');
+    assert.match(panel, /SCENE3D_CAMERA_DEFAULTS/);
+    assert.match(panel, /const cameraDefaults3D = SCENE3D_CAMERA_DEFAULTS/);
+    assert.match(renderer, /near: 0\.05, far: 1000/);
+    assert.match(panel, /\['x', 'y', 'z', 'yaw', 'pitch', 'roll', 'fov', 'orthoScale', 'near', 'far'\]/);
+});
+
+await check('3D source time remap curves can be authored at the playhead', () => {
+    const panel = read('client/src/components/TemplatePanel.jsx');
+    assert.match(panel, /remapSceneObjectTime\(timeRemap3D, localPlayhead/);
+    assert.match(panel, /const setTimeRemapKeyframe3D =/);
+    assert.match(panel, /seek3DTimeRemapKeyframe/);
+    assert.match(panel, /timeRemapKeyframes3D\.length/);
+    assert.match(panel, /templates\.scene3d\.sourceTime/);
+    assert.match(panel, /disabled: hasTimeRemapCurve3D/);
+    assert.match(panel, /templates\.scene3d\.clearCurve/);
+    assert.match(panel, /templates\.scene3d\.sourceSpan/);
+    for (const lang of ['en', 'fr']) {
+        const words = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).templates?.scene3d;
+        for (const key of ['timeRemapCurve', 'sourceTime', 'sourceSpan', 'curveOverridesSpeedOffset', 'clearCurve']) {
+            assert.ok(words?.[key], `${lang}.templates.scene3d.${key}`);
+        }
+    }
+});
+
+await check('3D text exposes its renderer styling controls in both locales', () => {
+    const panel = read('client/src/components/TemplatePanel.jsx');
+    const renderer = read('client/src/motion/Scene3D.js');
+    for (const control of ['fontFamily', 'fontWeight', 'textAlign', 'sideColor']) {
+        assert.match(panel, new RegExp(`object3d\\.${control}|${control}:`), `${control} editor control`);
+    }
+    assert.match(panel, /value=\{text3DDraft\} onChange=\{e => setText3DDraft\(e\.target\.value\)\} onBlur=\{\(\) => update3DObject\(\{ content: text3DDraft \}\)\}/,
+        'editing 3D text commits as one change on blur instead of writing a history entry for every keystroke');
+    assert.match(renderer, /object\.fontFamily \|\| 'Arial'/);
+    assert.match(renderer, /object\.fontWeight/);
+    assert.match(renderer, /object\.textAlign/);
+    assert.match(renderer, /object\.sideColor/);
+    for (const lang of ['en', 'fr']) {
+        const words = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).templates?.scene3d;
+        for (const key of ['fontFamily', 'fontWeight', 'textAlign', 'frontColor', 'extrusionColor', 'alignments']) {
+            assert.ok(words?.[key], `${lang}.templates.scene3d.${key}`);
+        }
+    }
+});
+
+await check('3D material opacity and emissive lighting are editable and localized', () => {
+    const panel = read('client/src/components/TemplatePanel.jsx');
+    const renderer = read('client/src/motion/Scene3D.js');
+    for (const control of ['materialOpacity', 'emissiveIntensity', 'emissiveColor']) {
+        assert.match(panel, new RegExp(`scene3d\\.${control}`), `${control} editor control`);
+    }
+    assert.match(renderer, /object\?\.material\?\.opacity/);
+    assert.match(renderer, /transform\.material\?\.emissiveIntensity/);
+    assert.match(renderer, /transform\.material\?\.emissiveColor/);
+    for (const lang of ['en', 'fr']) {
+        const words = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).templates?.scene3d;
+        for (const key of ['materialOpacity', 'emissiveIntensity', 'emissiveColor']) assert.ok(words?.[key], `${lang}.${key}`);
+    }
+});
+
+await check('custom 3D meshes can be authored with validated vertices, indexed faces and UVs', () => {
+    const panel = read('client/src/components/TemplatePanel.jsx');
+    assert.match(panel, /templates\.scene3d\.meshGeometry/);
+    assert.match(panel, /vertices\.length <= 5000/);
+    assert.match(panel, /index < vertices\?\.length/);
+    assert.match(panel, /geometry\.uvs\.length === vertices\?\.length/);
+    assert.match(read('client/src/motion/Scene3D.js'), /object\.type === 'mesh' && Array\.isArray\(mesh\.uvs\)/);
+    for (const lang of ['en', 'fr']) {
+        const words = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).templates?.scene3d;
+        assert.ok(words?.meshGeometry && words?.meshGeometryHelp && words?.meshGeometryInvalid, `${lang} mesh editor strings`);
+    }
+});
+
+await check('malformed cyclic scene trees validate and recover without recursion failure', () => {
+    const cyclicGroup = SS.createGroup({ id: 'cyclic-group', duration: 2 });
+    cyclicGroup.children = [cyclicGroup];
+    const raw = SS.createScene({ id: 'cyclic-scene', nodes: [cyclicGroup] });
+    const validation = SS.validateSceneShape(raw);
+    assert.equal(validation.valid, false);
+    assert.ok(validation.errors.some(error => error.includes('cyclic parent/child reference')));
+    assert.equal(SS.flattenScene(raw).placements.length, 0, 'flattening skips the cyclic edge instead of overflowing the stack');
+    assert.equal(SS.resolveAbsoluteTransform(raw, 'missing-node').x, 50, 'transform lookup terminates for missing nodes');
+    assert.equal(SS.nodeLife(raw, 'missing-node'), null, 'node-life lookup terminates for missing nodes');
+    assert.equal(SS.updateNode(raw, 'cyclic-group', { name: 'Recovered group' }).nodes[0].children.length, 0,
+        'editing a scene node removes cyclic child edges while rebuilding its branch');
+    assert.equal(SS.removeNode(raw, 'missing-node').nodes[0].children.length, 0,
+        'removing a missing node still terminates and repairs cyclic edges');
+    const added = SS.addNode(raw, SS.createNode(SS.NODE_TYPES.TEXT, { id: 'added-leaf', duration: 1 }), 'cyclic-group');
+    assert.deepEqual(added.nodes[0].children.map(child => child.id), ['added-leaf'],
+        'adding to a container repairs its malformed child branch');
+    const recovered = SS.normalizeScene(raw);
+    assert.equal(recovered.nodes[0].children.length, 0, 'normalization drops the cyclic edge and keeps the valid root');
+    assert.equal(SS.validateSceneShape(recovered).valid, true, 'recovered scene is safe to render');
+});
+
+await check('excessively nested scene trees are bounded before rendering', () => {
+    let root = SS.createGroup({ id: 'deep-0', duration: 1 });
+    let cursor = root;
+    for (let depth = 1; depth <= 1000; depth += 1) {
+        const child = SS.createGroup({ id: `deep-${depth}`, duration: 1 });
+        cursor.children = [child];
+        cursor = child;
+    }
+    const raw = SS.createScene({ id: 'deep-scene', nodes: [root] });
+    assert.ok(SS.validateSceneShape(raw).errors.some(error => error.includes('nested deeper than')),
+        'raw deep scenes are reported as invalid');
+    const recovered = SS.normalizeScene(raw);
+    assert.ok(SS.listNodes(recovered).every(entry => entry.depth <= SS.MAX_SCENE_DEPTH),
+        'normalization caps depth at the renderer-supported limit');
+    assert.equal(SS.validateSceneShape(recovered).valid, true, 'the bounded scene is safe to render');
 });
 
 log(failures ? `\n${failures} FAILURE(S)` : '\nALL SCENE EDITOR CHECKS PASSED');

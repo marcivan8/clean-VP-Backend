@@ -54,6 +54,8 @@ export const MOTION_PARAM_DEFS = {
     x:        { type: 'float', label: 'X offset',   min: -100, max: 100, step: 0.5,  value: 0, neutral: 0 },
     y:        { type: 'float', label: 'Y offset',   min: -100, max: 100, step: 0.5,  value: 0, neutral: 0 },
     scale:    { type: 'float', label: 'Scale',      min: 0,    max: 4,   step: 0.01, value: 1, neutral: 1 },
+    scaleX:   { type: 'float', label: 'Scale X',    min: 0,    max: 4,   step: 0.01, value: 1, neutral: 1 },
+    scaleY:   { type: 'float', label: 'Scale Y',    min: 0,    max: 4,   step: 0.01, value: 1, neutral: 1 },
     rotation: { type: 'float', label: 'Rotation',   min: -180, max: 180, step: 1,    value: 0, neutral: 0 },
     opacity:  { type: 'float', label: 'Opacity',    min: 0,    max: 1,   step: 0.01, value: 1, neutral: 1 },
     blur:     { type: 'float', label: 'Blur',       min: 0,    max: 40,  step: 0.5,  value: 0, neutral: 0 },
@@ -100,12 +102,21 @@ export function animationsToParamTracks(animations, clipDuration) {
         }
     }
 
-    // The editor assumes ascending time and one keyframe per instant.
+    // The editor assumes ascending time and one keyframe per exact instant.
     for (const param of Object.keys(tracks)) {
         tracks[param].sort((a, b) => a.time - b.time);
-        tracks[param] = tracks[param].filter(
-            (kf, i, arr) => i === 0 || Math.abs(kf.time - arr[i - 1].time) > 1e-4
-        );
+        const unique = [];
+        for (const keyframe of tracks[param]) {
+            const previous = unique.at(-1);
+            if (previous && keyframe.time === previous.time) {
+                // MotionResolver.sampleAnimation resolves exact duplicate
+                // timestamps with the later-authored key. Preserve nearby but
+                // distinct timestamps so the editor and renderer keep the same
+                // interpolation interval.
+                unique[unique.length - 1] = keyframe;
+            } else unique.push(keyframe);
+        }
+        tracks[param] = unique;
     }
     return tracks;
 }

@@ -56,11 +56,20 @@ function loadClientModules() {
             .replace(/\bexport\s+(const|function|class|let)\b/g, '$1');
         combined += src + '\n';
     }
-    combined += 'return { deriveZoomKeyframes, applyCameraMotionToBaseTrack, buildPreset, applyPresetToClip, clipToMotionLayer, resolveMotionAt, PRESET_GROUPS, LAYER_KINDS };';
+    combined += 'return { deriveCameraKeyframes, deriveZoomKeyframes, evaluateKeyframes, applyCameraMotionToBaseTrack, buildPreset, applyPresetToClip, clipToMotionLayer, resolveMotionAt, PRESET_GROUPS, LAYER_KINDS };';
     // eslint-disable-next-line no-new-func
     return new Function(combined)();
 }
 const CLIENT = loadClientModules();
+
+section('0 · Export keyframes use the canonical easing catalog');
+{
+    const track = easing => [{ time: 0, value: 0 }, { time: 1, value: 1, easing }];
+    check('sine easing is honored', Math.abs(CLIENT.evaluateKeyframes(track('easeInOutSine'), 0.25) - 0.1464466094) < 1e-6);
+    check('custom cubic Bézier easing is honored', CLIENT.evaluateKeyframes(track('cubic-bezier(0.42,0,1,1)'), 0.5) < 0.5);
+    check('step easing is honored', CLIENT.evaluateKeyframes(track('steps(2)'), 0.25) === 0);
+    check('spring easing is honored', CLIENT.evaluateKeyframes(track('spring(170,26)'), 0.5) !== 0.5);
+}
 
 // Extract the REAL smooth-zoom builder straight out of exportProcessor.js
 // (the same worker code the export job runs, not a copy that could quietly
@@ -69,11 +78,13 @@ const CLIENT = loadClientModules();
 function loadZoomFilter() {
     const src = read('jobs/exportProcessor.js');
     const ease = src.match(/function zoomEaseExpr\(easing, u\)[\s\S]*?\n}\n/);
+    const sample = src.match(/function sampledEaseExpr\(samples, u\)[\s\S]*?\n}\n/);
+    const retimeEase = src.match(/function applyRetimeEasing\(name, progress\)[\s\S]*?\n}\n/);
     const kfe = src.match(/function keyframeExpr\(pts, T[\s\S]*?\n}\n/);
     const m = src.match(/function buildSmoothZoomFilter\(kfs[\s\S]*?\n}\n/);
-    if (!ease || !kfe || !m) return null;
+    if (!ease || !sample || !retimeEase || !kfe || !m) return null;
     // eslint-disable-next-line no-new-func
-    return new Function(`${ease[0]}\n${kfe[0]}\n${m[0]}\nreturn buildSmoothZoomFilter;`)();
+    return new Function(`${sample[0]}\n${retimeEase[0]}\n${ease[0]}\n${kfe[0]}\n${m[0]}\nreturn buildSmoothZoomFilter;`)();
 }
 const buildSmoothZoomFilter = loadZoomFilter();
 
@@ -101,20 +112,22 @@ section('2 · deriveZoomKeyframes — the non-effect cases');
     check('a clip with no animations derives nothing',
         CLIENT.deriveZoomKeyframes({ id: 'c1', type: 'video', duration: 4 }, { type: 'video' }) === null);
 
-    check('a clip with only FADE/TRANSLATE animations (no scale) derives nothing',
-        CLIENT.deriveZoomKeyframes({
+    const whip = {
             id: 'c1', type: 'video', duration: 1,
             ...CLIENT.applyPresetToClip({ duration: 1 }, 'camera-whip'),
-        }, { type: 'video' }) === null,
-        'camera-whip is TRANSLATE-only — see CameraMotionCompiler.js header for why translate is out of scope');
+        };
+    const whipMotion = CLIENT.deriveCameraKeyframes(whip, { type: 'video' });
+    check('a translate-only camera preset derives pan without inventing zoom',
+        whipMotion?.panX?.length > 1 && whipMotion.scale.every(point => Math.abs(point.value - 1) < 1e-6));
 
-    check('a clip that already has hand-authored clip.keyframes.scale is never overridden',
-        CLIENT.deriveZoomKeyframes({
+    const combined = CLIENT.deriveZoomKeyframes({
             id: 'c1', type: 'video', duration: 2,
             keyframes: { scale: [{ time: 0, value: 1 }, { time: 2, value: 1.3 }] },
             ...CLIENT.applyPresetToClip({ duration: 2 }, 'camera-push'),
-        }, { type: 'video' }) === null,
-        'an existing hand-authored rhythm must win — silently replacing it would be a regression, not a fix');
+        }, { type: 'video' });
+    check('hand-authored scale keyframes compose multiplicatively with camera motion',
+        Array.isArray(combined) && combined.at(-1).value > 1.4,
+        combined && `combined final scale=${combined.at(-1).value}`);
 
     check('zero-duration clips derive nothing',
         CLIENT.deriveZoomKeyframes({
@@ -252,7 +265,7 @@ if (!FFMPEG) {
         fs.rmSync(tmp, { recursive: true, force: true });
     }
 
-    section('7 · REAL FFMPEG — a hand-authored clip.keyframes.scale rhythm is untouched by this change');
+    section('7 · REAL FFMPEG — a hand-authored clip.keyframes.scale rhythm still renders');
     {
         // This is the non-breaking guarantee: a clip that ALREADY has a
         // human-drawn zoom rhythm from KeyframeEditor must render byte-for-
@@ -295,8 +308,8 @@ section('8 · Wired into the export request (client) and the live preview (Revid
         /from '\.\.\/motion\/ClipAdapter\.js'/.test(preview) && /from '\.\.\/motion\/MotionResolver\.js'/.test(preview));
     check('a motionLayer is only built when the clip actually has animations (zero overhead for every plain clip)',
         /Array\.isArray\(clip\.animations\) && clip\.animations\.length > 0/.test(preview));
-    check('video AND image clips both get the wiring (the gap applied to both base track types)',
-        (preview.match(/const motionLayer = \(Array\.isArray\(clip\.animations\)/g) || []).length === 2);
+    check('the shared Revideo clip path wires video and image animations without duplicate branches',
+        /const motionLayer = \(isOverlay \|\| \(Array\.isArray\(clip\.animations\)/.test(preview));
     check('every animated transform prop (x/y/scaleX/scaleY/rotation/opacity) branches on motionLayer',
         /motionLayer \? \(clip\.x \|\| 0\) \+ motionOffsets/.test(preview) &&
         /motionLayer \? motionOffsets\([^)]*\)\.scale : evaluateKF/.test(preview));

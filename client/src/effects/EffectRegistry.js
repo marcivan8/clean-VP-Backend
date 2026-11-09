@@ -598,7 +598,7 @@ export const EFFECT_DEFINITIONS = {
             effectType: {
                 value: 'zoom_pulse',
                 type: PARAM_TYPES.SELECT,
-                options: ['zoom_pulse', 'flash', 'shake', 'cut'],
+                options: ['zoom_pulse', 'flash', 'shake'],
                 label: 'Effect Type'
             },
             intensity: {
@@ -615,7 +615,7 @@ export const EFFECT_DEFINITIONS = {
                 label: 'Beat Division'
             }
         },
-        endpoint: '/api/effects/beat-detect'
+        endpoint: '/api/effects/beat-sync'
     },
 
     emotion_frame: {
@@ -734,12 +734,31 @@ class EffectRegistry {
             throw new Error(`Unknown effect type: ${type}`);
         }
 
+        // Keep the registry's parameter schema when callers supply only raw
+        // values. Replacing the whole params object strips each control's
+        // range and type; EffectNode then assumes 0..1 and clamps values such
+        // as color-grade brightness (0..200) to 1. Wrapped values can override
+        // metadata explicitly while inheriting any omitted fields.
+        const params = { ...definition.params };
+        for (const [key, supplied] of Object.entries(overrides.params || {})) {
+            const schema = definition.params[key];
+            if (schema) {
+                params[key] = supplied && typeof supplied === 'object' && !Array.isArray(supplied) && 'value' in supplied
+                    ? { ...schema, ...supplied }
+                    : { ...schema, value: supplied };
+            } else {
+                params[key] = supplied && typeof supplied === 'object' && !Array.isArray(supplied) && 'value' in supplied
+                    ? supplied
+                    : { value: supplied };
+            }
+        }
+
         return {
             type,
             name: definition.name,
             engine: definition.engine,
-            params: { ...definition.params },
-            ...overrides
+            ...overrides,
+            params,
         };
     }
 

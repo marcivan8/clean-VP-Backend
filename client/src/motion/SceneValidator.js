@@ -23,13 +23,18 @@
 
 import { measureTextBounds, fitTextToBox, reserveSlotWidth } from './TextMeasurement.js';
 import { contrastRatio, luminance } from './ColorTheory.js';
+import { interpolateSvgPaths, validateSvgPathData } from './VectorGraphics.js';
 import { TEMPLATE_KINDS, SHAPE_KINDS } from './TemplateGraphics.js';
 import { auditScene as auditTextCraft, ruleById as craftRuleById } from './TextCraft.js';
+import { MAX_MESH_TRIANGLES, MAX_SCENE_TRIANGLES } from './Scene3D.js';
+import { GRAPHIC_EFFECT_KINDS } from './LayerEffects.js';
 import {
     NODE_TYPES,
+    CONTAINER_TYPES,
     isOverlayType,
     EFFECT_KINDS,
     MASK_KINDS,
+    BLEND_MODE_KINDS,
     IDENTITY_TRANSFORM,
     composeTransform,
     nodeBox,
@@ -50,6 +55,9 @@ export const ISSUE_CODES = {
     LAYER_COLLISION:      'layer_collision',
     MISSING_ASSET:        'missing_asset',
     UNSUPPORTED_EFFECT:   'unsupported_effect',
+    UNSUPPORTED_BLEND_MODE: 'unsupported_blend_mode',
+    UNSUPPORTED_VECTOR_MORPH: 'unsupported_vector_morph',
+    INVALID_VECTOR_PATH: 'invalid_vector_path',
     UNKNOWN_TEMPLATE:     'unknown_template',
     UNSUPPORTED_MASK:     'unsupported_mask',
     ZERO_DURATION:        'zero_duration',
@@ -57,24 +65,39 @@ export const ISSUE_CODES = {
     EXIT_BEFORE_ENTRANCE: 'exit_before_entrance',
     STARTS_AFTER_SCENE:   'starts_after_scene',
     LOW_CONTRAST:         'low_contrast',
+    SCENE_RENDER_LIMIT:   'scene_render_limit',
+    ANIMATION_RENDER_LIMIT: 'animation_render_limit',
     // R107 - the text-craft rules whose symptom is visible before render.
     READ_HOLD:            'read_hold',
     SWAP_DWELL:           'swap_dwell',
     SWAP_SLOT_UNRESERVED: 'swap_slot_unreserved',
 };
-
 /** Codes `autoFixScene` can resolve on its own. */
 export const AUTO_FIXABLE = Object.freeze([
     ISSUE_CODES.TEXT_OVERFLOW,
     ISSUE_CODES.OUTSIDE_FRAME,
     ISSUE_CODES.SAFE_AREA,
     ISSUE_CODES.UNSUPPORTED_EFFECT,
+    ISSUE_CODES.UNSUPPORTED_BLEND_MODE,
     ISSUE_CODES.TIMING_OUT_OF_RANGE,
     ISSUE_CODES.ZERO_DURATION,
     // R107 - reserving the slot is arithmetic (the widest alternative), so it
     // belongs here. Dropping a word that has no time to be read, or retiming
     // a reveal, are design choices and stay in the report.
     ISSUE_CODES.SWAP_SLOT_UNRESERVED,
+]);
+
+// These are deliberately separate: media overlays use FFmpeg/CSS while
+// text, shape and vector layers use LayerEffects' canvas implementation.
+const GRAPHIC_EFFECT_KIND_SET = new Set(GRAPHIC_EFFECT_KINDS);
+const MEDIA_EFFECT_KINDS = new Set([
+    // The compositor renders alpha-based shadow/glow in dedicated branches
+    // (including the video glow pass), so validation must preserve them.
+    'shadow', 'glow', 'gradient-fill', 'blur', 'blur_gaussian', 'blur_radial', 'blur_motion', 'shake', 'fade_in', 'fade_out',
+    'stroke',
+    'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate',
+    'color_grade', 'grain', 'film_grain', 'chromatic-aberration', 'rgb_split',
+    'motion-blur', 'distortion', 'vignette', 'glitch', 'inner-shadow',
 ]);
 
 /** Minimum legible text on a phone, as a fraction of frame height. */
@@ -146,17 +169,24 @@ function measurerFor(scene, opts) {
 function visibleLeaves(scene, opts) {
     const measure = measurerFor(scene, opts);
     const out = [];
-    const visit = (list, parentAbs, timeOffset) => {
+    const visit = (list, parentAbs, timeOffset, timeLimit = Infinity) => {
         for (const node of list || []) {
             if (!node || node.hidden) continue;
             const abs = composeTransform(parentAbs, node.transform, scene.frame);
             const start = timeOffset + Math.max(0, num(node.start, 0));
-            if (node.type === NODE_TYPES.GROUP) { visit(node.children, abs, start); continue; }
+            if (start >= timeLimit) continue;
+            if (CONTAINER_TYPES.includes(node.type)) {
+                const childLimit = node.type === NODE_TYPES.COMPOSITION
+                    ? Math.min(timeLimit, start + Math.max(0, num(node.duration, 0)))
+                    : timeLimit;
+                visit(node.children, abs, start, childLimit);
+                continue;
+            }
             out.push({
                 node,
                 abs,
                 start,
-                end: start + Math.max(0, num(node.duration, 0)),
+                end: Math.min(timeLimit, start + Math.max(0, num(node.duration, 0))),
                 box: nodeBox(scene, node, abs, measure),
             });
         }
@@ -353,18 +383,159 @@ function checkSource(entry, issues, opts) {
     }
 }
 
-function checkEffects(entry, issues) {
+function checkEffects(entry, issues, leaves = []) {
     const { node } = entry;
     for (const effect of node.effects || []) {
-        if (!EFFECT_KINDS.includes(effect.kind)) {
+        // Disabled effects are retained in the stack so the user can re-enable
+        // them later. They do not affect this render and should not produce a
+        // false warning or be removed by auto-fix.
+        if (!effect || effect.enabled === false) continue;
+        // Raster/video overlays go through the FFmpeg media compositor. Its
+        // supported effect set differs from the shared canvas renderer used
+        // by templates and vectors; report that distinction before export.
+        const mediaOverlay = [NODE_TYPES.IMAGE, NODE_TYPES.VIDEO, NODE_TYPES.STICKER].includes(node.type);
+        const kind = effect.kind || effect.type;
+        const supportedForLayer = (mediaOverlay ? MEDIA_EFFECT_KINDS : GRAPHIC_EFFECT_KIND_SET).has(kind);
+        const mediaUnsupported = mediaOverlay && (
+            (kind === 'stroke' && node.type === NODE_TYPES.VIDEO)
+            || (node.type === NODE_TYPES.VIDEO && kind === 'gradient-fill')
+        );
+        if (!EFFECT_KINDS.includes(kind) || !supportedForLayer || mediaUnsupported) {
+            const layerLabel = node.type === NODE_TYPES.VIDEO ? 'video layers' : mediaOverlay ? 'raster media layers' : 'this layer';
+            const message = node.type === NODE_TYPES.VIDEO && kind === 'gradient-fill'
+                ? 'Gradient fill cannot be previewed consistently on video layers; use an image layer for this effect.'
+                : `The "${kind}" effect is not supported on ${layerLabel}, so it will be ignored when exporting.`;
             issues.push(issue(ISSUE_CODES.UNSUPPORTED_EFFECT, SEVERITY.WARN, node,
-                `The "${effect.kind}" effect is not supported, so it will be ignored when exporting.`, { kind: effect.kind }));
+                message,
+                { kind, nodeType: node.type }));
         }
     }
-    if (node.mask && !MASK_KINDS.includes(node.mask.kind)) {
+    const shapeMaskSupported = node.mask?.kind === 'shape'
+        && ['ellipse', 'circle', 'rectangle', 'rounded-rectangle', 'capsule', 'polygon', 'star', 'arrow'].includes(node.mask.shape)
+        && ((node.type === NODE_TYPES.SHAPE && (!!node.template || !!node.vector))
+            || [NODE_TYPES.IMAGE, NODE_TYPES.VIDEO, NODE_TYPES.STICKER].includes(node.type));
+    const maskSource = node.mask?.kind === 'node'
+        ? leaves.find(candidate => candidate.node.id === node.mask.nodeId && candidate.node.id !== node.id)
+        : null;
+    const sourceVectorKind = String(maskSource?.node?.vector?.kind || 'rect').toLowerCase();
+    const nodeMaskShapeSupported = (maskSource?.node?.type === NODE_TYPES.SHAPE
+        && !!maskSource.node.vector
+        && ['circle', 'ellipse', 'capsule', 'rect', 'rectangle', 'rounded-rectangle', 'polygon', 'star', 'arrow', 'path'].includes(sourceVectorKind))
+        || [NODE_TYPES.IMAGE, NODE_TYPES.VIDEO, NODE_TYPES.STICKER].includes(maskSource?.node?.type);
+    const nodeMaskModeSupported = !node.mask?.mode || ['alpha', 'luma', 'luminance'].includes(node.mask.mode);
+    const nodeMaskSupported = !!maskSource && nodeMaskShapeSupported && maskSource.box.w > 0 && maskSource.box.h > 0
+        && nodeMaskModeSupported
+        && ((node.type === NODE_TYPES.SHAPE && (!!node.template || !!node.vector))
+            || [NODE_TYPES.IMAGE, NODE_TYPES.VIDEO, NODE_TYPES.STICKER].includes(node.type));
+    // Scene mattes are foreground/background removal masks. The existing
+    // renderer consumes them only for video clips; accepting an image, text,
+    // or vector here would report a supported mask that flattening cannot
+    // execute.
+    const matteMaskSupported = node.mask?.kind === 'matte'
+        && node.type === NODE_TYPES.VIDEO
+        && !!(node.mask.layerMask?.maskAssetPath || node.mask.layerMask?.maskAssetUrl);
+    const validShapeFeather = node.mask?.kind !== 'shape' || node.mask.feather == null
+        || (Number.isFinite(Number(node.mask.feather)) && Number(node.mask.feather) >= 0 && Number(node.mask.feather) <= 0.25);
+    if (node.mask && (!MASK_KINDS.includes(node.mask.kind) || (!shapeMaskSupported && !nodeMaskSupported && !matteMaskSupported) || !validShapeFeather)) {
         issues.push(issue(ISSUE_CODES.UNSUPPORTED_MASK, SEVERITY.WARN, node,
-            `The "${node.mask.kind}" mask is not supported, so it will be ignored.`, { kind: node.mask.kind }));
+            `The "${node.mask.kind}" mask cannot be rendered for this layer and will be ignored.`, {
+                kind: node.mask.kind,
+                ...(validShapeFeather ? {} : { feather: node.mask.feather, supportedRange: [0, 0.25] }),
+            }));
     }
+}
+
+function checkVectorMorph(entry, issues) {
+    const { node } = entry;
+    const vector = node.vector;
+    const motion = vector?.motion;
+    if (vector?.kind !== 'path' || (!motion?.pathFrom && !motion?.pathTo)) return;
+    const validSources = typeof motion.pathFrom === 'string' && motion.pathFrom.trim()
+        && typeof motion.pathTo === 'string' && motion.pathTo.trim();
+    const compatible = validSources && motion.pathFrom.length <= 100000 && motion.pathTo.length <= 100000
+        && interpolateSvgPaths(motion.pathFrom, motion.pathTo, 0.5);
+    if (!compatible) {
+        issues.push(issue(ISSUE_CODES.UNSUPPORTED_VECTOR_MORPH, SEVERITY.WARN, node,
+            'This path pair cannot be morphed by the vector renderer. The original path will remain visible; use paths with matching contour counts and open or closed contours.',
+            { kind: 'path-morph' }));
+    }
+}
+
+function checkVectorPath(entry, issues) {
+    const { node } = entry;
+    const vector = node?.vector;
+    if (vector?.kind !== 'path') return;
+    const validation = validateSvgPathData(vector.pathData);
+    if (validation.valid) return;
+    issues.push(issue(ISSUE_CODES.INVALID_VECTOR_PATH, SEVERITY.WARN, node,
+        'This SVG path is invalid or exceeds the supported render complexity and will not render. Correct the path data before export.',
+        { reason: validation.reason }));
+}
+
+function checkVectorBlendMode(entry, issues) {
+    const { node } = entry;
+    const mode = node?.vector?.blendMode;
+    if (!mode || BLEND_MODE_KINDS.includes(mode)) return;
+    issues.push(issue(ISSUE_CODES.UNSUPPORTED_BLEND_MODE, SEVERITY.WARN, node,
+        `The vector blend mode "${mode}" is unsupported and would render as source-over. It will be reset to source-over.`,
+        { mode, supported: BLEND_MODE_KINDS }));
+}
+
+/**
+ * The deterministic software 3D renderer has explicit work limits. Report
+ * content beyond those limits before render instead of letting the renderer's
+ * defensive slices make objects, lights, particles, or mesh geometry vanish.
+ */
+function check3DRenderLimits(entry, issues) {
+    const node = entry?.node;
+    if (node?.template?.kind !== '3d-scene') return;
+    const scene = node.template?.params?.scene || {};
+    const objects = Array.isArray(scene.objects) ? scene.objects : [];
+    const lights = Array.isArray(scene.lights) ? scene.lights : [];
+    const addLimit = (label, actual, limit, detail = {}) => {
+        if (actual <= limit) return;
+        issues.push(issue(ISSUE_CODES.SCENE_RENDER_LIMIT, SEVERITY.WARN, node,
+            `This 3D scene has ${actual} ${label}; the renderer supports ${limit}, so the extra content will not appear.`,
+            { label, actual, limit, ...detail }));
+    };
+    addLimit('objects', objects.length, 80);
+    addLimit('lights', lights.length, 8);
+    addLimit('particles', Math.max(0, Number(scene.particles?.count) || 0), 500);
+    let sceneTriangles = 0;
+    for (const object of objects.slice(0, 80)) {
+        if (object?.type !== 'mesh') continue;
+        const vertices = Array.isArray(object.vertices) ? object.vertices.length : 0;
+        const sourceFaces = Array.isArray(object.faces) ? object.faces.slice(0, 5000) : [];
+        const faces = Array.isArray(object.faces) ? object.faces.length : 0;
+        const triangles = sourceFaces.reduce((total, face) => total + (
+            Array.isArray(face) && face.length >= 3 && face.length <= 64
+            && face.every(index => Number.isInteger(index) && index >= 0 && index < Math.min(vertices, 5000))
+                ? face.length - 2 : 0
+        ), 0);
+        addLimit(`vertices on mesh “${object.name || object.id || 'unnamed'}”`, vertices, 5000, { objectId: object.id || null });
+        addLimit(`faces on mesh “${object.name || object.id || 'unnamed'}”`, faces, 5000, { objectId: object.id || null });
+        addLimit(`triangles on mesh “${object.name || object.id || 'unnamed'}”`, triangles, MAX_MESH_TRIANGLES, { objectId: object.id || null });
+        sceneTriangles += Math.min(triangles, MAX_MESH_TRIANGLES);
+    }
+    addLimit('triangles in the 3D scene', sceneTriangles, MAX_SCENE_TRIANGLES);
+}
+
+/** Animation sanitization caps work defensively; report authored tracks that
+ * exceed those caps so keyframes are never silently discarded at render. */
+function checkAnimationRenderLimits(entry, issues) {
+    const node = entry?.node;
+    const animations = Array.isArray(node?.animations) ? node.animations : [];
+    const addLimit = (label, actual, limit) => {
+        if (actual <= limit) return;
+        issues.push(issue(ISSUE_CODES.ANIMATION_RENDER_LIMIT, SEVERITY.WARN, node,
+            `This layer has ${actual} ${label}; the renderer supports ${limit}, so the extra animation data will not appear.`,
+            { label, actual, limit }));
+    };
+    addLimit('animation tracks', animations.length, 16);
+    animations.forEach((animation, index) => {
+        const count = Array.isArray(animation?.keyframes) ? animation.keyframes.length : 0;
+        addLimit(`keyframes in animation ${index + 1}`, count, 24);
+    });
 }
 
 /**
@@ -468,7 +639,12 @@ export function validateScene(scene, opts = {}) {
         checkText(scene, entry, issues, opts);
         checkPlacement(scene, entry, issues, opts);
         checkSource(entry, issues, opts);
-        checkEffects(entry, issues);
+        checkVectorPath(entry, issues);
+        checkVectorMorph(entry, issues);
+        checkVectorBlendMode(entry, issues);
+        checkEffects(entry, issues, leaves);
+        check3DRenderLimits(entry, issues);
+        checkAnimationRenderLimits(entry, issues);
         checkTextCraft(entry, issues);
     }
     if (!opts.skipCollisions) checkCollisions(leaves, issues);
@@ -622,8 +798,18 @@ export function autoFixScene(scene, opts = {}) {
             } else if (item.code === ISSUE_CODES.TIMING_OUT_OF_RANGE) {
                 applied = fixTiming(node);
             } else if (item.code === ISSUE_CODES.UNSUPPORTED_EFFECT) {
-                const effects = (node.effects || []).filter(e => EFFECT_KINDS.includes(e.kind));
+                const mediaOverlay = [NODE_TYPES.IMAGE, NODE_TYPES.VIDEO, NODE_TYPES.STICKER].includes(node.type);
+                const supportedKinds = mediaOverlay ? MEDIA_EFFECT_KINDS : GRAPHIC_EFFECT_KIND_SET;
+                const effects = (node.effects || []).filter(e => {
+                    const kind = e.kind || e.type;
+                    return EFFECT_KINDS.includes(kind) && supportedKinds.has(kind) && !(mediaOverlay && (
+                        (kind === 'stroke' && node.type === NODE_TYPES.VIDEO)
+                        || (node.type === NODE_TYPES.VIDEO && kind === 'gradient-fill')
+                    ));
+                });
                 applied = { patch: { effects }, message: `An unsupported effect was removed from "${node.name}".` };
+            } else if (item.code === ISSUE_CODES.UNSUPPORTED_BLEND_MODE) {
+                applied = { patch: { vector: { ...node.vector, blendMode: 'source-over' } }, message: `Unsupported vector blending on "${node.name}" was reset to source-over.` };
             } else if (item.code === ISSUE_CODES.ZERO_DURATION) {
                 const left = Math.max(0, num(current.duration, 0) - entry.start);
                 if (left > 0.05) applied = { patch: { duration: round(left, 3) }, message: `"${node.name}" was given ${round(left)} s on screen.` };

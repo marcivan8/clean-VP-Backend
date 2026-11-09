@@ -16,7 +16,6 @@ export class AIEffectEngine {
         this.apiBase = options.apiBase || '/api/effects';
         this.cache = new Map();
         this.cacheExpiry = options.cacheExpiry || 5 * 60 * 1000; // 5 minutes
-        this.fallbackEnabled = options.fallbackEnabled ?? true;
     }
 
     // ========================================================================
@@ -42,16 +41,17 @@ export class AIEffectEngine {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     videoUrl,
-                    subject: options.subject || 'face',
-                    zoomLevel: options.zoomLevel || 1.5,
-                    smoothness: options.smoothness || 0.5,
+                    subject: options.subject ?? 'face',
+                    zoomLevel: options.zoomLevel ?? 1.5,
+                    smoothness: options.smoothness ?? 0.5,
                     startTime: options.startTime,
                     endTime: options.endTime
                 })
             });
 
             if (!response.ok) {
-                throw new Error(`Smart zoom analysis failed: ${response.statusText}`);
+                const payload = await response.json().catch(() => ({}));
+                throw new Error(payload.error || `Smart zoom analysis failed: ${response.statusText}`);
             }
 
             const result = await response.json();
@@ -62,57 +62,8 @@ export class AIEffectEngine {
             return result;
         } catch (error) {
             console.warn('[AIEffects] Smart zoom analysis failed:', error.message);
-
-            if (this.fallbackEnabled) {
-                return this._fallbackSmartZoom(options);
-            }
-
             throw error;
         }
-    }
-
-    _fallbackSmartZoom(options) {
-        const zoomLevel = options.zoomLevel || 1.5;
-        const startTime = options.startTime || 0;
-        const endTime = options.endTime || 10;
-        const duration = endTime - startTime;
-
-        // Generate static center zoom as fallback
-        return {
-            success: false,
-            fallback: true,
-            keyframes: [
-                {
-                    time: startTime,
-                    x: 0.5,
-                    y: 0.5,
-                    scale: 1.0,
-                    easing: 'easeInOut'
-                },
-                {
-                    time: startTime + duration * 0.2,
-                    x: 0.5,
-                    y: 0.4,  // Slight upward pan assuming face
-                    scale: zoomLevel,
-                    easing: 'linear'
-                },
-                {
-                    time: endTime - duration * 0.2,
-                    x: 0.5,
-                    y: 0.4,
-                    scale: zoomLevel,
-                    easing: 'easeInOut'
-                },
-                {
-                    time: endTime,
-                    x: 0.5,
-                    y: 0.5,
-                    scale: 1.0,
-                    easing: 'linear'
-                }
-            ],
-            detections: []
-        };
     }
 
     // ========================================================================
@@ -132,20 +83,21 @@ export class AIEffectEngine {
         if (cached) return cached;
 
         try {
-            const response = await fetch(`${this.apiBase}/beat-detect`, {
+            const response = await fetch(`${this.apiBase}/beat-sync`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     audioUrl,
-                    beatDivision: options.beatDivision || 1,
-                    sensitivity: options.sensitivity || 0.5,
+                    beatDivision: options.beatDivision ?? 1,
+                    sensitivity: options.sensitivity ?? 0.5,
                     startTime: options.startTime,
                     endTime: options.endTime
                 })
             });
 
             if (!response.ok) {
-                throw new Error(`Beat detection failed: ${response.statusText}`);
+                const payload = await response.json().catch(() => ({}));
+                throw new Error(payload.error || `Beat detection failed: ${response.statusText}`);
             }
 
             const result = await response.json();
@@ -155,34 +107,8 @@ export class AIEffectEngine {
             return result;
         } catch (error) {
             console.warn('[AIEffects] Beat detection failed:', error.message);
-
-            if (this.fallbackEnabled) {
-                return this._fallbackBeatSync(options);
-            }
-
             throw error;
         }
-    }
-
-    _fallbackBeatSync(options) {
-        // Generate regular beat pattern as fallback (assume 120 BPM)
-        const bpm = 120;
-        const beatInterval = 60 / bpm / (options.beatDivision || 1);
-        const startTime = options.startTime || 0;
-        const endTime = options.endTime || 30;
-
-        const beats = [];
-        for (let t = startTime; t < endTime; t += beatInterval) {
-            beats.push(t);
-        }
-
-        return {
-            success: false,
-            fallback: true,
-            bpm,
-            beats,
-            confidence: 0
-        };
     }
 
     /**
@@ -190,7 +116,7 @@ export class AIEffectEngine {
      */
     generateBeatSyncKeyframes(beatData, effectType, options = {}) {
         const { beats = [] } = beatData;
-        const intensity = options.intensity || 0.5;
+        const intensity = options.intensity ?? 0.5;
         const keyframes = [];
 
         for (const beatTime of beats) {
@@ -248,15 +174,16 @@ export class AIEffectEngine {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     videoUrl,
-                    framingStyle: options.framingStyle || 'dynamic',
-                    transitionSpeed: options.transitionSpeed || 0.5,
+                    framingStyle: options.framingStyle ?? 'dynamic',
+                    transitionSpeed: options.transitionSpeed ?? 0.5,
                     startTime: options.startTime,
                     endTime: options.endTime
                 })
             });
 
             if (!response.ok) {
-                throw new Error(`Emotion analysis failed: ${response.statusText}`);
+                const payload = await response.json().catch(() => ({}));
+                throw new Error(payload.error || `Emotion analysis failed: ${response.statusText}`);
             }
 
             const result = await response.json();
@@ -266,43 +193,8 @@ export class AIEffectEngine {
             return result;
         } catch (error) {
             console.warn('[AIEffects] Emotion analysis failed:', error.message);
-
-            if (this.fallbackEnabled) {
-                return this._fallbackEmotionFraming(options);
-            }
-
             throw error;
         }
-    }
-
-    _fallbackEmotionFraming(options) {
-        const style = options.framingStyle || 'dynamic';
-        const startTime = options.startTime || 0;
-        const endTime = options.endTime || 10;
-
-        // Static framing suggestions based on style
-        const framings = {
-            tight: { x: 0.5, y: 0.35, scale: 2.0 },
-            wide: { x: 0.5, y: 0.5, scale: 1.0 },
-            cinematic: { x: 0.5, y: 0.45, scale: 1.2 },
-            dynamic: { x: 0.5, y: 0.4, scale: 1.5 }
-        };
-
-        const framing = framings[style] || framings.dynamic;
-
-        return {
-            success: false,
-            fallback: true,
-            segments: [
-                {
-                    startTime,
-                    endTime,
-                    emotion: 'neutral',
-                    confidence: 0,
-                    framing
-                }
-            ]
-        };
     }
 
     // ========================================================================
@@ -324,8 +216,8 @@ export class AIEffectEngine {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     videoUrl,
-                    threshold: options.threshold || 0.3,
-                    minSceneDuration: options.minSceneDuration || 1.0
+                    threshold: options.threshold ?? 0.3,
+                    minSceneDuration: options.minSceneDuration ?? 1.0
                 })
             });
 
@@ -394,20 +286,22 @@ export class AIEffectEngine {
         const params = effect.getParamsSnapshot();
         const videoUrl = context.videoUrl || context.sourceUrl;
         const audioUrl = context.audioUrl || videoUrl;
+        const startTime = effect.startTime ?? context.startTime;
+        const endTime = effect.endTime ?? context.endTime;
 
         switch (effect.type) {
             case 'smart_zoom':
                 return this.analyzeSmartZoom(videoUrl, {
                     ...params,
-                    startTime: effect.startTime,
-                    endTime: effect.endTime
+                    startTime,
+                    endTime
                 });
 
             case 'beat_sync':
                 const beatData = await this.analyzeBeatSync(audioUrl, {
                     beatDivision: params.beatDivision,
-                    startTime: effect.startTime,
-                    endTime: effect.endTime
+                    startTime,
+                    endTime
                 });
 
                 // Generate effect keyframes
@@ -422,8 +316,8 @@ export class AIEffectEngine {
             case 'emotion_frame':
                 return this.analyzeEmotionFraming(videoUrl, {
                     ...params,
-                    startTime: effect.startTime,
-                    endTime: effect.endTime
+                    startTime,
+                    endTime
                 });
 
             default:

@@ -36,17 +36,7 @@ async function initializeModels() {
   if (!tfAvailable) return;
 
   try {
-    if (!faceDetector) {
-      console.log('🔄 Initialisation du détecteur de visages...');
-      const model = faceDetection.SupportedModels.MediaPipeFaceDetector;
-      const detectorConfig = {
-        runtime: 'tfjs',
-        modelType: 'short',
-        maxFaces: 10
-      };
-      faceDetector = await faceDetection.createDetector(model, detectorConfig);
-      console.log('✅ Détecteur de visages initialisé');
-    }
+    await initializeFaceDetector();
 
     if (!faceLandmarkDetector) {
       console.log('🔄 Initialisation du détecteur de landmarks...');
@@ -65,6 +55,30 @@ async function initializeModels() {
     // Don't throw, just log and continue without emotion analysis
     tfAvailable = false;
   }
+}
+
+async function initializeFaceDetector() {
+  if (!tfAvailable) throw new Error('Face detection dependencies are unavailable');
+  if (faceDetector) return;
+  console.log('🔄 Initialisation du détecteur de visages...');
+  const model = faceDetection.SupportedModels.MediaPipeFaceDetector;
+  faceDetector = await faceDetection.createDetector(model, {
+    runtime: 'tfjs',
+    modelType: 'short',
+    maxFaces: 10
+  });
+  console.log('✅ Détecteur de visages initialisé');
+}
+
+/** Detect faces without running the separate expression/landmark heuristic. */
+async function detectFaces(imagePath) {
+  if (!fs.existsSync(imagePath)) throw new Error(`Image not found: ${imagePath}`);
+  await initializeFaceDetector();
+  const image = await loadImage(imagePath);
+  const canvas = createCanvas(image.width, image.height);
+  canvas.getContext('2d').drawImage(image, 0, 0);
+  const faces = await faceDetector.estimateFaces(canvas);
+  return { width: image.width, height: image.height, faces };
 }
 
 /**
@@ -292,6 +306,7 @@ async function analyzeEmotionsBatch(framePaths) {
 }
 
 module.exports = {
+  detectFaces,
   analyzeEmotions,
   analyzeEmotionsBatch,
   initializeModels

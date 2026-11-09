@@ -171,7 +171,7 @@ const app = read('client/src/App.jsx');
 console.log('\n── UserStylePage is routed and reachable ──');
 
 check('UserStylePage is imported in App.jsx',
-    /import UserStylePage from/.test(app));
+    /const UserStylePage = lazy\(\(\) => import\('\.\/pages\/UserStylePage'\)\)/.test(app));
 
 check('a route renders it',
     /<Route[^>]*element=\{<UserStylePage\s*\/>\}/.test(app),

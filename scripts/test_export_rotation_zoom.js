@@ -34,14 +34,28 @@ function extract(name, sig) {
     const m = src.match(new RegExp(`function ${name}\\(${sig}[\\s\\S]*?\\n}\\n`));
     return m ? m[0] : null;
 }
-const parts = [extract('rotationFromProbeStream', 'vStream'), extract('zoomEaseExpr', 'easing, u'), extract('keyframeExpr', 'pts, T'), extract('buildSmoothZoomFilter', 'kfs')];
+const parts = [extract('rotationFromProbeStream', 'vStream'), extract('springEaseExpr', 'stiffness, damping, mass, u'), extract('sampledEaseExpr', 'samples, u'), extract('cubicBezierEaseExpr', 'x1, y1, x2, y2, u'), extract('applyRetimeEasing', 'name, progress'), extract('zoomEaseExpr', 'easing, u'), extract('keyframeExpr', 'pts, T'), extract('buildSmoothZoomFilter', 'kfs'), extract('buildAnimatedOpacityFilter', 'keyframes'), extract('buildAnimatedRotationFilter', 'keyframes')];
 section('0 · helpers found in jobs/exportProcessor.js');
-check('rotationFromProbeStream, zoomEaseExpr, keyframeExpr and buildSmoothZoomFilter extracted', parts.every(Boolean));
+check('rotation, zoom, keyframe and animated opacity/rotation helpers extracted', parts.every(Boolean));
 if (!parts.every(Boolean)) { console.log(`\n${passed} passed, ${failed} failed`); process.exit(1); }
 // eslint-disable-next-line no-new-func
-const { rotationFromProbeStream, buildSmoothZoomFilter } = new Function(`${parts.join('\n')}\nreturn { rotationFromProbeStream, buildSmoothZoomFilter };`)();
+const { rotationFromProbeStream, zoomEaseExpr, buildSmoothZoomFilter, buildAnimatedOpacityFilter, buildAnimatedRotationFilter } = new Function(`${parts.join('\n')}\nreturn { rotationFromProbeStream, zoomEaseExpr, buildSmoothZoomFilter, buildAnimatedOpacityFilter, buildAnimatedRotationFilter };`)();
 
 section('1 · rotation is read from every shape ffprobe reports');
+check('export easing expressions cover canonical cubic, quartic, sine, exponential and circular curves',
+    zoomEaseExpr('easeInOutCubic', 'u') === zoomEaseExpr('ease-in-out-cubic', 'u')
+    && zoomEaseExpr('easeOutQuart', 'u') === zoomEaseExpr('ease-out-quart', 'u')
+    && zoomEaseExpr('easeInOutSine', 'u') !== 'u'
+    && zoomEaseExpr('easeInOutExpo', 'u') !== 'u'
+    && zoomEaseExpr('easeInOutCirc', 'u') !== 'u');
+check('zoom steps preserve all canonical jump positions',
+    zoomEaseExpr('steps(4, start)', 'u').includes('floor(u*4)+1')
+    && zoomEaseExpr('steps(4, jump-end)', 'u').includes('floor(u*4)+0')
+    && zoomEaseExpr('steps(4, jump-both)', 'u').includes('/5')
+    && zoomEaseExpr('steps(4, jump-none)', 'u').includes('/3'));
+check('custom Bézier zoom easing clamps time controls but retains vertical overshoot',
+    zoomEaseExpr('cubic-bezier(2,0,-1,1)', 'u') === zoomEaseExpr('cubic-bezier(1,0,0,1)', 'u')
+    && zoomEaseExpr('cubic-bezier(0.2,1.4,0.8,-0.4)', 'u') !== zoomEaseExpr('cubic-bezier(0.2,0.4,0.8,0.4)', 'u'));
 check('fluent-ffmpeg flattened stream.rotation = -90 (iPhone portrait) → 90', rotationFromProbeStream({ rotation: -90 }) === 90);
 check('stream.rotation as a string "-90" → 90', rotationFromProbeStream({ rotation: '-90' }) === 90);
 check('side_data_list [{rotation:-90}] → 90', rotationFromProbeStream({ side_data_list: [{ side_data_type: 'Display Matrix', rotation: -90 }] }) === 90);
@@ -56,6 +70,12 @@ check('no -noautorotate input option (it copied the rotation matrix onto the seg
 check('no manual transpose left in the per-clip chain', !/transpose=1/.test(code));
 check('no zoompan left (pixel-snapped zoom shook)', !/zoompan=/.test(code));
 check('metadata.resolution reports the rendered file, not the request', /renderedDims \? `\$\{renderedDims\.width\}x\$\{renderedDims\.height\}`/.test(src));
+check('export routes footage opacity keyframes through the alpha compositor',
+    /const opacityKfs = Array\.isArray\(clip\.keyframes\?\.opacity\)/.test(src)
+    && /vFilters\.push\(buildAnimatedOpacityFilter\(opacityKfs\)\)/.test(src));
+check('export routes absolute footage rotation keyframes through FFmpeg rotation',
+    /const rotationKfs = Array\.isArray\(clip\.keyframes\?\.rotation\)/.test(src)
+    && /buildAnimatedRotationFilter\(rotationKfs\)/.test(src));
 
 section('2b · speed audio and the proxy size');
 {
@@ -90,6 +110,10 @@ function bin(name) {
         const r = spawnSync(b, ['-version'], { encoding: 'utf8' });
         if (r.status === 0) return b;
     }
+    try {
+        if (name === 'ffmpeg') return require('ffmpeg-static');
+        if (name === 'ffprobe') return require('@ffprobe-installer/ffprobe').path;
+    } catch { /* optional local binary packages */ }
     return null;
 }
 const FFMPEG = bin('ffmpeg');
@@ -177,6 +201,92 @@ if (!FFMPEG || !FFPROBE) {
         check('easeOutCubic segments are eased, not linear', /pow\(1-/.test(eased));
         const centred = buildSmoothZoomFilter([{ time: 0, value: 2 }], { anchor: { mode: 'center', x: 0.9, y: 0.1 }, maxZoom: 8 });
         check('multicam (centre) anchor keeps the window inside the frame', /clip\(W\*0\.9000/.test(centred) && /clip\(H\*0\.1000/.test(centred));
+        const curveNames = ['easeInOutCubic', 'easeInOutQuart', 'easeInOutSine', 'easeInOutExpo', 'easeInOutCirc', 'backOut', 'backInOut', 'bounce', 'elastic', 'springGentle', 'springWobbly', 'spring(170,26,1)', 'cubic-bezier(0.42,0,0.58,1)', 'steps(6)'];
+        const curveResults = curveNames.map((easing, index) => {
+            const filter = buildSmoothZoomFilter([{ time: 0, value: 1.02 }, { time: 3, value: 1.08, easing }]);
+            const curveOutput = path.join(tmp, `ease-${index}.mp4`);
+            return { easing, result: run(['-i', srcV, '-vf', filter, '-pix_fmt', 'yuv420p', curveOutput]) };
+        });
+        for (const { easing, result } of curveResults) {
+            check(`FFmpeg accepts ${easing} easing on a camera keyframe`, result.status === 0, (result.stderr || '').slice(-350));
+        }
+        const axisFilter = buildSmoothZoomFilter([{ time: 0, value: 1 }, { time: 1, value: 1.1 }], {
+            scaleXKfs: [{ time: 0, value: 1 }, { time: 1, value: 1.4 }],
+            scaleYKfs: [{ time: 0, value: 1 }, { time: 1, value: 1.2 }],
+        });
+        const xSpan = axisFilter.match(/x1='([^']+)'/)?.[1] || '';
+        const ySpan = axisFilter.match(/y2='([^']+)'/)?.[1] || '';
+        check('horizontal and vertical scale tracks compile to independent perspective windows',
+            xSpan.includes('1.4000') && !xSpan.includes('1.2000')
+            && ySpan.includes('1.2000') && !ySpan.includes('1.4000'));
+        const axisInput = path.join(tmp, 'axis.mp4');
+        const axisOutput = path.join(tmp, 'axis-out.mp4');
+        run(['-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:d=1:r=30`, '-vf', 'drawbox=x=180:y=250:w=20:h=20:c=white:t=fill', '-pix_fmt', 'yuv420p', axisInput]);
+        const axisResult = run(['-i', axisInput, '-vf', axisFilter, '-pix_fmt', 'yuv420p', axisOutput]);
+        check('FFmpeg accepts animated independent X/Y perspective scale', axisResult.status === 0, (axisResult.stderr || '').slice(-400));
+
+        const animatedPosition = buildSmoothZoomFilter(null, {
+            positionX: [{ time: 0, value: 0 }, { time: 1, value: 36 }],
+            positionY: [{ time: 0, value: 0 }, { time: 1, value: -64 }],
+            width: 360, height: 640,
+        });
+        check('base clip pixel position keyframes compile into normalized X/Y pan expressions',
+            !!animatedPosition && animatedPosition.includes('0.10000') && animatedPosition.includes('-0.10000'));
+        const moved = path.join(tmp, 'position-keyframes.mp4');
+        const moveFilter = buildSmoothZoomFilter(null, {
+            positionX: [{ time: 0, value: 0 }, { time: 3, value: 54 }],
+            width: W, height: H,
+        });
+        const movedResult = run(['-i', srcV, '-vf', moveFilter, '-pix_fmt', 'yuv420p', moved]);
+        check('ffmpeg accepts animated base clip X position', movedResult.status === 0, (movedResult.stderr || '').slice(-400));
+        if (movedResult.status === 0) {
+            const movedFrames = gray(moved, W, H).map(f => centroid(f, W));
+            check('base clip position keyframes move the rendered frame smoothly to the right',
+                movedFrames.at(-1)[0] > movedFrames[0][0] + 45,
+                `start=${movedFrames[0][0].toFixed(1)} end=${movedFrames.at(-1)[0].toFixed(1)}`);
+        }
+
+        const opacityTrack = [{ time: 0, value: 1 }, { time: 3, value: 0.4 }];
+        const opacityFilter = buildAnimatedOpacityFilter(opacityTrack);
+        check('animated footage opacity compiles to a time-varying alpha filter',
+            opacityFilter.includes("alpha(X,Y)*clip((if(lt(T,0.000)") && opacityFilter.includes('0.400000'));
+        const opacityOutput = path.join(tmp, 'opacity-keyframes.mp4');
+        const opacityGraph = [
+            `[0:v]${opacityFilter}[fg]`,
+            `color=c=black:s=${W}x${H}:d=3:r=30[bg]`,
+            `[bg][fg]overlay=shortest=1[out]`,
+        ].join(';');
+        const opacityResult = run(['-i', srcV, '-filter_complex', opacityGraph, '-map', '[out]', '-pix_fmt', 'yuv420p', opacityOutput]);
+        check('ffmpeg accepts keyframed opacity on transparent footage', opacityResult.status === 0, (opacityResult.stderr || '').slice(-400));
+        if (opacityResult.status === 0) {
+            const frames = gray(opacityOutput, W, H);
+            const marker = 100 * W + 266;
+            check('keyframed opacity visibly fades footage over the render background',
+                frames[0][marker] > 180 && frames.at(-1)[marker] > 50 && frames.at(-1)[marker] < frames[0][marker] * 0.65,
+                `start=${frames[0][marker]} end=${frames.at(-1)[marker]}`);
+        }
+
+        const rotationTrack = [{ time: 0, value: 0 }, { time: 3, value: 24, easing: 'easeOutCubic' }];
+        const rotationFilter = buildAnimatedRotationFilter(rotationTrack);
+        check('animated rotation evaluates its angle over time with fixed centered alpha bounds',
+            rotationFilter.includes("rotate='(if(lt(t,") && rotationFilter.includes('sqrt(iw*iw+ih*ih)'));
+        const rotationInput = path.join(tmp, 'rotation-source.mp4');
+        const rotationOutput = path.join(tmp, 'rotation-keyframes.mp4');
+        run(['-f', 'lavfi', '-i', 'color=c=black:s=360x360:d=3:r=30', '-vf', 'drawbox=x=250:y=170:w=70:h=20:c=white:t=fill', '-pix_fmt', 'yuv420p', rotationInput]);
+        const rotationGraph = [
+            `[0:v]${rotationFilter}[fg]`,
+            'color=c=black:s=360x360:d=3:r=30[bg]',
+            '[bg][fg]overlay=shortest=1[out]',
+        ].join(';');
+        const rotationResult = run(['-i', rotationInput, '-filter_complex', rotationGraph, '-map', '[out]', '-pix_fmt', 'yuv420p', rotationOutput]);
+        check('FFmpeg accepts an animated alpha rotation on footage', rotationResult.status === 0, (rotationResult.stderr || '').slice(-500));
+        if (rotationResult.status === 0) {
+            const frames = gray(rotationOutput, 360, 360);
+            const first = centroid(frames[0], 360), last = centroid(frames.at(-1), 360);
+            check('keyframed rotation changes footage position around its fixed center',
+                Math.hypot(first[0] - last[0], first[1] - last[1]) > 10,
+                `start=${first.join(',')} end=${last.join(',')}`);
+        }
     }
     fs.rmSync(tmp, { recursive: true, force: true });
 }

@@ -10,6 +10,8 @@ import useVersionsStore from '../agent/projectVersions';
 import PlanSheet from './PlanSheet.jsx';
 import { EventBus, EVENT_TYPES } from '../agent/EventBus';
 import { contentEnd, togglePreview } from '../timeline/previewPlayback.js';
+import { summarizeUploads } from '../lib/uploadProgress.js';
+import { trackEvent } from '../utils/trackEvent.js';
 
 /* The flow covers the editor while it is open; the editor keeps running
    underneath, which is what makes "Skip" instant. */
@@ -42,6 +44,17 @@ const fmt = (secs) => {
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 
+function outcomeFromPrompt(prompt, fallback) {
+    const text = String(prompt || '').toLowerCase();
+    if (/photo\s*(?:collage|montage)|collage\s*(?:of\s*)?photos?|montage\s*photo/.test(text)) return 'photo_collage';
+    if (/story\s*time|storytime|tell(?:ing)?\s+(?:my\s+)?story/.test(text)) return 'story_time';
+    if (/how[- ]?to|tutorial|step[- ]by[- ]step/.test(text)) return 'howto';
+    if (/\bvlog\b/.test(text)) return 'vlog';
+    if (/talking\s*head|face\s*camera|\binterview\b/.test(text)) return 'talking_head';
+    if (/\breel\b|\btiktok\b|\bshorts?\b/.test(text)) return 'reel';
+    return fallback || 'reel';
+}
+
 /* ── What are you making? ─────────────────────────────────────────────────── */
 
 function OutcomeStep() {
@@ -49,17 +62,45 @@ function OutcomeStep() {
     const choose = useMobileFlowStore(s => s.choose);
     const beginProgress = useMobileFlowStore(s => s.beginProgress);
     const updateProgress = useMobileFlowStore(s => s.updateProgress);
-    const toChange = useMobileFlowStore(s => s.toChange);
     const close = useMobileFlowStore(s => s.close);
     const error = useMobileFlowStore(s => s.error);
+    const creationDraft = useMobileFlowStore(s => s.creationDraft);
+    const setCreationDraft = useMobileFlowStore(s => s.setCreationDraft);
     const assets = useTimelineStore(s => s.assets) || [];
-    const uploading = assets.find(asset => asset.uploadPhase && asset.uploadPhase !== 'complete' && asset.uploadPhase !== 'ready');
+    // One number for the whole import, not the first file's.
+    const upload = summarizeUploads(assets);
+    const selectedOutcome = creationDraft?.outcomeId || 'reel';
+    const request = creationDraft?.request || '';
+    const editableAssets = assets.filter(asset => !asset.assistantReference && ['video', 'image', 'audio'].includes(asset.type));
+    const hasVisualAssets = editableAssets.some(asset => ['video', 'image'].includes(asset.type));
+    const pendingAssets = editableAssets.filter(asset => asset.isProxying || (asset.uploadPhase && !['ready', 'complete'].includes(asset.uploadPhase)));
+    const failedAssets = editableAssets.filter(asset => asset.uploadError);
+    const canCreate = hasVisualAssets && pendingAssets.length === 0 && failedAssets.length === 0;
 
-    const pick = (id) => {
+    const create = () => {
+        if (!canCreate) return;
+        const id = outcomeFromPrompt(request, selectedOutcome);
+        const asksForMusic = /\b(music|soundtrack|song|background track)\b/i.test(request)
+            && !/\b(?:no|without|remove|mute)\s+(?:any\s+)?(?:background\s+)?(?:music|soundtrack|song)\b/i.test(request);
+        if (asksForMusic) {
+            const live = useTimelineStore.getState();
+            const placedAssetIds = new Set((live.tracks || []).flatMap(track => (track.clips || []).map(clip => clip.assetId)));
+            // Audio stays in the bin until the user asks for it. At that point,
+            // add their uploaded track to the edit before the playbook runs.
+            editableAssets
+                .filter(asset => asset.type === 'audio' && !placedAssetIds.has(asset.id))
+                .forEach(asset => live.addAssetToTimeline?.(asset));
+        }
+        trackEvent('mobile_short_creation_started', {
+            outcome: id,
+            has_prompt: Boolean(request.trim()),
+            asset_count: editableAssets.length,
+        });
         choose(id);
         // The run is fired and watched here rather than in the store: a store
         // that starts work is a store you cannot reason about in a test.
         startOutcome(id, {
+            request: request.trim(),
             onPlan: beginProgress,
             onStep: ({ index, state, message }) => updateProgress(index, state, message),
         })
@@ -68,6 +109,7 @@ function OutcomeStep() {
                 // A version per finished run is what makes "go back" possible
                 // without asking a beginner to count undo steps.
                 useVersionsStore.getState().capture(t(`mobileFlow.outcome.${id}`, id));
+                trackEvent('mobile_short_preview_ready', { outcome: id });
                 useMobileFlowStore.getState().finished();
             })
             .catch((err) => useMobileFlowStore.getState().failed(err?.message));
@@ -91,27 +133,40 @@ function OutcomeStep() {
                     {t('mobileFlow.title', 'What are you making?')}
                 </h1>
                 <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.5, color: 'var(--fg-2)' }}>
-                    {t('mobileFlow.subtitle', 'This sets the pacing, how it cuts, and how long it runs.')}
+                    {t('mobileFlow.subtitle', 'Tell us what you want. We’ll shape your footage into a short.')}
                 </p>
                 {error && (
                     <p role="alert" style={{ margin: '14px 0 0', fontSize: 14, color: 'var(--coral)' }}>{error}</p>
                 )}
             </div>
 
+            <label htmlFor="mobile-short-request" style={{ display: 'block', margin: '18px 20px 8px', fontSize: 13, fontWeight: 600, color: 'var(--fg-2)' }}>
+                {t('mobileFlow.promptLabel', 'Describe your short')}
+            </label>
+            <textarea
+                id="mobile-short-request"
+                value={request}
+                onChange={event => setCreationDraft({ request: event.target.value })}
+                placeholder={t('mobileFlow.promptPlaceholder', 'Make a 30 second reel from my clips with upbeat music and captions')}
+                rows={3}
+                style={{ margin: '0 20px', padding: '13px 15px', minHeight: 88, resize: 'vertical', borderRadius: 15, border: '1px solid var(--line)', background: 'var(--bg-2)', color: 'var(--fg)', font: 'inherit', fontSize: 15, lineHeight: 1.45, outlineColor: 'var(--accent)' }}
+            />
+
             <div style={{ padding: 20, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
                 {OUTCOMES.map(o => (
                     <button
                         key={o.id}
                         type="button"
-                        onClick={() => pick(o.id)}
+                        aria-pressed={selectedOutcome === o.id}
+                        onClick={() => setCreationDraft({ outcomeId: o.id })}
                         style={{
                             minHeight: 112, padding: 18, borderRadius: 18, cursor: 'pointer', textAlign: 'left',
-                            background: 'linear-gradient(145deg, rgba(255,255,255,.035), rgba(255,255,255,.015))', border: '1px solid var(--line)', color: 'var(--fg)',
+                            background: selectedOutcome === o.id ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-2))' : 'linear-gradient(145deg, rgba(255,255,255,.035), rgba(255,255,255,.015))', border: `1px solid ${selectedOutcome === o.id ? 'var(--accent)' : 'var(--line)'}`, color: 'var(--fg)',
                             display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 8,
                             fontFamily: 'var(--f-sans)',
                         }}
                     >
-                        <span aria-hidden="true" style={{ color: '#61e8f1', marginBottom: 2 }}>{o.id === 'talking_head' ? <UserRound size={19} /> : o.id === 'reel' ? <Smartphone size={19} /> : o.id === 'vlog' ? <Video size={19} /> : <MonitorPlay size={19} />}</span>
+                        <span aria-hidden="true" style={{ color: '#61e8f1', marginBottom: 2 }}>{o.id === 'talking_head' || o.id === 'story_time' ? <UserRound size={19} /> : o.id === 'reel' ? <Smartphone size={19} /> : o.id === 'vlog' ? <Video size={19} /> : o.id === 'photo_collage' ? <Film size={19} /> : <MonitorPlay size={19} />}</span>
                         <span style={{ fontSize: 16.5, fontWeight: 650, lineHeight: 1.2 }}>
                             {t(`mobileFlow.outcome.${o.id}`, o.id)}
                         </span>
@@ -119,14 +174,33 @@ function OutcomeStep() {
                     </button>
                 ))}
             </div>
-            <button type="button" onClick={toChange} style={{ margin: '-7px 20px 0', minHeight: 60, padding: '0 16px', borderRadius: 16, border: '1px dashed var(--line-strong)', background: 'linear-gradient(110deg,rgba(0,190,205,.05),rgba(122,42,190,.08))', color: 'var(--fg-2)', textAlign: 'left', fontSize: 14, fontFamily: 'var(--f-sans)' }}>
-                {t('mobileFlow.somethingElse', 'Something else — describe it')}
-            </button>
-            {uploading && <div style={{ margin: 'auto 20px 18px', padding: 15, border: '1px solid var(--line)', borderRadius: 15, background: 'var(--bg-2)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--fg-2)' }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{uploading.name || t('mobileFlow.uploading', 'Uploading your video')}</span><span style={{ color: '#6ee5eb' }}>{Math.round(uploading.uploadProgress || 0)}%</span></div>
-                <div style={{ height: 4, margin: '9px 0 10px', background: 'var(--line)', borderRadius: 8 }}><div style={{ width: `${Math.max(0, Math.min(100, uploading.uploadProgress || 0))}%`, height: '100%', borderRadius: 8, background: 'linear-gradient(90deg,#09d6e6,#8529df)' }} /></div>
-                <p style={{ margin: 0, color: 'var(--fg-3)', fontSize: 12.5 }}>{t('mobileFlow.uploadNote', 'Pick a style now. Your short starts as soon as the upload finishes.')}</p>
+            {(upload || failedAssets.length > 0) && <div style={{ margin: '0 20px 16px', padding: 15, border: '1px solid var(--line)', borderRadius: 15, background: 'var(--bg-2)' }} aria-live="polite">
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--fg-2)' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {upload && upload.total > 1
+                            ? t('mobileFlow.uploadBatch', { defaultValue: '{{done}} of {{total}} files ready', done: upload.done, total: upload.total })
+                            : (upload?.activeName || failedAssets[0]?.name || t('mobileFlow.uploading', 'Uploading your video'))}
+                    </span>
+                    {upload && <span style={{ flex: 'none', color: '#6ee5eb' }}>{upload.percent}%</span>}
+                </div>
+                {upload && <div style={{ height: 4, margin: '9px 0 10px', background: 'var(--line)', borderRadius: 8 }}><div style={{ width: `${upload.percent}%`, height: '100%', borderRadius: 8, background: 'linear-gradient(90deg,#09d6e6,#8529df)', transition: 'width .3s ease' }} /></div>}
+                {/* With several files the name of the one currently moving is the
+                    reassuring part; the count above already carries the progress. */}
+                {upload?.total > 1 && upload.activeName && (
+                    <p style={{ margin: '0 0 6px', color: 'var(--fg-2)', fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{upload.activeName}</p>
+                )}
+                <p style={{ margin: 0, color: failedAssets.length ? 'var(--coral)' : 'var(--fg-3)', fontSize: 12.5 }}>{failedAssets.length
+                    ? t('mobileFlow.uploadFailedNote', 'An upload needs attention. Retry it before creating your short.')
+                    : t('mobileFlow.uploadNote', 'Your prompt is saved here. You can create your short when the uploads are ready.')}</p>
             </div>}
+            <button
+                type="button"
+                onClick={create}
+                disabled={!canCreate}
+                style={{ margin: '0 20px 24px', minHeight: 54, border: 0, borderRadius: 999, background: 'var(--fg)', color: 'var(--bg)', fontSize: 16, fontWeight: 700, fontFamily: 'var(--f-sans)', opacity: canCreate ? 1 : .45, cursor: canCreate ? 'pointer' : 'not-allowed' }}
+            >
+                {pendingAssets.length ? t('mobileFlow.waitingForUploads', 'Preparing your footage…') : t('mobileFlow.createShort', 'Create my short')}
+            </button>
         </div>
     );
 }
@@ -136,13 +210,19 @@ function OutcomeStep() {
 function WorkingStep() {
     const { t } = useTranslation('editor');
     const steps = useEditStepsStore(s => s.steps);
-    const liveRef = useRef(null);
     const startedAt = useEditStepsStore(s => s.startedAt);
     const flowSteps = useMobileFlowStore(s => s.progressSteps);
     const flowStartedAt = useMobileFlowStore(s => s.progressStartedAt);
     const visibleSteps = flowSteps.length ? flowSteps : steps;
     const doneCount = visibleSteps.filter(s => s.state === 'done').length;
     const progress = visibleSteps.length ? Math.round((doneCount / visibleSteps.length) * 100) : 0;
+    const stage = !visibleSteps.length
+        ? 'starting'
+        : progress >= 70
+            ? 'finishingShort'
+            : progress >= 30
+                ? 'shapingStory'
+                : 'reviewingFootage';
 
     // Only the finished steps carry a sentence; the running one is the heading
     // of the list, not a line in it.
@@ -159,45 +239,13 @@ function WorkingStep() {
                 </h1>
             </div>
 
-            <ol
-                ref={liveRef}
-                aria-live="polite"
-                style={{ listStyle: 'none', margin: 0, padding: '24px 20px 0', flex: 1, minHeight: 0, overflowY: 'auto' }}
-            >
-                {visibleSteps.map(s => (
-                    <li key={s.index} style={{ display: 'flex', gap: 13, padding: '11px 0', alignItems: 'flex-start' }}>
-                        <span aria-hidden="true" style={{ flex: 'none', marginTop: 2 }}>
-                            {s.state === 'running'
-                                ? <Loader2 size={18} className="animate-spin" style={{ color: '#62e5ed' }} />
-                                : s.state === 'failed'
-                                    ? <X size={18} style={{ color: 'var(--fg-4)' }} />
-                                    : s.state === 'done'
-                                        ? <span style={{ width: 26, height: 26, border: '1px solid rgba(0,215,225,.7)', background: 'rgba(0,215,225,.1)', color: '#62e5ed', borderRadius: 999, display: 'grid', placeItems: 'center' }}><Check size={14} /></span>
-                                        : <span style={{ width: 26, height: 26, border: '1px solid var(--line-strong)', borderRadius: 999, display: 'inline-block' }} />}
-                        </span>
-                        <span style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
-                            <span style={{ fontSize: 15.5, color: s.state === 'running' ? 'var(--fg)' : 'var(--fg-2)', fontWeight: s.state === 'running' ? 600 : 400 }}>
-                                {s.label}
-                            </span>
-                            {/* the handler's own sentence — this is where the numbers are */}
-                            {s.message && s.state !== 'running' && (
-                                <span style={{ fontSize: 13, lineHeight: 1.45, color: 'var(--fg-3)' }}>{s.message}</span>
-                            )}
-                        </span>
-                    </li>
-                ))}
-
-                {!visibleSteps.length && (
-                    <li style={{ display: 'flex', gap: 13, padding: '11px 0', alignItems: 'center', color: 'var(--fg-3)' }}>
-                            <Loader2 size={18} className="animate-spin" style={{ color: '#62e5ed' }} />
-                        <span style={{ fontSize: 15.5 }}>{t('mobileFlow.starting', 'Getting started')}</span>
-                    </li>
-                )}
-            </ol>
+            <div aria-live="polite" role="status" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 18, padding: 24, textAlign: 'center' }}>
+                <Loader2 size={32} className="animate-spin" style={{ color: '#62e5ed' }} />
+                <span style={{ fontSize: 17, fontWeight: 600 }}>{t(`mobileFlow.${stage}`, stage)}</span>
+            </div>
 
             <div style={{ padding: '0 20px 26px' }}>
-                <div aria-label={`${progress}%`} style={{ height: 4, marginBottom: 10, background: 'var(--line)', borderRadius: 8, overflow: 'hidden' }}><div style={{ width: `${progress}%`, height: '100%', background: 'linear-gradient(90deg,#05d8e7,#872de3)', transition: 'width .35s ease' }} /></div>
-                <p style={{ margin: '0 0 14px', color: 'var(--fg-3)', fontFamily: 'var(--f-mono)', fontSize: 11.5 }}>{progressTime ? t('mobileFlow.workingUntilDone', 'Working through each step. This screen will stay open until the edit is complete.') : t('mobileFlow.starting', 'Getting started')}</p>
+                <p style={{ margin: '0 0 14px', textAlign: 'center', color: 'var(--fg-3)', fontSize: 13.5 }}>{progressTime ? t('mobileFlow.waitingForPreview', 'Your preview will appear here when it’s ready.') : t('mobileFlow.starting', 'Getting started')}</p>
             </div>
         </div>
     );
@@ -419,20 +467,32 @@ const CHANGES = [
 function ChangeStep() {
     const { t } = useTranslation('editor');
     const toResult = useMobileFlowStore(s => s.toResult);
+    const toOutcome = useMobileFlowStore(s => s.toOutcome);
     const choose = useMobileFlowStore(s => s.choose);
     const outcomeId = useMobileFlowStore(s => s.outcomeId);
+    const describeOnly = useMobileFlowStore(s => s.changeMode) === 'describe';
+    // Describe mode is entered from the first screen, so back goes there. Going
+    // 'back' to a result that does not exist yet leaves an empty screen.
+    const back = describeOnly ? toOutcome : toResult;
     const [typed, setTyped] = React.useState('');
+    const refinementInFlight = React.useRef(false);
     const beginProgress = useMobileFlowStore(s => s.beginProgress);
     const updateProgress = useMobileFlowStore(s => s.updateProgress);
 
     const run = (prompt, label) => {
         const text = String(prompt || '').trim();
-        if (!text) return;
+        if (!text || refinementInFlight.current) return;
+        refinementInFlight.current = true;
+        const checkpoint = useVersionsStore.getState().checkpoint();
+        trackEvent('mobile_short_refinement_started', { has_prompt: true });
         // Back to the working screen so the change is narrated like the first run.
         choose(outcomeId, text);
         beginProgress([{ label: t('mobileFlow.applyingChange', 'Apply your change') }]);
         updateProgress(0, 'running');
-        editJobManager.processEditRequest(text, { autoApprove: true })
+        // Let EditJobManager's mobile plan gate ask for confirmation on
+        // destructive or high impact changes. Additive refinements still run
+        // immediately, as defined by planFirst.js.
+        editJobManager.processEditRequest(text)
             .then((result) => {
                 if (!result?.success) throw new Error(result?.message || t('mobileFlow.changeFailed', 'The change could not be applied.'));
                 if (['chat', 'query_session_summary'].includes(result.operation)) {
@@ -440,9 +500,19 @@ function ChangeStep() {
                 }
                 updateProgress(0, 'done', result.message || null);
                 useVersionsStore.getState().capture(label || text);
+                refinementInFlight.current = false;
                 useMobileFlowStore.getState().finished();
             })
             .catch((err) => {
+                // A plan can contain several commands. If one fails after an
+                // earlier command already changed the timeline, restore the
+                // exact pre-request state instead of leaving a partial edit.
+                try {
+                    useVersionsStore.getState().restoreCheckpoint(checkpoint);
+                } catch (rollbackError) {
+                    console.error('[MobileFlow] Could not restore failed refinement checkpoint:', rollbackError);
+                }
+                refinementInFlight.current = false;
                 updateProgress(0, 'failed', err?.message || null);
                 useMobileFlowStore.getState().failed(err?.message);
             });
@@ -456,30 +526,34 @@ function ChangeStep() {
 
     return (
         <>
-        <button type="button" tabIndex={-1} aria-label={t('mobileFlow.back', 'Back')} onClick={toResult} style={{ position: 'fixed', inset: 0, zIndex: Z, border: 0, background: 'rgba(0,0,0,.62)', backdropFilter: 'blur(3px)' }} />
-        <div style={{ ...panel, zIndex: Z + 1, bottom: 0, maxHeight: '100dvh', overflowY: 'auto', paddingBottom: 'max(20px, env(safe-area-inset-bottom))' }} role="region" aria-label={t('mobileFlow.change', 'Change something')}>
+        <button type="button" tabIndex={-1} aria-label={t('mobileFlow.back', 'Back')} onClick={back} style={{ position: 'fixed', inset: 0, zIndex: Z, border: 0, background: 'rgba(0,0,0,.62)', backdropFilter: 'blur(3px)' }} />
+        <div style={{ ...panel, zIndex: Z + 1, bottom: 0, maxHeight: '100dvh', overflowY: 'auto', paddingBottom: 'max(20px, env(safe-area-inset-bottom))' }} role="region" aria-label={describeOnly ? t('mobileFlow.describeTitle', 'Describe your idea') : t('mobileFlow.change', 'Change something')}>
             <div aria-hidden="true" style={{ width: 40, height: 4, borderRadius: 4, background: 'var(--line-strong)', margin: '-8px auto 18px' }} />
 
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
-                <h2 style={{ margin: 0, fontSize: 23, fontWeight: 750, letterSpacing: '-.03em' }}>{t('mobileFlow.change', 'Change something')}</h2>
-                <button type="button" onClick={toResult} style={{ minHeight: 44, padding: '0 10px', background: 'none', border: 'none', color: 'var(--fg-3)', fontSize: 14, cursor: 'pointer' }}>
+                <h2 style={{ margin: 0, fontSize: 23, fontWeight: 750, letterSpacing: '-.03em' }}>{describeOnly ? t('mobileFlow.describeTitle', 'Describe your idea') : t('mobileFlow.change', 'Change something')}</h2>
+                <button type="button" onClick={back} style={{ minHeight: 44, padding: '0 10px', background: 'none', border: 'none', color: 'var(--fg-3)', fontSize: 14, cursor: 'pointer' }}>
                     {t('mobileFlow.back', 'Back')}
                 </button>
             </div>
 
-            <p style={{ margin: '-8px 0 18px', color: 'var(--fg-2)', fontSize: 13.5 }}>{t('mobileFlow.changeSubtitle', 'Tap one. It redoes the edit and keeps everything else.')}</p>
+            <p style={{ margin: '-8px 0 18px', color: 'var(--fg-2)', fontSize: 13.5 }}>{describeOnly
+                ? t('mobileFlow.describeSubtitle', 'Say what you want in your own words. Roka makes it.')
+                : t('mobileFlow.changeSubtitle', 'Tap one. It redoes the edit and keeps everything else.')}</p>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
-                {CHANGES.map(c => (
-                    <button key={c.id} type="button" onClick={() => run(c.prompt, t(`mobileFlow.changes.${c.id}`, c.prompt))} style={chip}>
-                        <c.icon size={17} color="#71e6ed" /> {t(`mobileFlow.changes.${c.id}`, c.prompt)}
-                    </button>
-                ))}
-            </div>
+            {!describeOnly && (<>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10, marginBottom: 16 }}>
+                    {CHANGES.map(c => (
+                        <button key={c.id} type="button" onClick={() => run(c.prompt, t(`mobileFlow.changes.${c.id}`, c.prompt))} style={chip}>
+                            <c.icon size={17} color="#71e6ed" /> {t(`mobileFlow.changes.${c.id}`, c.prompt)}
+                        </button>
+                    ))}
+                </div>
 
-            <label htmlFor="flow-ask" style={{ display: 'block', fontFamily: 'var(--f-mono)', fontSize: 11, letterSpacing: '0.14em', color: 'var(--fg-3)', marginBottom: 9 }}>
-                {t('mobileFlow.orSay', 'OR SAY IT IN YOUR OWN WORDS')}
-            </label>
+                <label htmlFor="flow-ask" style={{ display: 'block', fontFamily: 'var(--f-mono)', fontSize: 11, letterSpacing: '0.14em', color: 'var(--fg-3)', marginBottom: 9 }}>
+                    {t('mobileFlow.orSay', 'OR SAY IT IN YOUR OWN WORDS')}
+                </label>
+            </>)}
             <form
                 onSubmit={(e) => { e.preventDefault(); run(typed); setTyped(''); }}
                 style={{ display: 'flex', gap: 9, alignItems: 'center' }}
@@ -489,7 +563,10 @@ function ChangeStep() {
                     type="text"
                     value={typed}
                     onChange={(e) => setTyped(e.target.value)}
-                    placeholder={t('mobileFlow.askPlaceholder', 'Keep only the part about pricing')}
+                    autoFocus={describeOnly}
+                    placeholder={describeOnly
+                        ? t('mobileFlow.describePlaceholder', 'A punchy 30s reel from my clip')
+                        : t('mobileFlow.askPlaceholder', 'Keep only the part about pricing')}
                     style={{
                         flex: 1, minWidth: 0, minHeight: 48, padding: '0 16px', borderRadius: 999,
                         background: 'var(--glass)', border: '1px solid var(--line)', color: 'var(--fg)',
@@ -664,5 +741,8 @@ export default function MobileFlow({ onShare }) {
     if (step === 'change') return <ChangeStep />;
     if (step === 'versions') return <VersionsStep />;
     if (step === 'limit') return <LimitStep onShare={onShare} />;
-    return <ResultStep onShare={onShare} />;
+    return <ResultStep onShare={() => {
+        trackEvent('mobile_short_share_started');
+        onShare?.();
+    }} />;
 }

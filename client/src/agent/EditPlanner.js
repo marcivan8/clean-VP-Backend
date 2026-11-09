@@ -130,9 +130,12 @@ export class EditPlanner {
 
             if (!plan) {
                 console.log('[AG_DEBUG] [EditPlanner] No local plan found, attempting API plan...');
-                return await this.planViaAPI(intent, signal, planId);
+                const planned = await this.planViaAPI(intent, signal, planId);
+                if (planned?.success && planned.plan) planned.plan = this.attachEditorialBrief(planned.plan, intent, state);
+                return planned;
             }
 
+            this.attachEditorialBrief(plan, intent, state);
             console.log(`[AG_DEBUG] [EditPlanner] Plan generated successfully. Steps: ${plan.steps.length}`);
             return { success: true, plan };
 
@@ -141,6 +144,27 @@ export class EditPlanner {
             console.error('[EditPlanner] Error:', error);
             return { success: false, error: error.message };
         }
+    }
+
+    static attachEditorialBrief(plan, intent, state) {
+        const steps = Array.isArray(plan?.steps) ? plan.steps : [];
+        const previous = plan.editorialBrief || {};
+        const targets = new Set([...(intent?.targets || []), intent?.target_clip_id].filter(Boolean).map(String));
+        for (const step of steps) {
+            for (const key of ['asset_id', 'assetId', 'clip_id', 'clipId']) if (step?.[key]) targets.add(String(step[key]));
+        }
+        const constraints = intent?.constraints || intent?.parameters || {};
+        plan.editorialBrief = {
+            intendedResult: previous.intendedResult || String(intent?.originalPrompt || intent?.intent || intent?.operation || 'Edit the current project').slice(0, 500),
+            targetAssets: Array.isArray(previous.targetAssets) ? previous.targetAssets : [...targets],
+            timelineChanges: Array.isArray(previous.timelineChanges) ? previous.timelineChanges : steps.map(step => step.reason || step.action).filter(Boolean),
+            techniques: Array.isArray(previous.techniques) ? previous.techniques : [...new Set(steps.map(step => step.action).filter(Boolean))],
+            constraints: Array.isArray(previous.constraints) ? previous.constraints : Object.entries(constraints).map(([key, value]) => `${key}: ${JSON.stringify(value)}`),
+            unresolvedQuestions: Array.isArray(previous.unresolvedQuestions) ? previous.unresolvedQuestions : [],
+            style: state?.editingStyle || null,
+            instructionPriority: 'Explicit user instructions override style defaults; style guidance fills only unspecified choices.',
+        };
+        return plan;
     }
 
     static validateDurationLogic(intent, state) {
@@ -1373,6 +1397,11 @@ export class EditPlanner {
 
         try {
             const context = ContextGenerator.getTimelineContext();
+            // Resolve the same registered tool capability contracts that the
+            // executor validates. The planner can see tool inputs and limits
+            // instead of proposing unsupported operations from prose alone.
+            const { TOOL_CAPABILITIES } = await import('./VideoEditorTools.js');
+            context.toolCapabilities = TOOL_CAPABILITIES;
 
             // FIX: replaced fetch() with authFetch()
             const response = await authFetch('/api/ai/generate-plan', {

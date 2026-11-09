@@ -11,6 +11,7 @@ import project from '../revideo/project';
 import SettingsPanel from '../components/SettingsPanel';
 import useTimelineStore from '../store/useTimelineStore';
 import { transcriptionManager } from '../agent/TranscriptionManager';
+import { warmReferenceStyleProfile } from '../agent/referenceStyleService.js';
 import ErrorBoundary from '../components/ErrorBoundary';
 import Timeline from '../components/Timeline/Timeline';
 import ReasoningPanel from '../components/Assistant/ReasoningPanel';
@@ -1001,6 +1002,20 @@ const IDELayout = ({ mode = 'editor' }) => {
     const handleFileImport = async (e) => {
         const files = Array.from(e.target.files);
         if (files.length > 0) {
+            const mobileFlowBeforeImport = useMobileFlowStore.getState();
+            const timelineBeforeImport = useTimelineStore.getState();
+            const hasExistingTimelineMedia = (timelineBeforeImport.tracks || []).some(track => (track.clips || []).length > 0);
+            const isFreshMobileCreation = isMobile && !e.referenceMaterial && (
+                (mobileFlowBeforeImport.active && mobileFlowBeforeImport.step === 'outcome')
+                || (!hasExistingTimelineMedia && !(timelineBeforeImport.assets || []).some(asset => !asset.assistantReference))
+            );
+            // Any first upload on a blank mobile project enters the same guided
+            // creation path, including imports started from the editor picker.
+            // Reference attachments remain chat-only and never start a project flow.
+            if (isFreshMobileCreation && !mobileFlowBeforeImport.active) {
+                mobileFlowBeforeImport.open();
+                trackEvent('mobile_short_flow_opened', { source: 'editor_upload' });
+            }
             console.log("📂 Files Selected:", files.length);
             // Mobile: show "Opening your video" while the files are probed
             // (reading metadata can take seconds on a phone before the asset,
@@ -1093,6 +1108,14 @@ const IDELayout = ({ mode = 'editor' }) => {
                     resolution: metadata.width && metadata.height ? { w: metadata.width, h: metadata.height } : null
                 };
                 processedAssets.push(assetEntry);
+                // Register the asset NOW, not with the batch at the end of the
+                // loop. Every uploadProgress / uploadPhase callback below goes
+                // through updateAsset, which silently does nothing for an id the
+                // store has never seen — so with several files selected the
+                // progress of all of them used to be thrown away and the upload
+                // card had nothing to show. addAssets skips ids it already has,
+                // so the batch call at the end stays harmless.
+                useTimelineStore.getState().addAssets([assetEntry]);
                 const setVisualAnalysisRequested = (requested) => {
                     assetEntry.visualAnalysisRequested = requested;
                     useTimelineStore.getState().updateAsset(assetId, { visualAnalysisRequested: requested });
@@ -1104,6 +1127,9 @@ const IDELayout = ({ mode = 'editor' }) => {
                     // ordinary asset analyzer, or the active-source fields.
                     if (!isVideo && !isImage) {
                         processedAssets.splice(processedAssets.indexOf(assetEntry), 1);
+                        // It was registered in the store before the upload ran,
+                        // so dropping it from the batch is not enough any more.
+                        useTimelineStore.getState().removeAsset(assetId);
                         URL.revokeObjectURL(url);
                         throw new Error('Only image and video files can be attached as chat references.');
                     }
@@ -1127,9 +1153,28 @@ const IDELayout = ({ mode = 'editor' }) => {
                             uploadError: null,
                         };
                         Object.assign(assetEntry, persistedReference);
+                        useTimelineStore.getState().updateAsset(assetId, persistedReference);
                         URL.revokeObjectURL(url);
+                        // Analyze the visual grammar as soon as the reference
+                        // is safely stored. Keep attachment responsive; Auto's
+                        // finishing step will join this same request if it
+                        // starts before analysis completes.
+                        useTimelineStore.getState().updateAsset(assetId, { referenceAnalysisStatus: 'analyzing' });
+                        warmReferenceStyleProfile(assetId, {
+                            onReady: profile => useTimelineStore.getState().updateAsset(assetId, {
+                                visualStyleProfile: profile || null,
+                                referenceAnalysisStatus: profile ? 'ready' : 'unavailable',
+                            }),
+                            onError: error => {
+                                useTimelineStore.getState().updateAsset(assetId, { referenceAnalysisStatus: 'failed' });
+                                console.warn(`[IDELayout] reference style analysis failed for "${file.name}":`, error.message);
+                            },
+                        }).catch(() => {});
                     } catch (uploadError) {
                         processedAssets.splice(processedAssets.indexOf(assetEntry), 1);
+                        // It was registered in the store before the upload ran,
+                        // so dropping it from the batch is not enough any more.
+                        useTimelineStore.getState().removeAsset(assetId);
                         URL.revokeObjectURL(url);
                         console.warn(`[IDELayout] reference upload failed for "${file.name}":`, uploadError.message);
                         throw uploadError;
@@ -1601,7 +1646,7 @@ const IDELayout = ({ mode = 'editor' }) => {
             addAssets(processedAssets);
             if (!e.referenceMaterial) triggerHint('first_upload');
 
-            if (processedAssets.length === 1 && !e.deferTimelinePlacement && !e.referenceMaterial) {
+            if (processedAssets.length === 1 && !e.deferTimelinePlacement && !e.referenceMaterial && !isFreshMobileCreation) {
                 // Before auto-placing, evict ghost clips (stale segments from a
                 // previous session that have no URL). Without this the new clip
                 // overlaps them visually and `currentEnd` would push it far right
@@ -1686,7 +1731,10 @@ const IDELayout = ({ mode = 'editor' }) => {
         // R145 — a phone arriving with fresh media is the beginner case: ask
         // what they are making instead of dropping them on a timeline. Only
         // here, so opening an existing project never gets the flow.
-        if (isMobile) useMobileFlowStore.getState().open();
+        if (isMobile) {
+            useMobileFlowStore.getState().open();
+            trackEvent('mobile_short_flow_opened', { source: 'new_video' });
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps -- handleFileImport is recreated every render
     }, [projectId, sessionChecked]);
 
@@ -1754,6 +1802,53 @@ const IDELayout = ({ mode = 'editor' }) => {
         const live = useTimelineStore.getState();
         const exportState = override ? { ...live, ...override } : live;
         let { tracks, duration, assets, projectLUTId, aspectRatio: projectAspectRatio } = exportState;
+        // Ship only waveform envelopes referenced by 3D reactive objects. The
+        // exact same deterministic samples drive preview and frame rendering.
+        const reactiveAudioIds = new Set();
+        const scanReactive = (value, depth = 0) => {
+            if (!value || typeof value !== 'object' || depth > 24) return;
+            if (Array.isArray(value)) { value.forEach(item => scanReactive(item, depth + 1)); return; }
+            if (value.audioReactive?.assetId) reactiveAudioIds.add(value.audioReactive.assetId);
+            for (const child of Object.values(value)) scanReactive(child, depth + 1);
+        };
+        scanReactive(tracks);
+        let waveformCache = live.waveformsByAsset || {};
+        if (reactiveAudioIds.size) {
+            try {
+                const { default: WaveformEngine } = await import('../services/WaveformEngine.js');
+                const reactiveAssets = assets || live.assets || [];
+                await Promise.all([...reactiveAudioIds].map(async id => {
+                    if (waveformCache[id]?.peaks?.length) return;
+                    const asset = reactiveAssets.find(item => item.id === id);
+                    if (!asset) return;
+                    try {
+                        await WaveformEngine.getPeaks(id, {
+                            gcsPath: asset.gcsPath || asset.storagePath || null,
+                            proxyUrl: asset.proxyUrl || asset.url || null,
+                        });
+                    } catch (error) {
+                        console.warn(`[Export] audio reactive waveform unavailable for ${id}:`, error?.message);
+                    }
+                }));
+                waveformCache = useTimelineStore.getState().waveformsByAsset || waveformCache;
+            } catch (error) {
+                console.warn('[Export] could not load the waveform service for audio reactive motion:', error?.message);
+            }
+        }
+        const audioWaveformsByAsset = {};
+        for (const id of reactiveAudioIds) {
+            const peaks = waveformCache[id]?.peaks;
+            if (!Array.isArray(peaks) || !peaks.length) continue;
+            const limit = 2048;
+            const sampled = peaks.length <= limit ? peaks : Array.from({ length: limit }, (_, index) => {
+                const start = Math.floor(index * peaks.length / limit);
+                const end = Math.max(start + 1, Math.floor((index + 1) * peaks.length / limit));
+                let peak = 0;
+                for (let i = start; i < end; i++) peak = Math.max(peak, Number(peaks[i]) || 0);
+                return peak;
+            });
+            audioWaveformsByAsset[id] = { peaks: sampled, duration: Number(waveformCache[id].duration) || 0 };
+        }
         const planAspectRatio = override?.aspectRatio || live.aspectRatio || aspectRatio;
         let autoQaReport = null;
         if (!override) {
@@ -1799,19 +1894,19 @@ const IDELayout = ({ mode = 'editor' }) => {
                 height: nominalHeight,
                 fps:    settings.fps || 30,
             });
-            // Sending an empty plan would be harmless but pointless — omitting it
-            // keeps the worker on its original, untouched path for every project
-            // that has nothing to composite.
+            // Omit plans with neither overlays nor procedural base-footage
+            // effect samples. Base expressions need the plan even without layers.
             compositionPlan = planIsNoOp(plan) ? null : plan;
             if (compositionPlan) {
                 console.log(`[Export] composition plan: ${compositionPlan.overlays.length} overlay layer(s)`);
             }
         } catch (planErr) {
-            // A plan we cannot build must never block an export — the video
-            // simply ships without its overlay layers, same fail-open rule the
-            // LUT and caption passes follow.
-            console.warn('[Export] could not build composition plan (exporting without overlays):', planErr.message);
-            compositionPlan = null;
+            // Continuing here would produce a downloadable video with its
+            // designed layers silently missing. A genuinely empty plan is
+            // already represented by null above; a compilation error must be
+            // surfaced so the user can retry or repair the design.
+            console.error('[Export] could not build composition plan:', planErr.message);
+            throw new Error(`Could not prepare motion graphics for export: ${planErr.message}`);
         }
 
         // R63 — animated captions (motion/textShadow/uppercase/word-reveal) in
@@ -1860,9 +1955,11 @@ const IDELayout = ({ mode = 'editor' }) => {
         const response = await authFetch('/api/render', {
             method: 'POST',
             body: JSON.stringify({
-                timeline: { tracks: tracksForExport, duration, assets: assets || [] },
+                timeline: { tracks: tracksForExport, duration, assets: assets || [], audioWaveformsByAsset },
                 settings: {
                     platform: settings.platform || null,
+                    format: settings.format || 'mp4',
+                    fps: Number(settings.fps) || 30,
                     quality:  settings.quality  || 'high',
                     resolution: settings.resolution || '1080p',
                     // The project's actual aspect ratio — previously never sent for
@@ -1937,6 +2034,7 @@ const IDELayout = ({ mode = 'editor' }) => {
             captionProgramWarning: result.captionProgramWarning,
             revideoWarning: result.revideoWarning,
             clipWarning: result.clipWarning,
+            effectWarning: result.effectWarning,
             autoQaReport,
         };
     };
@@ -2008,6 +2106,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                 captionProgramWarning: result.captionProgramWarning,
                 revideoWarning: result.revideoWarning,
                 clipWarning: result.clipWarning,
+                effectWarning: result.effectWarning,
                 autoQaReport: result.autoQaReport || null,
             });
             setExportUrl(result.url);
@@ -2036,7 +2135,7 @@ const IDELayout = ({ mode = 'editor' }) => {
             // double-counted as a user-facing warning.
             [['caption', result.captionWarning], ['compositor', result.compositorWarning],
              ['caption_program', result.captionProgramWarning], ['revideo', result.revideoWarning],
-             ['clip', result.clipWarning]]
+             ['clip', result.clipWarning], ['effect', result.effectWarning]]
                 .forEach(([kind, warning]) => { if (warning) countMetric('export.warning', { ...exportAttrs, kind }); });
         } catch (err) {
             console.error('Export Failed:', err);
@@ -2519,14 +2618,15 @@ const IDELayout = ({ mode = 'editor' }) => {
                         )}
                         style={{ background: "linear-gradient(180deg, var(--glass), transparent)" }}
                     >
-                        <div className="md:hidden p-3 border-b border-[var(--line-soft)] flex justify-between items-center shrink-0" style={{ background: "var(--glass)" }}>
-                            <span className="font-bold text-sm" style={{ color: "var(--fg)" }}>{t('ideLayout.mediaAndAssets')}</span>
+                        <div className="md:hidden px-4 py-2 border-b border-[var(--line-soft)] flex justify-between items-center shrink-0" style={{ background: "var(--glass)" }}>
+                            <span style={{ color: "var(--fg)", fontSize: 16, fontWeight: 650, letterSpacing: '-0.01em' }}>{t('ideLayout.mediaAndAssets')}</span>
                             <button
                                 onClick={() => setMobileSheet(null)}
-                                className="p-1 rounded-full transition-colors hover:bg-white/10"
-                                style={{ color: "var(--fg-3)" }}
+                                aria-label={t('mobileUi.close')}
+                                className="rounded-full transition-colors hover:bg-white/10 inline-flex items-center justify-center shrink-0"
+                                style={{ color: "var(--fg-2)", width: 40, height: 40 }}
                             >
-                                <X className="w-4 h-4" />
+                                <X className="w-5 h-5" />
                             </button>
                         </div>
 
@@ -2562,22 +2662,24 @@ const IDELayout = ({ mode = 'editor' }) => {
                                             }}
                                             className={classNames("studio-tab-btn", activeTab === tab && "active")}
                                         >
-                                            {tab === 'media'      && <Layers   className="w-2.5 h-2.5" />}
-                                            {tab === 'captions'   && <Type     className="w-2.5 h-2.5" />}
-                                            {tab === 'transcript' && <span style={{ fontSize: 9 }}>📝</span>}
-                                            {tab === 'color'      && <Palette  className="w-2.5 h-2.5" />}
-                                            {tab === 'motion'     && <Zap      className="w-2.5 h-2.5" />}
+                                            {/* R156: 16px, not the 10px these were.
+                                                This strip is phone-only. */}
+                                            {tab === 'media'      && <Layers   className="w-4 h-4" />}
+                                            {tab === 'captions'   && <Type     className="w-4 h-4" />}
+                                            {tab === 'transcript' && <span style={{ fontSize: 14 }}>📝</span>}
+                                            {tab === 'color'      && <Palette  className="w-4 h-4" />}
+                                            {tab === 'motion'     && <Zap      className="w-4 h-4" />}
                                             {tab === 'shorts'     && (
                                                 <>
-                                                    <Smartphone className="w-2.5 h-2.5" />
-                                                    {isFree && <Lock className="w-2 h-2 text-primary" />}
+                                                    <Smartphone className="w-4 h-4" />
+                                                    {isFree && <Lock className="w-3 h-3 text-primary" />}
                                                 </>
                                             )}
-                                            {tab === 'iterations' && <span style={{ fontSize: 9 }}>🔁</span>}
-                                            {tab === 'assets'     && <Sparkles className="w-2.5 h-2.5" />}
-                                            {tab === 'audio'      && <span style={{ fontSize: 9 }}>🎤</span>}
-                                            {tab === 'transform'  && <Move     className="w-2.5 h-2.5" />}
-                                            {tab === 'settings'   && <Settings className="w-2.5 h-2.5" />}
+                                            {tab === 'iterations' && <span style={{ fontSize: 14 }}>🔁</span>}
+                                            {tab === 'assets'     && <Sparkles className="w-4 h-4" />}
+                                            {tab === 'audio'      && <span style={{ fontSize: 14 }}>🎤</span>}
+                                            {tab === 'transform'  && <Move     className="w-4 h-4" />}
+                                            {tab === 'settings'   && <Settings className="w-4 h-4" />}
                                             {t(`ideLayout.tabs.${tab}`)}
                                         </button>
                                     ))}
@@ -2596,7 +2698,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                                             style={{ color: "var(--fg-3)" }}
                                             aria-label={t('ideLayout.scrollTabsLeft')}
                                         >
-                                            <ChevronLeft className="w-3 h-3" />
+                                            <ChevronLeft className="w-4 h-4" />
                                         </button>
                                     </>
                                 )}
@@ -2614,7 +2716,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                                             style={{ color: "var(--fg-3)" }}
                                             aria-label={t('ideLayout.scrollTabsRight')}
                                         >
-                                            <ChevronRight className="w-3 h-3" />
+                                            <ChevronRight className="w-4 h-4" />
                                         </button>
                                     </>
                                 )}

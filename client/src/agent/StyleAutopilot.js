@@ -14,11 +14,14 @@ import useAIStore from '../store/useAIStore.js';
 import { editJobManager } from './EditJobManager.js';
 import { buildAutopilotSteps, getEditingStyle } from './EditingStyles.js';
 import { beginAutoRun, endAutoRun } from './autoRunContext.js';
+import { decide } from './EditPolicy.js';
 
 const STEP_LABEL = {
     captions: 'captions', transcript: 'transcript', short: 'best moment kept', vertical: 'vertical 9:16', request: 'your request', montage: 'visual montage',
     silences: 'silences removed', fillers: 'filler words removed', audio: 'audio levelled', recipe: 'style recipe',
     broll: 'b-roll placed',
+    // Steps the policy adds because the playbook needed them first.
+    prerequisite: 'groundwork',
 };
 const STYLE_NAME = { vlog: 'Vlog', talking_head: 'Talking head', interview: 'Interview', podcast: 'Podcast', reel: 'Reel' };
 
@@ -80,6 +83,70 @@ export async function runAutopilot(request, opts = {}) {
             prompt: videoOnly ? 'Create a video from the uploaded video clips only' : 'Create a video from the uploaded images and event footage',
         }, ...steps];
     }
+    // Mobile creation uses the chosen playbook to produce a coherent first
+    // cut, then applies the user's extra direction (for example, music or a
+    // softer pace). A typed direction must not replace the whole playbook.
+    const userDirection = String(opts.userDirection || '').trim();
+    if (userDirection) steps.push({ key: 'request', prompt: userDirection });
+
+    // ── Make the playbook state-aware (EditPolicy) ───────────────────────────
+    //
+    // buildAutopilotSteps() returns the same fixed list for a style every
+    // time. On a fresh upload that list opens with work that CANNOT run yet:
+    // "Clean up the video" and "Remove silences" both need word timings, so
+    // the step failed and was reported as skipped while the user watched. And
+    // re-running Auto re-ran everything, because nothing consulted what had
+    // already been applied.
+    //
+    // The playbook is now treated as the INTENT. EditPolicy walks it against
+    // the live project and returns the same steps with prerequisites inserted
+    // where they are genuinely missing, already-finished work dropped, and the
+    // caller's own prompt text preserved verbatim (polish_short reads its
+    // platform out of that text, so rewriting it would retarget the edit).
+    //
+    // Deliberately conservative:
+    //   - respectStyle is NOT set. The playbook already encodes the style, and
+    //     a second veto here could drop a step the user explicitly asked for.
+    //   - a blocked step is still RUN, exactly as it is today, so Auto can
+    //     never do less than it used to because of a wrong precondition.
+    //   - if refinement yields nothing, the original playbook runs untouched.
+    const originalSteps = steps;
+    let policySkipped = [];
+    try {
+        const decision = decide({
+            goals: steps.map(step => step.prompt),
+            state: useTimelineStore.getState(),
+            skipSatisfied: true,
+            respectStyle: false,
+        });
+
+        if (decision.steps.length > 0) {
+            // Carry each original step's `key` across so the progress UI keeps
+            // its labels; a prompt the policy inserted has no original key.
+            const keyByPrompt = new Map(steps.map(step => [step.prompt, step.key]));
+            steps = decision.steps.map(st => ({
+                key: keyByPrompt.get(st.prompt) || (st.inserted ? 'prerequisite' : 'request'),
+                prompt: st.prompt,
+            }));
+            policySkipped = decision.skipped || [];
+
+            if (decision.inserted.length > 0) {
+                progress(`Auto: ${decision.inserted.join(', ')} needed first — added to the plan.`);
+            }
+            for (const skip of policySkipped) {
+                progress(`Auto: skipping ${skip.id} — ${skip.reason}`);
+            }
+        }
+    } catch (err) {
+        // A planning fault must never block an Auto run: fall back to the
+        // playbook exactly as it was before this layer existed.
+        console.warn('[StyleAutopilot] EditPolicy refinement failed, using the raw playbook:', err);
+        steps = originalSteps;
+        policySkipped = [];
+    }
+
+    if (steps.length === 0) steps = originalSteps;
+
     try {
         opts.onPlan?.(steps.map((step, index) => ({
             index,
@@ -201,15 +268,30 @@ export async function runAutopilot(request, opts = {}) {
         console.warn('[StyleAutopilot] Could not save the Auto edit report:', err.message);
     }
     if (done.length === 0) {
-        return { success: false, operation: 'auto_edit', jobId: lastJobId, message: `${intro}Auto edit (${name}) could not apply anything. Skipped: ${skipped.join('; ')}.` };
+        // Everything already being done is not a failure — it is a no-op, and
+        // saying "could not apply anything" for it would be wrong.
+        if (skipped.length === 0 && policySkipped.length > 0) {
+            return {
+                success: true,
+                operation: 'auto_edit',
+                jobId: lastJobId,
+                message: `${intro}Auto edit (${name}): everything in this playbook is already applied. Nothing to redo.`,
+                details: { styleId, done: [], skipped: policySkipped, report },
+            };
+        }
+        return { success: false, operation: 'auto_edit', jobId: lastJobId, message: `${intro}Auto edit (${name}) could not apply anything. Skipped: ${[...skipped, ...policySkipped.map(sk => sk.id)].join('; ')}.` };
     }
-    const skippedText = skipped.length ? ` Skipped: ${skipped.join('; ')}.` : '';
+    // Work the policy dropped because it was already done is reported too:
+    // "nothing to do" has to be legible, or a short Auto run looks broken.
+    const alreadyDone = policySkipped.map(sk => `${sk.id} (${sk.reason})`);
+    const skippedAll = [...skipped, ...alreadyDone];
+    const skippedText = skippedAll.length ? ` Skipped: ${skippedAll.join('; ')}.` : '';
     return {
         success: true,
         operation: 'auto_edit',
         jobId: lastJobId,
         message: `${intro}Auto edit (${name}) done: ${done.join(', ')}. One undo reverts it.${skippedText}`,
-        details: { styleId, done, skipped, report },
+        details: { styleId, done, skipped: skippedAll, report },
     };
 }
 

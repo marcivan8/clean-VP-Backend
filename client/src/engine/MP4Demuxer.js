@@ -7,7 +7,7 @@ console.log('[MP4Demuxer] Module Loaded. MP4Box (Vendor ESM):', MP4Box);
  * Wraps mp4box.js to extract EncodedVideoChunks for WebCodecs VideoDecoder.
  */
 class MP4Demuxer {
-    constructor(fileUri, { onConfig, onChunk, onStatus, onAudioConfig, onAudioChunk, onError }) {
+    constructor(fileUri, { onConfig, onChunk, onStatus, onAudioConfig, onAudioChunk, onError, startTime = 0 }) {
         this.fileUri = fileUri;
         this.onConfig = onConfig; // Video Config
         this.onChunk = onChunk; // Video Chunk
@@ -21,6 +21,7 @@ class MP4Demuxer {
         // dead" instead of the old behavior of silently doing nothing forever
         // (see load() below for why that mattered).
         this.onError = onError || (() => {});
+        this.startTime = Math.max(0, Number(startTime) || 0);
 
         this.file = MP4Box.createFile();
         this.file.onError = (e) => console.error("[Demuxer] MP4Box Error:", e);
@@ -139,6 +140,7 @@ class MP4Demuxer {
             this.onStatus('[Demuxer] No Audio Track Found!');
         }
 
+        if (this.startTime > 0) this.file.seek(this.startTime, true);
         this.file.start();
     }
 

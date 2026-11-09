@@ -5,19 +5,15 @@
  *
  * WHY THIS EXISTS SEPARATELY: this codebase already had THREE easing
  * vocabularies that did not agree with each other —
- *   1. `EffectNode.js`'s `EASING_FUNCTIONS` — 11 functions, camelCase keys
- *      (`easeIn`, `easeOutCubic`), not exported, so nothing outside that file
- *      could reuse them.
+ *   1. `EffectNode.js` had a private easing table with only 11 functions.
  *   2. `KeyframeEditor.jsx`'s dropdown — kebab-case (`ease-in`, `ease-out`),
  *      which misses every camelCase key and silently falls back to linear.
  *      Four of its five options have never actually eased anything.
  *   3. `VideoPlayer.jsx`'s `interpolateKeyframes` — a single hardcoded
  *      `easing === 'easeOutCubic' ? ... : linear` branch.
  *
- * This module resolves ALL of those spellings to the same functions, so a
- * keyframe authored anywhere eases the same way everywhere. It deliberately
- * does not modify EffectNode — that file is wired into the GPU pipeline and
- * changing it is out of scope for an additive engine.
+ * This module resolves every supported spelling to one shared function, so a
+ * keyframe authored anywhere eases the same way everywhere.
  *
  * RULE: resolveEasing() NEVER throws and NEVER returns undefined. An unknown
  * easing name degrades to linear, because a slightly-wrong animation is an
@@ -172,10 +168,19 @@ export function cubicBezier(x1, y1, x2, y2) {
     return t => (t <= 0 ? 0 : t >= 1 ? 1 : sy(solveX(t)));
 }
 
-/** R92 — steps(n): a hold-and-jump curve, for stop-motion and ticker looks. */
-export function stepsEasing(n) {
-    const count = Math.max(1, Math.min(60, Math.round(Number(n) || 1)));
-    return t => (t >= 1 ? 1 : Math.floor(clampUnit(t) * count) / count);
+/** Step timing functions used for hold, ticker, and stepped motion. */
+export function stepsEasing(n, position = 'jump-end') {
+    const count = Math.max(1, Math.min(Number.MAX_SAFE_INTEGER, Math.round(Number(n) || 1)));
+    const mode = String(position || 'jump-end').toLowerCase();
+    return t => {
+        const progress = clampUnit(Number.isFinite(Number(t)) ? Number(t) : 0);
+        if (progress >= 1) return 1;
+        const step = Math.floor(progress * count);
+        if (mode === 'jump-start' || mode === 'start') return (step + 1) / count;
+        if (mode === 'jump-both') return (step + 1) / (count + 1);
+        if (mode === 'jump-none') return count > 1 ? step / (count - 1) : 0;
+        return step / count;
+    };
 }
 
 const clampUnit = t => (t < 0 ? 0 : t > 1 ? 1 : t);
@@ -205,6 +210,8 @@ const EASING_ALIASES = {
     'ease-in-out-expo': 'easeInOutExpo',
     'ease-out-circ':   'easeOutCirc',
     'ease-in-out-circ': 'easeInOutCirc',
+    'step-start':      'stepStart',
+    'step-end':        'stepEnd',
     'back-in':         'backIn',
     'back-in-out':     'backInOut',
     'anticipate':      'backIn',
@@ -234,14 +241,19 @@ function parseEasingFunction(name) {
     const m = /^\s*(cubic-bezier|spring|steps)\s*\(([^)]*)\)\s*$/i.exec(name);
     let fn = null;
     if (m) {
-        const args = m[2].split(',').map(v => Number(v.trim()));
+        const rawArgs = m[2].split(',').map(value => value.trim());
+        const args = rawArgs.map(Number);
         const kind = m[1].toLowerCase();
         if (kind === 'cubic-bezier' && args.length === 4 && args.every(Number.isFinite)) {
             fn = cubicBezier(args[0], args[1], args[2], args[3]);
         } else if (kind === 'spring' && args.length >= 2 && args.slice(0, 2).every(Number.isFinite)) {
             fn = springEasing({ stiffness: args[0], damping: args[1], mass: Number.isFinite(args[2]) ? args[2] : 1 });
-        } else if (kind === 'steps' && Number.isFinite(args[0])) {
-            fn = stepsEasing(args[0]);
+        } else if (kind === 'steps' && (rawArgs.length === 1 || rawArgs.length === 2)
+            && Number.isSafeInteger(args[0]) && args[0] > 0) {
+            const positions = { start: 'jump-start', end: 'jump-end', 'jump-start': 'jump-start',
+                'jump-end': 'jump-end', 'jump-none': 'jump-none', 'jump-both': 'jump-both' };
+            const position = positions[(rawArgs[1] || 'end').toLowerCase()];
+            if (position && (position !== 'jump-none' || args[0] > 1)) fn = stepsEasing(args[0], position);
         }
     }
     if (_parsedCache.size > 256) _parsedCache.clear();
@@ -258,6 +270,8 @@ export function resolveEasing(name) {
     if (typeof name !== 'string' || name.length === 0) return EASING_FUNCTIONS.linear;
     if (EASING_FUNCTIONS[name]) return EASING_FUNCTIONS[name];
     const canonical = EASING_ALIASES[name];
+    if (canonical === 'stepStart') return stepsEasing(1, 'jump-start');
+    if (canonical === 'stepEnd') return stepsEasing(1, 'jump-end');
     if (canonical && EASING_FUNCTIONS[canonical]) return EASING_FUNCTIONS[canonical];
     const parsed = name.includes('(') ? parseEasingFunction(name) : null;
     if (parsed) return parsed;

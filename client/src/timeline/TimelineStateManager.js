@@ -968,6 +968,12 @@ export class TimelineStateManager {
                         // vanishes on project reload, which is exactly what was
                         // happening to `animation` before R58.
                         animations: clip.animations,
+                        expressions: clip.expressions,
+                        motionPath: clip.motionPath,
+                        // Nested scene composition metadata drives isolated
+                        // group transforms/effects in preview and export. It
+                        // must round-trip with the child placement.
+                        compositionStack: clip.compositionStack ?? null,
                         // clip.words are ABSOLUTE timeline times recorded when the
                         // caption was created; wordShift is how far this placement
                         // has been MOVED since (see withWordShift).
@@ -1106,6 +1112,9 @@ export class TimelineStateManager {
                                 // projection in toLegacyTracks above. Keep the
                                 // two lists in sync.
                                 animations: legacyClip.animations,
+                                expressions: legacyClip.expressions,
+                                motionPath: legacyClip.motionPath,
+                                compositionStack: legacyClip.compositionStack ?? null,
                                 autoAnimate: legacyClip.autoAnimate || undefined,
                                 sfxCue: legacyClip.sfxCue || undefined,
                                 words: legacyClip.words,
@@ -1207,22 +1216,22 @@ export class TimelineStateManager {
         const effects = this.getEffectsForTarget(targetId);
         const placement = this.getEntity(ENTITY_TYPES.PLACEMENT, targetId);
 
-        if (!placement) return effects.filter(e => e.enabled);
+        const playhead = Number(time);
+        if (!Number.isFinite(playhead)) return [];
 
-        // Filter effects by time bounds
+        // Match EffectNode/EffectTiming and the renderers: effect windows are
+        // half-open [start, end), so adjacent effects never overlap at a cut.
+        // Explicit windows remain meaningful when the placement has not been
+        // hydrated into this legacy manager yet.
         return effects.filter(effect => {
             if (!effect.enabled) return false;
-
-            // If effect has explicit time bounds, use those
-            if (effect.startTime !== null && effect.endTime !== null) {
-                return time >= effect.startTime && time <= effect.endTime;
-            }
-
-            // Otherwise inherit from placement bounds
-            const effectStart = effect.startTime ?? placement.startTime;
-            const effectEnd = effect.endTime ?? (placement.startTime + placement.duration);
-
-            return time >= effectStart && time <= effectEnd;
+            const placementStart = Number(placement?.startTime);
+            const start = effect.startTime ?? (Number.isFinite(placementStart) ? placementStart : 0);
+            const inheritedEnd = Number.isFinite(placementStart)
+                ? placementStart + (Number(placement?.duration) || 0)
+                : Infinity;
+            const end = effect.endTime ?? inheritedEnd;
+            return playhead >= Number(start) && playhead < Number(end);
         });
     }
 

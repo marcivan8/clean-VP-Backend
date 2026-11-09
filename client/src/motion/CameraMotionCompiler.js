@@ -32,7 +32,7 @@
  */
 
 import { clipToMotionLayer } from './ClipAdapter.js';
-import { resolveMotionAt } from './MotionResolver.js';
+import { resolveMotionAt, sampleKeyframeTrack } from './MotionResolver.js';
 import { simplifySamples } from './Compositor.js';
 
 /** Seconds between samples — matches Compositor.GEOMETRY_SAMPLE_STEP. */
@@ -44,34 +44,9 @@ function hasCameraAnimation(layer) {
             ('scale' in k.properties || 'x' in k.properties || 'y' in k.properties)));
 }
 
-// Same easing the preview's evaluateKF applies to clip.keyframes
-// (client/src/revideo/project.tsx), so the product of the two matches it.
-const KF_EASING = {
-    linear: t => t,
-    easeIn: t => t * t, 'ease-in': t => t * t,
-    easeOut: t => t * (2 - t), 'ease-out': t => t * (2 - t),
-    easeInOut: t => (t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t),
-    'ease-in-out': t => (t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t),
-    easeOutCubic: t => 1 - Math.pow(1 - t, 3),
-    easeInCubic: t => t * t * t,
-};
-
 /** Value of a `[{time, value, easing}]` keyframe track at clip-local time t. */
 export function evaluateKeyframes(kfs, t, fallback = 1) {
-    if (!Array.isArray(kfs) || kfs.length === 0) return fallback;
-    const s = [...kfs].filter(k => Number.isFinite(Number(k.time)) && Number.isFinite(Number(k.value)))
-        .sort((a, b) => a.time - b.time);
-    if (s.length === 0) return fallback;
-    if (t <= s[0].time) return Number(s[0].value);
-    if (t >= s[s.length - 1].time) return Number(s[s.length - 1].value);
-    for (let i = 0; i < s.length - 1; i++) {
-        if (t >= s[i].time && t < s[i + 1].time) {
-            const u = (t - s[i].time) / Math.max(s[i + 1].time - s[i].time, 0.0001);
-            const ease = KF_EASING[s[i + 1].easing || 'linear'] || KF_EASING.linear;
-            return Number(s[i].value) + (Number(s[i + 1].value) - Number(s[i].value)) * ease(u);
-        }
-    }
-    return Number(s[s.length - 1].value);
+    return sampleKeyframeTrack(kfs, t, fallback);
 }
 
 /**

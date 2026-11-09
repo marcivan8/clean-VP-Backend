@@ -167,15 +167,20 @@ export function maskTimeFor(clip, timelineTime) {
  * FFmpeg filter graph for one matted clip. Inputs: [0:v] source (already
  * trimmed to the clip), [1:v] mask (already seeked to the clip's offset),
  * and [2:v] the background image when mode is "image".
- * Returns the graph lines; the output label is "outv".
+ * Returns the graph lines; the output label is "outv". `outputGraph` lets
+ * effects with branched filter topologies run after the matte composite while
+ * preserving the same output label.
  */
-export function matteFilterGraph(settings, { width, height, speed = 1, duration = 5, sandwichFilter = null }) {
+export function matteFilterGraph(settings, { width, height, speed = 1, duration = 5, sandwichFilter = null, outputFilter = null, outputGraph = null, crop = null, transform = null }) {
     const m = normalizeMatte(settings);
     const ramp = alphaRamp(m);
     const feather = scaledPx(m.feather, width);
     const blur = scaledPx(m.blur, width);
     const pts = speed && speed !== 1 ? `,setpts=PTS/${Number(speed).toFixed(4)}` : '';
-    const fit = `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`;
+    const cropFilter = crop && (Number(crop.w) < 0.999 || Number(crop.h) < 0.999)
+        ? `crop=iw*${Math.max(0.05, Math.min(1, Number(crop.w))).toFixed(4)}:ih*${Math.max(0.05, Math.min(1, Number(crop.h))).toFixed(4)}:iw*${Math.max(0, Math.min(0.95, Number(crop.x) || 0)).toFixed(4)}:ih*${Math.max(0, Math.min(0.95, Number(crop.y) || 0)).toFixed(4)},`
+        : '';
+    const fit = `${cropFilter}scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`;
     const lines = [
         `[0:v]${fit}${pts},format=yuv420p,split=2[base][base2]`,
         // Luma ramp (same numbers as the preview), then feather.
@@ -232,7 +237,22 @@ export function matteFilterGraph(settings, { width, height, speed = 1, duration 
     }
 
     lines.push(`[base][mask]alphamerge[fg]`);
-    lines.push(`[bg][fg]overlay=0:0:shortest=1,format=yuv420p[outv]`);
+    const outputEffects = typeof outputFilter === 'string' && outputFilter.trim() ? `,${outputFilter.trim()}` : '';
+    const outputLabel = Array.isArray(outputGraph) && outputGraph.length ? 'outbase' : 'outv';
+    if (transform && Number(transform.scale) > 0 && (Math.abs(Number(transform.scale) - 1) > 1e-6 || Number(transform.x) || Number(transform.y))) {
+        const even = n => Math.max(2, Math.round(n / 2) * 2);
+        const outW = even(width * Number(transform.scale));
+        const outH = even(height * Number(transform.scale));
+        const x = Math.round((width - outW) / 2 + (Number(transform.x) || 0));
+        const y = Math.round((height - outH) / 2 + (Number(transform.y) || 0));
+        lines.push(`[bg][fg]overlay=0:0:shortest=1[matte]`);
+        lines.push(`[matte]scale=${outW}:${outH}:flags=lanczos[scaled]`);
+        lines.push(`color=c=black:s=${width}x${height}:r=30[canvas]`);
+        lines.push(`[canvas][scaled]overlay=x=${x}:y=${y}:shortest=1,format=yuv420p${outputEffects}[${outputLabel}]`);
+    } else {
+        lines.push(`[bg][fg]overlay=0:0:shortest=1,format=yuv420p${outputEffects}[${outputLabel}]`);
+    }
+    if (outputLabel === 'outbase') lines.push(...outputGraph);
     return lines;
 }
 

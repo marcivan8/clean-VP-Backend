@@ -7,6 +7,14 @@
 
 import { ENGINE_TYPES } from '../EffectNode.js';
 
+const unwrapEffectParam = (params, key, fallback) => {
+    const raw = params?.[key];
+    const value = raw && typeof raw === 'object' && !Array.isArray(raw) && 'value' in raw
+        ? raw.value
+        : raw;
+    return value ?? fallback;
+};
+
 // ============================================================================
 // SHADER SOURCE CODE
 // ============================================================================
@@ -30,6 +38,7 @@ in vec2 v_texCoord;
 uniform sampler2D u_image;
 uniform vec2 u_direction;  // (1,0) for horizontal, (0,1) for vertical
 uniform float u_radius;
+uniform int u_quality;
 uniform vec2 u_resolution;
 
 out vec4 outColor;
@@ -39,9 +48,12 @@ void main() {
     vec4 result = vec4(0.0);
     float total = 0.0;
     
-    for (float i = -16.0; i <= 16.0; i += 1.0) {
-        float weight = exp(-0.5 * (i * i) / (u_radius * u_radius));
-        vec2 offset = u_direction * texelSize * i * u_radius;
+    for (int i = 0; i < 32; i++) {
+        if (i >= u_quality) break;
+        float position = (float(i) / float(max(u_quality - 1, 1)) - 0.5) * 6.0;
+        float radius = max(u_radius, 0.0001);
+        float weight = exp(-0.5 * position * position);
+        vec2 offset = u_direction * texelSize * position * radius;
         result += texture(u_image, v_texCoord + offset) * weight;
         total += weight;
     }
@@ -72,13 +84,17 @@ void main() {
     
     for (int i = 0; i < 64; i++) {
         if (i >= u_samples) break;
-        float t = float(i) / float(u_samples - 1) - 0.5;
-        vec2 offset = direction * t * u_intensity * 0.1;
+        float t = float(i) / float(max(u_samples - 1, 1)) - 0.5;
+        // Keep the authored pixel-space angle and distance stable on portrait,
+        // square, and landscape frames. UV units have different pixel scales
+        // on the two axes, so convert the horizontal reference distance back
+        // through texelSize before sampling.
+        vec2 offset = direction * t * u_intensity * 0.1 * u_resolution.x * texelSize;
         result += texture(u_image, v_texCoord + offset);
         total += 1.0;
     }
     
-    outColor = result / total;
+    outColor = total > 0.0 ? result / total : texture(u_image, v_texCoord);
 }`,
 
     // === Radial Blur ===
@@ -90,26 +106,27 @@ uniform sampler2D u_image;
 uniform float u_intensity;
 uniform vec2 u_center;
 uniform int u_samples;
+uniform vec2 u_resolution;
 
 out vec4 outColor;
 
 void main() {
-    vec2 toCenter = u_center - v_texCoord;
+    vec2 toCenter = (u_center - v_texCoord) * u_resolution;
     float dist = length(toCenter);
-    vec2 direction = normalize(toCenter);
+    vec2 direction = dist > 0.00001 ? toCenter / dist : vec2(0.0);
     
     vec4 result = vec4(0.0);
     float total = 0.0;
     
     for (int i = 0; i < 64; i++) {
         if (i >= u_samples) break;
-        float t = float(i) / float(u_samples);
-        vec2 offset = direction * t * u_intensity * dist * 0.5;
+        float t = float(i) / float(max(u_samples, 1));
+        vec2 offset = direction * t * u_intensity * dist * 0.5 / u_resolution;
         result += texture(u_image, v_texCoord + offset);
         total += 1.0;
     }
     
-    outColor = result / total;
+    outColor = total > 0.0 ? result / total : texture(u_image, v_texCoord);
 }`,
 
     // === Glow/Bloom ===
@@ -130,32 +147,31 @@ void main() {
     vec2 texelSize = 1.0 / u_resolution;
     vec4 original = texture(u_image, v_texCoord);
     
-    // Extract bright areas
-    float brightness = dot(original.rgb, vec3(0.299, 0.587, 0.114));
-    vec3 bright = brightness > u_threshold ? original.rgb : vec3(0.0);
-    
-    // Blur bright areas
-    vec3 bloom = vec3(0.0);
-    float total = 0.0;
+    // Match the live SVG and FFmpeg bloom: Rec. 709 luminance, a soft
+    // threshold ramp, and a normalized Gaussian blur of the highlight matte.
+    float bloom = 0.0;
+    float totalWeight = 0.0;
     
     for (float x = -8.0; x <= 8.0; x += 1.0) {
         for (float y = -8.0; y <= 8.0; y += 1.0) {
             float weight = exp(-0.5 * (x*x + y*y) / (u_radius * u_radius * 0.25));
             vec2 offset = vec2(x, y) * texelSize * u_radius * 0.5;
             vec4 sampleColor = texture(u_image, v_texCoord + offset);
-            float sampleBright = dot(sampleColor.rgb, vec3(0.299, 0.587, 0.114));
-            if (sampleBright > u_threshold) {
-                bloom += sampleColor.rgb * weight;
-                total += weight;
-            }
+            float sampleLuminance = dot(sampleColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+            float thresholdWidth = max(1.0 - u_threshold, 0.001);
+            float highlight = clamp((sampleLuminance - u_threshold) / thresholdWidth, 0.0, 1.0);
+            bloom += highlight * weight;
+            totalWeight += weight;
         }
     }
     
-    if (total > 0.0) bloom /= total;
-    
-    // Combine with tint
-    vec3 tintedBloom = bloom * u_color;
-    outColor = vec4(original.rgb + tintedBloom * u_intensity, original.a);
+    if (totalWeight > 0.0) bloom /= totalWeight;
+
+    // feMerge composites the flood colour over SourceGraphic; it does not
+    // add RGB energy to the original, which would clip and look harsher.
+    float glowAlpha = bloom * clamp(u_intensity, 0.0, 1.0) * 0.7;
+    outColor = vec4(mix(original.rgb, u_color, glowAlpha),
+        original.a + glowAlpha * (1.0 - original.a));
 }`,
 
     // === Vignette ===
@@ -176,12 +192,8 @@ void main() {
     
     vec2 center = vec2(0.5);
     float dist = distance(v_texCoord, center);
-    float vignette = smoothstep(u_radius, u_radius - u_softness, dist);
-    
-    vec3 vignetted = mix(u_color, color.rgb, vignette * (1.0 - u_intensity) + (1.0 - u_intensity));
-    vignetted = mix(color.rgb, u_color, (1.0 - vignette) * u_intensity);
-    
-    outColor = vec4(mix(color.rgb, vignetted, u_intensity), color.a);
+    float edge = smoothstep(u_radius - max(u_softness, 0.0001), u_radius, dist);
+    outColor = vec4(mix(color.rgb, u_color, edge * clamp(u_intensity, 0.0, 1.0)), color.a);
 }`,
 
     // === Camera Shake ===
@@ -199,9 +211,16 @@ uniform vec2 u_resolution;
 
 out vec4 outColor;
 
-// Simple noise function
-float noise(float x) {
+// Smooth deterministic value noise avoids frame-to-frame white-noise jitter.
+float hash(float x) {
     return fract(sin(x * 12.9898 + u_seed) * 43758.5453);
+}
+
+float noise(float x) {
+    float cell = floor(x);
+    float blend = fract(x);
+    blend = blend * blend * (3.0 - 2.0 * blend);
+    return mix(hash(cell), hash(cell + 1.0), blend);
 }
 
 void main() {
@@ -249,7 +268,9 @@ void main() {
     float dist = length(dir);
     
     float rad = u_angle * 3.14159265 / 180.0;
-    vec2 offset = vec2(cos(rad), sin(rad)) * u_amount / u_resolution.x;
+    // amount is in pixels; convert each axis independently so a 90° split
+    // has the same pixel displacement as a 0° split on any aspect ratio.
+    vec2 offset = vec2(cos(rad) / u_resolution.x, sin(rad) / u_resolution.y) * u_amount;
     
     // Sample each channel with offset
     float r = texture(u_image, v_texCoord + offset * dist).r;
@@ -269,6 +290,8 @@ uniform sampler2D u_image;
 uniform float u_intensity;
 uniform float u_size;
 uniform float u_time;
+uniform bool u_animated;
+uniform vec2 u_resolution;
 
 out vec4 outColor;
 
@@ -280,7 +303,8 @@ void main() {
     vec4 color = texture(u_image, v_texCoord);
     
     // Generate grain
-    vec2 grainCoord = v_texCoord * u_size + vec2(u_time);
+    float frame = u_animated ? floor(u_time * 30.0) : 0.0;
+    vec2 grainCoord = floor(v_texCoord * u_resolution / max(u_size, 0.01)) + vec2(frame);
     float grain = random(grainCoord) * 2.0 - 1.0;
     
     // Apply grain
@@ -392,13 +416,21 @@ void main() {
     
     // Brightness (multiply)
     rgb *= u_brightness / 100.0;
+    rgb = clamp(rgb, 0.0, 1.0);
     
     // Contrast
     rgb = (rgb - 0.5) * (u_contrast / 100.0) + 0.5;
+    rgb = clamp(rgb, 0.0, 1.0);
     
     // Saturation
     float gray = dot(rgb, vec3(0.299, 0.587, 0.114));
     rgb = mix(vec3(gray), rgb, u_saturation / 100.0);
+
+    // Contrast and saturation can move channels outside [0, 1]. The export
+    // path clips after brightness and before its remaining grade operations;
+    // clamp here before RGB-to-HSL so preview avoids invalid saturation and
+    // zero-denominator cases while matching that bounded color domain.
+    rgb = clamp(rgb, 0.0, 1.0);
     
     // Hue rotate
     vec3 hsl = rgb2hsl(rgb);
@@ -416,6 +448,9 @@ void main() {
 }`
 };
 
+// Public capability manifest used by registry validation and diagnostics.
+export const GPU_SHADER_TYPES = Object.freeze(Object.keys(SHADERS));
+
 // ============================================================================
 // GPU EFFECT ENGINE CLASS
 // ============================================================================
@@ -424,8 +459,11 @@ export class GPUEffectEngine {
     constructor(gl) {
         this.gl = gl;
         this.programs = new Map();
+        this.uniformLocations = new WeakMap();
         this.framebuffers = [];
         this.textures = [];
+        this.targetWidth = 0;
+        this.targetHeight = 0;
         this.initialized = false;
 
         // Geometry buffers
@@ -491,34 +529,55 @@ export class GPUEffectEngine {
 
         // Compile vertex shader
         const vs = gl.createShader(gl.VERTEX_SHADER);
+        if (!vs) return;
         gl.shaderSource(vs, VERTEX_SHADER);
         gl.compileShader(vs);
 
         if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
             console.error(`[GPUEffects] Vertex shader error:`, gl.getShaderInfoLog(vs));
+            gl.deleteShader(vs);
             return;
         }
 
         // Compile fragment shader
         const fs = gl.createShader(gl.FRAGMENT_SHADER);
+        if (!fs) { gl.deleteShader(vs); return; }
         gl.shaderSource(fs, fragmentSrc);
         gl.compileShader(fs);
 
         if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
             console.error(`[GPUEffects] Fragment shader error (${name}):`, gl.getShaderInfoLog(fs));
+            gl.deleteShader(vs);
+            gl.deleteShader(fs);
             return;
         }
 
         // Link program
         const program = gl.createProgram();
+        if (!program) {
+            gl.deleteShader(vs);
+            gl.deleteShader(fs);
+            return;
+        }
         gl.attachShader(program, vs);
         gl.attachShader(program, fs);
         gl.linkProgram(program);
 
         if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
             console.error(`[GPUEffects] Program link error (${name}):`, gl.getProgramInfoLog(program));
+            gl.deleteProgram(program);
+            gl.deleteShader(vs);
+            gl.deleteShader(fs);
             return;
         }
+
+        // Shader objects are only needed through linking. Detaching and
+        // deleting them here keeps long-lived preview contexts lean; the
+        // linked program retains its executable until destroy().
+        gl.detachShader(program, vs);
+        gl.detachShader(program, fs);
+        gl.deleteShader(vs);
+        gl.deleteShader(fs);
 
         // Store with attribute locations
         this.programs.set(name, {
@@ -534,6 +593,35 @@ export class GPUEffectEngine {
     // ========================================================================
     // PROCESSING
     // ========================================================================
+
+    _ensureRenderTargets(width, height) {
+        if (this.targetWidth === width && this.targetHeight === height) return;
+
+        const gl = this.gl;
+        gl.activeTexture(gl.TEXTURE0);
+        for (let i = 0; i < this.textures.length; i++) {
+            gl.bindTexture(gl.TEXTURE_2D, this.textures[i]);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffers[i]);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.textures[i], 0);
+        }
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        this.targetWidth = width;
+        this.targetHeight = height;
+    }
+
+    _uniformLocation(gl, program, name) {
+        // Uniform locations are stable for a linked program. Avoid querying
+        // the WebGL driver again on every frame and every effect pass.
+        if (!this.uniformLocations) this.uniformLocations = new WeakMap();
+        let locations = this.uniformLocations.get(program);
+        if (!locations) {
+            locations = new Map();
+            this.uniformLocations.set(program, locations);
+        }
+        if (!locations.has(name)) locations.set(name, gl.getUniformLocation(program, name));
+        return locations.get(name);
+    }
 
     /**
      * Process a single effect
@@ -558,18 +646,22 @@ export class GPUEffectEngine {
         const { program, attributes } = shaderInfo;
 
         // Get interpolated params
-        const params = effect.getParamsAt(time);
+        const placement = context.placement || {};
+        const params = effect.getParamsAt(time, {
+            ...context,
+            clipStart: context.clipStart ?? placement.startTime ?? placement.start ?? 0,
+            clipDuration: context.clipDuration ?? placement.duration,
+        });
 
         // Use framebuffer for output
-        const fbIndex = context.fbIndex || 0;
+        const fbIndex = Number.isInteger(context.fbIndex) ? context.fbIndex % this.framebuffers.length : 0;
         const outputTexture = this.textures[fbIndex];
 
         // Resize framebuffer texture if needed
         const width = context.width || gl.drawingBufferWidth;
         const height = context.height || gl.drawingBufferHeight;
 
-        gl.bindTexture(gl.TEXTURE_2D, outputTexture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        this._ensureRenderTargets(width, height);
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffers[fbIndex]);
         gl.viewport(0, 0, width, height);
@@ -588,94 +680,137 @@ export class GPUEffectEngine {
         // Bind input texture
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, inputTexture);
-        gl.uniform1i(gl.getUniformLocation(program, 'u_image'), 0);
+        gl.uniform1i(this._uniformLocation(gl, program, 'u_image'), 0);
 
         // Set common uniforms
-        gl.uniform2f(gl.getUniformLocation(program, 'u_resolution'), width, height);
-        gl.uniform1f(gl.getUniformLocation(program, 'u_time'), time);
+        gl.uniform2f(this._uniformLocation(gl, program, 'u_resolution'), width, height);
+        gl.uniform1f(this._uniformLocation(gl, program, 'u_time'), time);
 
         // Set effect-specific uniforms
-        this._setEffectUniforms(gl, program, effect.type, params);
+        this._setEffectUniforms(gl, program, effect.type, params, time);
 
         // Draw
         gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // Gaussian blur is separable: a vertical pass after the horizontal pass
+        // produces a true 2D blur at substantially lower cost than a 2D kernel.
+        if (effect.type === 'blur_gaussian') {
+            const verticalIndex = (fbIndex + 1) % this.framebuffers.length;
+            const verticalTexture = this.textures[verticalIndex];
+            gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffers[verticalIndex]);
+            gl.viewport(0, 0, width, height);
+            gl.useProgram(program);
+            gl.enableVertexAttribArray(attributes.position);
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
+            gl.vertexAttribPointer(attributes.position, 2, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(attributes.texCoord);
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
+            gl.vertexAttribPointer(attributes.texCoord, 2, gl.FLOAT, false, 0, 0);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, outputTexture);
+            gl.uniform1i(this._uniformLocation(gl, program, 'u_image'), 0);
+            gl.uniform2f(this._uniformLocation(gl, program, 'u_resolution'), width, height);
+            const radius = Number(unwrapEffectParam(params, 'radius', 5));
+            gl.uniform1f(this._uniformLocation(gl, program, 'u_radius'), Number.isFinite(radius) ? Math.max(0, Math.min(50, radius)) : 5);
+            const quality = Number(unwrapEffectParam(params, 'quality', 8));
+            gl.uniform1i(this._uniformLocation(gl, program, 'u_quality'), Number.isFinite(quality) ? Math.max(4, Math.min(32, Math.round(quality))) : 8);
+            gl.uniform2f(this._uniformLocation(gl, program, 'u_direction'), 0, 1);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            return verticalTexture;
+        }
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
         return outputTexture;
     }
 
-    _setEffectUniforms(gl, program, type, params) {
+    _setEffectUniforms(gl, program, type, params, time = 0) {
+        const value = (key, fallback) => unwrapEffectParam(params, key, fallback);
+        const number = (key, fallback, min = -Infinity, max = Infinity) => {
+            const raw = Number(value(key, fallback));
+            return Number.isFinite(raw) ? Math.max(min, Math.min(max, raw)) : fallback;
+        };
+        const samples = (key, fallback, min) => Math.round(number(key, fallback, min, 64));
+        const boolean = (key, fallback) => Boolean(value(key, fallback));
         switch (type) {
             case 'blur_gaussian':
-                gl.uniform1f(gl.getUniformLocation(program, 'u_radius'), params.radius || 5);
-                gl.uniform2f(gl.getUniformLocation(program, 'u_direction'), 1, 0); // Horizontal pass
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_radius'), number('radius', 5, 0, 50));
+                gl.uniform1i(this._uniformLocation(gl, program, 'u_quality'), Math.min(32, samples('quality', 8, 4)));
+                gl.uniform2f(this._uniformLocation(gl, program, 'u_direction'), 1, 0); // Horizontal pass
                 break;
 
             case 'blur_motion':
-                gl.uniform1f(gl.getUniformLocation(program, 'u_intensity'), params.intensity || 0.5);
-                gl.uniform1f(gl.getUniformLocation(program, 'u_angle'), params.angle || 0);
-                gl.uniform1i(gl.getUniformLocation(program, 'u_samples'), params.samples || 16);
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_intensity'), number('intensity', 0.5, 0, 1));
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_angle'), number('angle', 0, 0, 360));
+                gl.uniform1i(this._uniformLocation(gl, program, 'u_samples'), samples('samples', 16, 2));
                 break;
 
             case 'blur_radial':
-                gl.uniform1f(gl.getUniformLocation(program, 'u_intensity'), params.intensity || 0.3);
-                gl.uniform2f(gl.getUniformLocation(program, 'u_center'),
-                    params.centerX || 0.5, params.centerY || 0.5);
-                gl.uniform1i(gl.getUniformLocation(program, 'u_samples'), params.samples || 32);
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_intensity'), number('intensity', 0.3, 0, 1));
+                gl.uniform2f(this._uniformLocation(gl, program, 'u_center'),
+                    number('centerX', 0.5, 0, 1), number('centerY', 0.5, 0, 1));
+                gl.uniform1i(this._uniformLocation(gl, program, 'u_samples'), samples('samples', 32, 1));
                 break;
 
             case 'glow':
-                gl.uniform1f(gl.getUniformLocation(program, 'u_threshold'), params.threshold || 0.7);
-                gl.uniform1f(gl.getUniformLocation(program, 'u_intensity'), params.intensity || 1.0);
-                gl.uniform1f(gl.getUniformLocation(program, 'u_radius'), params.radius || 10);
-                const glowColor = params.color || [1, 1, 1];
-                gl.uniform3f(gl.getUniformLocation(program, 'u_color'),
-                    glowColor[0], glowColor[1], glowColor[2]);
+            {
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_threshold'), number('threshold', 0.7, 0, 1));
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_intensity'), number('intensity', 1, 0, 3));
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_radius'), number('radius', 10, 1, 50));
+                const glowColor = Array.isArray(value('color', null)) ? value('color', null) : [1, 1, 1];
+                gl.uniform3f(this._uniformLocation(gl, program, 'u_color'),
+                    ...[0, 1, 2].map(index => Number.isFinite(Number(glowColor[index])) ? Math.max(0, Math.min(1, Number(glowColor[index]))) : 1));
                 break;
+            }
 
             case 'vignette':
-                gl.uniform1f(gl.getUniformLocation(program, 'u_intensity'), params.intensity || 0.5);
-                gl.uniform1f(gl.getUniformLocation(program, 'u_radius'), params.radius || 0.7);
-                gl.uniform1f(gl.getUniformLocation(program, 'u_softness'), params.softness || 0.5);
-                const vigColor = params.color || [0, 0, 0];
-                gl.uniform3f(gl.getUniformLocation(program, 'u_color'),
-                    vigColor[0], vigColor[1], vigColor[2]);
+            {
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_intensity'), number('intensity', 0.5, 0, 1));
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_radius'), number('radius', 0.7, 0, 1.5));
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_softness'), number('softness', 0.5, 0, 1));
+                const vigColor = Array.isArray(value('color', null)) ? value('color', null) : [0, 0, 0];
+                gl.uniform3f(this._uniformLocation(gl, program, 'u_color'),
+                    ...[0, 1, 2].map(index => Number.isFinite(Number(vigColor[index])) ? Math.max(0, Math.min(1, Number(vigColor[index]))) : 0));
                 break;
+            }
 
             case 'shake':
-                gl.uniform1f(gl.getUniformLocation(program, 'u_intensity'), params.intensity || 5);
-                gl.uniform1f(gl.getUniformLocation(program, 'u_frequency'), params.frequency || 10);
-                gl.uniform1f(gl.getUniformLocation(program, 'u_seed'), params.randomSeed || 0);
-                gl.uniform1f(gl.getUniformLocation(program, 'u_rotation'), params.rotationAmount || 0);
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_intensity'), number('intensity', 5, 0, 50));
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_frequency'), number('frequency', 10, 1, 60));
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_seed'), number('randomSeed', 0));
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_rotation'), number('rotationAmount', 0, 0, 10));
                 break;
 
             case 'rgb_split':
-                gl.uniform1f(gl.getUniformLocation(program, 'u_amount'), params.amount || 5);
-                gl.uniform1f(gl.getUniformLocation(program, 'u_angle'), params.angle || 0);
-                gl.uniform2f(gl.getUniformLocation(program, 'u_center'),
-                    params.centerX || 0.5, params.centerY || 0.5);
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_amount'), number('amount', 5, 0, 50));
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_angle'), number('angle', 0, 0, 360));
+                gl.uniform2f(this._uniformLocation(gl, program, 'u_center'),
+                    number('centerX', 0.5, 0, 1), number('centerY', 0.5, 0, 1));
                 break;
 
             case 'film_grain':
-                gl.uniform1f(gl.getUniformLocation(program, 'u_intensity'), params.intensity || 0.15);
-                gl.uniform1f(gl.getUniformLocation(program, 'u_size'), params.size || 1.5);
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_intensity'), number('intensity', 0.15, 0, 1));
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_size'), number('size', 1.5, 0.5, 5));
+                gl.uniform1i(this._uniformLocation(gl, program, 'u_animated'), boolean('animated', true) ? 1 : 0);
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_time'), boolean('animated', true) ? (Number(time) || 0) : 0);
                 break;
 
             case 'glitch':
-                gl.uniform1f(gl.getUniformLocation(program, 'u_intensity'), params.intensity || 0.3);
-                gl.uniform1f(gl.getUniformLocation(program, 'u_blockSize'), params.blockSize || 32);
-                gl.uniform1i(gl.getUniformLocation(program, 'u_colorShift'), params.colorShift ? 1 : 0);
-                gl.uniform1i(gl.getUniformLocation(program, 'u_scanlines'), params.scanlines ? 1 : 0);
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_intensity'), number('intensity', 0.3, 0, 1));
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_blockSize'), number('blockSize', 32, 4, 128));
+                gl.uniform1i(this._uniformLocation(gl, program, 'u_colorShift'), boolean('colorShift', false) ? 1 : 0);
+                gl.uniform1i(this._uniformLocation(gl, program, 'u_scanlines'), boolean('scanlines', false) ? 1 : 0);
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_time'), Number.isFinite(Number(time)) ? Number(time) : 0);
                 break;
 
             case 'color_grade':
-                gl.uniform1f(gl.getUniformLocation(program, 'u_brightness'), params.brightness || 100);
-                gl.uniform1f(gl.getUniformLocation(program, 'u_contrast'), params.contrast || 100);
-                gl.uniform1f(gl.getUniformLocation(program, 'u_saturation'), params.saturation || 100);
-                gl.uniform1f(gl.getUniformLocation(program, 'u_hueRotate'), params.hueRotate || 0);
-                gl.uniform1f(gl.getUniformLocation(program, 'u_temperature'), params.temperature || 0);
-                gl.uniform1f(gl.getUniformLocation(program, 'u_tint'), params.tint || 0);
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_brightness'), number('brightness', 100, 0, 200));
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_contrast'), number('contrast', 100, 0, 200));
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_saturation'), number('saturation', 100, 0, 200));
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_hueRotate'), number('hueRotate', 0, -180, 180));
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_temperature'), number('temperature', 0, -100, 100));
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_tint'), number('tint', 0, -100, 100));
                 break;
         }
     }
@@ -685,12 +820,13 @@ export class GPUEffectEngine {
      */
     processChain(effects, inputTexture, time, context = {}) {
         let current = inputTexture;
-        let fbIndex = 0;
 
         for (const effect of effects) {
             if (effect.enabled && effect.engine === ENGINE_TYPES.GPU && effect.isActiveAt(time)) {
+                // Select a target different from the current input to avoid a
+                // WebGL feedback loop, including after multi-pass effects.
+                const fbIndex = current === this.textures[0] ? 1 : 0;
                 current = this.processEffect(effect, current, time, { ...context, fbIndex });
-                fbIndex = (fbIndex + 1) % 2;  // Ping-pong framebuffers
             }
         }
 
@@ -737,6 +873,13 @@ export class GPUEffectEngine {
         if (this.positionBuffer) gl.deleteBuffer(this.positionBuffer);
         if (this.texCoordBuffer) gl.deleteBuffer(this.texCoordBuffer);
 
+        this.framebuffers.length = 0;
+        this.textures.length = 0;
+        this.positionBuffer = null;
+        this.texCoordBuffer = null;
+        this.targetWidth = 0;
+        this.targetHeight = 0;
+        this.uniformLocations = new WeakMap();
         this.initialized = false;
     }
 }

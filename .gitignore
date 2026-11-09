@@ -10,6 +10,11 @@ ML_Dataset/
 !client/package-lock.json
 !client/src/locales/**/*.json
 !scripts/sticker-library-src/manifest.json
+# R156's generated command catalogue. server/brain/capabilityCatalog.js
+# require()s this at load time, so a deploy without it crashes — the blanket
+# *.json rule above was quietly keeping it out of the repo. Kept in sync by
+# `node scripts/generate_capability_catalog.mjs --check`.
+!server/brain/commandCatalog.generated.json
 !scripts/fixtures/**/*.json
 !scripts/**/*.json
 ML_Models/
@@ -31,3 +36,6 @@ render-previews/
 # Generated edit previews and test renders (keep out of Railway source uploads).
 artifacts/
 
+
+# revideo render-worker build output (mirrors the ignored client/dist)
+render-worker/revideo/dist

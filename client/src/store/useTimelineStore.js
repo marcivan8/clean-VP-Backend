@@ -31,7 +31,7 @@ import { planStoryboard, KIND_PLAN } from '../motion/Storyboard.js';
 import { placementsFor } from '../motion/StoryboardBridge.js';
 import { framingPlan } from '../motion/StoryboardFraming.js';
 import { inspect as inspectStoryboard, repair as repairStoryboard, describe as describeQa } from '../motion/StoryboardQA.js';
-import { findNode, updateNode, removeNode as removeSceneNodeFrom, listNodes } from '../motion/SceneSchema.js';
+import { findNode, updateNode, removeNode as removeSceneNodeFrom, listNodes, wrapNodeInComposition } from '../motion/SceneSchema.js';
 import { deriveSpeakerCrop, deriveTrackingSegments } from '../motion/ObjectLayers.js';
 import { frameForPreset, splitSpeakerCrop, computeReframePlan, LAYOUT_PRESETS } from '../motion/LayoutPresets.js';
 import { TEMPLATE_KINDS, TEMPLATE_WIDTH_FRACTION, TEMPLATE_DEFAULTS, templateParams, templateSize } from '../motion/TemplateGraphics.js';
@@ -643,12 +643,27 @@ const useTimelineStore = create(
             // ==============================================================
             // ASSETS (UI-only state, not in timeline engine)
             // ==============================================================
-            addAssets: (newAssets) => set((state) => ({
-                assets: [...state.assets, ...newAssets],
-                // A reference video is never the active source video for the
-                // project. Preserve the real source when a chat reference arrives.
-                uploadedFile: newAssets.find(a => a.type === 'video' && a.assistantReference !== true)?.file || state.uploadedFile
-            })),
+            /**
+             * Insert assets, skipping any id already in the store.
+             *
+             * The import loop registers each asset as soon as it is created so
+             * that uploadProgress / uploadPhase updates have somewhere to land,
+             * then calls this once more with the whole batch. A blind concat
+             * would duplicate every file on that second call, and overwriting
+             * would undo the progress the async upload callbacks have written
+             * in the meantime — the store copy is the live one, so it wins.
+             */
+            addAssets: (newAssets) => set((state) => {
+                const incoming = (Array.isArray(newAssets) ? newAssets : []).filter(Boolean);
+                const known = new Set(state.assets.map(a => a?.id));
+                const fresh = incoming.filter(a => a.id && !known.has(a.id));
+                return {
+                    assets: fresh.length ? [...state.assets, ...fresh] : state.assets,
+                    // A reference video is never the active source video for the
+                    // project. Preserve the real source when a chat reference arrives.
+                    uploadedFile: incoming.find(a => a.type === 'video' && a.assistantReference !== true)?.file || state.uploadedFile
+                };
+            }),
             // ── FIX: Cascade-remove clips that reference the deleted asset ────────
             // Previously only removed the asset entry; clips remained on the timeline
             // so the asset would reappear from the autosave on the next page load.
@@ -2383,6 +2398,24 @@ const useTimelineStore = create(
 
             /** R95 PHASE 5 — hide or show one layer of a design. */
             setSceneNodeHidden: (sceneId, nodeId, hidden) => get().editSceneNode(sceneId, nodeId, { hidden: !!hidden }),
+
+            /** Wrap a designed layer in an editable same-frame nested composition. */
+            precomposeSceneNode: (sceneId, nodeId) => {
+                const scene = (get().scenes || {})[sceneId];
+                if (!scene) return { success: false, error: 'that design is not in this project' };
+                const next = wrapNodeInComposition(scene, nodeId);
+                if (next === scene) return { success: false, error: 'select a layer to precompose' };
+                let checked = { scene: next };
+                try {
+                    checked = autoFixScene(next, { safeZone: safeZoneForAspect(get().aspectRatio || '16:9'), assets: get().assets });
+                } catch (err) {
+                    console.error('[precomposeSceneNode] validation failed:', err);
+                }
+                const saved = checked.scene || next;
+                get()._saveHistory();
+                set(state => ({ scenes: { ...state.scenes, [sceneId]: saved } }));
+                return { success: true, ...get().applySceneToTimeline(sceneId, { skipHistory: true }) };
+            },
 
             /** R95 PHASE 5 — delete one layer of a design, and its clip. */
             deleteSceneNode: (sceneId, nodeId) => {

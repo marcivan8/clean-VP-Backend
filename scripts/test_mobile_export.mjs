@@ -42,8 +42,11 @@ console.log('✓ server sizes the frame from the project aspect ratio when no pl
 
     // The file has to exist before the tap.
     assert.match(code, /setReadyFile/, 'the export is prefetched into state');
-    assert.match(code, /fetchAsFile\(result\.url, result\.filename\)[\s\S]{0,200}setReadyFile/,
+    const prefetchEffect = code.slice(code.indexOf('useEffect(() => {'), code.indexOf('}, [open, result?.url, result?.filename])'));
+    assert.match(prefetchEffect, /fetchAsFile\(result\.url, result\.filename,\s*\{/,
         'the prefetch runs in an effect, not in the handler');
+    assert.match(prefetchEffect, /\.then\(\(f\) => \{[\s\S]*?setReadyFile\(f\)/,
+        'the fetched file is saved to state when the prefetch resolves');
 
     // Nothing may be awaited between entering save() and calling share().
     const body = code.slice(code.indexOf('const save = (mode) =>'));
@@ -97,8 +100,8 @@ console.log('✓ server sizes the frame from the project aspect ratio when no pl
     // The share control must not be tappable before the file exists: that path
     // awaits a download and iOS then refuses the share. This is the error Marc
     // saw, "Impossible d'ouvrir le menu de partage".
-    assert.match(done, /disabled=\{!readyFile\}/, 'share waits until the file is in hand');
-    assert.match(done, /readyFile \? t\('mobileExport\.saveToPhotos'\) : t\('mobileExport\.preparingFile'\)/,
+    assert.match(done, /disabled=\{!readyFile \|\| busy === 'share'\}/, 'share waits until the file is in hand');
+    assert.match(done, /!readyFile[\s\S]*?t\('mobileExport\.preparingFile'\)[\s\S]*?t\('mobileExport\.saveToPhotos'\)/,
         'and says it is preparing rather than failing');
 
     for (const lang of ['en', 'fr']) {

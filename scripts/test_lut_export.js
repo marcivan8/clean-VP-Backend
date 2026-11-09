@@ -179,7 +179,7 @@ section('6 · The PREVIEW is graded too, not just the export');
         (/const projectLUTId = useTimelineStore\(state => state\.projectLUTId\)/.test(player)
             && /const storedProjectLUTFilter = useTimelineStore\(state => state\.projectLUTFilter\)/.test(player)
             && /const projectLUTFilter = projectLUTId \? storedProjectLUTFilter : 'none';/.test(player)
-            && /const baseFilter = combinePreviewFilters\(transitionFilter\(tfx, projectLUTFilter\), effectFilter\)/.test(player)
+            && /const baseFilter = combinePreviewFilters\(transitionFilter\(tfx, projectLUTFilter, \{[^)]*\}\), effectFilter\)/.test(player)
             && /filter: baseFilter/.test(player)),
         'the filter was stored and never used — clicking a LUT changed nothing visible');
     check('the ungraded path stays neutral',

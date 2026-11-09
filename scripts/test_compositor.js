@@ -46,7 +46,7 @@ const read = (rel) => {
 // approach as test_motion_engine.js. Exercises the REAL source; a hand-copied
 // duplicate would pass while the shipped file was broken.
 function loadModules() {
-    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'MotionPresets', 'CaptionModel', 'ClipAdapter', 'Compositor'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'MotionPresets', 'MotionExpression', 'EffectTiming', 'CaptionModel', 'ClipAdapter', 'Compositor'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);
@@ -59,7 +59,7 @@ function loadModules() {
     }
     combined += '\nreturn { buildCompositionPlan, planIsNoOp, validateCompositionPlan, buildTimeMap,'
              + ' timelineToOutputTime, resolveCompositionAt, interpolateGeometry,'
-             + ' COMPOSITION_PLAN_VERSION, buildPreset };\n';
+             + ' COMPOSITION_PLAN_VERSION, getVisualTrackRoles, buildPreset };\n';
     // eslint-disable-next-line no-new-func
     return new Function(combined)();
 }
@@ -202,6 +202,30 @@ section('4 · Geometry: centre-percent in, NORMALISED top-left out');
     check('the overlay preserves its source aspect ratio',
         near((g.w * FRAME.width) / (g.h * FRAME.height), 400 / 400, 0.02),
         'a square source must not come out stretched by the frame aspect');
+    const anisotropic = M.buildCompositionPlan([
+        { id: 'v1', type: 'video', order: 0, clips: [vclip({ id: 'base', start: 0, duration: 10 })] },
+        { id: 'v2', type: 'video', order: 1, clips: [vclip({ id: 'stretch', start: 0, duration: 4, w: 400, h: 400,
+            extra: { x: 50, y: 50, scale: 1, scaleX: 2, scaleY: 0.5 } })] },
+    ], FRAME).overlays[0].geometry[0];
+    check('independent scaleX and scaleY change overlay width and height independently',
+        near(anisotropic.w, g.w * 2) && near(anisotropic.h, g.h * 0.5),
+        `base=${g.w}x${g.h}; anisotropic=${anisotropic.w}x${anisotropic.h}`);
+    const mirrored = M.buildCompositionPlan([
+        { id: 'v1', type: 'video', order: 0, clips: [vclip({ id: 'base', start: 0, duration: 10 })] },
+        { id: 'v2', type: 'video', order: 1, clips: [vclip({ id: 'mirror', start: 0, duration: 2, w: 400, h: 400,
+            extra: { x: 50, y: 50, scale: 1, scaleX: -1, scaleY: -0.5 } })] },
+    ], FRAME).overlays[0].geometry[0];
+    check('negative axis scales preserve positive centered bounds and carry mirror flags',
+        near(mirrored.w, g.w) && near(mirrored.h, g.h * 0.5)
+            && near(mirrored.x + mirrored.w / 2, 0.5) && mirrored.flipH === 1 && mirrored.flipV === 1,
+        JSON.stringify(mirrored));
+    const collapsed = M.buildCompositionPlan([
+        { id: 'v1', type: 'video', order: 0, clips: [vclip({ id: 'base', start: 0, duration: 10 })] },
+        { id: 'v2', type: 'video', order: 1, clips: [vclip({ id: 'collapsed', start: 0, duration: 2, w: 400, h: 400,
+            extra: { scale: 0 } })] },
+    ], FRAME).overlays[0].geometry[0];
+    check('zero scale resolves to a transparent collapsed overlay', collapsed.opacity === 0,
+        JSON.stringify(collapsed));
     check('a static overlay collapses to a single geometry sample',
         plan.overlays[0].geometry.length === 1 && plan.overlays[0].animated === false,
         'a static overlay should compile to a plain overlay=x=N:y=M, not an expression');
@@ -272,6 +296,26 @@ section('5 · Animated overlays sample into piecewise-linear geometry');
         M.interpolateGeometry(ov.geometry, 1e6).t === ov.geometry[ov.geometry.length - 1].t);
 }
 
+section('5b · Effect keyframes stay on project timeline time');
+{
+    const tracks = [
+        { id: 'v1', type: 'video', order: 0, clips: [vclip({ id: 'base', start: 0, duration: 8 })] },
+        { id: 'v2', type: 'video', order: 1, clips: [vclip({ id: 'effect-overlay', start: 2, duration: 4, extra: {
+            effects: [{ kind: 'brightness', params: { amount: 1 }, keyframes: { amount: [
+                { time: 2, value: 0.2 }, { time: 6, value: 1.8, easing: 'linear' },
+            ] } }],
+        } })] },
+    ];
+    const plan = M.buildCompositionPlan(tracks, FRAME);
+    const samples = plan.overlays[0].effects[0].samples.amount;
+    const start = samples.find(sample => near(sample.t, 2));
+    const middle = samples.find(sample => near(sample.t, 4));
+    const end = samples.find(sample => near(sample.t, 6));
+    check('the first effect keyframe aligns with the overlay start', !!start && near(start.value, 0.2));
+    check('a project-time keyframe interpolates at its timeline position', !!middle && near(middle.value, 1));
+    check('the last effect keyframe aligns with the overlay end', !!end && near(end.value, 1.8));
+}
+
 section('6 · The plan is safe to hand to a worker');
 {
     const tracks = [
@@ -295,6 +339,27 @@ section('6 · The plan is safe to hand to a worker');
     check('a zero-length overlay window is rejected',
         M.validateCompositionPlan({ ...plan,
             overlays: [{ ...plan.overlays[0], outputEnd: plan.overlays[0].outputStart }] }).valid === false);
+    check('non-finite overlay timing is rejected',
+        M.validateCompositionPlan({ ...plan,
+            overlays: [{ ...plan.overlays[0], outputEnd: Infinity }] }).valid === false);
+    check('invalid transform samples are rejected before render',
+        M.validateCompositionPlan({ ...plan,
+            overlays: [{ ...plan.overlays[0], geometry: [{ ...plan.overlays[0].geometry[0], rotation: null }] }] }).valid === false);
+    check('opacity outside the compositing range is rejected',
+        M.validateCompositionPlan({ ...plan,
+            overlays: [{ ...plan.overlays[0], geometry: [{ ...plan.overlays[0].geometry[0], opacity: 1.5 }] }] }).valid === false);
+    check('a zero-width ellipse matte is rejected before export compilation',
+        M.validateCompositionPlan({ ...plan, overlays: [{ ...plan.overlays[0], sceneMask: {
+            kind: 'shape', shape: 'ellipse', x: 0.2, y: 0.2, w: 0, h: 0.6,
+        } }] }).valid === false);
+    check('a matte extending beyond the overlay bounds is rejected',
+        M.validateCompositionPlan({ ...plan, overlays: [{ ...plan.overlays[0], sceneMask: {
+            kind: 'shape', shape: 'rectangle', x: 0.8, y: 0.1, w: 0.3, h: 0.5,
+        } }] }).valid === false);
+    check('omitted or null mask bounds fall back to the configured inset',
+        M.validateCompositionPlan({ ...plan, overlays: [{ ...plan.overlays[0], sceneMask: {
+            kind: 'shape', shape: 'rectangle', inset: 0.1, x: null, y: null, w: null, h: null,
+        } }] }).valid === true);
     check('duplicate zIndex is rejected',
         M.validateCompositionPlan({ ...plan,
             overlays: [{ ...plan.overlays[0], zIndex: 1 }, { ...plan.overlays[0], id: 'x', zIndex: 1 }] }).valid === false,
@@ -362,6 +427,30 @@ section('8 · R62 — the "overlay" graphics track composites without becoming t
     check('base selection is independent of array order',
         planSwapped.base.trackId === 'v1' && planSwapped.overlays[0].trackId === 'ov1');
 
+    const stackedVideoTracks = [
+        { id: 'main-video', type: 'video', order: 0, clips: [vclip({ id: 'main', start: 0, duration: 5 })] },
+        { id: 'broll-video', type: 'video', order: 1, clips: [vclip({ id: 'broll', start: 1, duration: 2 })] },
+        { id: 'graphics', type: 'overlay', order: 2, clips: [oclip({ id: 'title', start: 1, duration: 2 })] },
+    ];
+    const roles = M.getVisualTrackRoles(stackedVideoTracks);
+    const stackedPlan = M.buildCompositionPlan(stackedVideoTracks, FRAME);
+    check('shared visual track roles keep the first video as base and expose higher video tracks as layers',
+        roles.baseTrack?.id === 'main-video' && roles.overlayTracks.map(track => track.id).join(',') === 'broll-video,graphics');
+    check('export plan composites higher video tracks in front-to-back track order',
+        stackedPlan.base.trackId === 'main-video'
+        && stackedPlan.overlays.map(layer => layer.trackId).join(',') === 'broll-video,graphics');
+    const previewSource = read('client/src/components/Player/GraphicOverlay.jsx');
+    check('preview uses the shared base/layer track roles instead of filtering to explicit overlay tracks',
+        /getVisualTrackRoles\(tracks\)/.test(previewSource)
+        && !/tracks\.filter\(t\s*=>\s*t\.type\s*===\s*'overlay'\)/.test(previewSource));
+    check('preview keeps the source track type when rendering a video or image layer',
+        /trackType:\s*track\.type/.test(previewSource)
+        && /\(clip\.type\s*\|\|\s*trackType\)\s*===\s*'video'/.test(previewSource));
+    const playerSource = read('client/src/components/Player/VideoPlayer.jsx');
+    check('main preview prefers the shared base track and falls back only across a base gap',
+        /const \{ baseTrack \} = getVisualTrackRoles\(tracks\)/.test(playerSource)
+        && /\(videoTrack\?\.clips \|\| \[\]\)\.find\(isPlayableClip\)\s*\|\|\s*videoTracks\.filter/.test(playerSource));
+
     // A project with NO video track at all — an overlay-only project should
     // not crash; the "base" is simply empty rather than the overlay track
     // silently being promoted into that role.
@@ -373,6 +462,44 @@ section('8 · R62 — the "overlay" graphics track composites without becoming t
     check('...and the sticker itself is dropped rather than rendered against an empty timeline',
         planOverlayOnly.overlays.length === 0,
         'with no base segments there is no output-time position for it to occupy — this is unreachable from the app today (exportProcessor requires a video track before STEP 2.5 runs at all), pinned here so buildCompositionPlan stays safe as a standalone function');
+
+    const vectorPayload = {
+        kind: 'path', w: 400, h: 220,
+        pathData: 'M 20 110 L 380 110', fill: 'none', stroke: '#2785FF', strokeWidth: 14,
+        motion: { preset: 'draw', duration: 0.8, easing: 'easeOutCubic' },
+    };
+    const vectorPlan = M.buildCompositionPlan([
+        { id: 'v1', type: 'video', order: 0, clips: [vclip({ id: 'base', start: 0, duration: 5 })] },
+        { id: 'graphics', type: 'overlay', order: 1, clips: [{
+            id: 'vector-title', start: 1, duration: 2, vector: vectorPayload,
+        }] },
+    ], FRAME);
+    check('inline vector payload is preserved and normalized to a renderable vector source',
+        vectorPlan.overlays[0]?.source?.type === 'vector'
+        && JSON.stringify(vectorPlan.overlays[0]?.source?.vector) === JSON.stringify(vectorPayload));
+    check('vector-only composition plans pass client validation without a URL or asset id',
+        M.validateCompositionPlan(vectorPlan).valid,
+        M.validateCompositionPlan(vectorPlan).errors.join('; '));
+    check('ellipse vector sources supported by the renderer pass client validation',
+        M.validateCompositionPlan({ ...vectorPlan, overlays: [{ ...vectorPlan.overlays[0], source: { type: 'vector', vector: { kind: 'ellipse', w: 120, h: 72 } } }] }).valid);
+    check('malformed inline vector payloads are rejected by client validation',
+        !M.validateCompositionPlan({ ...vectorPlan, overlays: [{ ...vectorPlan.overlays[0], source: { type: 'vector', vector: { kind: 'path', pathData: '' } } }] }).valid);
+
+    const effectsPlan = M.buildCompositionPlan([
+        { id: 'v1', type: 'video', order: 0, clips: [vclip({ id: 'base', start: 0, duration: 10 })] },
+        { id: 'v2', type: 'video', order: 1, clips: [vclip({
+            id: 'fx-overlay', start: 0, duration: 2,
+            extra: { effects: [{ type: 'blur_gaussian', params: { radius: { value: 4 } }, enabled: true, startTime: 0.25, endTime: 1.5,
+                keyframes: { radius: [{ time: 0, value: 2 }, { time: 1, value: 8, easing: 'ease-in-out' }] } }] },
+        })] },
+    ], FRAME);
+    check('overlay footage effects accept EffectRegistry type/value params in the export plan',
+        effectsPlan.overlays[0]?.effects?.[0]?.kind === 'blur_gaussian'
+        && effectsPlan.overlays[0]?.effects?.[0]?.params?.radius === 4
+        && effectsPlan.overlays[0]?.effects?.[0]?.startTime === 0.25
+        && effectsPlan.overlays[0]?.effects?.[0]?.endTime === 1.5
+        && effectsPlan.overlays[0]?.effects?.[0]?.keyframes?.radius?.length === 2
+        && effectsPlan.overlays[0]?.effects?.[0]?.samples?.radius?.length > 1);
 }
 
 console.log(`\n${'─'.repeat(60)}`);

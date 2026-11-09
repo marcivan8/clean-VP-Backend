@@ -57,6 +57,7 @@
 
 import { clipToMotionLayer } from './ClipAdapter.js';
 import { resolveMotionAt } from './MotionResolver.js';
+import { resolveEffectParameter } from './EffectTiming.js';
 import { LAYER_KINDS } from './MotionSchema.js';
 
 // Same test as LayoutPresets.hasLayoutFrame (R88). Inlined rather than
@@ -71,7 +72,8 @@ function hasLayoutFrame(clip) {
 }
 
 /** Bump when the plan shape changes so a worker can reject one it can't execute. */
-export const COMPOSITION_PLAN_VERSION = 1;
+export const COMPOSITION_PLAN_VERSION = 7;
+const hasNumericValue = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
 
 /** How finely animated overlay geometry is sampled, in seconds. */
 // Exported (R63) so CaptionCompiler.js samples animated caption geometry at
@@ -119,6 +121,22 @@ function sortedVisualTracks(tracks) {
         }))
         .sort((a, b) => (a.priority - b.priority) || (a.order - b.order))
         .map(e => e.track);
+}
+
+/**
+ * Resolve the visual track roles shared by the editor preview and export.
+ * The first video/image track is the base; every higher visual track is a
+ * composited layer. Keeping this decision shared prevents a second video track
+ * from appearing as a cut in one renderer and a picture-in-picture layer in
+ * the other.
+ */
+export function getVisualTrackRoles(tracks) {
+    const visual = sortedVisualTracks(tracks);
+    const baseTrack = visual.find(track => track.type === 'video' || track.type === 'image') || null;
+    return {
+        baseTrack,
+        overlayTracks: visual.filter(track => track !== baseTrack),
+    };
 }
 
 /**
@@ -228,9 +246,14 @@ function resolveGeometry(layer, timelineTime, frame) {
     // a track is visible immediately rather than filling the screen and looking
     // broken. An explicit clip scale multiplies this.
     const DEFAULT_WIDTH_FRACTION = 0.25;
-    const wFrac = DEFAULT_WIDTH_FRACTION * (Number.isFinite(m.scale) ? m.scale : 1);
+    const scaleX = (Number.isFinite(m.scale) ? m.scale : 1)
+        * (Number.isFinite(m.scaleX) ? m.scaleX : 1);
+    const scaleY = (Number.isFinite(m.scale) ? m.scale : 1)
+        * (Number.isFinite(m.scaleY) ? m.scaleY : 1);
+    const wFrac = DEFAULT_WIDTH_FRACTION * Math.abs(scaleX);
     // Preserve the source's own aspect: h_px = w_px / srcAspect.
-    const hFrac = srcAspect > 0 ? wFrac * (frameAspect / srcAspect) : wFrac;
+    const hFrac = (srcAspect > 0 ? DEFAULT_WIDTH_FRACTION * (frameAspect / srcAspect) : DEFAULT_WIDTH_FRACTION)
+        * Math.abs(scaleY);
 
     const centreX = m.x / 100;
     const centreY = m.y / 100;
@@ -242,8 +265,11 @@ function resolveGeometry(layer, timelineTime, frame) {
         x: centreX - wFrac / 2,
         y: centreY - hFrac / 2,
         rotation: Number(m.rotation) || 0,
-        opacity: Number.isFinite(m.opacity) ? m.opacity : 1,
+        opacity: Math.abs(scaleX) < 1e-8 || Math.abs(scaleY) < 1e-8
+            ? 0 : (Number.isFinite(m.opacity) ? m.opacity : 1),
         blur: Number(m.blur) || 0,
+        flipH: scaleX < 0 ? 1 : 0,
+        flipV: scaleY < 0 ? 1 : 0,
     };
 }
 
@@ -276,6 +302,8 @@ function roundGeometry(g) {
         rotation: Math.round(g.rotation * 1000) / 1000,
         opacity: Math.round(g.opacity * 1000) / 1000,
         blur: Math.round(g.blur * 1000) / 1000,
+        flipH: g.flipH ? 1 : 0,
+        flipV: g.flipV ? 1 : 0,
     };
 }
 
@@ -285,7 +313,8 @@ function sameGeometry(a, b) {
         && Math.abs(a.w - b.w) < 1e-5 && Math.abs(a.h - b.h) < 1e-5
         && Math.abs(a.rotation - b.rotation) < 1e-3
         && Math.abs(a.opacity - b.opacity) < 2e-3
-        && Math.abs(a.blur - b.blur) < 1e-2;
+        && Math.abs(a.blur - b.blur) < 1e-2
+        && a.flipH === b.flipH && a.flipV === b.flipV;
 }
 
 /**
@@ -320,6 +349,159 @@ function sampleGeometry(layer, frame, timeMap) {
     return simplifySamples(samples);
 }
 
+function sampleCompositionOpacity(group, timeMap) {
+    const animations = Array.isArray(group?.opacityAnimations) ? group.opacityAnimations : [];
+    const expression = typeof group?.opacityExpression === 'string' ? group.opacityExpression : null;
+    if (!animations.length && !expression) return null;
+    const start = Number(group.start) || 0;
+    const duration = Math.max(0, Number(group.duration) || 0);
+    const layer = { startTime: start, duration, opacity: 1, animations, expressions: expression ? { opacity: expression } : {} };
+    const timelineSamples = new Set();
+    const segments = timeMap?.segments || [];
+    for (const segment of segments) {
+        const from = Number(segment.timelineStart) || 0;
+        const to = Number(segment.timelineEnd) || from;
+        for (let t = from; t < to; t += GEOMETRY_SAMPLE_STEP) timelineSamples.add(Number(t.toFixed(6)));
+        timelineSamples.add(to);
+        for (const animation of animations) {
+            const animStart = animation.anchor === 'out'
+                ? Math.max(0, duration - (Number(animation.duration) || 0) - (Number(animation.startTime) || 0))
+                : Number(animation.startTime) || 0;
+            for (const keyframe of animation.keyframes || []) {
+                const t = start + animStart + (Number(keyframe?.time) || 0);
+                if (t >= from && t <= to) timelineSamples.add(Number(t.toFixed(6)));
+            }
+        }
+    }
+    const samples = [...timelineSamples].sort((a, b) => a - b).map(t => ({
+        t: Number(timelineToOutputTime(timeMap, t).toFixed(4)),
+        value: Number(resolveMotionAt(layer, t).opacity.toFixed(5)),
+    })).filter((sample, index, all) => index === 0 || sample.t > all[index - 1].t);
+    return samples.length ? samples : [{ t: 0, value: 1 }];
+}
+
+function reduceEffectSampleRows(rows, keys, protectedTimes, max = 60) {
+    if (!Array.isArray(rows) || rows.length <= max) return rows;
+    const retained = new Set([0, rows.length - 1]);
+    for (const time of protectedTimes) {
+        const index = rows.findIndex(row => Math.abs(row.localTime - time) < 1e-6);
+        if (index >= 0) retained.add(index);
+    }
+    // Do not discard authored keyframes just to satisfy the expression cap.
+    // The worker validator will refuse this over-budget track explicitly.
+    if (retained.size > max) return [...retained].sort((a, b) => a - b).map(index => rows[index]);
+    const ranges = Object.fromEntries(keys.map(key => {
+        const values = rows.map(row => row.values[key]).filter(Number.isFinite);
+        let low = Infinity, high = -Infinity;
+        for (const value of values) { low = Math.min(low, value); high = Math.max(high, value); }
+        return [key, Math.max(1e-9, high - low)];
+    }));
+    const tolerance = 0.0015;
+    while (retained.size < max) {
+        const anchors = [...retained].sort((a, b) => a - b);
+        let worst = tolerance;
+        let worstIndex = -1;
+        for (let span = 0; span < anchors.length - 1; span++) {
+            const lo = anchors[span], hi = anchors[span + 1];
+            const a = rows[lo], b = rows[hi];
+            const dt = b.localTime - a.localTime;
+            for (let index = lo + 1; index < hi; index++) {
+                const point = rows[index];
+                const progress = dt > 0 ? (point.localTime - a.localTime) / dt : 0;
+                let deviation = 0;
+                for (const key of keys) {
+                    const actual = point.values[key], from = a.values[key], to = b.values[key];
+                    if (![actual, from, to].every(Number.isFinite)) continue;
+                    deviation = Math.max(deviation, Math.abs(actual - (from + (to - from) * progress)) / ranges[key]);
+                }
+                if (deviation > worst) { worst = deviation; worstIndex = index; }
+            }
+        }
+        if (worstIndex < 0) break;
+        retained.add(worstIndex);
+    }
+    return [...retained].sort((a, b) => a - b).map(index => rows[index]);
+}
+
+/** Sample keyed effect parameters onto the same output-time clock as geometry. */
+function sampleEffectTracks(effects, layer, timeMap, { clipLocalOutputTime = false } = {}) {
+    return (Array.isArray(effects) ? effects : []).map((effect, effectIndex) => {
+        // Empty inputs are the editor's representation of an unset boundary.
+        // Number('') is 0, so coercing before checking emptiness accidentally
+        // turned a full-clip effect into a zero-length window during export.
+        const hasBoundary = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+        const hasStart = hasBoundary(effect?.startTime);
+        const hasEnd = hasBoundary(effect?.endTime);
+        const outputWindows = (hasStart || hasEnd) ? (timeMap?.segments || []).flatMap(segment => {
+            const timelineStart = Math.max(
+                Number(layer.startTime) || 0,
+                hasStart ? Number(effect.startTime) : Number(layer.startTime) || 0,
+                Number(segment.timelineStart) || 0,
+            );
+            const timelineEnd = Math.min(
+                (Number(layer.startTime) || 0) + (Number(layer.duration) || 0),
+                hasEnd ? Number(effect.endTime) : (Number(layer.startTime) || 0) + (Number(layer.duration) || 0),
+                Number(segment.timelineEnd) || 0,
+            );
+            if (!(timelineEnd > timelineStart)) return [];
+            return [{
+                // Timeline clip duration is already its output duration. Speed
+                // changes which source frames play inside that window; it does
+                // not compress the clip's authored timeline coordinates again.
+                start: Number((Number(segment.outputStart) + (timelineStart - Number(segment.timelineStart))).toFixed(4)),
+                end: Number((Number(segment.outputStart) + (timelineEnd - Number(segment.timelineStart))).toFixed(4)),
+            }];
+        }) : undefined;
+        const params = effect?.params || {};
+        const tracks = Object.fromEntries(Object.entries(params).flatMap(([key, raw]) => {
+            const track = effect?.keyframes?.[key] || raw?.keyframes;
+            return Array.isArray(track) && track.length ? [[key, track]] : [];
+        }));
+        for (const [key, track] of Object.entries(effect?.keyframes || {})) {
+            if (Array.isArray(track) && track.length && !tracks[key]) tracks[key] = track;
+        }
+        for (const [key, expression] of Object.entries(effect?.expressions || {})) {
+            if (typeof expression === 'string' && expression.trim() && !tracks[key]) tracks[key] = [];
+        }
+        for (const [key, raw] of Object.entries(params)) {
+            if (typeof raw?.expression === 'string' && raw.expression.trim() && !tracks[key]) tracks[key] = [];
+        }
+        if (!Object.keys(tracks).length) return outputWindows ? { ...effect, outputWindows } : effect;
+
+        const duration = Math.max(0, Number(layer.duration) || 0);
+        const localTimes = new Set([0, duration]);
+        const protectedTimes = new Set([0, duration]);
+        for (let at = 0.1; at < duration; at += 0.1) localTimes.add(Number(at.toFixed(4)));
+        for (const track of Object.values(tracks)) for (const point of track) {
+            // Effect controls author keyframes at the project playhead, so
+            // their times are timeline seconds (unlike clip-local motion
+            // preset tracks). Convert authored times to this local sample grid.
+            const at = Number(point?.time) - (Number(layer.startTime) || 0);
+            if (Number.isFinite(at) && at >= 0 && at <= duration) {
+                localTimes.add(at);
+                protectedTimes.add(at);
+            }
+        }
+        const keys = Object.keys(tracks);
+        const rows = [...localTimes].sort((a, b) => a - b).map(localTime => ({
+            localTime,
+            t: Number((clipLocalOutputTime ? localTime : timelineToOutputTime(timeMap, layer.startTime + localTime)).toFixed(4)),
+            values: Object.fromEntries(keys.map(key => [key,
+                Number(resolveEffectParameter(effect, key, Number(params[key]?.value ?? params[key]) || 0, (Number(layer.startTime) || 0) + localTime, {
+                    clipStart: Number(layer.startTime) || 0,
+                    clipDuration: duration,
+                })),
+            ])),
+        }));
+        const reducedRows = reduceEffectSampleRows(rows, keys, protectedTimes, 60);
+        const samples = Object.fromEntries(keys.map(key => [key,
+            reducedRows.map(row => ({ t: row.t, value: row.values[key] }))
+                .filter(point => Number.isFinite(point.t) && Number.isFinite(point.value)),
+        ]));
+        return { ...effect, ...(outputWindows ? { outputWindows } : {}), samples, sourceIndex: effectIndex };
+    });
+}
+
 /**
  * Drop samples that sit on the straight line between their neighbours.
  *
@@ -333,7 +515,7 @@ function sampleGeometry(layer, frame, timeMap) {
 // samples with the SAME Douglas-Peucker logic that fixed the curve-flattening
 // bug here (see the comment below) — a second copy could silently regress
 // independently of this one.
-export function simplifySamples(samples, tolerance = 0.0015, keys = ['x', 'y', 'w', 'h', 'opacity', 'rotation']) {
+export function simplifySamples(samples, tolerance = 0.0015, keys = ['x', 'y', 'w', 'h', 'opacity', 'rotation', 'flipH', 'flipV']) {
     if (!Array.isArray(samples) || samples.length <= 2) return samples;
 
     const KEYS = keys;
@@ -401,7 +583,7 @@ export function buildCompositionPlan(tracks, opts = {}) {
     };
     const fps = Number(opts.fps) > 0 ? Number(opts.fps) : 30;
 
-    const visual = sortedVisualTracks(tracks);
+    const { baseTrack, overlayTracks } = getVisualTrackRoles(tracks);
     // The base must be an actual video/image track — never 'overlay' (R62).
     // `sortedVisualTracks` already puts overlay tracks last via
     // VISUAL_TYPE_PRIORITY, which makes `visual[0]` correct in every case that
@@ -410,12 +592,11 @@ export function buildCompositionPlan(tracks, opts = {}) {
     // the same guarantee: even a plan built for a video-less/overlay-only
     // timeline (unreachable in the app today, but not unreachable as an input
     // to this pure function) cannot promote a sticker into the base role.
-    const baseTrack = visual.find(t => t.type === 'video' || t.type === 'image') || null;
-    const overlayTracks = visual.filter(t => t !== baseTrack);
-
     const timeMap = buildTimeMap(baseTrack?.clips || []);
 
     const overlays = [];
+    const compositionOpacityCache = new Map();
+    const compositionEffectCache = new Map();
     // zIndex counts up from 1: the base track is 0 and is not in this list.
     let zIndex = 1;
 
@@ -423,7 +604,15 @@ export function buildCompositionPlan(tracks, opts = {}) {
         for (const clip of (track.clips || [])) {
             if (!clip || !(Number(clip.duration) > 0)) continue;
 
-            const layer = clipToMotionLayer(clip, track);
+            const groupOpacity = (clip.compositionStack || []).reduce((product, group) =>
+                product * Math.max(0, Math.min(1, Number(group?.opacity ?? 1))), 1);
+            // Scene flattening stores the legacy aggregate opacity on each
+            // child. Remove static container opacity from the child sample;
+            // the compiler applies it once after isolating the group buffer.
+            const renderClip = groupOpacity > 1e-6 && groupOpacity < 0.999999
+                ? { ...clip, opacity: Number(clip.opacity ?? 1) / groupOpacity }
+                : clip;
+            const layer = clipToMotionLayer(renderClip, track);
             if (!layer) continue;
 
             // Carry through source dimensions when the app already knows them —
@@ -464,15 +653,47 @@ export function buildCompositionPlan(tracks, opts = {}) {
                 id: `ov-${clip.id}`,
                 clipId: clip.id,
                 trackId: track.id,
+                ...(clip.sceneId ? { sceneId: clip.sceneId } : {}),
+                ...(clip.sceneNodeId ? { sceneNodeId: clip.sceneNodeId } : {}),
+                ...(Array.isArray(clip.compositionStack) && clip.compositionStack.length
+                    ? { compositionStack: clip.compositionStack.map(group => {
+                        let opacitySamples = compositionOpacityCache.get(group.id);
+                        if (opacitySamples === undefined) {
+                            opacitySamples = sampleCompositionOpacity(group, timeMap);
+                            compositionOpacityCache.set(group.id, opacitySamples);
+                        }
+                        const { opacityAnimations: _opacityAnimations, opacityExpression: _opacityExpression, ...serializableGroup } = group;
+                        let sampledEffects = compositionEffectCache.get(group.id);
+                        if (sampledEffects === undefined) {
+                            sampledEffects = sampleEffectTracks(group.effects, {
+                                startTime: Number(group.start) || 0,
+                                duration: Math.max(0, Number(group.duration) || 0),
+                            }, timeMap);
+                            compositionEffectCache.set(group.id, sampledEffects);
+                        }
+                        return {
+                            ...serializableGroup,
+                            effects: sampledEffects.map(effect => {
+                                const { keyframes: _keyframes, expressions: _expressions, ...serializableEffect } = effect;
+                                return serializableEffect;
+                            }),
+                            ...(opacitySamples ? { opacitySamples } : {}),
+                        };
+                    }) }
+                    : {}),
                 zIndex: zIndex++,
                 kind: layer.kind,
                 source: {
                     url: clip.proxyUrl || clip.url || clip.sourceUrl || null,
                     assetId: clip.assetId || null,
-                    type: clip.type || track.type,
+                    type: clip.vector ? 'vector' : (clip.type || track.type),
                     // R89: a template is drawn by the worker from this
                     // description (TemplateRenderer), not fetched.
                     ...(clip.type === 'template' && clip.template ? { template: clip.template } : {}),
+                    // Vector clips are authored as serializable drawing data,
+                    // not media URLs. Preserve that payload for the export
+                    // compositor's PNG-sequence renderer.
+                    ...(clip.vector ? { vector: clip.vector } : {}),
                 },
                 // Where in the SOURCE file this clip starts, and how fast it runs.
                 sourceOffset: Number(clip.offset) || 0,
@@ -491,9 +712,64 @@ export function buildCompositionPlan(tracks, opts = {}) {
                 // dx/dy/blur by the actual render resolution, so this stays
                 // in CSS-pixel-ish units consistent with the preview.
                 ...(clip.shadow ? { shadow: normalizeShadow(clip.shadow) } : {}),
+                ...(clip.motionBlur?.enabled ? { motionBlur: {
+                    enabled: true,
+                    samples: Math.max(2, Math.min(15, Math.round(Number(clip.motionBlur.samples) || 5))),
+                    shutterAngle: Math.max(0, Math.min(360, Number.isFinite(Number(clip.motionBlur.shutterAngle)) ? Number(clip.motionBlur.shutterAngle) : 180)),
+                    frameRate: Math.max(1, Math.min(120, Number(clip.motionBlur.frameRate) || 30)),
+                } } : {}),
+                ...(clip.blendMode && clip.blendMode !== 'source-over' ? { blendMode: clip.blendMode } : {}),
+                ...(Array.isArray(clip.effects) && clip.effects.length ? { effects: sampleEffectTracks(clip.effects, layer, timeMap).map(effect => {
+                    const { type: _legacyType, ...preserved } = effect;
+                    return {
+                        ...preserved,
+                        kind: effect.kind || effect.type,
+                        params: Object.fromEntries(Object.entries(effect.params || {}).map(([key, value]) => [key,
+                            value && typeof value === 'object' && 'value' in value
+                                ? (Array.isArray(value.keyframes) ? { ...value, value: value.value } : value.value)
+                                : value,
+                        ])),
+                        // Keep the authoring state in the plan. Preview skips
+                        // disabled effects; dropping this flag made export apply them.
+                        ...(effect.enabled !== undefined ? { enabled: effect.enabled } : {}),
+                    };
+                }) } : {}),
+                ...(clip.sceneMask ? { sceneMask: { ...clip.sceneMask } } : {}),
             });
         }
     }
+
+    // Resolve scene-node mattes only after every visible overlay has been
+    // collected. The matte node travels as a real source layer through export
+    // but is not drawn as a visible layer by default, matching track-matte
+    // behavior in compositing applications.
+    const sceneNodeOverlays = new Map();
+    for (const overlay of overlays) {
+        if (overlay.sceneId && overlay.sceneNodeId) {
+            sceneNodeOverlays.set(`${overlay.sceneId}:${overlay.sceneNodeId}`, overlay);
+        }
+    }
+    for (const overlay of overlays) {
+        if (overlay.sceneMask?.kind !== 'layer') continue;
+        const matte = sceneNodeOverlays.get(`${overlay.sceneId}:${overlay.sceneMask.nodeId}`);
+        overlay.sceneMask = {
+            ...overlay.sceneMask,
+            sourceOverlayId: matte?.id || null,
+        };
+        if (matte && matte.id !== overlay.id) matte.matteOnly = true;
+    }
+
+    const baseEffectsByClip = (baseTrack?.clips || []).flatMap(clip => {
+        const authored = Array.isArray(clip.effects) ? clip.effects : [];
+        if (!authored.some(effect => Object.keys(effect?.expressions || {}).length
+            || Object.values(effect?.params || {}).some(param => typeof param?.expression === 'string' && param.expression.trim()))) return [];
+        const layer = clipToMotionLayer(clip, baseTrack);
+        if (!layer) return [];
+        const effects = sampleEffectTracks(authored, layer, timeMap, { clipLocalOutputTime: true })
+            .filter(effect => Object.keys(effect?.expressions || {}).length
+                || Object.values(effect?.params || {}).some(param => typeof param?.expression === 'string' && param.expression.trim()));
+        return effects.length ? [{ clipId: clip.id, effects }] : [];
+    });
 
     return {
         version: COMPOSITION_PLAN_VERSION,
@@ -503,19 +779,20 @@ export function buildCompositionPlan(tracks, opts = {}) {
             trackId: baseTrack?.id || null,
             segments: timeMap.segments,
             totalDuration: Number(timeMap.totalDuration.toFixed(4)),
+            ...(baseEffectsByClip.length ? { effectsByClip: baseEffectsByClip } : {}),
         },
         overlays,
     };
 }
 
 /**
- * True when the plan changes nothing and the overlay pass can be skipped
- * entirely. This is the non-breaking guarantee, made checkable: for every
- * project that renders correctly today, this returns true and the export runs
- * byte-for-byte as it did before.
+ * True when there are neither overlays nor sampled base-footage expressions.
+ * Ordinary projects still skip the plan; procedural base effects retain it so
+ * their samples reach the worker even without any overlay layers.
  */
 export function planIsNoOp(plan) {
-    return !plan || !Array.isArray(plan.overlays) || plan.overlays.length === 0;
+    return !plan || ((!Array.isArray(plan.overlays) || plan.overlays.length === 0)
+        && !(plan.base?.effectsByClip || []).length);
 }
 
 /**
@@ -524,32 +801,179 @@ export function planIsNoOp(plan) {
  * rather than failing the export — an ungraded/unlayered video is a far better
  * outcome than no video, which is the same fail-open rule the LUT lookup uses.
  */
+function validClientIsolatedGroupEffect(effect) {
+    if (effect?.enabled === false) return true;
+    const kind = effect?.kind || effect?.type;
+    if (!['blur', 'blur_gaussian', 'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate', 'color_grade', 'glow'].includes(kind)
+        || effect.keyframes || effect.expressions) return false;
+    if (effect.samples == null) return effect.outputWindows == null;
+    if (kind === 'blur' || kind === 'blur_gaussian') {
+        const key = effect.samples?.radius ? 'radius' : 'amount';
+        const points = effect.samples?.[key];
+        return Array.isArray(points) && points.length > 0 && points.length <= 60
+            && !Object.keys(effect.samples || {}).some(sampleKey => sampleKey !== key)
+            && !points.some((point, index) => !point || !hasNumericValue(point.t) || Number(point.t) < 0
+                || !hasNumericValue(point.value) || Number(point.value) < 0 || Number(point.value) > 50
+                || (index > 0 && Number(point.t) <= Number(points[index - 1]?.t)))
+            && (effect.outputWindows == null || (Array.isArray(effect.outputWindows) && !effect.outputWindows.some(effectWindow =>
+                !effectWindow || !hasNumericValue(effectWindow.start) || !hasNumericValue(effectWindow.end) || Number(effectWindow.start) < 0 || Number(effectWindow.end) <= Number(effectWindow.start))));
+    }
+    if (kind === 'hue' || kind === 'hue-rotate') {
+        const key = effect.samples?.degrees ? 'degrees' : 'amount';
+        const points = effect.samples?.[key];
+        return Array.isArray(points) && points.length > 0 && points.length <= 60
+            && !Object.keys(effect.samples || {}).some(sampleKey => sampleKey !== key)
+            && !points.some((point, pointIndex) => !point || !hasNumericValue(point.t) || Number(point.t) < 0
+                || !hasNumericValue(point.value) || Number(point.value) < -360 || Number(point.value) > 360
+                || (pointIndex > 0 && Number(point.t) <= Number(points[pointIndex - 1]?.t)))
+            && (effect.outputWindows == null || (Array.isArray(effect.outputWindows) && !effect.outputWindows.some(effectWindow =>
+                !effectWindow || !hasNumericValue(effectWindow.start) || !hasNumericValue(effectWindow.end) || Number(effectWindow.start) < 0 || Number(effectWindow.end) <= Number(effectWindow.start))));
+    }
+    if (kind === 'glow') {
+        const limits = { threshold: [0, 1], intensity: [0, 3], radius: [0, 50] };
+        const samples = effect.samples;
+        return !!samples && Object.keys(samples).length > 0 && !Object.keys(samples).some(key => !limits[key])
+            && Object.entries(samples).every(([key, points]) => Array.isArray(points) && points.length > 0 && points.length <= 60
+                && !points.some((point, index) => !point || !hasNumericValue(point.t) || Number(point.t) < 0
+                    || !hasNumericValue(point.value) || Number(point.value) < limits[key][0] || Number(point.value) > limits[key][1]
+                    || (index > 0 && Number(point.t) <= Number(points[index - 1]?.t))))
+            && (effect.outputWindows == null || (Array.isArray(effect.outputWindows) && !effect.outputWindows.some(effectWindow =>
+                !effectWindow || !hasNumericValue(effectWindow.start) || !hasNumericValue(effectWindow.end) || Number(effectWindow.start) < 0 || Number(effectWindow.end) <= Number(effectWindow.start))));
+    }
+    if (kind === 'color_grade') {
+        const keys = ['brightness', 'contrast', 'saturation'];
+        const samples = effect.samples;
+        return !!samples && Object.keys(samples).length > 0 && !Object.keys(samples).some(sampleKey => !keys.includes(sampleKey))
+            && Object.entries(samples).every(([_key, points]) => Array.isArray(points) && points.length > 0 && points.length <= 60
+                && !points.some((point, pointIndex) => !point || !hasNumericValue(point.t) || Number(point.t) < 0
+                    || !hasNumericValue(point.value) || Number(point.value) < 0 || Number(point.value) > 200
+                    || (pointIndex > 0 && Number(point.t) <= Number(points[pointIndex - 1]?.t))))
+            && (effect.outputWindows == null || (Array.isArray(effect.outputWindows) && !effect.outputWindows.some(effectWindow =>
+                !effectWindow || !hasNumericValue(effectWindow.start) || !hasNumericValue(effectWindow.end) || Number(effectWindow.start) < 0 || Number(effectWindow.end) <= Number(effectWindow.start))));
+    }
+    const points = effect.samples?.amount;
+    return ['brightness', 'contrast', 'saturation', 'saturate'].includes(kind)
+        && Array.isArray(points) && points.length > 0 && points.length <= 60
+        && !Object.keys(effect.samples || {}).some(key => key !== 'amount')
+        && !points.some((point, pointIndex) => !point || !hasNumericValue(point.t) || Number(point.t) < 0
+            || !hasNumericValue(point.value) || Number(point.value) < 0 || Number(point.value) > (kind === 'saturation' || kind === 'saturate' ? 5 : 4)
+            || (pointIndex > 0 && Number(point.t) <= Number(points[pointIndex - 1]?.t)))
+        && (effect.outputWindows == null || (Array.isArray(effect.outputWindows) && !effect.outputWindows.some(effectWindow =>
+            !effectWindow || !hasNumericValue(effectWindow.start) || !hasNumericValue(effectWindow.end) || Number(effectWindow.start) < 0 || Number(effectWindow.end) <= Number(effectWindow.start))));
+}
+
+function validClientEffectSamples(effect) {
+    if (effect?.samples == null) return true;
+    const samples = effect.samples;
+    if (!samples || typeof samples !== 'object' || Array.isArray(samples)) return false;
+    const entries = Object.entries(samples);
+    if (!entries.length || entries.length > 16) return false;
+    if (!entries.every(([, points]) => Array.isArray(points) && points.length > 0 && points.length <= 60
+        && !points.some((point, index) => !point || !hasNumericValue(point.t) || Number(point.t) < 0
+            || !hasNumericValue(point.value) || (index > 0 && Number(point.t) <= Number(points[index - 1]?.t))))) return false;
+    return effect.outputWindows == null || (Array.isArray(effect.outputWindows) && !effect.outputWindows.some(effectWindow =>
+        !effectWindow || !hasNumericValue(effectWindow.start) || !hasNumericValue(effectWindow.end)
+        || Number(effectWindow.start) < 0 || Number(effectWindow.end) <= Number(effectWindow.start)));
+}
+
 export function validateCompositionPlan(plan) {
     const errors = [];
     if (!plan || typeof plan !== 'object') return { valid: false, errors: ['plan must be an object'] };
     if (plan.version !== COMPOSITION_PLAN_VERSION) {
         errors.push(`unsupported plan version ${plan.version} (expected ${COMPOSITION_PLAN_VERSION})`);
     }
-    if (!plan.frame || !(plan.frame.width > 0) || !(plan.frame.height > 0)) {
-        errors.push('plan.frame must have positive width and height');
+    if (!plan.frame || !Number.isFinite(Number(plan.frame.width)) || !Number.isFinite(Number(plan.frame.height))
+        || Number(plan.frame.width) <= 0 || Number(plan.frame.height) <= 0) {
+        errors.push('plan.frame must have finite positive width and height');
     }
     if (!Array.isArray(plan.overlays)) errors.push('plan.overlays must be an array');
 
     (plan.overlays || []).forEach((ov, i) => {
-        if (!ov.source?.url && !ov.source?.assetId) {
-            errors.push(`overlays[${i}]: has neither a source url nor an assetId`);
+        const vector = ov.source?.vector;
+        const vectorKinds = new Set(['rect', 'circle', 'ellipse', 'capsule', 'polygon', 'star', 'arrow', 'path']);
+        const inlineVector = ov.source?.type === 'vector' && vector && typeof vector === 'object'
+            && vectorKinds.has(String(vector.kind || 'rect'))
+            && (!('w' in vector) || (Number.isFinite(Number(vector.w)) && Number(vector.w) > 0 && Number(vector.w) <= 10000))
+            && (!('h' in vector) || (Number.isFinite(Number(vector.h)) && Number(vector.h) > 0 && Number(vector.h) <= 10000))
+            && (vector.kind !== 'path' || (typeof vector.pathData === 'string' && vector.pathData.trim().length > 0));
+        if (!ov.source?.url && !ov.source?.assetId && !inlineVector) {
+            errors.push(`overlays[${i}]: has no resolvable media or inline vector source`);
         }
-        if (!(ov.outputEnd > ov.outputStart)) {
-            errors.push(`overlays[${i}]: outputEnd must be greater than outputStart`);
+        if (!hasNumericValue(ov.outputStart) || !hasNumericValue(ov.outputEnd)
+            || Number(ov.outputStart) < 0 || !(ov.outputEnd > ov.outputStart)) {
+            errors.push(`overlays[${i}]: output window must be finite, non-negative, and positive in duration`);
+        }
+        if (ov.blendMode && !['source-over', 'multiply', 'screen', 'darken', 'lighten', 'difference', 'addition', 'overlay', 'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'].includes(ov.blendMode)) {
+            errors.push(`overlays[${i}]: unsupported blend mode ${ov.blendMode}`);
+        }
+        if (ov.effects != null && (!Array.isArray(ov.effects) || ov.effects.some(effect => !validClientEffectSamples(effect)))) {
+            errors.push(`overlays[${i}]: effect samples are malformed or exceed the render budget`);
+        }
+        if (ov.compositionStack != null && (!Array.isArray(ov.compositionStack) || ov.compositionStack.some(group =>
+            !group || typeof group.id !== 'string' || !group.id || !hasNumericValue(group.opacity) || Number(group.opacity) < 0 || Number(group.opacity) > 1
+            || (group.start !== undefined && (!hasNumericValue(group.start) || Number(group.start) < 0))
+            || (group.duration !== undefined && (!hasNumericValue(group.duration) || Number(group.duration) < 0))
+            || (group.blendMode && !['source-over', 'multiply', 'screen', 'darken', 'lighten', 'difference', 'addition', 'overlay', 'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'].includes(group.blendMode))
+            || (group.opacitySamples != null && (!Array.isArray(group.opacitySamples) || group.opacitySamples.length === 0 || group.opacitySamples.some((sample, sampleIndex, samples) =>
+                !sample || !hasNumericValue(sample.t) || Number(sample.t) < 0 || !hasNumericValue(sample.value)
+                || Number(sample.value) < 0 || Number(sample.value) > 1
+                || (sampleIndex > 0 && Number(sample.t) <= Number(samples[sampleIndex - 1]?.t)))) )
+            || (group.effects != null && (!Array.isArray(group.effects) || group.effects.some(effect => !validClientIsolatedGroupEffect(effect))))))) {
+            errors.push(`overlays[${i}]: compositionStack must contain groups with ids and opacity in [0, 1]`);
+        }
+        const supportedShapeMasks = ['ellipse', 'circle', 'rectangle', 'rounded-rectangle', 'polygon', 'star', 'arrow'];
+        if (ov.sceneMask && (ov.sceneMask.kind !== 'shape' || !supportedShapeMasks.includes(ov.sceneMask.shape))) {
+            const matte = (plan.overlays || []).find(candidate => candidate?.id === ov.sceneMask?.sourceOverlayId);
+            if (ov.sceneMask.kind !== 'layer' || !matte?.matteOnly || matte.id === ov.id) {
+                errors.push(`overlays[${i}]: unsupported or unresolved scene mask`);
+            }
+            if (ov.sceneMask.kind === 'layer' && ov.sceneMask.mode != null && !['alpha', 'luma', 'luminance'].includes(ov.sceneMask.mode)) {
+                errors.push(`overlays[${i}]: unsupported layer matte mode ${ov.sceneMask.mode}`);
+            }
+        }
+        if (ov.sceneMask?.kind === 'shape' && supportedShapeMasks.includes(ov.sceneMask.shape)) {
+            const mask = ov.sceneMask;
+            const inset = Number.isFinite(Number(mask.inset)) ? Math.max(0, Math.min(0.45, Number(mask.inset))) : 0;
+            const hasX = hasNumericValue(mask.x), hasY = hasNumericValue(mask.y);
+            const x = hasX ? Number(mask.x) : inset;
+            const y = hasY ? Number(mask.y) : inset;
+            const w = hasNumericValue(mask.w) ? Number(mask.w) : 1 - x - (hasX ? 0 : inset);
+            const h = hasNumericValue(mask.h) ? Number(mask.h) : 1 - y - (hasY ? 0 : inset);
+            if (![x, y, w, h].every(Number.isFinite) || x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > 1 || y + h > 1) {
+                errors.push(`overlays[${i}]: scene mask bounds must be positive and fit inside the layer`);
+            }
+            if (mask.shape === 'polygon' && (!Number.isFinite(Number(mask.sides ?? 5)) || Number(mask.sides ?? 5) < 3 || Number(mask.sides ?? 5) > 128)) {
+                errors.push(`overlays[${i}]: polygon mask sides must be between 3 and 128`);
+            }
+            if (mask.shape === 'star' && (!Number.isFinite(Number(mask.points ?? 5)) || Number(mask.points ?? 5) < 2 || Number(mask.points ?? 5) > 64)) {
+                errors.push(`overlays[${i}]: star mask points must be between 2 and 64`);
+            }
+            if (mask.feather !== undefined && (!hasNumericValue(mask.feather) || Number(mask.feather) < 0 || Number(mask.feather) > 0.25)) {
+                errors.push(`overlays[${i}]: shape mask feather must be in 0..0.25`);
+            }
+            for (const key of ['radius', 'innerRadius', 'outerRadius', 'rotation']) {
+                if (mask[key] != null && !Number.isFinite(Number(mask[key]))) errors.push(`overlays[${i}]: scene mask ${key} must be finite`);
+            }
         }
         if (!Array.isArray(ov.geometry) || ov.geometry.length === 0) {
             errors.push(`overlays[${i}]: needs at least one geometry sample`);
         }
         (ov.geometry || []).forEach((g, k) => {
-            for (const key of ['x', 'y', 'w', 'h', 't']) {
-                if (!Number.isFinite(g[key])) errors.push(`overlays[${i}].geometry[${k}]: ${key} is not finite`);
+            if (!g || typeof g !== 'object') {
+                errors.push(`overlays[${i}].geometry[${k}]: sample must be an object`);
+                return;
+            }
+            for (const key of ['x', 'y', 'w', 'h', 't', 'rotation', 'opacity', 'blur']) {
+                if (!hasNumericValue(g?.[key])) errors.push(`overlays[${i}].geometry[${k}]: ${key} is not finite`);
             }
             if (g.w <= 0 || g.h <= 0) errors.push(`overlays[${i}].geometry[${k}]: non-positive size`);
+            if (g.t < 0 || g.opacity < 0 || g.opacity > 1 || g.blur < 0) {
+                errors.push(`overlays[${i}].geometry[${k}]: value is outside supported bounds`);
+            }
+            if (['flipH', 'flipV'].some(key => g[key] !== undefined
+                && (!hasNumericValue(g[key]) || ![0, 1].includes(Number(g[key]))))) {
+                errors.push(`overlays[${i}].geometry[${k}]: scale flip must be 0 or 1`);
+            }
         });
     });
 
@@ -603,6 +1027,8 @@ export function interpolateGeometry(samples, t) {
                 rotation: lerp('rotation'),
                 opacity: lerp('opacity'),
                 blur: lerp('blur'),
+                ...(a.flipH !== undefined || b.flipH !== undefined ? { flipH: lerp('flipH') } : {}),
+                ...(a.flipV !== undefined || b.flipV !== undefined ? { flipV: lerp('flipV') } : {}),
             };
         }
     }
