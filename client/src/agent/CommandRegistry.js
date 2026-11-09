@@ -380,7 +380,7 @@ export const COMMANDS = [
         id: 'polish_short',
         category: 'transform',
         label: 'Pro short finish',
-        summary: 'AI hook title with motion, platform captions with key words, camera punch-ins, number pops, transitions and sound effects.',
+        summary: 'Platform captions with key words and camera punch-ins on the strongest moments. (R158: the hook title, CTA outro, number pops and transitions are off by default.)',
         phrases: ['pro finish', 'finish it like a pro', 'make it look pro', 'make it look professional', 'polish the short',
                   'finish the short', 'add a hook title', 'hook title', 'add a hook on screen', 'make it viral', 'make it pop',
                   'finish it for tiktok', 'finish it for reels', 'finish it for shorts',

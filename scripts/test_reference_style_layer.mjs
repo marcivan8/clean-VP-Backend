@@ -56,7 +56,14 @@ assert.equal(scene.brollMoments.some(moment => moment.assetIds?.includes('ref'))
 assert.equal(scene.visualSummary.includes('sports'), false, 'reference subject contaminated source visual grounding');
 
 const built = { duration: 12, aspectRatio: '9:16', tracks: [{ id: 'video', type: 'video', clips: [{ id: 'v1', type: 'video', assetId: 'source-asset', sourceUrl: '/uploads/source.mp4', start: 0, duration: 12, offset: 0 }] }] };
-const polished = polishShort(built, PLATFORM_PROFILES.reels, { words, scenePlan: scene, referenceStyleProfile: profile });
+// R158 — the hook title, CTA outro, number pops, auto storyboard and
+// transitions are OFF by default now (polishShort's `want`). This suite is
+// entirely about how a REFERENCE STYLE shapes those designed layers, so it
+// asks for them explicitly. The new default is pinned in
+// scripts/test_short_picking.mjs and scripts/test_pro_finish_chain.mjs.
+const FULL_LAYERS = { title: true, cta: true, captions: true, camera: true, numbers: true, graphics: true, cuts: true };
+
+const polished = polishShort(built, PLATFORM_PROFILES.reels, { words, scenePlan: scene, referenceStyleProfile: profile, layers: FULL_LAYERS });
 const captions = polished.tracks.flatMap(track => track.clips).filter(clip => String(clip.id).startsWith('short-caption-'));
 assert.ok(captions.length > 0, 'expected generated transcript captions');
 assert.equal(captions[0].color, '#EEEEEE');
@@ -73,6 +80,7 @@ const sourceFaces = [1, 2, 3, 4].map(i => ({
 const refAsset = { id: 'ref-face', type: 'image/png', url: '/uploads/reference-only.png', has_faces: true, assistantReference: true };
 const phoneStyle = { ...profile, colorPalette: ['#FFFFFF', '#111827'], motifs: ['phone mockup'] };
 const phoneOutput = polishShort(built, PLATFORM_PROFILES.reels, {
+        layers: FULL_LAYERS,
     words: storyboardWords, events: [], scenePlan: scene, referenceStyleProfile: phoneStyle,
     assets: [refAsset],
 });
@@ -90,6 +98,7 @@ assert.ok(Math.abs(phoneExportLayer.geometry[0].w - phoneScreen.frame.w) < 0.001
     'phone-screen export geometry should match the designed screen opening');
 const dashboardLayers = phoneOutput.tracks.flatMap(track => track.clips || []);
 const dashboardOnly = polishShort(built, PLATFORM_PROFILES.reels, {
+        layers: FULL_LAYERS,
     words: storyboardWords, events: [], scenePlan: scene,
     referenceStyleProfile: { ...profile, motifs: ['dashboard interface'] }, assets: [refAsset],
 });
@@ -103,6 +112,7 @@ assert.equal(dashboardCard?.scale, TEMPLATE_WIDTH_FRACTION['ui-card'] / 0.25,
 
 const collageStyle = { ...profile, colorPalette: ['#FFFFFF', '#111827'], motifs: ['portrait collage'] };
 const collageOutput = polishShort(built, PLATFORM_PROFILES.reels, {
+        layers: FULL_LAYERS,
     words: storyboardWords, events: [], scenePlan: scene, referenceStyleProfile: collageStyle,
     assets: [...sourceFaces, refAsset],
 });
@@ -117,6 +127,7 @@ assert.ok(portraits.every(clip => clip.template.params.shape === 'rounded' && !c
 const metricWords = 'We reached 1262 subscribers this month and 17400 people watched the launch'.split(' ')
     .map((word, i) => ({ word, start: 5 + i * 0.42, end: 5 + i * 0.42 + 0.36 }));
 const metricsOutput = polishShort({ ...built, duration: 15 }, PLATFORM_PROFILES.reels, {
+        layers: FULL_LAYERS,
     words: metricWords, scenePlan: scene,
     referenceStyleProfile: { ...profile, graphicsDensity: 'dense', motifs: ['social proof metrics'] },
 });

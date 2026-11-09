@@ -22,6 +22,7 @@ import { Smartphone, Play, Square, Download, Loader2, Trash2, Wand2, ExternalLin
 
 import useTimelineStore from '../store/useTimelineStore';
 import { PLATFORM_IDS, PLATFORM_PROFILES, profileNotes } from '../agent/PlatformProfiles.js';
+import { MIN_WINDOW_SCORE } from '../agent/shortPicker.js';
 import { finishShort } from '../agent/shortFinisher.js';
 import { createProject } from '../lib/projectsApi.js';
 import { captureShortThumbnail, getCachedShortThumbnail, thumbnailKey } from '../utils/captureShortThumbnail.js';
@@ -60,6 +61,25 @@ async function ensureMattesFor(short) {
     if (!videoCount) throw new Error('There is no video clip in this short to separate from its background.');
     if (!personCount) throw new Error('No person was detected in this short, so the speaker highlight could not be applied.');
     return short;
+}
+
+/**
+ * R158 — how strong the pick was, in words.
+ *
+ * Every short already carried `score` from the picker and nothing ever showed
+ * it, so a 13.4 pick and a 2.4 pick looked identical in the list. The bands
+ * are read off the scoring arithmetic in shortPicker.js: below
+ * MIN_WINDOW_SCORE (3.5) nothing but speech density and length fit could have
+ * contributed, and each further band is roughly one more real signal
+ * (a verbal hook, a reveal, a punchline).
+ */
+function pickStrength(score) {
+    const n = Number(score);
+    if (!Number.isFinite(n)) return null;
+    if (n >= MIN_WINDOW_SCORE + 6) return { label: 'strong pick', tone: 'text-emerald-400' };
+    if (n >= MIN_WINDOW_SCORE + 2) return { label: 'good pick', tone: 'text-foreground/70' };
+    if (n >= MIN_WINDOW_SCORE) return { label: 'fair pick', tone: 'text-muted-foreground' };
+    return { label: 'weak pick', tone: 'text-amber-400' };
 }
 
 export default function ShortsPanel({ onExport }) {
@@ -331,6 +351,7 @@ export default function ShortsPanel({ onExport }) {
                     const pic = thumbs[key];
                     const isPreviewing = previewId === short.id;
                     const isPreparing = preparing === short.id;
+                    const strength = pickStrength(short.score);
                     return (
                         <li key={short.id} className={`rounded border p-2 bg-secondary/40 ${isPreviewing ? 'border-primary/70' : 'border-border'}`}>
                             <div className="flex gap-2">
@@ -365,6 +386,12 @@ export default function ShortsPanel({ onExport }) {
                                         </span>
                                     </div>
                                     {short.title && <p className="text-[11px] text-foreground truncate mb-1" title={short.title}>{short.title}</p>}
+                                    {strength && (
+                                        <p className={`text-[10px] font-mono mb-1 ${strength.tone}`}
+                                           title={`Picker score ${Number(short.score).toFixed(2)}. Below ${MIN_WINDOW_SCORE} means nothing in the passage scored beyond its pacing and length.`}>
+                                            {strength.label}
+                                        </p>
+                                    )}
                                     {warnings.slice(0, 1).map(n => (
                                         <p key={n.code} className="text-[10px] text-amber-400 flex items-start gap-1 mb-1" title={n.text}>
                                             <AlertTriangle className="w-3 h-3 shrink-0 mt-px" /><span className="line-clamp-1">{n.text}</span>

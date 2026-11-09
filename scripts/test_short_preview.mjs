@@ -63,7 +63,22 @@ await check('Preview loads the finished 9:16 short; Back puts the main edit, und
     assert.equal(p.currentTime, 0, 'the playhead must be at the top of the short');
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.equal(S.getState().isPlaying, true, 'the preview never actually started playing');
-    assert.ok(p.tracks.some(t => t.clips.some(c => String(c.id).startsWith('short-hook-text-'))), 'the hook title is on the player timeline');
+    // R158 — was asserting a 'short-hook-text-' clip. The hook title is off by
+    // default now; what this line is for is proving the FINISHED short reached
+    // the player rather than the raw cut, so it checks the caption layer, which
+    // is the one the Shorts tab still adds.
+    // R158 — was asserting a 'short-hook-text-' clip. The hook title is off by
+    // default now. What this line is for is proving the FINISHED short reached
+    // the player rather than the raw cut, and the caption layer proves it more
+    // directly than the title did: this fixture's main edit already HAS a
+    // caption clip, so the finish restyles it with the platform pack and moves
+    // its words into short time. Both are things only the finish does.
+    const playerText = p.tracks.find(t => t.type === 'text')?.clips?.[0];
+    assert.ok(playerText, 'no caption clip on the player timeline');
+    assert.ok(playerText.captionStyle?.packId,
+        'the caption was never styled with the platform pack — the finish did not reach the player');
+    assert.ok(playerText.words?.[0] && playerText.words[0].start < 1,
+        `the caption words were not moved into short time (first word at ${playerText.words?.[0]?.start})`);
     assert.equal(S.getState().shortPreview.shortId, SHORT.id, 'the preview was dropped by the deferred start');
     assert.ok(p.tracks.find(t => t.type === 'video').clips[0].virtualCam, 'speaker framing travels to the player');
     assert.equal(p.shortPreview.label, 'TikTok');
@@ -211,7 +226,12 @@ await check('preview scene planning never waits for a generative scene model', a
         const built = await SF.finishShort(S.getState(), SHORT, {
             plan: null, motionTechniques: [], visualContext: [], sfx: false,
         });
-        assert.ok(built.applied.some(item => /hook sequence/.test(item)), 'the local scene plan did not reach the short');
+        // R158 — was /hook sequence/. This check exists for the assertion
+        // BELOW it (no request to the AI scene planner); this line only has to
+        // prove the local plan produced something. Captions are what the
+        // default layer set builds locally from the transcript.
+        assert.ok(built.applied.some(item => /caption/i.test(item)),
+            `the local plan did not reach the short: ${JSON.stringify(built.applied)}`);
         assert.ok(requests.every(url => !url.includes('/api/motion/scene-plan')), 'preview requested the AI scene planner');
     } finally { globalThis.fetch = saved; }
 });

@@ -114,7 +114,16 @@ await check('polish_short with no transcript yet transcribes the main track, the
         // and test_round_c.mjs check against.
         const allClips = state.tracks.flatMap(t => t.clips);
         const idOf = c => String(c.clipId || c.id || '');
-        assert.ok(allClips.some(c => idOf(c).startsWith('short-hook')), 'no hook title was added -- transcript-dependent layers still silently skipped');
+        // R158 — this used to assert a hook title. The hook title and CTA are
+        // now off by default (polishShort's `want`), so the transcript-dependent
+        // layer this test exists to prove is CAPTIONS: the point was never the
+        // headline specifically, it was that a never-transcribed video no
+        // longer gets its transcript-dependent layers silently skipped. The
+        // caption assertions immediately below are that proof, and they are
+        // stronger than the title check was (they check the words AND the
+        // platform styling reached the clip).
+        assert.ok(!allClips.some(c => idOf(c).startsWith('short-hook')),
+            'the hook title is off by default since R158');
         const caption = allClips.find(c => Array.isArray(c.words) && c.words.length > 0 && !idOf(c).startsWith('short-hook'));
         assert.ok(caption, 'no caption clip was built from the freshly transcribed words');
         assert.ok(caption.fontFamily, 'the caption was never styled with the platform pack');

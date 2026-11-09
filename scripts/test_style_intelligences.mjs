@@ -205,7 +205,21 @@ await check('organize: no stored hook-first reorder for vlog / interview / podca
 });
 await check('client sends the style to animate (both calls), rhythm zoom, organize, and re-reads the Brain on change', () => {
     const e = read('../client/src/agent/MediaExecutionEngine.js');
-    assert.equal((e.match(/editingStyle: (st|aaStore)\.editingStyle \|\| null/g) || []).length, 2);
+    // Pinned per CALL rather than by counting matches of a loose regex.
+    // R159 added a third legitimate sender (the short judge, which needs the
+    // style to score "right for this format"), and a bare count of 2 both
+    // failed on that and would have accepted the style being moved OFF one of
+    // the animate calls and onto something else.
+    // A FIXED window after each call's URL, deliberately not lazy: `{0,400}?`
+    // stops at the first newline, which is the line the URL is on, so every
+    // call would look as though it sent nothing.
+    const animateCalls = [...e.matchAll(/animate-automatically'[\s\S]{0,400}/g)]
+        .map(m => m[0]);
+    assert.equal(animateCalls.length, 2, 'both animate calls');
+    for (const call of animateCalls) {
+        assert.ok(/editingStyle: (st|aaStore)\.editingStyle \|\| null/.test(call),
+            `an animate call does not send the style: ${call.slice(0, 90)}`);
+    }
     assert.ok(/style: rzStyle, editingStyle: useTimelineStore\.getState\(\)\.editingStyle \|\| null/.test(e));
     assert.ok(/editingStyle: ocStore\.editingStyle \|\| null/.test(e));
     const rp = read('../client/src/components/Assistant/ReasoningPanel.jsx');

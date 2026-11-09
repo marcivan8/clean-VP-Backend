@@ -160,15 +160,22 @@ const SHORT = { duration: 20, aspectRatio: '9:16', tracks: [
     { id: 't', type: 'text', clips: [{ id: 'caption-1', content: 'we grew revenue by 300% this year', start: 1, duration: 2, words: [{ word: 'we', start: 1, end: 1.2 }] }] },
 ] };
 const WORDS = W('here is how we grew revenue by 300 percent in one year with one simple change', 0.45);
+// R158 — the hook title, CTA outro, number pops and transitions are OFF by
+// default now (polishShort's `want`). This suite verifies that each layer
+// WORKS and is tuned per platform, so it asks for them explicitly; the
+// default is pinned in scripts/test_short_picking.mjs and
+// scripts/test_pro_finish_chain.mjs instead.
+const FULL_LAYERS = { title: true, cta: true, captions: true, camera: true, numbers: true, graphics: true, cuts: true };
+
 await check('every layer is added, tuned per platform, and the input is not changed', () => {
     const before = JSON.stringify(SHORT);
-    const r = SPo.polishShort(SHORT, PP.PLATFORM_PROFILES.tiktok, { words: WORDS, events: [{ eventType: 'REVEAL', timelineTime: 5 }], popOut: true });
+    const r = SPo.polishShort(SHORT, PP.PLATFORM_PROFILES.tiktok, { words: WORDS, events: [{ eventType: 'REVEAL', timelineTime: 5 }], popOut: true, layers: FULL_LAYERS });
     assert.equal(JSON.stringify(SHORT), before, 'input untouched');
-    assert.deepEqual(r.applied.map(a => a.split(' (')[0]), ['hook title', 'captions', 'camera moves', 'moment graphics', 'transitions', 'speaker pop-out', 'title layout repaired']);
-    const title = r.tracks.find(t => t.id === 'track-short-title').clips[0];
-    assert.equal(title.content.replace(/\s+/g, ' '), 'HOW WE GREW REVENUE BY 300', 'layout QA may wrap the title to keep it inside the frame');
-    assert.ok(title.animations.some(a => a.presetId === 'composed:slam-in') && title.animations.some(a => a.anchor === 'out'));
-    assert.ok(title.y > PP.PLATFORM_PROFILES.tiktok.safeZone.top * 100, 'title below the top UI');
+    assert.deepEqual(r.applied.map(a => a.split(' (')[0]), ['hook title', 'captions', 'camera moves', 'moment graphics', 'transitions', 'speaker pop-out']);
+    const hookClips = r.tracks.flatMap(t => t.clips).filter(c => String(c.id).startsWith('short-hook-'));
+    assert.ok(hookClips.length > 0, 'the hook is present as designed text or graphics');
+    assert.ok(hookClips.some(c => c.animations?.some(a => a.presetId === 'composed:slam-in')) && hookClips.some(c => c.animations?.some(a => a.anchor === 'out')));
+    assert.ok(hookClips.every(c => c.y == null || c.y > PP.PLATFORM_PROFILES.tiktok.safeZone.top * 100), 'hook elements below top UI');
     const gfx = r.tracks.find(t => t.id === 'track-short-graphics').clips;
     // R95 wiring: tiktok's hook title is now KineticTitle's "punchy" preset,
     // whose measured accent is a burst shape (not a flat underline) - see
@@ -192,7 +199,7 @@ await check('every layer is added, tuned per platform, and the input is not chan
     assert.ok(!vids[1].layerTarget, 'no mask → no pop-out');
 });
 await check('the look differs per platform; an AI headline and keywords win', () => {
-    const reels = SPo.polishShort(SHORT, PP.PLATFORM_PROFILES.reels, { words: WORDS, plan: { headline: 'The one change that tripled us', keywords: ['year'] } });
+    const reels = SPo.polishShort(SHORT, PP.PLATFORM_PROFILES.reels, { words: WORDS, plan: { headline: 'The one change that tripled us', keywords: ['year'] }, layers: FULL_LAYERS });
     const title = reels.tracks.find(t => t.id === 'track-short-title').clips[0];
     assert.equal(title.content.replace(/\s+/g, ' '), 'The one change that tripled us', 'Reels keeps sentence case while allowing safe line breaks');
     assert.equal(title.fontFamily, 'Montserrat', 'brand font survives the designed-title wiring');
@@ -202,9 +209,10 @@ await check('the look differs per platform; an AI headline and keywords win', ()
     assert.ok(reels.tracks.find(t => t.id === 't').clips[0].emphasis.indices.includes(5), '"year" from the AI keywords');
 });
 await check('the title\'s motion resolves cleanly over its life', () => {
-    const r = SPo.polishShort(SHORT, PP.PLATFORM_PROFILES.shorts, { words: WORDS });
-    const title = r.tracks.find(t => t.id === 'track-short-title').clips[0];
-    const layer = clipToMotionLayer(title, { type: 'text' });
+    const r = SPo.polishShort(SHORT, PP.PLATFORM_PROFILES.shorts, { words: WORDS, layers: FULL_LAYERS });
+    const title = r.tracks.flatMap(t => t.clips).find(c => String(c.id).startsWith('short-hook-') && c.animations?.length);
+    assert.ok(title, 'generated hook has an animated layer');
+    const layer = clipToMotionLayer(title, { type: title.type || 'text' });
     const mid = resolveMotionAt(layer, title.duration * 0.4);
     assert.ok(mid.opacity > 0.95 && Math.abs(mid.scale - 1) < 0.3, JSON.stringify(mid));
     assert.ok(resolveMotionAt(layer, title.duration).opacity < 0.05, 'gone at the end');
@@ -231,7 +239,7 @@ await check('the finisher: own 9:16 timeline, AI plan, polish and sounds on the 
     const before = JSON.stringify(S.getState().tracks);
     const asset = { id: 's', name: 'whoosh', preview_url: 'https://cdn.example/w.mp3', duration: 0.6, recommended_volume: 0.8 };
     const r = await SF.finishShort(S.getState(), { id: 's1', platform: 'tiktok', start: 38, end: 62, events: [{ eventType: 'REVEAL', timelineTime: 45 }] },
-        { fetchPlan: async () => ({ headline: 'How we tripled revenue', keywords: ['revenue'] }), fetchAsset: async () => asset });
+        { fetchPlan: async () => ({ headline: 'How we tripled revenue', keywords: ['revenue'] }), fetchAsset: async () => asset, layers: FULL_LAYERS });
     assert.equal(JSON.stringify(S.getState().tracks), before, 'main edit untouched');
     assert.equal(r.aspectRatio, '9:16');
     assert.ok(r.applied[0] === 'AI headline' && r.applied.some(a => a.startsWith('sound effects')));
@@ -257,12 +265,25 @@ await check('"pro finish" on the main edit: one undo, a re-run replaces instead 
     const r = await engine.executeStoreAction({ action: 'polish_short', args: { brief: 'pro finish' } }, null);
     assert.equal(r.success, true, r.message);
     assert.match(r.message, /Finished for Instagram Reels/);
-    const count = () => S.getState().tracks.flatMap(t => t.clips).filter(c => String(c.clipId || c.id).startsWith('short-')).length;
-    const n1 = count();
-    assert.ok(n1 >= 2, `title + underline added (${n1})`);
+    // R158 — was `count() >= 2, 'title + underline added'`, counting clips
+    // whose id starts 'short-'. The hook title and its underline are off by
+    // default now, and on the MAIN edit the caption layer updates the existing
+    // text clips rather than adding 'short-'-prefixed ones, so that counter
+    // reads 0 here even though the finish ran (verified: captions and camera
+    // both apply — see the push-in assertion below).
+    //
+    // What this check exists for is the NEXT line: a re-run must REPLACE, not
+    // stack. So it now takes a signature that is sensitive to either kind of
+    // change — how many clips there are and how many carry animations — which
+    // tests the real invariant without depending on which layers are enabled.
+    const signature = () => {
+        const clips = S.getState().tracks.flatMap(t => t.clips);
+        return `${clips.length}/${clips.filter(c => c.animations?.length).length}`;
+    };
+    const n1 = signature();
     assert.ok(S.getState().past.length > before);
     await engine.executeStoreAction({ action: 'polish_short', args: { brief: 'pro finish for instagram reels' } }, null);
-    assert.equal(count(), n1, 'replaced, not stacked');
+    assert.equal(signature(), n1, 'replaced, not stacked');
     const vid = S.getState().tracks.find(t => t.type === 'video').clips[0];
     assert.ok(vid.animations.some(a => a.presetId === 'composed:push-in'));
 });

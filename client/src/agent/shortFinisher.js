@@ -227,8 +227,24 @@ export async function finishShort(state, short, opts = {}) {
         platform: profile.id,
         editingStyle: opts.editingStyle || state.editingStyle,
     }));
-    const layers = wantsPolish ? undefined : {
-        title: false, captions: false, camera: false, numbers: false, cuts: false,
+    // `undefined` means "use polishShort's own defaults" (R158: captions +
+    // camera, no hook title, no CTA, no number pops, no transitions). The
+    // explicit object is the polish-OFF case and names every layer, including
+    // the two added in R158, so a new layer defaulting to on can never leak
+    // into a short the user asked not to polish.
+    // `opts.layers` is forwarded so the layer choice is reachable from here,
+    // not only from a direct polishShort() call — that is what makes the
+    // hook title and CTA genuinely switchable rather than merely present in
+    // the file. Undefined means "use polishShort's defaults" (R158: captions
+    // + camera).
+    //
+    // polish:false still wins outright and names every layer: "do not polish
+    // this" must not be overridable by a stray layers object, and listing
+    // them all means a layer added later cannot default itself back on into a
+    // short the user asked to leave alone.
+    const layers = wantsPolish ? (opts.layers || undefined) : {
+        title: false, cta: false, captions: false, camera: false,
+        numbers: false, graphics: false, cuts: false,
     };
     const polished = polishShort(built, profile, {
         words, events, plan, scenePlan,

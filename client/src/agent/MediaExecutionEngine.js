@@ -59,7 +59,7 @@ import { selectAnimateMoments, sfxPlayableUrl, countMoments, CLUSTER_S } from '.
 import i18next from 'i18next';
 import { resolveRetakeSource, retakeReviewLines, makeRetakeT, findTranscript } from './retakeSource.js';
 import { clipSourceWords, buildRhythmRequest, shotsToKeyframes } from './rhythmShots.js';
-import { findBestShortWindow, findShortCandidates, findShortCandidatesFallback, rangesOutside } from './shortPicker.js';
+import { findBestShortWindow, findShortCandidates, findShortCandidatesFallback, rangesOutside, shortWindowPool, MIN_WINDOW_SCORE } from './shortPicker.js';
 import { PLATFORM_PROFILES, MAX_SHORT_COUNT, assignPlatforms, platformsFromText } from './PlatformProfiles.js'; // R92 round B
 // R106 — a short's length comes from the content (speech density, payoffs,
 // source length, editing style) above a one-minute floor, not from a
@@ -67,6 +67,7 @@ import { PLATFORM_PROFILES, MAX_SHORT_COUNT, assignPlatforms, platformsFromText 
 import { planShortLength, fitShortCount, MIN_SHORT_SECONDS } from './shortLength.js';
 import { fallbackShortScenePlan, polishShort } from './shortPolish.js'; // R92 round C
 import { buildStyleReferencePlan } from '../motion/StyleReferenceAdapter.js';
+import { getReferenceStyleProfile } from './referenceStyleService.js';
 import { packSegments } from './segmentPacking.js';
 import { splitClipAtSpeakerSegments } from './virtualMulticamTimeline.js';
 import { quotaReason } from '../lib/quotaReason.js';
@@ -77,28 +78,23 @@ const DERIVED_PEAK_DB_FLOOR = -8;
 /** Resolve only explicitly attached reference assets, with a cached profile
  * preferred and a fail-open one-time analysis for older video references. */
 async function styleReferenceProfileFor(state, visualProfiles = [], signal) {
-    const references = (state?.assets || []).filter(asset => asset?.assistantReference);
+    // `assets` is append-only for a project, so the first reference may belong
+    // to an older conversation. The most recently attached reference is the
+    // best match for the current edit unless the caller supplied a cached
+    // profile explicitly.
+    const references = (state?.assets || []).filter(asset => asset?.assistantReference === true).reverse();
     const ids = new Set(references.map(asset => String(asset.id)));
     const cached = visualProfiles.find(profile =>
         profile?.isReference && ids.has(String(profile.assetId)) && profile?.visualStyleProfile
         && Number(profile.visualStyleProfile.profileVersion) >= 2
     )?.visualStyleProfile;
     if (cached) return cached;
-    const reference = references.find(asset => asset?.type === 'video' && asset.id)
-        || references.find(asset => asset?.type === 'image' && asset.id);
+    const localProfile = references.find(asset => asset?.visualStyleProfile)?.visualStyleProfile;
+    if (localProfile && Number(localProfile.profileVersion) >= 2) return localProfile;
+    const reference = references.find(asset => asset?.id);
     if (!reference) return null;
     try {
-        const response = await authFetch('/api/brain/analyze-style-reference', {
-            method: 'POST',
-            body: JSON.stringify({ assetId: reference.id }),
-            ...(signal ? { signal } : {}),
-        });
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok) {
-            console.warn(`[reference-style] analysis failed (${response.status}): ${result?.error || response.statusText || 'unknown server error'}`);
-            return null;
-        }
-        return result?.profile || null;
+        return await getReferenceStyleProfile(reference.id, signal);
     } catch (err) {
         if (signal?.aborted) throw err;
         console.warn('[reference-style] analysis unavailable; using the selected editing style:', err.message);
@@ -748,7 +744,22 @@ export class MediaExecutionEngine {
      * detects and resolves only; it never writes). Empty on any failure: the
      * placements then still land on their words, just without the moment bonus.
      */
+    /**
+     * Semantic moments (REVEAL / PUNCHLINE / EMPHASIS) for scoring and placement.
+     *
+     * Returns [] on any failure, which is right for `animate_automatically`
+     * (placements still run without events) but NOT self-evident for the
+     * shorts picker, where these moments carry the heaviest scoring weight.
+     * An empty list from a timeout looks identical to a video that genuinely
+     * has no detected moments, and the shorts path used to report the same
+     * confident "Found 3 short(s)" either way.
+     *
+     * So the reason is recorded on the instance. The return value is
+     * unchanged, so the other four call sites are unaffected; the shorts
+     * handlers read `_lastEventFetch` to disclose a degraded pick.
+     */
     async _fetchSemanticEvents() {
+        this._lastEventFetch = { ok: false, reason: 'unknown', count: 0 };
         try {
             const st = useTimelineStore.getState();
             const tracks = this._tracksWithDerivedAudioPeaks(st);
@@ -760,14 +771,93 @@ export class MediaExecutionEngine {
                 body: JSON.stringify({ projectState: { tracks, words }, projectId: st.projectId || null, editingStyle: st.editingStyle || null }),
                 signal: timeoutSignal(45_000), // R91: placements still run without events
             });
-            if (!res.ok) return [];
+            if (!res.ok) {
+                this._lastEventFetch = { ok: false, reason: `http_${res.status}`, count: 0 };
+                return [];
+            }
             const data = await res.json();
-            return (Array.isArray(data?.plan) ? data.plan : [])
+            const events = (Array.isArray(data?.plan) ? data.plan : [])
                 .filter(p => p && Number.isFinite(Number(p.timelineTime)))
                 .map(p => ({ eventType: p.eventType, timelineTime: Number(p.timelineTime) }));
+            // ok:true with count:0 is a real answer — this video has no
+            // detected moments — and is NOT the same as a failure.
+            this._lastEventFetch = { ok: true, reason: 'ok', count: events.length };
+            return events;
         } catch (err) {
             console.warn('[MediaExecutionEngine] semantic events unavailable:', err.message);
+            this._lastEventFetch = {
+                ok: false,
+                reason: err?.name === 'AbortError' ? 'timeout' : 'error',
+                count: 0,
+            };
             return [];
+        }
+    }
+
+    /**
+     * R159 — have the judge read the top candidate passages and say which
+     * would actually make a short.
+     *
+     * The picker is an argmax over a heuristic that cannot tell whether a
+     * passage stands on its own, lands anywhere, or is the point of the video
+     * rather than a tangent (R158's finding). This asks a small model those
+     * questions about the runners-up the argmax was about to discard.
+     *
+     * Entirely optional, in the strong sense: `null` is the normal answer on
+     * any project with no judge model configured, and every caller must pick
+     * exactly as it does today when it gets one. So:
+     *
+     *   - fewer than two passages → no call at all. There is no ordering to
+     *     change and it would still cost money.
+     *   - 12 s ceiling. This sits in front of a button the user already
+     *     pressed; a slow judge is worse than no judge.
+     *   - every failure returns null, with the reason recorded on the
+     *     instance so a TIMEOUT can be disclosed while "no judge configured"
+     *     stays quiet — announcing an unconfigured optional feature on every
+     *     run is noise, not honesty.
+     *
+     * @param {Array} pool from shortWindowPool()
+     * @param {Object} context editingStyle / platform / duration / opening
+     * @returns {Promise<Object|null>} id → { confidence, why }
+     */
+    async _judgeShortWindows(pool, context = {}) {
+        this._lastShortJudge = { ok: false, reason: 'skipped', count: 0 };
+        if (!Array.isArray(pool) || pool.length < 2) return null;
+        try {
+            const res = await authFetch('/api/brain/judge-shorts', {
+                method: 'POST',
+                body: JSON.stringify({
+                    windows: pool.map(w => ({
+                        id: w.id, start: w.start, end: w.end,
+                        opener: w.opener, tail: w.tail, words: w.words,
+                    })),
+                    context,
+                }),
+                signal: timeoutSignal(12_000),
+            });
+            if (!res.ok) {
+                this._lastShortJudge = { ok: false, reason: `http_${res.status}`, count: 0 };
+                return null;
+            }
+            const data = await res.json();
+            const verdicts = (data && typeof data.verdicts === 'object' && data.verdicts) ? data.verdicts : null;
+            if (!verdicts) {
+                // A legitimate success: no judge model is configured. Not a
+                // degradation, and not worth telling the user about.
+                this._lastShortJudge = { ok: true, reason: 'no_judge', count: 0 };
+                return null;
+            }
+            const count = Object.keys(verdicts).length;
+            this._lastShortJudge = { ok: true, reason: 'ok', count };
+            return count > 0 ? verdicts : null;
+        } catch (err) {
+            console.warn('[MediaExecutionEngine] short judge unavailable:', err.message);
+            this._lastShortJudge = {
+                ok: false,
+                reason: err?.name === 'AbortError' ? 'timeout' : 'error',
+                count: 0,
+            };
+            return null;
         }
     }
 
@@ -1634,7 +1724,19 @@ export class MediaExecutionEngine {
                 // soft target: when a trim is unavoidable it should use as
                 // much of the allowed length as the content supports, not
                 // collapse to the style's typical/preferred length.
-                const win = findBestShortWindow(words, { events, target: cap, min: Math.min(15, cap), max: cap });
+                // R159 — same arbitration as repurpose_shorts, with one
+                // difference that matters: this path CUTS the timeline on an
+                // explicit request, so the judge can reorder the candidates
+                // but nothing here refuses to act on its say-so. A doubted
+                // pick is disclosed below instead.
+                const slot = { target: cap, min: Math.min(15, cap), max: cap };
+                const judgePool = shortWindowPool(words, { events, slots: [slot], lengthMode: 'cap', perSlot: 4, limit: 6 });
+                const shortJudge = await this._judgeShortWindows(judgePool, {
+                    editingStyle: st.editingStyle || null,
+                    duration: Math.round(total),
+                    opening: words.slice(0, 40).map(w => w?.word ?? w?.text ?? '').join(' ').trim() || null,
+                });
+                const win = findBestShortWindow(words, { events, ...slot, judgeScores: shortJudge });
                 if (!win) {
                     return { action, success: false, message: 'No sentence-aligned moment of the right length was found in the transcript.' };
                 }
@@ -1645,8 +1747,45 @@ export class MediaExecutionEngine {
                 const cut = st.cutTimelineRanges(ranges);
                 if (!cut) return { action, success: false, message: 'The short could not be cut from the timeline.' };
                 const len = Math.round(Math.min(total, win.end + 0.3) - Math.max(0, win.start - 0.15));
-                const hook = win.hookEvent ? ' It opens on a key moment.' : '';
-                return { action, success: true, message: `Kept the strongest ${len} s (from ${win.start.toFixed(1)} s): "${win.text.slice(0, 80)}".${hook}` };
+                const hook = win.hookEvent
+                    ? (win.hookEvent === 'VERBAL_HOOK'
+                        ? ' It opens on a hook in the words.'
+                        : ' It opens on a key moment.')
+                    : '';
+
+                // R158 — this path CUTS the timeline, so it does not refuse a
+                // weak pick (the user asked for a short). It says so instead.
+                // Without this, "Kept the strongest 60 s" read identically
+                // whether the passage was genuinely the best in the video or
+                // simply the least bad.
+                const fetchInfo = this._lastEventFetch || null;
+                // Weak on EITHER reading: the heuristic found nothing
+                // strong, or the judge read the passage and doubted it. Both
+                // deserve the same warning, and taking the better of the two
+                // would let one hide the other.
+                const weakScore = Math.min(
+                    Number.isFinite(win.baseScore) ? win.baseScore : win.score,
+                    win.score,
+                );
+                const weakPick = weakScore < MIN_WINDOW_SCORE
+                    ? ' Nothing in this video stood out strongly, so this is the best available passage rather than a clear highlight — undo if it is not the moment you wanted.'
+                    : '';
+                const eventNote = (fetchInfo && !fetchInfo.ok)
+                    ? (fetchInfo.reason === 'timeout'
+                        ? ' Moment detection timed out, so this was chosen from the words and pacing alone.'
+                        : ' Moment detection was unavailable, so this was chosen from the words and pacing alone.')
+                    : '';
+                return {
+                    action, success: true,
+                    message: `Kept the strongest ${len} s (from ${win.start.toFixed(1)} s): "${win.text.slice(0, 80)}".${hook}${weakPick}${eventNote}`,
+                    details: {
+                        score: Math.round(win.score * 100) / 100,
+                        baseScore: Number.isFinite(win.baseScore) ? Math.round(win.baseScore * 100) / 100 : null,
+                        judge: typeof win.judge === 'number' ? win.judge : null,
+                        hookEvent: win.hookEvent || null,
+                        eventsAvailable: !!(fetchInfo && fetchInfo.ok),
+                    },
+                };
             }
 
             // ── R90 (A7): one-click style recipes ────────────────────────────
@@ -2249,7 +2388,33 @@ export class MediaExecutionEngine {
                     plan: planShortLength({ platform: id, totalDuration: total, words, events, style: editingStyle }),
                 }));
                 const slots = plans.map(({ id, plan }) => ({ platform: id, min: plan.min, max: plan.max, target: plan.target }));
-                let found = words.length > 0 ? findShortCandidates(words, { events, slots }) : [];
+                // R158 — `report` is filled with the slots that were skipped and
+                // why, so the user is told when a video simply does not hold
+                // the number of shorts they asked for.
+                const pickReport = {};
+
+                // R159 — arbitration. The heuristic enumerates every legal
+                // window and keeps the highest-scoring one per slot; this
+                // takes the top few DISTINCT ones it was about to discard and
+                // has a small model read them for whether they would stand on
+                // their own as a short. Fails closed: `judgeScores` of null
+                // makes findShortCandidates arithmetically identical to R158.
+                let judgeScores = null;
+                if (words.length > 0) {
+                    const pool = shortWindowPool(words, { events, slots, perSlot: 3, limit: 8 });
+                    judgeScores = await this._judgeShortWindows(pool, {
+                        editingStyle,
+                        platform: platforms[0] || null,
+                        duration: Math.round(total),
+                        // How the VIDEO opens, not the passage: the cheapest
+                        // usable hint about what it is about. A real
+                        // through-line needs the project map, which is a
+                        // GPT-4o derivation and far too heavy for a pick.
+                        opening: words.slice(0, 40).map(w => w?.word ?? w?.text ?? '').join(' ').trim() || null,
+                    });
+                }
+
+                let found = words.length > 0 ? findShortCandidates(words, { events, slots, report: pickReport, judgeScores }) : [];
 
                 let fallbackUsed = false;
                 if (found.length === 0) {
@@ -2267,6 +2432,12 @@ export class MediaExecutionEngine {
                     start: Math.round(f.start * 100) / 100,
                     end: Math.round(f.end * 100) / 100,
                     score: Math.round(f.score * 100) / 100,
+                    // R159 — the heuristic's own score before arbitration,
+                    // and the judge's confidence if it had one. Kept so a
+                    // pick can be explained after the fact rather than only
+                    // ranked.
+                    baseScore: Number.isFinite(f.baseScore) ? Math.round(f.baseScore * 100) / 100 : null,
+                    judge: typeof f.judge === 'number' ? f.judge : null,
                     hookEvent: f.hookEvent || null,
                     title: String(f.text || '').slice(0, 90),
                     createdAt: now,
@@ -2280,8 +2451,12 @@ export class MediaExecutionEngine {
                 st.setShorts(shorts);
                 try { useAIStore.getState().setActiveTab?.('shorts'); } catch { /* panel switch is a convenience */ }
                 const lines = shorts.map(s => `${PLATFORM_PROFILES[s.platform].label}: ${Math.round(s.end - s.start)} s from ${s.start.toFixed(0)} s, "${s.title.slice(0, 50)}"`);
-                const missing = count - shorts.length;
-                const missText = missing > 0 ? ` ${missing} more could not fit without overlapping.` : '';
+                // Only slots that genuinely could not FIT belong in this note;
+                // the ones refused on quality are reported separately below,
+                // because "could not fit without overlapping" is the wrong
+                // reason to give for "nothing there was good enough".
+                const noRoom = Array.isArray(pickReport.noWindow) ? pickReport.noWindow.length : 0;
+                const missText = noRoom > 0 ? ` ${noRoom} more could not fit without overlapping.` : '';
                 // Why these lengths, in the user's words. Without this the new
                 // minute-plus shorts look arbitrary next to the old 30 s ones.
                 const trimmed = requested > count
@@ -2295,10 +2470,52 @@ export class MediaExecutionEngine {
                 const transcriptNote = fallbackUsed
                     ? (words.length ? ' (no full sentences fitted, so they follow the cuts)' : ' (there is no transcript yet, so they follow the cuts, not what is said; add captions and ask again for picks by content)')
                     : '';
+
+                // R158 — the same honesty the missing-transcript note above has
+                // always had, extended to the OTHER input the picker leans on.
+                // REVEAL / PUNCHLINE / EMPHASIS carry the heaviest scoring
+                // weight; without them the pick falls back to speech density,
+                // the opening words and length. That used to be invisible: a
+                // degraded pick reported the identical confident message.
+                const fetchInfo = this._lastEventFetch || null;
+                const eventNote = (!fallbackUsed && fetchInfo && !fetchInfo.ok)
+                    ? (fetchInfo.reason === 'timeout'
+                        ? ' Moment detection timed out, so these are picked from the words and pacing alone — ask again for a stronger pick.'
+                        : ' Moment detection was unavailable, so these are picked from the words and pacing alone.')
+                    : '';
+
+                // Slots refused on quality rather than arithmetic.
+                const weak = Array.isArray(pickReport.belowFloor) ? pickReport.belowFloor : [];
+                const floorNote = weak.length > 0
+                    ? ` ${weak.length} more ${weak.length === 1 ? 'was' : 'were'} skipped: no remaining passage was strong enough to carry a short, so you are getting the ${shorts.length} that ${shorts.length === 1 ? 'is' : 'are'} worth posting rather than ${count} to pad the list.`
+                    : '';
+                // R159 — a slot the heuristic liked and the judge refused.
+                // Reported apart from `floorNote` because the reason is
+                // different in kind: not "nothing scored high enough" but
+                // "this reads well on paper and would not survive on its own".
+                const vetoed = Array.isArray(pickReport.judgeVetoed) ? pickReport.judgeVetoed : [];
+                const vetoNote = vetoed.length > 0
+                    ? ` ${vetoed.length} more scored well but ${vetoed.length === 1 ? 'was' : 'were'} dropped after the passage was read: ${vetoed.length === 1 ? 'it needs' : 'they need'} the surrounding video to make sense.`
+                    : '';
+                const judgeInfo = this._lastShortJudge || null;
+                const judgeNote = (pickReport.judged > 0)
+                    ? ' Each pick was also read for whether the passage stands on its own.'
+                    : (judgeInfo && !judgeInfo.ok && (judgeInfo.reason === 'timeout' || judgeInfo.reason === 'error')
+                        // Only a real failure is disclosed. An unconfigured
+                        // judge is the default state, not a degradation.
+                        ? ' The passage read timed out, so these are the heuristic picks.'
+                        : '');
                 return {
                     action, success: true,
-                    message: `Found ${shorts.length} short(s)${transcriptNote}: ${lines.join('; ')}.${trimmed}${why}${missText} In the Shorts tab each one exports finished: AI hook title with motion, platform captions, camera punch-ins, number pops, transitions and sound effects. Your main edit is unchanged.`,
-                    details: { count: shorts.length, platforms: shorts.map(s => s.platform) },
+                    message: `Found ${shorts.length} short(s)${transcriptNote}: ${lines.join('; ')}.${trimmed}${why}${missText}${floorNote}${vetoNote}${eventNote}${judgeNote} In the Shorts tab each one exports finished: platform captions with key words and camera punch-ins on the strongest moments. Your main edit is unchanged.`,
+                    details: {
+                        count: shorts.length,
+                        platforms: shorts.map(s => s.platform),
+                        skippedForQuality: weak.length,
+                        skippedByJudge: vetoed.length,
+                        judged: pickReport.judged || 0,
+                        eventsAvailable: !!(fetchInfo && fetchInfo.ok),
+                    },
                 };
             }
 
@@ -5412,7 +5629,13 @@ export class MediaExecutionEngine {
     }
 
     async verifyExecution(job) {
-        return job.results.every(r => r.success !== false);
+        const expected = Array.isArray(job?.commands) ? job.commands.length : 0;
+        const results = Array.isArray(job?.results) ? job.results : [];
+        // An empty command list, missing result, thrown/undefined handler return,
+        // or a handler that only says "not false" is not evidence of execution.
+        return expected > 0
+            && results.length === expected
+            && results.every(result => result && typeof result === 'object' && result.success === true);
     }
 
     getStatus() {

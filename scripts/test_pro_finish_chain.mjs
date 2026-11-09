@@ -117,6 +117,15 @@ const allClips = (tracks) => (tracks || []).flatMap(t => (t.clips || []).map(c =
 const presetIdsOf = (clips) => clips.flatMap(c => (c.animations || []).map(a => a.presetId)).filter(Boolean);
 const idsStarting = (tracks, prefix) => allClips(tracks).filter(c => String(c.id || '').startsWith(prefix)).map(c => c.id);
 
+// R158 — the hook title, CTA outro, number pops and transitions are now OFF
+// by default (polishShort's `want`): an auto-written headline and CTA on
+// someone else's words were the two layers most likely to be wrong, and wrong
+// in the first second. The scene engine behind them is untouched and still
+// reachable, so this suite — which exists to verify that CHAIN reaches the
+// clips — asks for the layers explicitly. A separate check below pins the
+// default, so neither fact can regress without a failure.
+const FULL_LAYERS = { title: true, cta: true, captions: true, camera: true, numbers: true, graphics: true, cuts: true };
+
 log('\n── 1. finishShort: the real Shorts-tab entry point ──');
 
 let finished = null;
@@ -129,6 +138,7 @@ await check('it runs end to end with the AI plans injected', async () => {
         scenePlan: planWithTechniques(M),
         sfx: false,
         popOut: false,
+        layers: FULL_LAYERS,
     });
     assert.ok(finished, 'nothing came back');
     assert.ok(finished.tracks.length > 0, 'no tracks');
@@ -186,6 +196,21 @@ await check('every finish layer is short- prefixed, so a re-run replaces instead
     }
 });
 
+await check('R158: by DEFAULT the Shorts tab adds captions and camera only', async () => {
+    const M = withRouteStubs(m => m);
+    const plain = await finishShort(state(), short, {
+        plan: { headline: 'ZERO TO FORTY THOUSAND', keywords: ['forty', 'thousand'] },
+        scenePlan: planWithTechniques(M),
+        sfx: false,
+        popOut: false,
+        // no `layers` — this is what the panel actually does
+    });
+    assert.equal(idsStarting(plain.tracks, 'short-hook-').length, 0, 'no hook title by default');
+    assert.equal(idsStarting(plain.tracks, 'short-cta-').length, 0, 'no CTA outro by default');
+    assert.ok(plain.applied.some(a => /caption/i.test(a)), `captions should still be applied: ${JSON.stringify(plain.applied)}`);
+    assert.ok(plain.applied.some(a => /camera/i.test(a)), `camera moves should still be applied: ${JSON.stringify(plain.applied)}`);
+});
+
 log('\n── 2. No AI configured: transcript fallback still builds a directed sequence ──');
 
 await check('with no scene plan the transcript creates an animated multi-beat hook and no invented CTA', async () => {
@@ -193,6 +218,7 @@ await check('with no scene plan the transcript creates an animated multi-beat ho
         plan: null,
         scenePlan: null,
         sfx: false,
+        layers: FULL_LAYERS,
     });
     assert.ok(finishedNoAi.applied.some(a => /hook sequence/.test(a)), `expected a transcript fallback sequence: ${JSON.stringify(finishedNoAi.applied)}`);
     assert.ok(!finishedNoAi.applied.some(a => /AI-directed/.test(a)), 'a local fallback must not be reported as AI-directed');
@@ -232,7 +258,7 @@ await check('speaker pop-out skips clips where the matte found no person', async
         bboxTrack: [], settings: { mode: 'blur' },
     };
     const result = await finishShort(input, short, {
-        popOut: true, sfx: false, plan: null, motionTechniques: [], visualContext: [],
+        popOut: true, sfx: false, plan: null, motionTechniques: [], visualContext: [], layers: FULL_LAYERS,
     });
     const video = result.tracks.find(track => track.type === 'video')?.clips || [];
     assert.equal(video[0]?.layerTarget, undefined, 'empty foreground data should not dim or replace the full frame');
@@ -310,7 +336,7 @@ await check('the no-AI finish renders transcript-led graphics at their spoken ti
         + 'but the surprising lesson is that the small change made everything easier '
         + 'i realized consistency matters more than speed so follow for more practical ideas').split(' ');
     const words = transcript.map((word, i) => ({ word, start: i * 0.55, end: i * 0.55 + 0.45 }));
-    const timed = await finishShort({ ...state(), captions: words }, { ...short, end: 30 }, { plan: null, scenePlan: null, sfx: false });
+    const timed = await finishShort({ ...state(), captions: words }, { ...short, end: 30 }, { plan: null, scenePlan: null, sfx: false, layers: FULL_LAYERS });
     const clips = allClips(timed.tracks).filter(c => String(c.id).startsWith('short-storyboard-'));
     assert.ok(clips.length > 0, 'no transcript-led storyboard template clips were rendered');
     assert.ok(clips.some(c => Number(c.start) > 3), 'supporting graphics should be placed in the body, not all at time zero');
@@ -326,7 +352,7 @@ await check('short finish wires contextual vector illustrations as animated temp
         brollMoments: [], sfxCues: [], source: 'local-fallback',
     };
     const result = polishShort({ tracks: state().tracks, duration: TOTAL, aspectRatio: '9:16' }, PLATFORM_PROFILES.tiktok,
-        { words: WORDS, events: [], scenePlan });
+        { words: WORDS, events: [], scenePlan, layers: FULL_LAYERS });
     const illustrations = allClips(result.tracks).filter(c => String(c.id).startsWith('short-illustration-'));
     assert.equal(illustrations.length, 1, 'a recognized vector subject should create one illustration clip');
     assert.equal(illustrations[0].template?.kind, 'icon');
@@ -339,7 +365,7 @@ await check('Shorts panel finish places matched bin b-roll into the generated ti
     const withBroll = state();
     withBroll.assets.push({ id: 'broll-launch', type: 'video', name: 'Rocket launch', url: '/media/rocket.mp4', duration: 6 });
     const result = await finishShort(withBroll, { ...short, end: 24 }, {
-        plan: null, motionTechniques: [], visualContext: [], sfx: false,
+        plan: null, motionTechniques: [], visualContext: [], sfx: false, layers: FULL_LAYERS,
         scenePlan: { tone: 'editorial', beats: [], timedMoments: [], sfxCues: [],
             brollMoments: [{ start: 8, end: 10, query: 'rocket launch', assetIds: ['broll-launch'] }], source: 'local-fallback' },
     });
@@ -355,6 +381,7 @@ await check('the no-AI finish resolves planner sound cues to real SFX clips', as
         plan: null,
         scenePlan: null,
         fetchAsset: async query => ({ name: query, url: '/api/test-sfx.mp3', duration: 0.8, recommended_volume: 0.6 }),
+        layers: FULL_LAYERS,
     });
     const sfx = allClips(result.tracks).filter(c => c.isSFX);
     assert.ok(sfx.length > 0, 'planner cues were not turned into sound-effect clips');
@@ -400,7 +427,7 @@ await check('the local scene planner retrieves and executes KB motions with no s
         return { ok: false, status: 503, json: async () => ({}) };
     };
     try {
-        const result = await finishShort(state(), short, { sfx: false });
+        const result = await finishShort(state(), short, { sfx: false, layers: FULL_LAYERS });
         const hook = allClips(result.tracks).filter(c => String(c.id).startsWith('short-hook-'));
         assert.ok(hook.length > 0, 'the local planner produced no hook clips');
         assert.ok(presetIdsOf(hook).includes('composed:slam-in'), `intro KB motion was lost: ${JSON.stringify(presetIdsOf(hook))}`);
@@ -425,6 +452,7 @@ await check('finishShort uses injected headline and Motion KB lookups, then plan
             return [{ name: 'hook-slam-headline', beatKinds: ['intro'], motion: { enter: 'slam-in', emphasis: 'punch', exit: 'whip-out', energy: 0.9 } }];
         },
         visualContext: [],
+        layers: FULL_LAYERS,
     });
     assert.equal(askedForHeadline, 1, 'the optional headline plan was not fetched');
     assert.equal(askedForTechniques, 1, 'the non-generative technique lookup was not fetched');
@@ -479,7 +507,7 @@ const twoBeatPlan = (M) => M.cleanScenePlan({
 const polishWith = (scenePlan, events = []) => polishShort(
     { tracks: state().tracks, duration: TOTAL, aspectRatio: '9:16' },
     PLATFORM_PROFILES.tiktok,
-    { words: WORDS, events, scenePlan },
+    { words: WORDS, events, scenePlan, layers: FULL_LAYERS },
 );
 
 await check('two offered beats produce a two-beat hook ON TIKTOK', () => {
@@ -488,11 +516,11 @@ await check('two offered beats produce a two-beat hook ON TIKTOK', () => {
     // either. The test names the platform deliberately.
     withRouteStubs((M) => {
         const polished = polishWith(twoBeatPlan(M));
-        const hookText = allClips(polished.tracks).filter(c => String(c.id).startsWith('short-hook-text-'));
-        assert.ok(hookText.length >= 2, `expected two beats' worth of text clips, got ${hookText.length}`);
-        const words = hookText.map(c => String(c.content || c.name || '')).join(' ');
-        assert.match(words, /Zero To Forty\s+Thousand/);
-        assert.match(words, /Six weeks/);
+        const hookLayers = allClips(polished.tracks).filter(c => String(c.id).startsWith('short-hook-'));
+        assert.ok(hookLayers.length >= 2, `expected two designed beats, got ${hookLayers.length}`);
+        const renderedCopy = JSON.stringify(hookLayers);
+        assert.match(renderedCopy, /Zero To Forty\\nThousand|Zero To Forty/);
+        assert.match(renderedCopy, /Six weeks/, `second beat copy missing from designed layers: ${renderedCopy}`);
     });
 });
 
@@ -510,7 +538,7 @@ await check('a short too brief for two beats stays on one', () => {
         const polished = polishShort(
             { tracks: [{ id: 'track-video', type: 'video', name: 'V', clips: [{ id: 'v1', type: 'video', start: 0, duration: 6 }] }], duration: 6, aspectRatio: '9:16' },
             PLATFORM_PROFILES.tiktok,
-            { words: WORDS.slice(0, 12), events: [], scenePlan: twoBeatPlan(M) },
+            { words: WORDS.slice(0, 12), events: [], scenePlan: twoBeatPlan(M), layers: FULL_LAYERS },
         );
         const hookText = allClips(polished.tracks).filter(c => String(c.id).startsWith('short-hook-text-'));
         assert.equal(hookText.length, 1, 'a 6s short cannot afford two readable beats');
@@ -570,7 +598,7 @@ await check('a model response naming a technique becomes animated clips', () => 
         const polished = polishShort(
             { tracks: state().tracks, duration: TOTAL, aspectRatio: '9:16' },
             PLATFORM_PROFILES.tiktok,
-            { words: WORDS, events: short.events, scenePlan: { title: plan.title || 'Zero To Forty Thousand', points: [], cta: '', beats: plan.beats } },
+            { words: WORDS, events: short.events, scenePlan: { title: plan.title || 'Zero To Forty Thousand', points: [], cta: '', beats: plan.beats }, layers: FULL_LAYERS },
         );
         const presets = presetIdsOf(allClips(polished.tracks).filter(c => String(c.id).startsWith('short-hook-')));
         assert.ok(presets.includes('composed:slam-in'), `KB -> route -> polish -> clips broke: ${JSON.stringify([...new Set(presets)])}`);
@@ -583,7 +611,7 @@ await check('an unknown technique from a model degrades to the look own motion, 
         const polished = polishShort(
             { tracks: state().tracks, duration: TOTAL, aspectRatio: '9:16' },
             PLATFORM_PROFILES.tiktok,
-            { words: WORDS, events: [], scenePlan: { title: 'A Real Title Here', points: [], cta: '', beats: plan.beats } },
+            { words: WORDS, events: [], scenePlan: { title: 'A Real Title Here', points: [], cta: '', beats: plan.beats }, layers: FULL_LAYERS },
         );
         const hook = allClips(polished.tracks).filter(c => String(c.id).startsWith('short-hook-'));
         assert.ok(hook.length > 0, 'the hook disappeared when the technique was unknown');
@@ -603,7 +631,7 @@ await check('every technique in the library survives the whole chain to a clip',
             const polished = polishShort(
                 { tracks: state().tracks, duration: TOTAL, aspectRatio: '9:16' },
                 PLATFORM_PROFILES.tiktok,
-                { words: WORDS, events: [], scenePlan: { title: 'A Real Title Here', points: [], cta: '', beats: plan.beats } },
+                { words: WORDS, events: [], scenePlan: { title: 'A Real Title Here', points: [], cta: '', beats: plan.beats }, layers: FULL_LAYERS },
             );
             const presets = presetIdsOf(allClips(polished.tracks).filter(c => String(c.id).startsWith('short-hook-')));
             if (!presets.includes(`composed:${technique.motion.enter}`)) failures.push(`${technique.name} (${technique.motion.enter})`);

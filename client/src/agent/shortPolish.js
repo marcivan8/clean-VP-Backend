@@ -839,7 +839,37 @@ export function polishShort(built, profile, opts = {}) {
         cameraEnergy: Math.max(0.2, Math.min(0.9, baseLook.cameraEnergy * referenceStyle.motionScale)),
         } : {}),
     };
-    const want = { title: true, captions: true, camera: true, numbers: true, cuts: true, popOut: !!opts.popOut, ...(opts.layers || {}) };
+    // ── R158 — which layers a short gets by default ──────────────────────────
+    //
+    // Was { title, captions, camera, numbers, cuts } all on. The hook title and
+    // the CTA outro are now OFF: an auto-written headline and an auto-written
+    // call to action on someone else's words are the two things most likely to
+    // be wrong, and wrong on screen in the first second. Number pops, the auto
+    // storyboard and transitions are off with them — the brief was captions and
+    // camera.
+    //
+    // Nothing is deleted. Every layer is still reachable:
+    //     polishShort(built, { layers: { title: true, cta: true } })
+    // so turning the headline back on, or exposing it as a panel toggle, is a
+    // one-line change rather than a rewrite of the scene wiring (R95/R102).
+    //
+    // `cta` is its OWN flag now. It used to ride on `want.title`, so there was
+    // no way to keep a hook title without also getting a closing CTA, or to
+    // drop the CTA alone. Likewise `graphics` (the auto storyboard and the
+    // scene-plan timed moments) was gated on `want.title`, which meant turning
+    // off the headline silently took the body graphics with it — a coupling
+    // that had nothing to do with either feature.
+    const want = {
+        title: false,
+        cta: false,
+        captions: true,
+        camera: true,
+        numbers: false,
+        graphics: false,
+        cuts: false,
+        popOut: !!opts.popOut,
+        ...(opts.layers || {}),
+    };
     const tracks = (built?.tracks || []).map(t => ({ ...t, clips: (t.clips || []).map(c => ({ ...c })) }));
     const duration = Math.max(0.5, Number(built?.duration) || 0);
     const frame = resolveFrame(built?.aspectRatio || '9:16');
@@ -1041,7 +1071,7 @@ export function polishShort(built, profile, opts = {}) {
         .find(b => (b?.kind === 'cta' || b?.kind === 'outro') && typeof b.text === 'string' && b.text.trim());
     const ctaBeat = planCtaBeat
         || (opts.scenePlan?.cta ? { kind: 'cta', text: String(opts.scenePlan.cta).trim() } : null);
-    if (want.title && ctaBeat) {
+    if (want.cta && ctaBeat) {
         const ctaDur = Math.max(1.2, Math.min(2.2, duration * 0.12));
         const ctaStart = Math.max(0, duration - ctaDur);
         if (ctaStart > hookSpan + 0.2) {
@@ -1258,7 +1288,7 @@ export function polishShort(built, profile, opts = {}) {
         ...(sourceAccent ? { accent: sourceAccent } : {}),
         graphicsDensity: opts.scenePlan?.tone === 'editorial' || opts.scenePlan?.tone === 'warm' ? 'sparse' : 'balanced',
     };
-    const storyboardGraphics = want.title ? addAutoStoryboard(tracks, {
+    const storyboardGraphics = want.graphics ? addAutoStoryboard(tracks, {
         words, events: opts.events, duration, aspectRatio: built?.aspectRatio || '9:16', hookSpan, profile, style: storyboardStyle,
         assets: opts.assets,
     }) : 0;
@@ -1322,7 +1352,7 @@ export function polishShort(built, profile, opts = {}) {
     // avoid number/reveal callouts already placed above, and use the same
     // scene director so each beat gets coordinated text, graphic accents,
     // safe placement, and motion.
-    if (!storyboardGraphics && want.title && Array.isArray(opts.scenePlan?.timedMoments)) {
+    if (!storyboardGraphics && want.graphics && Array.isArray(opts.scenePlan?.timedMoments)) {
         let textN = 0, gfxN = 0, count = 0;
         const naturalSceneCap = Math.max(1, Math.min(5, Math.floor(duration / 7)));
         const maxTimedScenes = referenceStyle
@@ -1372,7 +1402,7 @@ export function polishShort(built, profile, opts = {}) {
     // 4b. Contextual vector illustrations. Only add an icon when the scene
     // text names a subject supported by the vector library; avoid generic
     // decorative icons that would add noise without explaining the beat.
-    if (!storyboardGraphics && want.title && Array.isArray(opts.scenePlan?.timedMoments)) {
+    if (!storyboardGraphics && want.graphics && Array.isArray(opts.scenePlan?.timedMoments)) {
         const treatment = profile?.id === 'tiktok' ? 'burst' : 'badge';
         const background = treatment === 'burst' ? 'radial-burst' : 'gradient-orb';
         const accent = look.accent;

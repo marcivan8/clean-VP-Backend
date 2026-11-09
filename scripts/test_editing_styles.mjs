@@ -477,7 +477,12 @@ await check('engine extract_short cuts outside the picked window', () => {
     const e = read('../client/src/agent/MediaExecutionEngine.js');
     const i = e.indexOf("case 'extract_short'");
     assert.ok(i > 0);
-    const body = e.slice(i, i + 2500);
+    // To the end of the case, not a fixed character count: R159 added the
+    // judge call inside this handler and a 2500-char window silently stopped
+    // short of the cut it is meant to be checking for.
+    const end = e.indexOf("\n            case '", i + 10);
+    assert.ok(end > i, 'the end of the extract_short case was not found');
+    const body = e.slice(i, end);
     assert.ok(/findBestShortWindow\(words/.test(body) && /cutTimelineRanges\(ranges\)/.test(body));
 });
 await check('picker is in the desktop chat box, style syncs to the cloud', () => {

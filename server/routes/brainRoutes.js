@@ -9,7 +9,8 @@
  *
  * Routes:
  *   POST   /api/brain/command         — Execute a command via the brain
- *   POST   /api/brain/analyze         — Analyze project state (advise only)
+ *   POST   /api/brain/analyze         — Analyze project state (advise only; returns judge verdicts)
+ *   POST   /api/brain/judge-shorts    — Score candidate short windows (advisory; may return null)
  *   POST   /api/brain/feedback        — Record suggestion chip feedback
  *   POST   /api/brain/observe-command — Learn from an executed command (no GPT)
  *   POST   /api/brain/observe-export  — Save edits from a successfully rendered export
@@ -18,7 +19,6 @@
  *   GET    /api/brain/analysis-status — Read queued visual-analysis status for a project
  *   GET    /api/brain/bin-summary     — Fast media bin summary (no AI)
  *   GET    /api/brain/broll-profiles  — Raw per-asset visual profiles (no AI)
- *   POST   /api/brain/organize        — Build a timeline organize plan
  *   GET    /api/brain/profile         — Return learned user style (for "Your Style" page)
  *   DELETE /api/brain/profile/reset   — Reset learned profile (GDPR: right to erasure)
  *   GET    /api/brain/profile/export  — Export raw profile JSON (GDPR: right to data portability)
@@ -34,6 +34,8 @@ const { authenticateUser }      = require('../../middleware/auth');
 const { BrainOrchestrator }     = require('../brain/Orchestrator');
 const { PatternLearner }        = require('../brain/PatternLearner');
 const { UserProfileEngine }     = require('../brain/UserProfileEngine');
+const { judgeCandidates } = require('../brain/JudgeService');
+const { judgeShortWindows, MAX_WINDOWS } = require('../brain/ShortJudge');
 const { MediaIntelligencePipeline } = require('../brain/media/MediaIntelligencePipeline');
 const { ProjectIntelligence }   = require('../brain/ProjectIntelligence');
 const { StoryIntelligence }     = require('../brain/StoryIntelligence');
@@ -216,6 +218,54 @@ router.post('/analyze', authenticateUser, async (req, res) => {
 
         const brainOutput = await orchestrator.process(input);
 
+        // ── Arbitration (R157) ────────────────────────────────────────────────
+        // Score the suggestions the Brain just produced with the small, fast
+        // judge model, so the client can order them by whether they actually
+        // serve THIS video rather than by the Brain's emission order.
+        //
+        // Strictly additive: judgeCandidates() fails closed (no judge
+        // configured, malformed JSON, rate limit, timeout → null) and the
+        // client's blend treats a null as "no opinion" and keeps its own
+        // deterministic ranking. It is also awaited rather than
+        // fire-and-forget, because a verdict that arrives after the chips are
+        // rendered is worse than no verdict: the order would change under the
+        // user's cursor.
+        let judgeVerdicts = null;
+        const suggestions = brainOutput.response?.suggestions || [];
+        if (suggestions.length > 1) {
+            judgeVerdicts = await judgeCandidates({
+                candidates: suggestions.map(sg => ({
+                    id: sg.type,
+                    summary: sg.text || sg.type,
+                    reasons: sg.reason ? [sg.reason] : [],
+                })),
+                context: {
+                    styleId: editingStyle,
+                    platform,
+                    // The same shape editorialKnowledge.detectSituations reads,
+                    // so the judge is told what this edit measurably needs
+                    // rather than only what the candidates are called.
+                    facts: {
+                        ...projectState,
+                        editingStyle,
+                        platform,
+                        projectMap,
+                        storyMap,
+                    },
+                    throughLine: projectMap?.through_line || null,
+                    duration: projectState.duration || 0,
+                    clipCount: (projectState.tracks || [])
+                        .filter(t => t.type === 'video')
+                        .reduce((n, t) => n + (t.clips?.length || 0), 0),
+                    editsDone: projectState.editHistory || [],
+                    findings: [
+                        ...(storyMap?.issues || []).map(i => i.issue).filter(Boolean),
+                        ...(projectMap?.coverage_gaps || []).map(g => g.gap).filter(Boolean),
+                    ],
+                },
+            });
+        }
+
         // Return only response fields — no intent or learning exposed.
         //
         // projectMap/storyMap were computed above (GPT-4o calls, real cost) and
@@ -230,10 +280,77 @@ router.post('/analyze', authenticateUser, async (req, res) => {
             nextSuggestions: brainOutput.response?.suggestions || [],
             projectMap,
             storyMap,
+            // id → { confidence, why }, or null when no judgement was available.
+            judgeVerdicts,
         });
 
     } catch (err) {
         console.error('[brainRoutes] /analyze error:', err.message);
+        return res.status(500).json({ error: err.message });
+    }
+});
+
+// ── POST /api/brain/judge-shorts ─────────────────────────────────────────────
+// Score candidate short windows the client's heuristic picker already found.
+//
+// R159. This is arbitration, not selection: the client sends the top handful
+// of windows its own scoring produced, and gets back a confidence per window
+// that it folds into that scoring, bounded. The deliberate consequences:
+//
+//   - `{ verdicts: null }` is a SUCCESS. It is what a project with no judge
+//     model configured gets, and the client must pick exactly as it does
+//     today when it sees one. A 500 here would turn an optional improvement
+//     into a dependency of making shorts at all.
+//   - Nothing is derived. No project map, no story map, no media
+//     intelligence: those are GPT-4o calls and this sits in front of a button
+//     the user already pressed. Context is whatever the client already had.
+//   - Nothing is written. No timeline, no project, no learning.
+//
+// TODO: apply aiLimiter (mounted at /api/brain in index.js, so this inherits it)
+router.post('/judge-shorts', authenticateUser, async (req, res) => {
+    const { windows, context = {} } = req.body || {};
+
+    if (!Array.isArray(windows) || windows.length === 0) {
+        return res.status(400).json({ error: 'windows must be a non-empty array' });
+    }
+    if (windows.length > MAX_WINDOWS * 2) {
+        return res.status(400).json({ error: `windows must hold at most ${MAX_WINDOWS * 2} entries` });
+    }
+
+    // Shape-check here rather than trusting the judge to ignore junk: an entry
+    // without a usable id could never have its verdict matched back anyway.
+    const clean = windows
+        .filter(w => w && typeof w.id === 'string' && w.id
+            && Number.isFinite(Number(w.start)) && Number.isFinite(Number(w.end))
+            && Number(w.end) > Number(w.start))
+        .map(w => ({
+            id: String(w.id).slice(0, 64),
+            start: Number(w.start),
+            end: Number(w.end),
+            opener: typeof w.opener === 'string' ? w.opener : '',
+            tail: typeof w.tail === 'string' ? w.tail : '',
+            words: Number(w.words) > 0 ? Number(w.words) : 0,
+        }));
+
+    if (clean.length === 0) {
+        return res.status(400).json({ error: 'no window had a usable id and time range' });
+    }
+
+    try {
+        const verdicts = await judgeShortWindows({
+            windows: clean,
+            context: {
+                styleId: sanitizeEditingStyle(context.editingStyle),
+                platform: context.platform || null,
+                duration: Number(context.duration) || 0,
+                throughLine: typeof context.throughLine === 'string' ? context.throughLine : null,
+                opening: typeof context.opening === 'string' ? context.opening : null,
+            },
+        });
+        // null is a legitimate answer, not an error. See the note above.
+        return res.json({ verdicts: verdicts || null });
+    } catch (err) {
+        console.error('[brainRoutes] /judge-shorts error:', err.message);
         return res.status(500).json({ error: err.message });
     }
 });
@@ -624,52 +741,14 @@ router.get('/broll-profiles', authenticateUser, async (req, res) => {
     }
 });
 
-// ── POST /api/brain/organize ──────────────────────────────────────────────────
-// Build a timeline organize plan from analyzed assets.
-// Returns a PLAN — frontend decides whether to execute the commands.
-// If not all assets are analyzed yet, returns { ready: false } instead of an error.
-router.post('/organize', authenticateUser, async (req, res) => {
-    try {
-        const { projectId, platform } = req.body || {};
-
-        if (!projectId) {
-            return res.status(400).json({ error: 'projectId is required' });
-        }
-
-        const { data: assets, error } = await supabaseAdmin
-            .from('media_assets')
-            .select('*')
-            .eq('project_id', projectId);
-
-        if (error) {
-            return res.status(500).json({ error: error.message });
-        }
-
-        const bin = assets || [];
-
-        // Check if all assets are done
-        const unanalyzed = bin.filter(a => a.analysis_status !== ASSET_ANALYSIS_DONE);
-        if (unanalyzed.length > 0) {
-            return res.json({
-                ready: false,
-                message: `Still analyzing ${unanalyzed.length} asset${unanalyzed.length !== 1 ? 's' : ''}`,
-            });
-        }
-
-        const plan = await mediaIntel.buildOrganizePlan(bin, platform || null);
-
-        return res.json({
-            ready: true,
-            commands:    plan.commands,
-            explanation: plan.explanation,
-            suggestions: plan.suggestions,
-        });
-
-    } catch (err) {
-        console.error('[brainRoutes] /organize error:', err.message);
-        return res.status(500).json({ error: err.message });
-    }
-});
+// ── POST /api/brain/organize — REMOVED (R157) ─────────────────────────────────
+// R157 — POST /api/brain/organize was removed along with
+// server/brain/strategies/ and MediaIntelligencePipeline.buildOrganizePlan().
+// The strategies emitted command strings that do not exist in
+// CommandRegistry (remove_silence, generate_captions, apply_smart_zoom,
+// add_clip_to_track, add_music_bed, set_track_volume), so the endpoint could
+// only return a plan of no-ops, and no client code ever called it. Bin
+// organisation goes through the real `organize_clips` command.
 
 // ── GET /api/brain/profile ────────────────────────────────────────────────────
 // Returns the user's learned editing style in a display-friendly format.
