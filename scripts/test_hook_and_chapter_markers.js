@@ -60,6 +60,11 @@ let helpers = null;
         // do not use the catalogue, so provide the harmless binding first.
         .replace(/^\s*import\s+\{\s*TEMPLATE_KINDS\s*\}\s+from\s+'\.\.\/motion\/TemplateGraphics\.js';\s*$/m, 'const TEMPLATE_KINDS = [];')
         .replace(/^\s*import\s+\{\s*describeToolCapabilities,\s*validateToolInvocation\s*\}\s+from\s+'\.\/ToolCapabilityCatalog\.js';\s*$/m, 'const describeToolCapabilities = definitions => definitions; const validateToolInvocation = () => ({ success: true });')
+        // VideoEditorTools builds its ROKA effect guide at module scope. This
+        // test evaluates only pure timeline helpers, so provide a minimal
+        // registry stub rather than importing the browser effect system.
+        .replace(/^\s*import\s+\{\s*effectRegistry\s*\}\s+from\s+'\.\.\/effects\/EffectRegistry\.js';\s*$/m, 'const effectRegistry = { get: () => null };')
+        .replace(/^\s*import\s+\{\s*COMPONENT_IDS\s*\}\s+from\s+'\.\.\/motion\/ComponentLibrary\.js';\s*$/m, 'const COMPONENT_IDS = [];')
         // Strip every top-level import line — none of these three pure
         // helpers reference them, so nothing needs stubbing.
         .replace(/^\s*import\s+[^;]+;\s*$/gm, '')
