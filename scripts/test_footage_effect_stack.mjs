@@ -925,7 +925,10 @@ const overlayRadialBlurExport = compileOverlaySource({
   outputStart: 0, source: { type: 'video' },
   geometry: [{ t: 0, x: 0.5, y: 0.5, w: 0.5, h: 0.5, opacity: 1, rotation: 0 }],
   effects: [{ kind: 'blur_radial', params: { intensity: 0.6, centerX: 0.25, centerY: 0.7, samples: 8 } }],
-}, 1, 'radial_blur_overlay', { width: 1080, height: 1920, fps: 30 });
+// This is a graph acceptance test with 64px synthetic inputs; compile at the
+// same size so FFmpeg exercises the animated expressions without scaling the
+// fixture into a 540x960 per-pixel radial kernel.
+}, 1, 'radial_blur_overlay', { width: 64, height: 64, fps: 2 });
 assert.ok(overlayRadialBlurExport.includes('geq=') && overlayRadialBlurExport.includes('(0.25)-X/W')
   && overlayRadialBlurExport.includes('(0.7)-Y/H'),
   'scene overlay radial blur export follows its authored center instead of substituting gaussian blur');
@@ -944,7 +947,7 @@ const animatedOverlayRadialBlur = compileOverlaySource({
     centerX: [{ t: 0, value: 0.2 }, { t: 1, value: 0.8 }],
     centerY: [{ t: 0, value: 0.7 }, { t: 1, value: 0.3 }],
   } }],
-}, 1, 'animated_radial_blur_overlay', { width: 1080, height: 1920, fps: 30 });
+}, 1, 'animated_radial_blur_overlay', { width: 64, height: 64, fps: 2 });
 assert.ok(animatedOverlayRadialBlur.includes('if(lt(T') && animatedOverlayRadialBlur.includes('0.2+(0.6)')
   && animatedOverlayRadialBlur.includes('(-0.4)'), 'overlay radial blur samples animated center coordinates');
 const animatedOverlayRadialRender = spawnSync(ffmpeg, [
