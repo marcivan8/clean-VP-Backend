@@ -374,7 +374,8 @@ export const COMMANDS = [
         category: 'edit',
         label: 'Sync cutaways to the words',
         summary: 'Places b-roll on the words it illustrates and number pops on spoken prices and figures.',
-        phrases: ['sync the b roll', 'sync b roll to the words', 'cutaways on the words', 'place b roll on the words',
+        phrases: ['sync the b roll and number pops to the words', 'sync b roll and number pops to the words',
+                  'sync the b roll', 'sync b roll to the words', 'cutaways on the words', 'place b roll on the words',
                   'beat sync', 'add number pops', 'pop the numbers', 'show the prices', 'b roll on key moments',
                   // R123: natural "illustrate ... with b-roll/footage/stock" phrasing, plus
                   // bare "insert/add b-roll or stock footage" requests that previously matched

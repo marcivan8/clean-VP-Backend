@@ -202,7 +202,8 @@ check('both cases run inside a history group and close it in finally', () => {
 check('semantic events fetched from animate-automatically', () => assert.ok(/_fetchSemanticEvents[\s\S]{0,1500}animate-automatically/.test(eng)));
 check('each recipe runs automatic scene animation and avoids duplicating its SFX', () => {
     const i = eng.indexOf("case 'apply_style_recipe'");
-    const body = eng.slice(i, i + 10000);
+    const nextCase = eng.indexOf('\n            case ', i + 1);
+    const body = eng.slice(i, nextCase > 0 ? nextCase : undefined);
     assert.match(body, /action: 'animate_automatically'/, 'recipe does not invoke moment animation');
     assert.match(body, /clip\.autoAnimate/, 'recipe SFX can duplicate sounds emitted by automatic animation');
     assert.match(body, /placeContextualIllustrations/, 'recipe does not place contextual illustrations');

@@ -644,8 +644,10 @@ export class IntentParser {
         const leadingCommand = firstClause ? resolveCommand(firstClause).match : null;
         // These commands intentionally bundle several visual/audio actions.
         // Their explanatory follow-up sentences are details for that bundle,
-        // not separate tool requests.
-        if (leadingCommand?.macro || ['polish_short', 'apply_style_recipe', 'storyboard_video'].includes(leadingCommand?.id)) return null;
+        // not separate tool requests. `sync_cutaways` is also kept intact:
+        // splitting "sync the b-roll and number pops" at "and" would leave
+        // the first clause as contextual-b-roll-only and discard number pops.
+        if (leadingCommand?.macro || ['polish_short', 'apply_style_recipe', 'storyboard_video', 'sync_cutaways'].includes(leadingCommand?.id)) return null;
         const clauses = String(prompt || '')
             .split(/\s+(?:and then|then|and also|also|and|plus|et puis|et aussi|et)\s+|\s*;\s*/i)
             .map(part => part.trim().replace(/^[,.;\s]+|[,.;\s]+$/g, ''))
