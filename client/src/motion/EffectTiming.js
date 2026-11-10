@@ -21,26 +21,37 @@ export function resolveEffectParameter(effect, key, fallback, projectTime = 0, c
     const keyed = sampleKeyframeTrack(normalizedTrack, time, safeBase);
     const expression = effect?.expressions?.[key] ?? raw?.expression;
     if (typeof expression !== 'string' || !expression.trim()) return keyed;
-    // Expressions currently evaluate one scalar channel. Preserve vector
-    // keyframe results until vector expressions have explicit channel syntax.
-    if (Array.isArray(keyed)) return keyed;
     const clipStart = Number.isFinite(Number(context.clipStart)) ? Number(context.clipStart) : 0;
     const localTime = time - clipStart;
     const clipDuration = Number(context.clipDuration);
-    const rawStart = Number(effect?.startTime);
-    const rawEnd = Number(effect?.endTime);
+    const rawStart = effect?.startTime === null || effect?.startTime === undefined || effect?.startTime === ''
+        ? NaN : Number(effect.startTime);
+    const rawEnd = effect?.endTime === null || effect?.endTime === undefined || effect?.endTime === ''
+        ? NaN : Number(effect.endTime);
     const start = Number.isFinite(rawStart) ? rawStart - clipStart : 0;
     const end = Number.isFinite(rawEnd) ? rawEnd - clipStart : clipDuration;
     const duration = Number.isFinite(start) && Number.isFinite(end) && end > start
         ? end - start
         : (Number.isFinite(clipDuration) && clipDuration > 0 ? clipDuration : 0);
-    const expressed = evaluateMotionExpression(expression, {
+    const variablesFor = value => ({
         t: localTime,
         time: localTime,
         duration,
         progress: duration > 0 ? Math.max(0, Math.min(1, (localTime - start) / duration)) : 0,
-        value: Number.isFinite(Number(keyed)) ? Number(keyed) : (Number(safeBase) || 0),
+        value,
     });
+    if (Array.isArray(keyed)) {
+        // The formula runs once per channel; `value` is that channel's
+        // interpolated value. This keeps vector controls deterministic while
+        // allowing color and point controls to use the same safe grammar.
+        return keyed.map(channel => {
+            const numeric = Number(channel);
+            const expressed = evaluateMotionExpression(expression, variablesFor(Number.isFinite(numeric) ? numeric : 0));
+            return Number.isFinite(expressed) ? expressed : channel;
+        });
+    }
+    const numericKeyed = Number(keyed);
+    const expressed = evaluateMotionExpression(expression, variablesFor(Number.isFinite(numericKeyed) ? numericKeyed : (Number(safeBase) || 0)));
     return Number.isFinite(expressed) ? expressed : keyed;
 }
 

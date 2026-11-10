@@ -182,6 +182,19 @@ assert.equal(axisTracks.scaleX.length, 2, 'keyframe editor bridge exposes horizo
 assert.equal(axisTracks.scaleY.length, 2, 'keyframe editor bridge exposes vertical scale animation tracks');
 assert.deepEqual(paramTracksToAnimations(axisTracks, 2)[0].keyframes[1].properties,
   { scaleX: 2, scaleY: 0.5 }, 'independent scale axes survive a keyframe editor round trip');
+const independentlyEasedTracks = {
+  x: [{ time: 0, value: 0, easing: 'linear' }, { time: 1, value: 10, easing: 'ease-in' }],
+  y: [{ time: 0, value: 0, easing: 'linear' }, { time: 1, value: 10, easing: 'linear' }],
+};
+const independentlyEasedAnimation = paramTracksToAnimations(independentlyEasedTracks, 1)[0];
+assert.equal(independentlyEasedAnimation.keyframes[1].easingByProperty.x, 'ease-in',
+  'transform keyframe bridge retains the X channel incoming easing');
+assert.equal(independentlyEasedAnimation.keyframes[1].easingByProperty.y, 'linear',
+  'transform keyframe bridge retains a different Y channel incoming easing at the same instant');
+assert.deepEqual(sampleAnimation(independentlyEasedAnimation, 0.5), { x: 2.5, y: 5 },
+  'shared-time transform properties render with their independently authored easing curves');
+assert.deepEqual(animationsToParamTracks([independentlyEasedAnimation], 1), independentlyEasedTracks,
+  'independent property easing survives a full editor bridge round trip');
 const transformPanelSource = fs.readFileSync(new URL('../client/src/components/TransformPanel.jsx', import.meta.url), 'utf8');
 assert.match(transformPanelSource, /getKeyframeState\('scaleX'\)/, 'transform inspector exposes horizontal scale keyframing');
 assert.match(transformPanelSource, /getKeyframeState\('scaleY'\)/, 'transform inspector exposes vertical scale keyframing');
@@ -229,6 +242,8 @@ assert.equal(validateMotionExpression('window.alert(1)').reason, 'unsupported_sy
   'expression validation rejects JavaScript globals and member access');
 assert.equal(validateMotionExpression('1 / 0').reason, 'non_finite',
   'expression validation rejects formulas that cannot produce a finite value');
+assert.equal(validateMotionExpression('1 / (t - 1)').reason, 'non_finite',
+  'expression validation rejects formulas that fail at an interior sample even when other sample times are finite');
 const expressionScene = createScene({ duration: 1, nodes: [createNode(NODE_TYPES.TEXT, {
   id: 'expression-scene-layer', duration: 1, content: 'Motion', expressions: { x: '50+10*sin(t)' },
 })] });

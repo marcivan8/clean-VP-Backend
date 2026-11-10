@@ -96,7 +96,7 @@ export function animationsToParamTracks(animations, clipDuration) {
                 tracks[param].push({
                     time: Math.max(0, animStart + (Number(kf.time) || 0)),
                     value: Number(value),
-                    easing: kf.easing || anim.easing || 'linear',
+                    easing: kf.easingByProperty?.[param] || kf.easing || anim.easing || 'linear',
                 });
             }
         }
@@ -142,15 +142,19 @@ export function paramTracksToAnimations(tracks, clipDuration) {
             const value = Number(kf?.value);
             if (!Number.isFinite(value)) continue;
             const key = t.toFixed(4);
-            if (!byTime.has(key)) byTime.set(key, { time: t, properties: {}, easing: kf.easing || 'linear' });
+            if (!byTime.has(key)) byTime.set(key, { time: t, properties: {}, easingByProperty: {} });
             byTime.get(key).properties[param] = value;
+            byTime.get(key).easingByProperty[param] = kf.easing || 'linear';
         }
     }
 
     if (byTime.size === 0) return [];
 
     const entries = [...byTime.values()].sort((a, b) => a.time - b.time);
-    const keyframes = entries.map(e => createKeyframe(e.time, e.properties, e.easing));
+    const keyframes = entries.map(e => ({
+        ...createKeyframe(e.time, e.properties, 'linear'),
+        easingByProperty: e.easingByProperty,
+    }));
 
     // A single keyframe holds a constant — legal, and how a user pins a value.
     const duration = Math.max(

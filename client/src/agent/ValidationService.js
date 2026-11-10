@@ -93,9 +93,13 @@ export class ValidationService {
             'smart_cleanup', 'remove_repetition', 'auto_captions', 'generate_captions', 'generate_transcript',
             'reorder_clips',
             'polish_short', 'repurpose_shorts', 'auto_reel', 'apply_style_recipe', 'resume_failed_job',
+            // These change graphic/effect state without changing footage cuts.
+            // Existing projects may already contain gaps/overlaps unrelated to
+            // the motion action, so validate their own persisted postconditions.
+            'apply_motion_effect_stack', 'design_scene', 'compose_motion', 'add_motion_component',
         ]);
-        const opKey = plan.operation || plan.steps?.[0]?.action;
-        const skipIntegrityCheck = RESTRUCTURING_OPS.has(opKey);
+        const opKey = plan.steps?.[0]?.action || plan.operation || plan.intent_operation;
+        const skipIntegrityCheck = RESTRUCTURING_OPS.has(opKey) || opKey === 'addMotionComponent';
 
         try {
             // 1. Validate operation-specific results
@@ -177,7 +181,9 @@ export class ValidationService {
     // ==================== OPERATION VALIDATORS ====================
 
     validateOperation(plan, executionResult, state) {
-        const operation = plan.operation || plan.intent_operation || plan.steps?.[0]?.action;
+        // The plan's top-level operation can be the generic "edit" wrapper.
+        // The first compiled step is the concrete action we must validate.
+        const operation = plan.steps?.[0]?.action || plan.operation || plan.intent_operation;
         const outputs = [];
         const issues = [];
         const warnings = [];
@@ -206,6 +212,13 @@ export class ValidationService {
             case 'add_text':
             case 'color_grade':
                 return this.validateEffect(plan, state);
+
+            case 'apply_motion_effect_stack':
+            case 'design_scene':
+            case 'compose_motion':
+            case 'add_motion_component':
+            case 'addMotionComponent':
+                return this.validateMotionMutation(operation, executionResult, state);
 
             case 'export_video':
                 return this.validateExport(plan, executionResult);
@@ -260,6 +273,60 @@ export class ValidationService {
                     warnings: []
                 };
         }
+    }
+
+    /** Verify motion-engine actions against the state ROKA actually changed. */
+    validateMotionMutation(operation, executionResult, state) {
+        const results = executionResult.results || [];
+        const isComponent = operation === 'add_motion_component' || operation === 'addMotionComponent';
+        const expectedAction = isComponent ? 'addMotionComponent' : operation;
+        const result = [...results].reverse().find(item => item?.action === expectedAction);
+        const fail = message => ({
+            outputs: [],
+            issues: [{ type: ISSUE_TYPES.INTEGRITY_ERROR, action: operation, message }],
+            warnings: [],
+        });
+        if (!result || result.success !== true) {
+            return fail(result?.message || result?.error || `ROKA did not confirm ${operation} ran successfully.`);
+        }
+
+        const details = result.details || {};
+        const clips = (state.tracks || []).flatMap(track => (track.clips || []).map(clip => ({ track, clip })));
+        const clipsById = new Map(clips.map(entry => [entry.clip.id, entry]));
+
+        if (operation === 'apply_motion_effect_stack') {
+            const clipIds = Array.isArray(details.clipIds) ? details.clipIds : [];
+            const effects = Array.isArray(details.effects) ? details.effects : [];
+            if (details.verified !== true || clipIds.length === 0 || effects.length === 0) {
+                return fail('The footage effect action returned success without verified target clips and effects.');
+            }
+            const missing = clipIds.filter(id => {
+                const entry = clipsById.get(id);
+                return !entry || entry.track.type !== 'video' || effects.some(effect =>
+                    !(entry.clip.effects || []).some(saved => saved.id === effect.id && saved.type === effect.type));
+            });
+            if (missing.length) return fail(`The footage effect stack is missing from ${missing.length} target clip(s) after execution.`);
+            return { outputs: [{ action: operation, status: 'verified', clipIds, effectCount: effects.length }], issues: [], warnings: [] };
+        }
+
+        if (operation === 'compose_motion') {
+            const clipIds = Array.isArray(details.clipIds) ? details.clipIds : [];
+            const animated = clipIds.filter(id => (clipsById.get(id)?.clip.animations || []).length > 0);
+            if (!details.applied || animated.length !== Number(details.applied)) {
+                return fail('The requested motion was reported as applied, but its keyframed clip state could not be verified.');
+            }
+            return { outputs: [{ action: operation, status: 'verified', clipIds: animated }], issues: [], warnings: [] };
+        }
+
+        const sceneId = details.sceneId;
+        const clipIds = Array.isArray(details.clipIds) ? details.clipIds : [];
+        const expectedCount = Number(details.clipCount) || 0;
+        const scene = sceneId ? state.scenes?.[sceneId] : null;
+        const persistedIds = clipIds.filter(id => clipsById.has(id));
+        if (!scene || expectedCount <= 0 || persistedIds.length < expectedCount) {
+            return fail('The motion design was reported as created, but its scene and timeline layers were not all found afterward.');
+        }
+        return { outputs: [{ action: operation, status: 'verified', sceneId, clipIds: persistedIds }], issues: [], warnings: [] };
     }
 
     validateSplit(plan, state, executionResult) {

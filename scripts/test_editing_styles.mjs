@@ -374,11 +374,11 @@ await check('recipe transitions: scene changes, spaced jump cuts, capped', () =>
 });
 await check('9:16 crop is full height and follows the speaker', () => {
     const r = fillFrameCrop({ sourceAspect: 16 / 9, frameAspect: 9 / 16, bboxTrack: [{ t: 1, cx: 0.7, cy: 0.4, w: 0.2, h: 0.6 }], sourceStart: 0, duration: 5 });
-    assert.equal(r.faceAware, true); assert.equal(r.crop.cropH, 1);
+    assert.equal(r.subjectAware, true); assert.equal(r.crop.cropH, 1);
     assert.ok(Math.abs(r.crop.cropW - (9 / 16) / (16 / 9)) < 1e-3);
     assert.ok(Math.abs(r.crop.cropX + r.crop.cropW / 2 - 0.7) < 1e-3, 'centred on the face');
     const c = fillFrameCrop({ sourceAspect: 16 / 9, frameAspect: 9 / 16 });
-    assert.equal(c.faceAware, false); assert.ok(Math.abs(c.crop.cropX + c.crop.cropW / 2 - 0.5) < 1e-3);
+    assert.equal(c.subjectAware, false); assert.ok(Math.abs(c.crop.cropX + c.crop.cropW / 2 - 0.5) < 1e-3);
     assert.equal(fillFrameCrop({ sourceAspect: 9 / 16, frameAspect: 9 / 16 }), null, 'vertical video: nothing to crop');
 });
 await check('reframeToFrame crops on 9:16 and removes the crop on 16:9, one undo each', () => {

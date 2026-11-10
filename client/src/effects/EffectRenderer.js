@@ -47,6 +47,7 @@ export class EffectRenderer {
         this.renderJobs = new Map();
         this.maxRenderJobHistory = 100;
         this.renderAbortController = null;
+        this._previewWarnings = new Set();
 
         // Progress callbacks
         this.onProgress = options.onProgress || null;
@@ -105,6 +106,33 @@ export class EffectRenderer {
         if (pipeline?.gpuEngine === engine) pipeline.setGPUEngine(null);
     }
 
+    _warnGpuEffectsUnavailable(placement, currentTime) {
+        const effects = this.pipeline?.getActiveEffects?.(placement?.id, currentTime, placement)
+            ?.filter(effect => effect.enabled !== false) || [];
+        const groups = [
+            ...(!this.gl ? [{ engine: ENGINE_TYPES.GPU, type: 'gpu_effect_preview_unavailable',
+                message: 'GPU effects are active, but WebGL is unavailable for this preview.' }] : []),
+            { engine: ENGINE_TYPES.CPU, type: 'cpu_effect_preview_unavailable',
+                message: 'CPU effects are applied during export but are not rendered in real-time preview.' },
+        ];
+        for (const group of groups) {
+            const activeEffects = effects.filter(effect => effect.engine === group.engine);
+            if (!activeEffects.length) continue;
+            const effectIds = activeEffects.map(effect => effect.id);
+            const key = `${placement?.id || 'unknown'}:${group.engine}:${effectIds.join(',')}`;
+            if (this._previewWarnings.has(key)) continue;
+            this._previewWarnings.add(key);
+            this.pipeline.onPreviewWarning?.({
+                type: group.type,
+                targetId: placement?.id || null,
+                effectIds,
+                message: `${group.message}${group.engine === ENGINE_TYPES.CPU
+                    ? ` Effects: ${activeEffects.map(effect => effect.name || effect.type).join(', ')}.` : ''}`,
+                recoverable: true,
+            });
+        }
+    }
+
     // ========================================================================
     // REAL-TIME PREVIEW
     // ========================================================================
@@ -118,7 +146,16 @@ export class EffectRenderer {
      * @returns {WebGLTexture} Processed output texture
      */
     renderPreview(inputTexture, placements, currentTime, context = {}) {
-        if (!this.pipeline || !this.gl) {
+        if (!this.pipeline) {
+            return inputTexture;
+        }
+
+        if (!this.gl) {
+            // Keep playback available when WebGL is unavailable, but do not
+            // silently make an effect-bearing preview look successfully rendered.
+            for (const placement of placements || []) {
+                this._warnGpuEffectsUnavailable(placement, currentTime);
+            }
             return inputTexture;
         }
 
@@ -170,6 +207,10 @@ export class EffectRenderer {
      */
     renderPlacementPreview(inputTexture, placement, currentTime, context = {}) {
         if (!this.pipeline) {
+            return inputTexture;
+        }
+        if (!this.gl) {
+            this._warnGpuEffectsUnavailable(placement, currentTime);
             return inputTexture;
         }
 

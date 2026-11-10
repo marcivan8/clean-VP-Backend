@@ -35,17 +35,17 @@ const CC = require(path.join(ROOT, 'server/compositor/CompositorCompiler.js'));
     const noFace = LP.splitSpeakerCrop({ sourceAspect: 16 / 9, frameAspect: 9 / 16 });
     const c = noFace.crop;
     assert.ok(Math.abs((c.cropW * 16 / 9) / c.cropH - 9 / 16) < 0.01, JSON.stringify(c));
-    assert.equal(noFace.faceAware, false);
+    assert.equal(noFace.subjectAware, false);
     ok('split speaker crop has the frame shape (no bars) and falls back without detection');
 
     const bbox = [{ t: 0, cx: 0.44, cy: 0.62, w: 0.4, h: 0.6 }, { t: 1, cx: 0.46, cy: 0.6, w: 0.4, h: 0.6 }];
     const face = LP.splitSpeakerCrop({ bboxTrack: bbox, sourceAspect: 9 / 16, frameAspect: 9 / 16, sourceStart: 0, duration: 2 });
     const headY = (0.61 - 0.3) + 0.2 * 0.6; // median cy - h/2 + 20% of h
     const headInFrame = (headY - face.crop.cropY) / face.crop.cropH;
-    assert.equal(face.faceAware, true);
+    assert.equal(face.subjectAware, true);
     assert.ok(Math.abs(headInFrame - 0.25) < 0.03, `head at ${headInFrame}`);
     assert.ok(Math.abs((0.45 - face.crop.cropX) / face.crop.cropW - 0.5) < 0.05);
-    ok('face-aware split crop puts the head in the middle of the top half');
+    ok('subject-aware split crop puts the estimated head position in the middle of the top half');
 }
 
 // Compositor.js inlines hasLayoutFrame (its test harnesses concatenate a
@@ -80,7 +80,7 @@ const ovClip = () => st().tracks.find(t => t.type === 'overlay').clips[0];
 setup(true);
 let r = st().applyLayout('ov', 'b1', 'split');
 assert.equal(r.success, true, JSON.stringify(r));
-assert.equal(r.faceAware, true);
+assert.equal(r.subjectAware, true);
 let pieces = base();
 assert.deepEqual(pieces.map(p => [p.start, p.duration]), [[0, 3], [3, 4], [7, 3]]);
 ok('split cuts the speaker clip into before / under / after the content');

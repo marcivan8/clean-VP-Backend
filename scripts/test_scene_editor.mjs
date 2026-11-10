@@ -289,6 +289,25 @@ await check('a repeat lays the move down again, and a ping-pong comes back', () 
     assert.equal(SM.expandRepeat(base, { duration: 3 }), base, 'no repeat, no change');
 });
 
+await check('per-property easing survives scene normalization, repeat expansion, and timeline flattening', () => {
+    const scene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [SS.createNode(NODE_TYPES.SHAPE, {
+        id: 'independent-easing', duration: 2,
+        animations: [{ id: 'independent-repeat', type: 'translate', duration: 1, easing: 'linear',
+            repeat: { times: 2 }, keyframes: [
+                { time: 0, properties: { x: 0, y: 0 } },
+                { time: 1, properties: { x: 10, y: 10 }, easingByProperty: { x: 'ease-in', y: 'linear' } },
+            ] }],
+    })] }));
+    const clip = SS.flattenScene(scene).placements[0].clip;
+    const animation = clip.animations.find(item => item.id === 'independent-repeat');
+    assert.equal(animation.keyframes[1].easingByProperty.x, 'ease-in');
+    assert.equal(animation.keyframes[1].easingByProperty.y, 'linear');
+    assert.deepEqual(MR.sampleAnimation(animation, 0.5), { x: 2.5, y: 5 }, 'first pass uses independent curves');
+    const secondPass = MR.sampleAnimation(animation, 1.5);
+    assert.ok(Math.abs(secondPass.x - 2.5) < 0.02 && Math.abs(secondPass.y - 5) < 0.02,
+        `repeated pass preserves separate easing, got ${JSON.stringify(secondPass)}`);
+});
+
 await check('animating a group moves what is inside it, and a rotating group makes them orbit', () => {
     const child = SS.createNode(NODE_TYPES.TEXT, { id: 'c', content: 'x', duration: 2, transform: { x: 20, y: 0 } });
     const scene = SS.normalizeScene(SS.createScene({
@@ -928,19 +947,21 @@ await check('the scene editor is mounted in the Motion panel and wired to the st
 
 await check('3D procedural particle emitters and lifecycle controls are editable and localized', () => {
     const panel = read('client/src/components/TemplatePanel.jsx');
-    for (const property of ['particleSimulation', 'emitterShape', 'emissionMode', 'emitterPosition', 'emitterSize', 'ringInnerRadius', 'particleLifetime', 'particleTurbulence', 'turbulenceFrequency', 'particleFadeIn', 'particleFadeOut', 'loopParticles', 'particleVelocity', 'particleGravity']) {
+    for (const property of ['particleSimulation', 'particleShape', 'particleShapes', 'emitterShape', 'emissionMode', 'emitterPosition', 'emitterSize', 'ringInnerRadius', 'particleLifetime', 'particleTurbulence', 'turbulenceFrequency', 'particleFadeIn', 'particleFadeOut', 'loopParticles', 'particleVelocity', 'particleGravity']) {
         assert.match(panel, new RegExp(`templates\\.scene3d\\.${property}`), `${property} editor control`);
     }
     assert.match(panel, /update3DEmitter\(\{ position:/, 'emitter position persists into scene data');
     assert.match(panel, /update3DEmitter\(\{ size:/, 'emitter dimensions persist into scene data');
     assert.match(panel, /update3DParticles\(\{ velocity:/, 'particle velocity persists into scene data');
     assert.match(panel, /update3DParticles\(\{ gravity:/, 'particle acceleration persists into scene data');
+    assert.match(panel, /\['size', 'spread', 'speed', 'opacity'\]/, 'audio response can drive particle spread');
     assert.match(panel, /particles3d\.loop !== false/, 'looping is represented as an explicit saved particle option');
     for (const lang of ['en', 'fr']) {
         const words = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).templates?.scene3d;
-        for (const key of ['particleSimulation', 'emitterShape', 'emitterShapes', 'emissionMode', 'emissionModes', 'emitterPosition', 'emitterSize', 'emitterRadii', 'ringInnerRadius', 'particleLifetime', 'particleTurbulence', 'turbulenceFrequency', 'particleFadeIn', 'particleFadeOut', 'loopParticles', 'particleVelocity', 'particleGravity']) {
+        for (const key of ['particleSimulation', 'particleShape', 'particleShapes', 'emitterShape', 'emitterShapes', 'emissionMode', 'emissionModes', 'emitterPosition', 'emitterSize', 'emitterRadii', 'ringInnerRadius', 'particleLifetime', 'particleTurbulence', 'turbulenceFrequency', 'particleFadeIn', 'particleFadeOut', 'loopParticles', 'particleVelocity', 'particleGravity']) {
             assert.ok(words?.[key], `${lang}.templates.scene3d.${key}`);
         }
+        for (const key of ['size', 'spread', 'speed', 'opacity']) assert.ok(words?.particleAudioTargets?.[key], `${lang}.templates.scene3d.particleAudioTargets.${key}`);
     }
 });
 
@@ -964,7 +985,89 @@ await check('3D camera animation uses the renderer defaults for clipping-plane k
     assert.match(panel, /SCENE3D_CAMERA_DEFAULTS/);
     assert.match(panel, /const cameraDefaults3D = SCENE3D_CAMERA_DEFAULTS/);
     assert.match(renderer, /near: 0\.05, far: 1000/);
-    assert.match(panel, /\['x', 'y', 'z', 'yaw', 'pitch', 'roll', 'fov', 'orthoScale', 'near', 'far'\]/);
+    assert.match(panel, /\['x', 'y', 'z', 'yaw', 'pitch', 'roll', 'fov', 'orthoScale', 'near', 'far', 'dofFocusDistance', 'dofFocusRange', 'dofStrength', 'dofMaxBlur'\]/);
+    assert.match(renderer, /animatedCamera\.dofFocusDistance/);
+    assert.match(renderer, /animatedCamera\.dofFocusRange/);
+    assert.match(renderer, /animatedCamera\.dofStrength/);
+    assert.match(renderer, /animatedCamera\.dofMaxBlur/);
+});
+
+await check('3D object keyframes expose primitive radius and dimension channels in both locales', () => {
+    const panel = read('client/src/components/TemplatePanel.jsx');
+    for (const property of ['radius', 'height', 'tube', 'sizeX', 'sizeY', 'sizeZ']) {
+        assert.match(panel, new RegExp(`${property}: \\{ key: '${property}'`), `${property} has a keyframe property mapping`);
+    }
+    const renderer = read('client/src/motion/Scene3D.js');
+    assert.match(renderer, /radius: clamp\(geometryBase\.radius \+ n\(animated\.radius\)/);
+    assert.match(renderer, /sizeX/);
+    for (const lang of ['en', 'fr']) {
+        const words = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).templates?.scene3d?.properties;
+        for (const property of ['radius', 'height', 'tube', 'sizeX', 'sizeY', 'sizeZ']) {
+            assert.ok(words?.[property], `${lang}.templates.scene3d.properties.${property}`);
+        }
+    }
+});
+
+await check('3D base and emissive color channels can be edited and keyframed from the scene panel', () => {
+    const panel = read('client/src/components/TemplatePanel.jsx');
+    for (const property of ['colorR', 'colorG', 'colorB', 'emissiveR', 'emissiveG', 'emissiveB']) {
+        assert.match(panel, new RegExp(`${property}: \\{ key: '${property}'.*kind: 'absolute'`), `${property} is an absolute color track`);
+        assert.match(panel, new RegExp(`'${property}'`), `${property} is exposed by the scene panel`);
+    }
+    assert.match(panel, /keyframeSpec\.kind === 'absolute'[\s\S]*sampledTrackValue : keyframeSpec\.base/);
+    assert.match(panel, /max="255" step="1"/);
+    const renderer = read('client/src/motion/Scene3D.js');
+    assert.match(renderer, /SCENE3D_COLOR_CHANNEL_PROPERTIES/);
+    for (const lang of ['en', 'fr']) {
+        const words = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).templates?.scene3d?.properties;
+        for (const property of ['colorR', 'colorG', 'colorB', 'emissiveR', 'emissiveG', 'emissiveB']) {
+            assert.ok(words?.[property], `${lang}.templates.scene3d.properties.${property}`);
+        }
+    }
+});
+
+await check('3D light RGB channels can be keyframed and expression driven from the lighting panel', () => {
+    const panel = read('client/src/components/TemplatePanel.jsx');
+    for (const property of ['colorR', 'colorG', 'colorB']) {
+        assert.match(panel, new RegExp(`lightPropertyBase3D[\\s\\S]*${property}: parseSceneColorChannel`));
+        assert.match(panel, new RegExp(`'${property}'`));
+    }
+    const renderer = read('client/src/motion/Scene3D.js');
+    assert.match(renderer, /'colorR', 'colorG', 'colorB'\]\.includes\(property\)/);
+    assert.match(renderer, /color: colorFromChannels\(light\?\.color \|\| '#FFFFFF', animated, 'color'\)/);
+    for (const lang of ['en', 'fr']) {
+        const words = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).templates?.scene3d?.lightProperties;
+        for (const property of ['colorR', 'colorG', 'colorB']) assert.ok(words?.[property], `${lang}.lightProperties.${property}`);
+    }
+});
+
+await check('3D area lights expose source size and targeting in both locales', () => {
+    const panel = read('client/src/components/TemplatePanel.jsx');
+    assert.match(panel, /'point', 'directional', 'spot', 'area'/);
+    assert.match(panel, /light\.type === 'area'[\s\S]*lightWidth[\s\S]*lightHeight/);
+    const renderer = read('client/src/motion/Scene3D.js');
+    assert.match(renderer, /supportedLights = new Set\(\['point', 'directional', 'spot', 'area'\]\)/);
+    assert.match(renderer, /areaSamples/);
+    for (const lang of ['en', 'fr']) {
+        const words = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).templates?.scene3d;
+        assert.ok(words?.lightTypes?.area, `${lang}.lightTypes.area`);
+        assert.ok(words?.lightWidth, `${lang}.lightWidth`);
+        assert.ok(words?.lightHeight, `${lang}.lightHeight`);
+    }
+});
+
+await check('3D object audio-reactive controls expose geometry channels and localized labels', () => {
+    const panel = read('client/src/components/TemplatePanel.jsx');
+    assert.match(panel, /'radius', 'height', 'tube', 'sizeX', 'sizeY', 'sizeZ'\]/);
+    for (const lang of ['en', 'fr']) {
+        const words = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).templates?.scene3d?.audioTargets;
+        for (const target of ['radius', 'height', 'tube', 'sizeX', 'sizeY', 'sizeZ']) {
+            assert.ok(words?.[target], `${lang}.templates.scene3d.audioTargets.${target}`);
+        }
+    }
+    const renderer = read('client/src/motion/Scene3D.js');
+    assert.match(renderer, /reactiveGeometry\[target\] = amount/);
+    assert.match(renderer, /geometryBase\.radius \+ n\(animated\.radius\) \+ n\(reactiveGeometry\.radius\)/);
 });
 
 await check('3D objects expose shadow casting and planes define the scene receiver', () => {

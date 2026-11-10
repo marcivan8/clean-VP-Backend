@@ -13,12 +13,28 @@ const FUNCTIONS = Object.freeze({
         const x = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
         return x * x * (3 - 2 * x);
     },
+    linear: (value, inMin, inMax, outMin, outMax) => inMax === inMin
+        ? (value < inMin ? outMin : outMax)
+        : outMin + (outMax - outMin) * ((value - inMin) / (inMax - inMin)),
+    ease: (value, inMin, inMax, outMin, outMax) => {
+        const p = inMax === inMin ? (value < inMin ? 0 : 1) : Math.max(0, Math.min(1, (value - inMin) / (inMax - inMin)));
+        return outMin + (outMax - outMin) * p * p * (3 - 2 * p);
+    },
+    easeIn: (value, inMin, inMax, outMin, outMax) => {
+        const p = inMax === inMin ? (value < inMin ? 0 : 1) : Math.max(0, Math.min(1, (value - inMin) / (inMax - inMin)));
+        return outMin + (outMax - outMin) * p * p;
+    },
+    easeOut: (value, inMin, inMax, outMin, outMax) => {
+        const p = inMax === inMin ? (value < inMin ? 0 : 1) : Math.max(0, Math.min(1, (value - inMin) / (inMax - inMin)));
+        return outMin + (outMax - outMin) * (1 - (1 - p) * (1 - p));
+    },
 });
 const EXPRESSION_FUNCTIONS = new Set([...Object.keys(FUNCTIONS), 'noise', 'wiggle']);
 const FUNCTION_ARITY = Object.freeze({
     abs: [1, 1], ceil: [1, 1], floor: [1, 1], round: [1, 1],
     sin: [1, 1], cos: [1, 1], tan: [1, 1], sqrt: [1, 1],
     min: [1, 3], max: [1, 3], clamp: [3, 3], smoothstep: [3, 3],
+    linear: [5, 5], ease: [5, 5], easeIn: [5, 5], easeOut: [5, 5],
     noise: [1, 2], wiggle: [2, 3],
 });
 
@@ -147,12 +163,25 @@ export function validateMotionExpression(expression, { variables = ['t', 'time',
             return { valid: false, reason: 'unknown_variable', detail: token };
         }
     }
+    // Supply every caller-declared variable to the probes as well as the
+    // built-ins. Previously the grammar accepted custom names here, but the
+    // evaluator then saw them as undefined and rejected otherwise valid
+    // expressions. Probe custom variables at several values so singularities
+    // such as `1 / (custom - 1)` still fail closed.
+    const probeValues = [0.37, 1, 2.5];
     const contexts = [
         { t: 0.37, time: 0.37, duration: 2, progress: 0.185, value: 0.5 },
         { t: 1, time: 1, duration: 2, progress: 0.5, value: 1 },
         { t: 2.5, time: 2.5, duration: 4, progress: 0.625, value: 1.5 },
-    ];
-    if (!contexts.some(context => evaluateMotionExpression(source, context) !== null)) {
+    ].map((context, index) => {
+        for (const variable of variables) {
+            if (!Object.prototype.hasOwnProperty.call(context, variable) && variable !== 'pi' && variable !== 'e') {
+                context[variable] = probeValues[index];
+            }
+        }
+        return context;
+    });
+    if (!contexts.every(context => evaluateMotionExpression(source, context) !== null)) {
         return { valid: false, reason: 'non_finite' };
     }
     return { valid: true, reason: '' };

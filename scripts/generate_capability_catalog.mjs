@@ -156,6 +156,12 @@ for (const cmd of reg.COMMANDS) {
         requires: contract.requires,
         prefers: contract.prefers,
         provides: contract.provides,
+        inputs: cmd.params || [],
+        effects: cmd.readOnly
+            ? 'Reads project or media analysis; does not mutate project state.'
+            : `${cmd.destructive ? 'Removes or shortens existing material.' : 'May update timeline or project state.'}`,
+        cost: cmd.network ? 'network' : cmd.expensive ? 'analysis_or_compute' : cmd.readOnly ? 'analysis_or_local' : 'local',
+        verification: 'Require a checked execution result and verify the resulting timeline or asset state before reporting success.',
         destructive: contract.destructive,
         readOnly: contract.readOnly,
         macro: contract.macro,
@@ -240,26 +246,18 @@ if (failures.length > 0) {
 }
 
 entries.sort((a, b) => a.category.localeCompare(b.category) || a.id.localeCompare(b.id));
+for (const entry of entries) {
+    entry.inputs ||= [];
+    entry.effects ||= entry.readOnly
+        ? 'Reads project or media analysis; does not mutate project state.'
+        : `${entry.destructive ? 'Removes or shortens existing material.' : 'May update timeline or project state.'}`;
+    entry.cost ||= 'local';
+    entry.verification ||= 'Require a checked execution result and verify the resulting timeline or asset state before reporting success.';
+}
 
-const catalog = {
-    // Hand-editing this file is pointless: it is regenerated from the registry.
-    $generatedBy: 'scripts/generate_capability_catalog.mjs',
-    $source: 'client/src/agent/CommandRegistry.js + client/src/agent/CapabilityGraph.js',
-    $doNotEdit: true,
-    resources: Object.values(graph.RESOURCES).sort(),
-    commandCount: entries.length,
-    registryDeclaredCount: entries.filter(e => e.registryDeclared).length,
-    supplementCount: entries.filter(e => !e.registryDeclared).length,
-    commands: entries,
-};
-
-// Stable, newline-terminated JSON so --check is a pure content comparison and
-// the file produces no diff noise between runs.
-const serialized = JSON.stringify(catalog, null, 2) + '\n';
-
-// ── style policy ────────────────────────────────────────────────────────────
+// Editing style policies and executable command preferences are generated from
+// the same server source as the Brain's style guidance.
 const styles = require('../server/brain/editingStyles.js');
-
 const stylePolicy = {};
 for (const id of styles.EDITING_STYLE_IDS) {
     const zoom = styles.rhythmZoomStyle(id) || {};
@@ -273,11 +271,37 @@ for (const id of styles.EDITING_STYLE_IDS) {
         calm: styles.isCalmStyle(id),
         allowPunchIns: zoom.allowPunchIns !== false,
         motions: zoom.motions || null,
-        // Prose, carried verbatim for explanations — never parsed for decisions.
+        preferredCommands: styles.STYLE_COMMANDS[id] || [],
         aside: ((styles.STYLE_FOCUS[id] || {}).aside) || [],
         priorities: ((styles.STYLE_FOCUS[id] || {}).priorities) || [],
     };
+    for (const commandId of stylePolicy[id].preferredCommands) {
+        if (!entries.some(entry => entry.id === commandId)) failures.push(`${id}: preferred command '${commandId}' is absent from the capability catalog`);
+    }
 }
+if (failures.length > 0) {
+    console.error('[generate_capability_catalog] FAILED — invalid style capability references:');
+    for (const f of failures) console.error('  - ' + f);
+    process.exit(1);
+}
+
+const catalog = {
+    // Hand-editing this file is pointless: it is regenerated from the registry.
+    $generatedBy: 'scripts/generate_capability_catalog.mjs',
+    $source: 'client command registry/capability graph + server/brain/editingStyles.js',
+    $doNotEdit: true,
+    resources: Object.values(graph.RESOURCES).sort(),
+    styles: stylePolicy,
+    modes: styles.MODE_POLICY,
+    commandCount: entries.length,
+    registryDeclaredCount: entries.filter(e => e.registryDeclared).length,
+    supplementCount: entries.filter(e => !e.registryDeclared).length,
+    commands: entries,
+};
+
+// Stable, newline-terminated JSON so --check is a pure content comparison and
+// the file produces no diff noise between runs.
+const serialized = JSON.stringify(catalog, null, 2) + '\n';
 
 const phraseMap = {};
 for (const e of entries) phraseMap[e.id] = e.phrase;

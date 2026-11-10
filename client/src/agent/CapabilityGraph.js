@@ -116,6 +116,7 @@ export const CAPABILITIES = Object.freeze({
     rhythm_zoom:          { requires: [R.CLIPS, R.TRANSCRIPT] },
     animate_automatically:{ requires: [R.CLIPS], prefers: [R.TRANSCRIPT] },
     compose_motion:       { requires: [R.CLIPS] },
+    apply_motion_effect_stack: { requires: [R.CLIPS] },
     remove_background:    { requires: [R.CLIPS], prefers: [R.SCENE_ANALYSIS] },
     sandwich_text:        { requires: [R.CLIPS], prefers: [R.SCENE_ANALYSIS] },
     zoom_speaker:         { requires: [R.CLIPS], prefers: [R.SCENE_ANALYSIS] },

@@ -464,17 +464,27 @@ export class IntentParser {
         const visualTargetSearch = this.tryVisualTargetSearch(prompt);
         if (visualTargetSearch) return this.validateAndNormalize(visualTargetSearch, prompt);
 
-        const reg = this.tryRegistry(prompt);
-        if (reg) {
-            if (reg.needs_clarification) return reg;
-            console.log('[IntentParser] Registry match:', reg.operation, `(confidence: ${reg._confidence})`);
-            return this.validateAndNormalize(reg, prompt);
+        // Preserve separately stated actions instead of ranking the whole
+        // sentence and silently discarding every command after the winner.
+        const compound = this.tryCompoundRegistry(prompt);
+        if (compound && !compound._deferToAI) {
+            if (compound.needs_clarification) return compound;
+            return this.validateAndNormalize(compound, prompt);
         }
 
-        const localFirst = this.tryLocalFirst(prompt);
-        if (localFirst) {
-            console.log('[IntentParser] Local-first match (skipped API):', localFirst.operation);
-            return this.validateAndNormalize(localFirst, prompt);
+        if (!compound?._deferToAI) {
+            const reg = this.tryRegistry(prompt);
+            if (reg) {
+                if (reg.needs_clarification) return reg;
+                console.log('[IntentParser] Registry match:', reg.operation, `(confidence: ${reg._confidence})`);
+                return this.validateAndNormalize(reg, prompt);
+            }
+
+            const localFirst = this.tryLocalFirst(prompt);
+            if (localFirst) {
+                console.log('[IntentParser] Local-first match (skipped API):', localFirst.operation);
+                return this.validateAndNormalize(localFirst, prompt);
+            }
         }
 
         try {
@@ -614,6 +624,82 @@ export class IntentParser {
             originalPrompt: prompt,
             _registry: true,
             _macro: cmd.macro ? expandMacro(cmd.id) : null,
+        };
+    }
+
+    /** Resolve explicit conjunction-separated clauses as one atomic plan. */
+    static tryCompoundRegistry(prompt) {
+        const lowerPrompt = String(prompt || '').toLowerCase();
+        if ((lowerPrompt.includes('clean') || lowerPrompt.includes('remove silence'))
+            && (lowerPrompt.includes('dynamic') || lowerPrompt.includes('zoom rhythm'))
+            && !/\b(multicam|multi-cam|multi camera|multi-camera)\b/.test(lowerPrompt)) {
+            return {
+                intent: 'edit', operation: 'compound_clean_dynamic',
+                parameters: zoomStyleParams(lowerPrompt),
+                constraints: zoomStyleParams(lowerPrompt),
+                confidence: 'HIGH', originalPrompt: prompt,
+            };
+        }
+        const firstClause = String(prompt || '').split(/[.!?\n]/, 1)[0].trim();
+        const leadingCommand = firstClause ? resolveCommand(firstClause).match : null;
+        // These commands intentionally bundle several visual/audio actions.
+        // Their explanatory follow-up sentences are details for that bundle,
+        // not separate tool requests.
+        if (leadingCommand?.macro || ['polish_short', 'apply_style_recipe', 'storyboard_video'].includes(leadingCommand?.id)) return null;
+        const clauses = String(prompt || '')
+            .split(/\s+(?:and then|then|and also|also|and|plus|et puis|et aussi|et)\s+|\s*;\s*/i)
+            .map(part => part.trim().replace(/^[,.;\s]+|[,.;\s]+$/g, ''))
+            .filter(Boolean);
+        if (clauses.length < 2 || clauses.length > 6) return null;
+
+        const commands = [];
+        let unresolvedClause = false;
+        for (const clause of clauses) {
+            const resolved = resolveCommand(clause);
+            if (resolved?.ambiguous) {
+                const options = [resolved.match, ...resolved.alternatives].slice(0, 3);
+                return {
+                    needs_clarification: true,
+                    confidence: 'LOW',
+                    reason: `I found more than one possible action in "${clause}".`,
+                    questions: [{
+                        question: `Which action did you mean for "${clause}"? ${options.map(option => option.label).join(' or ')}`,
+                        parameter: 'command',
+                        type: 'text',
+                    }],
+                    originalPrompt: prompt,
+                };
+            }
+            if (!resolved?.match || resolved.match.unimplemented) {
+                unresolvedClause = true;
+                continue;
+            }
+            const command = resolved.match;
+            const operation = command.executes || command.id;
+            // Preserve repeated operations too: two caption/title/transition
+            // requests can target different moments or carry different params.
+            // A later planner may merge safe duplicates, but parsing must not
+            // silently erase an explicit clause.
+            commands.push({
+                operation,
+                constraints: extractParams(command, clause),
+                prompt: clause,
+                confidence: resolved.confidence,
+                macro: command.macro ? expandMacro(command.id) : null,
+                destructive: !!command.destructive,
+            });
+        }
+        if (commands.length < 2 || unresolvedClause) return { _deferToAI: true };
+
+        return {
+            intent: 'edit',
+            operation: 'multi_command',
+            commands,
+            targets: [],
+            constraints: {},
+            confidence: 'HIGH',
+            originalPrompt: prompt,
+            _registry: true,
         };
     }
 
@@ -1998,6 +2084,7 @@ export class IntentParser {
         return {
             intent: result.intent || null,
             operation,
+            ...(Array.isArray(result.commands) ? { commands: result.commands } : {}),
             targets: result.targets || [],
             target_track_id: result.target_track_id || null,
             // Local-first intents put their settings in `parameters` (e.g. the

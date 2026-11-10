@@ -16,6 +16,12 @@ import { validateMotionExpression } from '../motion/MotionExpression.js';
  * selected one. The drawing is motion/TemplateGraphics.js (preview and export).
  */
 const field = 'w-full bg-white/5 border border-border rounded px-2 py-1 text-xs text-foreground outline-none';
+const parseSceneColorChannel = (color, channel) => {
+    const value = String(color || '').replace(/^#/, '');
+    const hex = value.length === 3 ? value.split('').map(character => character + character).join('') : value;
+    const parsed = Number.parseInt(hex.slice(channel * 2, channel * 2 + 2), 16);
+    return Number.isFinite(parsed) ? parsed : 0;
+};
 
 const VectorEditor = ({ trackId, clip }) => {
     const { t } = useTranslation('editor');
@@ -51,12 +57,18 @@ const VectorEditor = ({ trackId, clip }) => {
         <label className="block space-y-1">
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('vector.shape')}</span>
             <select className={field} value={draft.kind || 'path'} onChange={event => commit({ kind: event.target.value })}>
-                {['path', 'rect', 'circle', 'capsule', 'polygon', 'star', 'arrow'].map(kind => <option key={kind} value={kind}>{kind}</option>)}
+                {['path', 'rect', 'circle', 'ellipse', 'capsule', 'callout', 'polygon', 'star', 'arrow'].map(kind => <option key={kind} value={kind}>{kind}</option>)}
             </select>
         </label>
         <div className="grid grid-cols-2 gap-2">{fieldInput('w', 'width', { number: true })}{fieldInput('h', 'height', { number: true })}</div>
         {draft.kind === 'path' && <>{fieldInput('pathData', 'pathData')}
             {motionInput('pathFrom', 'morphFrom')}{motionInput('pathTo', 'morphTo')}
+            <label className="block space-y-1">
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('vector.morphStartTime')}</span>
+                <input className={field} type="number" min="0" step="0.05" value={motion.morphStartTime ?? ''}
+                    onChange={event => setDraft({ ...draft, motion: { ...motion, morphStartTime: event.target.value === '' ? '' : Number(event.target.value) } })}
+                    onBlur={() => commitMotion({ morphStartTime: Math.max(0, Number(motion.morphStartTime) || 0) })} />
+            </label>
             <label className="block space-y-1">
                 <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('vector.morphDuration')}</span>
                 <input className={field} type="number" min="0.01" step="0.05" value={motion.morphDuration ?? ''}
@@ -187,10 +199,22 @@ const TemplateEditor = ({ trackId, clip }) => {
         scaleX: { key: 'scaleX', base: Number(object3d.scale?.x ?? 1), kind: 'multiply' },
         scaleY: { key: 'scaleY', base: Number(object3d.scale?.y ?? 1), kind: 'multiply' },
         scaleZ: { key: 'scaleZ', base: Number(object3d.scale?.z ?? 1), kind: 'multiply' },
+        radius: { key: 'radius', base: Number(object3d.radius ?? (object3d.type === 'torus' ? 0.8 : 0.65)), kind: 'add' },
+        height: { key: 'height', base: Number(object3d.height ?? 1.5), kind: 'add' },
+        tube: { key: 'tube', base: Number(object3d.tube ?? 0.2), kind: 'add' },
+        sizeX: { key: 'sizeX', base: Number(object3d.size?.x ?? 1), kind: 'add' },
+        sizeY: { key: 'sizeY', base: Number(object3d.size?.y ?? 1), kind: 'add' },
+        sizeZ: { key: 'sizeZ', base: Number(object3d.size?.z ?? 1), kind: 'add' },
         opacity: { key: 'opacity', base: Number(object3d.opacity ?? 1), kind: 'multiply' },
         roughness: { key: 'roughness', base: Number(object3d.material?.roughness ?? 0.62), kind: 'add' },
         metalness: { key: 'metalness', base: Number(object3d.material?.metalness ?? 0.08), kind: 'add' },
         emissiveIntensity: { key: 'emissiveIntensity', base: Number(object3d.material?.emissiveIntensity ?? 0), kind: 'add' },
+        colorR: { key: 'colorR', base: parseSceneColorChannel(object3d.color || object3d.material?.color || '#7C3AED', 0), kind: 'absolute' },
+        colorG: { key: 'colorG', base: parseSceneColorChannel(object3d.color || object3d.material?.color || '#7C3AED', 1), kind: 'absolute' },
+        colorB: { key: 'colorB', base: parseSceneColorChannel(object3d.color || object3d.material?.color || '#7C3AED', 2), kind: 'absolute' },
+        emissiveR: { key: 'emissiveR', base: parseSceneColorChannel(object3d.material?.emissiveColor || object3d.material?.emissive || '#000000', 0), kind: 'absolute' },
+        emissiveG: { key: 'emissiveG', base: parseSceneColorChannel(object3d.material?.emissiveColor || object3d.material?.emissive || '#000000', 1), kind: 'absolute' },
+        emissiveB: { key: 'emissiveB', base: parseSceneColorChannel(object3d.material?.emissiveColor || object3d.material?.emissive || '#000000', 2), kind: 'absolute' },
     };
     const keyframeSpec = keyframeProperties3D[selected3DProperty] || keyframeProperties3D.rotationY;
     const localPlayhead = Math.max(0, Math.min(Number(clip.duration) || 0, (Number(currentTime) || 0) - (Number(clip.start) || 0)));
@@ -201,14 +225,23 @@ const TemplateEditor = ({ trackId, clip }) => {
     const cameraTrackStart3D = Math.max(0, Number(cameraTrack3D?.startTime) || 0);
     const cameraTrackTime3D = localPlayhead - cameraTrackStart3D;
     const cameraTrackValue3D = cameraTrack3D && cameraTrackTime3D >= 0 ? sampleAnimation(cameraTrack3D, cameraTrackTime3D)[selected3DCameraProperty] : undefined;
-    const cameraValue3D = Number.isFinite(cameraTrackValue3D) ? cameraTrackValue3D : Number(camera3d[selected3DCameraProperty] ?? cameraDefaults3D[selected3DCameraProperty]);
+    const cameraDof3D = camera3d.depthOfField || scene3d.depthOfField || {};
+    const cameraDofProperties3D = { dofFocusDistance: ['focusDistance', Number(camera3d.z ?? cameraDefaults3D.z)], dofFocusRange: ['focusRange', 0.35], dofStrength: ['strength', 1], dofMaxBlur: ['maxBlur', 6] };
+    const cameraDofProperty3D = cameraDofProperties3D[selected3DCameraProperty];
+    const cameraValue3D = Number.isFinite(cameraTrackValue3D) ? cameraTrackValue3D
+        : cameraDofProperty3D ? Number(cameraDof3D[cameraDofProperty3D[0]] ?? cameraDofProperty3D[1])
+            : Number(camera3d[selected3DCameraProperty] ?? cameraDefaults3D[selected3DCameraProperty]);
     const lights3d = Array.isArray(scene3d.lights) && scene3d.lights.length ? scene3d.lights : [{ position: { x: -3, y: 5, z: 6 }, intensity: 0.9, color: '#FFFFFF' }];
     const light3d = lights3d[Math.min(selected3DLight, lights3d.length - 1)] || lights3d[0];
     const lightPropertyBase3D = {
         intensity: Number(light3d.intensity ?? 0.8), range: Number(light3d.range ?? 24), decay: Number(light3d.decay ?? 0.3), angle: Number(light3d.angle ?? 60),
+        width: Number(light3d.width ?? 4), height: Number(light3d.height ?? 4),
         positionX: Number(light3d.position?.x ?? 0), positionY: Number(light3d.position?.y ?? 0), positionZ: Number(light3d.position?.z ?? 0),
         directionX: Number(light3d.direction?.x ?? 0), directionY: Number(light3d.direction?.y ?? 0), directionZ: Number(light3d.direction?.z ?? 0),
         targetX: Number(light3d.target?.x ?? 0), targetY: Number(light3d.target?.y ?? 0), targetZ: Number(light3d.target?.z ?? 0),
+        colorR: parseSceneColorChannel(light3d.color || '#FFFFFF', 0),
+        colorG: parseSceneColorChannel(light3d.color || '#FFFFFF', 1),
+        colorB: parseSceneColorChannel(light3d.color || '#FFFFFF', 2),
     };
     const lightTrackId3D = `scene3d-light-${selected3DLight}-${selected3DLightProperty}`;
     const lightTrack3D = (light3d.animations || []).find(animation => animation.id === lightTrackId3D);
@@ -234,7 +267,8 @@ const TemplateEditor = ({ trackId, clip }) => {
         update3DScene({ lights: lights3d.map((light, lightIndex) => lightIndex === Math.min(selected3DLight, lights3d.length - 1) ? { ...light, animations } : light) });
     };
     const add3DCameraKeyframe = (value = cameraValue3D) => {
-        const baseValue = Number(camera3d[selected3DCameraProperty] ?? cameraDefaults3D[selected3DCameraProperty]);
+        const baseValue = cameraDofProperty3D ? Number(cameraDof3D[cameraDofProperty3D[0]] ?? cameraDofProperty3D[1])
+            : Number(camera3d[selected3DCameraProperty] ?? cameraDefaults3D[selected3DCameraProperty]);
         const animations = [...(camera3d.animations || [])];
         const index = animations.findIndex(animation => animation.id === cameraTrackId3D);
         const track = index >= 0 ? animations[index] : { id: cameraTrackId3D, startTime: 0, duration: Number(clip.duration) || 1, easing: keyframeEasing, keyframes: [] };
@@ -254,19 +288,21 @@ const TemplateEditor = ({ trackId, clip }) => {
     const propertyTrackStart = Math.max(0, Number(propertyTrack?.startTime) || 0);
     const propertyTrackTime = localPlayhead - propertyTrackStart;
     const sampledTrackValue = propertyTrack && propertyTrackTime >= 0 ? sampleAnimation(propertyTrack, propertyTrackTime)[keyframeSpec.key] : undefined;
-    const actual3DPropertyValue = keyframeSpec.kind === 'multiply'
+    const actual3DPropertyValue = keyframeSpec.kind === 'absolute'
+        ? (Number.isFinite(sampledTrackValue) ? sampledTrackValue : keyframeSpec.base)
+        : keyframeSpec.kind === 'multiply'
         ? keyframeSpec.base * (Number.isFinite(sampledTrackValue) ? sampledTrackValue : 1)
         : keyframeSpec.base + (Number.isFinite(sampledTrackValue) ? sampledTrackValue : 0);
     const current3DKeyframe = propertyTrackTime >= 0 ? propertyTrack?.keyframes?.find(keyframe => Math.abs(Number(keyframe.time) - propertyTrackTime) < 0.001) : undefined;
     const add3DKeyframe = () => {
-        const storedValue = keyframeSpec.kind === 'multiply'
+        const storedValue = keyframeSpec.kind === 'absolute' ? actual3DPropertyValue : keyframeSpec.kind === 'multiply'
             ? (Math.abs(keyframeSpec.base) < 1e-6 ? actual3DPropertyValue : actual3DPropertyValue / keyframeSpec.base)
             : actual3DPropertyValue - keyframeSpec.base;
         const animations = (object3d.animations || []).filter(animation => !(selected3DProperty === 'rotationY' && animation.id === 'scene3d-spin'));
         const trackIndex = animations.findIndex(animation => animation.id === propertyTrackId);
         const track = trackIndex >= 0 ? animations[trackIndex] : { id: propertyTrackId, startTime: 0, duration: Number(clip.duration) || 1, easing: keyframeEasing, keyframes: [] };
         const keyframes = [...(track.keyframes || [])];
-        if (trackIndex < 0 && localPlayhead > 0.001) keyframes.push({ time: 0, easing: 'linear', properties: { [keyframeSpec.key]: keyframeSpec.kind === 'multiply' ? 1 : 0 } });
+        if (trackIndex < 0 && localPlayhead > 0.001) keyframes.push({ time: 0, easing: 'linear', properties: { [keyframeSpec.key]: keyframeSpec.kind === 'absolute' ? keyframeSpec.base : keyframeSpec.kind === 'multiply' ? 1 : 0 } });
         const trackTime = Math.max(0, localPlayhead - Math.max(0, Number(track.startTime) || 0));
         const existingIndex = keyframes.findIndex(keyframe => Math.abs(Number(keyframe.time) - trackTime) < 0.001);
         const keyframe = { ...(existingIndex >= 0 ? keyframes[existingIndex] : {}), time: trackTime, easing: keyframeEasing, properties: { ...(existingIndex >= 0 ? keyframes[existingIndex].properties : {}), [keyframeSpec.key]: storedValue } };
@@ -378,7 +414,7 @@ const TemplateEditor = ({ trackId, clip }) => {
                 </div>
                 <label className="block space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.primitive')}</span>
                     <select className={field} value={object3d.type || 'box'} onChange={e => update3DObject({ type: e.target.value })}>
-                        {['box', 'sphere', 'cylinder', 'cone', 'torus', 'plane', 'image', 'video', 'text', 'mesh'].map(type => <option key={type} value={type}>{type}</option>)}
+                        {['box', 'sphere', 'capsule', 'cylinder', 'cone', 'torus', 'plane', 'image', 'video', 'text', 'mesh'].map(type => <option key={type} value={type}>{type}</option>)}
                     </select>
                 </label>
                 {['image', 'mesh'].includes(object3d.type) && <LogoPicker labelKey="texture" value={object3d.imageAssetId} onPick={asset => update3DObject({ imageAssetId: asset?.id || null, imageUrl: asset ? (asset.url || asset.proxyUrl || null) : null })} />}
@@ -426,7 +462,7 @@ const TemplateEditor = ({ trackId, clip }) => {
                     {object3d.audioReactive?.assetId && <div className="grid grid-cols-2 gap-2">
                         <label className="block space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.audioTarget')}</span>
                             <select className={field} value={object3d.audioReactive?.target || 'scale'} onChange={e => update3DObject({ audioReactive: { ...object3d.audioReactive, target: e.target.value } })}>
-                                {['scale', 'rotationX', 'rotationY', 'rotationZ', 'opacity', 'positionX', 'positionY', 'positionZ'].map(target => <option key={target} value={target}>{target}</option>)}
+                                {['scale', 'rotationX', 'rotationY', 'rotationZ', 'opacity', 'positionX', 'positionY', 'positionZ', 'radius', 'height', 'tube', 'sizeX', 'sizeY', 'sizeZ'].map(target => <option key={target} value={target}>{t(`templates.scene3d.audioTargets.${target}`)}</option>)}
                             </select>
                         </label>
                         {number3D(t('templates.scene3d.audioAmount'), object3d.audioReactive?.amount ?? 0.35, value => update3DObject({ audioReactive: { ...object3d.audioReactive, amount: Math.max(-10, Math.min(10, value)) } }))}
@@ -449,9 +485,9 @@ const TemplateEditor = ({ trackId, clip }) => {
                 {['box', 'image', 'video', 'plane'].includes(object3d.type) && <div className="grid grid-cols-3 gap-2">
                     {['x', 'y', 'z'].map(axis => number3D(t('templates.scene3d.size', { axis: axis.toUpperCase() }), object3d.size?.[axis] ?? 1, value => update3DObject({ size: { ...(object3d.size || {}), [axis]: Math.max(0.02, value) } })))}
                 </div>}
-                    {['sphere', 'cylinder', 'cone', 'torus'].includes(object3d.type) && <div className="grid grid-cols-2 gap-2">
+                    {['sphere', 'capsule', 'cylinder', 'cone', 'torus'].includes(object3d.type) && <div className="grid grid-cols-2 gap-2">
                     {number3D(t('templates.scene3d.radius'), object3d.radius ?? (object3d.type === 'torus' ? 0.8 : 0.65), value => update3DObject({ radius: Math.max(0.02, value) }))}
-                    {['cylinder', 'cone'].includes(object3d.type) && number3D(t('templates.scene3d.height'), object3d.height ?? 1.5, value => update3DObject({ height: Math.max(0.02, value) }))}
+                    {['capsule', 'cylinder', 'cone'].includes(object3d.type) && number3D(t('templates.scene3d.height'), object3d.height ?? 1.5, value => update3DObject({ height: Math.max(0.02, value) }))}
                     {object3d.type === 'torus' && number3D(t('templates.scene3d.tube'), object3d.tube ?? 0.2, value => update3DObject({ tube: Math.max(0.01, value) }))}
                 </div>}
                 <div className="grid grid-cols-3 gap-2">
@@ -539,7 +575,7 @@ const TemplateEditor = ({ trackId, clip }) => {
                 </div>
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.cameraAnimation')}</div>
                 <select className={field} value={selected3DCameraProperty} onChange={e => { setSelected3DCameraProperty(e.target.value); setExpressionError3D(''); }} aria-label={t('templates.scene3d.cameraProperty')}>
-                    {['x', 'y', 'z', 'yaw', 'pitch', 'roll', 'fov', 'orthoScale', 'near', 'far'].map(property => <option key={property} value={property}>{t(`templates.scene3d.cameraProperties.${property}`)}</option>)}
+                    {['x', 'y', 'z', 'yaw', 'pitch', 'roll', 'fov', 'orthoScale', 'near', 'far', 'dofFocusDistance', 'dofFocusRange', 'dofStrength', 'dofMaxBlur'].map(property => <option key={property} value={property}>{t(`templates.scene3d.cameraProperties.${property}`)}</option>)}
                 </select>
                 {number3D(t(`templates.scene3d.cameraProperties.${selected3DCameraProperty}`), cameraValue3D, add3DCameraKeyframe)}
                 <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -606,8 +642,8 @@ const TemplateEditor = ({ trackId, clip }) => {
                             }}>{t('templates.scene3d.removeLight')}</button>
                         </div>
                         <label className="block space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.lightType')}</span>
-                            <select className={field} value={light.type || 'point'} onChange={e => updateLight({ type: e.target.value, ...(e.target.value === 'directional' ? { direction: light.direction || { x: 0, y: 0, z: -1 } } : {}), ...(e.target.value === 'spot' ? { target: light.target || { x: 0, y: 0, z: 0 } } : {}) })}>
-                                {['point', 'directional', 'spot'].map(type => <option key={type} value={type}>{t(`templates.scene3d.lightTypes.${type}`)}</option>)}
+                            <select className={field} value={light.type || 'point'} onChange={e => updateLight({ type: e.target.value, ...(e.target.value === 'directional' ? { direction: light.direction || { x: 0, y: 0, z: -1 } } : {}), ...(['spot', 'area'].includes(e.target.value) ? { target: light.target || { x: 0, y: 0, z: 0 } } : {}) })}>
+                                {['point', 'directional', 'spot', 'area'].map(type => <option key={type} value={type}>{t(`templates.scene3d.lightTypes.${type}`)}</option>)}
                             </select>
                         </label>
                         <div className="grid grid-cols-3 gap-2">
@@ -626,13 +662,19 @@ const TemplateEditor = ({ trackId, clip }) => {
                             <div className="grid grid-cols-3 gap-2">{['x', 'y', 'z'].map(axis => number3D(t('templates.scene3d.lightTarget', { axis: axis.toUpperCase() }), light.target?.[axis], value => updateLight({ target: { ...(light.target || {}), [axis]: value } })))}</div>
                             {number3D(t('templates.scene3d.spotAngle'), light.angle ?? 60, value => updateLight({ angle: Math.max(1, Math.min(179, value)) }))}
                         </>}
+                        {light.type === 'area' && <>
+                            {['x', 'y', 'z'].map(axis => number3D(t('templates.scene3d.lightTarget', { axis: axis.toUpperCase() }), light.target?.[axis], value => updateLight({ target: { ...(light.target || {}), [axis]: value } })))}
+                            {number3D(t('templates.scene3d.lightWidth'), light.width ?? 4, value => updateLight({ width: Math.max(0.1, value) }), 0.1)}
+                            {number3D(t('templates.scene3d.lightHeight'), light.height ?? 4, value => updateLight({ height: Math.max(0.1, value) }), 0.1)}
+                        </>}
                         <label className="flex items-center justify-between gap-2"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.lightColor')}</span><input type="color" value={light.color || '#FFFFFF'} onChange={e => updateLight({ color: e.target.value })} className="w-7 h-7 rounded border border-border bg-transparent p-0.5 cursor-pointer" /></label>
                         <div className="border-t border-border/50 pt-2 space-y-2">
                             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.lightAnimation')}</div>
                             <select className={field} value={selected3DLightProperty} onChange={e => { setSelected3DLightProperty(e.target.value); setExpressionError3D(''); }} aria-label={t('templates.scene3d.lightAnimationProperty')}>
-                                {['intensity', 'range', 'decay', 'angle', 'positionX', 'positionY', 'positionZ', 'directionX', 'directionY', 'directionZ', 'targetX', 'targetY', 'targetZ'].map(property => <option key={property} value={property}>{t(`templates.scene3d.lightProperties.${property}`)}</option>)}
+                                {['intensity', 'range', 'decay', 'angle', 'width', 'height', 'positionX', 'positionY', 'positionZ', 'directionX', 'directionY', 'directionZ', 'targetX', 'targetY', 'targetZ', 'colorR', 'colorG', 'colorB'].map(property => <option key={property} value={property}>{t(`templates.scene3d.lightProperties.${property}`)}</option>)}
                             </select>
-                            {number3D(t(`templates.scene3d.lightProperties.${selected3DLightProperty}`), lightValue3D, add3DLightKeyframe)}
+                            {number3D(t(`templates.scene3d.lightProperties.${selected3DLightProperty}`), lightValue3D,
+                                value => add3DLightKeyframe(['colorR', 'colorG', 'colorB'].includes(selected3DLightProperty) ? Math.max(0, Math.min(255, Math.round(value))) : value))}
                             <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                                 <span>{t('templates.scene3d.playheadValue', { value: Number(lightValue3D.toFixed(3)) })}</span>
                                 <span>{t('templates.scene3d.cameraKeyframeCount', { count: lightTrack3D?.keyframes?.length || 0 })}</span>
@@ -679,6 +721,11 @@ const TemplateEditor = ({ trackId, clip }) => {
                     {number3D(t('templates.scene3d.particleSize'), scene3d.particles?.size ?? 5, value => update3DScene({ particles: { ...(scene3d.particles || {}), size: value } }))}
                     {number3D(t('templates.scene3d.particleSpeed'), scene3d.particles?.speed ?? 0.18, value => update3DScene({ particles: { ...(scene3d.particles || {}), speed: value } }))}
                 </div>
+                <label className="block space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.particleShape')}</span>
+                    <select className={field} value={scene3d.particles?.shape || 'circle'} onChange={e => update3DScene({ particles: { ...(scene3d.particles || {}), shape: e.target.value } })}>
+                        {['circle', 'square', 'diamond', 'star'].map(shape => <option key={shape} value={shape}>{t(`templates.scene3d.particleShapes.${shape}`)}</option>)}
+                    </select>
+                </label>
                 <label className="flex items-center justify-between gap-2"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.particleColor')}</span>
                     <input type="color" value={scene3d.particles?.color || '#A78BFA'} onChange={e => update3DScene({ particles: { ...(scene3d.particles || {}), color: e.target.value } })} className="w-7 h-7 rounded border border-border bg-transparent p-0.5 cursor-pointer" />
                 </label>
@@ -725,7 +772,7 @@ const TemplateEditor = ({ trackId, clip }) => {
             {scene3d.particles?.audioReactive?.assetId && <div className="grid grid-cols-2 gap-2">
                 <label className="block space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.particleAudioTarget')}</span>
                     <select className={field} value={scene3d.particles.audioReactive.target || 'size'} onChange={e => update3DScene({ particles: { ...scene3d.particles, audioReactive: { ...scene3d.particles.audioReactive, target: e.target.value } } })}>
-                        {['size', 'speed', 'opacity'].map(target => <option key={target} value={target}>{t(`templates.scene3d.particleAudioTargets.${target}`)}</option>)}
+                        {['size', 'spread', 'speed', 'opacity'].map(target => <option key={target} value={target}>{t(`templates.scene3d.particleAudioTargets.${target}`)}</option>)}
                     </select>
                 </label>
                 {number3D(t('templates.scene3d.audioAmount'), scene3d.particles.audioReactive.amount ?? 0.5, value => update3DScene({ particles: { ...scene3d.particles, audioReactive: { ...scene3d.particles.audioReactive, amount: Math.max(-1, Math.min(3, value)) } } }))}
@@ -735,7 +782,7 @@ const TemplateEditor = ({ trackId, clip }) => {
                 <div className="rounded border border-border p-2 space-y-2">
                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.proceduralMotion')}</div>
                     <select className={field} value={expressionProperty3D} onChange={e => setExpressionProperty3D(e.target.value)}>
-                        {['scale', 'rotationX', 'rotationY', 'rotationZ', 'opacity', 'x', 'y', 'z', ...(object3d.type === 'text' ? [] : ['roughness', 'metalness', 'emissiveIntensity'])].map(property => <option key={property} value={property}>{property}</option>)}
+                        {['scale', 'rotationX', 'rotationY', 'rotationZ', 'opacity', 'x', 'y', 'z', 'radius', 'height', 'tube', 'sizeX', 'sizeY', 'sizeZ', 'colorR', 'colorG', 'colorB', ...(object3d.type === 'text' ? [] : ['roughness', 'metalness', 'emissiveIntensity', 'emissiveR', 'emissiveG', 'emissiveB'])].map(property => <option key={property} value={property}>{property}</option>)}
                     </select>
                     <input className={`${field} font-mono ${expressionError3D ? 'border-destructive' : ''}`} value={expressionDraft3D} aria-invalid={!!expressionError3D} aria-describedby={expressionError3D ? 'scene3d-expression-error' : undefined} placeholder="1 + 0.12 * sin(2 * pi * t)" onChange={e => { setExpressionDraft3D(e.target.value); setExpressionError3D(''); }} onBlur={() => {
                         const expressions = { ...(object3d.expressions || {}) };
@@ -754,11 +801,27 @@ const TemplateEditor = ({ trackId, clip }) => {
                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.keyframes')}</div>
                     <label className="block space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.property')}</span>
                         <select className={field} value={selected3DProperty} onChange={e => setSelected3DProperty(e.target.value)}>
-                            {Object.keys(keyframeProperties3D).filter(property => object3d.type !== 'text' || !['roughness', 'metalness', 'emissiveIntensity'].includes(property)).map(property => <option key={property} value={property}>{t(`templates.scene3d.properties.${property}`)}</option>)}
+                            {Object.keys(keyframeProperties3D).filter(property => object3d.type !== 'text' || !['roughness', 'metalness', 'emissiveIntensity', 'emissiveR', 'emissiveG', 'emissiveB'].includes(property)).map(property => <option key={property} value={property}>{t(`templates.scene3d.properties.${property}`)}</option>)}
                         </select>
                     </label>
                     <div className="grid grid-cols-2 gap-2">
                         <div className="text-xs text-muted-foreground self-center">{t('templates.scene3d.playheadValue', { value: Number(actual3DPropertyValue.toFixed(3)) })}</div>
+                        {keyframeSpec.kind === 'absolute' && <input aria-label={t(`templates.scene3d.properties.${selected3DProperty}`)} className={field} type="number" min="0" max="255" step="1" value={Math.round(actual3DPropertyValue)} onChange={event => {
+                            const nextValue = Math.max(0, Math.min(255, Number(event.target.value) || 0));
+                            const animations = [...(object3d.animations || [])];
+                            const trackIndex = animations.findIndex(animation => animation.id === propertyTrackId);
+                            const track = trackIndex >= 0 ? animations[trackIndex] : { id: propertyTrackId, startTime: 0, duration: Number(clip.duration) || 1, easing: keyframeEasing, keyframes: [] };
+                            const keyframes = [...(track.keyframes || [])];
+                            const trackTime = Math.max(0, localPlayhead - Math.max(0, Number(track.startTime) || 0));
+                            if (trackIndex < 0 && localPlayhead > 0.001) keyframes.push({ time: 0, easing: 'linear', properties: { [keyframeSpec.key]: keyframeSpec.base } });
+                            const existingIndex = keyframes.findIndex(keyframe => Math.abs(Number(keyframe.time) - trackTime) < 0.001);
+                            const frame = { ...(existingIndex >= 0 ? keyframes[existingIndex] : {}), time: trackTime, easing: keyframeEasing, properties: { ...(existingIndex >= 0 ? keyframes[existingIndex].properties : {}), [keyframeSpec.key]: nextValue } };
+                            if (existingIndex >= 0) keyframes[existingIndex] = frame; else keyframes.push(frame);
+                            keyframes.sort((a, b) => Number(a.time) - Number(b.time));
+                            const nextTrack = { ...track, duration: Number(clip.duration) || track.duration || 1, keyframes };
+                            if (trackIndex >= 0) animations[trackIndex] = nextTrack; else animations.push(nextTrack);
+                            update3DObject({ animations });
+                        }} />}
                         <select className={field} value={keyframeEasing} onChange={e => setKeyframeEasing(e.target.value)} aria-label={t('templates.scene3d.easing')}>
                             {['linear', 'easeInCubic', 'easeOutCubic', 'easeInOutCubic', 'backOut'].map(easing => <option key={easing} value={easing}>{easing}</option>)}
                         </select>

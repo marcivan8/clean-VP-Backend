@@ -19,6 +19,7 @@
     "test:3d-template-export": "node scripts/test_3d_template_export.mjs",
     "test:layer-effects": "node scripts/test_layer_effects.mjs",
     "test:footage-effects": "node scripts/test_footage_effect_stack.mjs",
+    "test:lut-effect": "node scripts/test_lut_effect_control.mjs",
     "test:effect-expressions": "node scripts/test_effect_expressions.mjs",
     "test:gpu-effects": "node scripts/test_gpu_effect_preview.mjs",
     "test:legacy-effect-timing": "node scripts/test_legacy_effect_timing.mjs",

@@ -49,19 +49,30 @@ export function buildStyleReferencePlan(raw) {
     if (!raw || typeof raw !== 'object') return null;
     const confidence = Number(raw.confidence);
     if (!Number.isFinite(confidence) || confidence < 0.35) return null;
-    const motionEnergy = validEnum(raw.motionEnergy, ENUMS.motionEnergy);
+    // A still image can reliably suggest a visual system, but it cannot show
+    // motion, transition timing, or animation. Short video samples need at
+    // least three successful frames before those temporal fields are trusted.
+    const hasTemporalEvidence = raw.mediaKind !== 'image'
+        && !(raw.mediaKind === 'video' && Number(raw.sampleCount) < 3);
+    const motionEnergy = hasTemporalEvidence ? validEnum(raw.motionEnergy, ENUMS.motionEnergy) : null;
     const captionTreatment = validEnum(raw.captionTreatment, ENUMS.captionTreatment);
     const titleTreatment = validEnum(raw.titleTreatment, ENUMS.titleTreatment);
     const graphicsDensity = validEnum(raw.graphicsDensity, ENUMS.graphicsDensity);
-    const transitionPacing = validEnum(raw.transitionPacing, ENUMS.transitionPacing);
+    const transitionPacing = hasTemporalEvidence ? validEnum(raw.transitionPacing, ENUMS.transitionPacing) : null;
     const visualTone = validEnum(raw.visualTone, ENUMS.visualTone);
     const colors = [...new Set((Array.isArray(raw.colorPalette) ? raw.colorPalette : []).map(hex).filter(Boolean))].slice(0, 3);
     const motifs = (Array.isArray(raw.motifs) ? raw.motifs : []).map(x => String(x || '').trim()).filter(Boolean).slice(0, 4);
-    const titleStyle = textStyle(raw.titleStyle);
-    const captionStyle = textStyle(raw.captionStyle);
-    const transitionTypes = [...new Set((Array.isArray(raw.transitionTypes) ? raw.transitionTypes : [])
+    const withoutMotion = style => {
+        const value = textStyle(style);
+        if (!value || hasTemporalEvidence) return value;
+        const { animationIn, ...staticStyle } = value;
+        return Object.keys(staticStyle).length ? staticStyle : null;
+    };
+    const titleStyle = withoutMotion(raw.titleStyle);
+    const captionStyle = withoutMotion(raw.captionStyle);
+    const transitionTypes = [...new Set((hasTemporalEvidence && Array.isArray(raw.transitionTypes) ? raw.transitionTypes : [])
         .map(value => validIdentifier(value, TRANSITIONS)).filter(Boolean))].slice(0, 4);
-    const sceneDirections = (Array.isArray(raw.sceneDirections) ? raw.sceneDirections : []).slice(0, 9).map(item => {
+    const sceneDirections = (hasTemporalEvidence && Array.isArray(raw.sceneDirections) ? raw.sceneDirections : []).slice(0, 9).map(item => {
         if (!item || typeof item !== 'object') return null;
         const directionStyle = textStyle({ ...item, color: item.textColor });
         const role = validEnum(item.role, new Set(['hook', 'title', 'caption', 'graphic', 'transition', 'unknown']));
@@ -141,6 +152,11 @@ export function buildStyleReferencePlan(raw) {
         captionStyle,
         transitionTypes,
         sceneDirections,
+        evidence: {
+            mediaKind: raw.mediaKind || 'unknown',
+            sampleCount: Number.isFinite(Number(raw.sampleCount)) ? Number(raw.sampleCount) : null,
+            temporal: hasTemporalEvidence,
+        },
     };
 }
 

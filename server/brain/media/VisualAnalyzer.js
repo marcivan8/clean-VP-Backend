@@ -88,6 +88,81 @@ const ERROR_RESULT = {
     suggestedLabel: null,
 };
 
+const STYLE_ENUMS = {
+    motionEnergy: new Set(['low', 'medium', 'high', 'unknown']),
+    captionTreatment: new Set(['none', 'minimal', 'clean', 'bold', 'word_highlight', 'boxed', 'kinetic', 'unknown']),
+    titleTreatment: new Set(['none', 'minimal', 'top_card', 'centered', 'large_kinetic', 'lower_third', 'editorial_serif', 'unknown']),
+    graphicsDensity: new Set(['sparse', 'balanced', 'dense', 'unknown']),
+    transitionPacing: new Set(['slow', 'medium', 'fast', 'unknown']),
+    visualTone: new Set(['cinematic', 'editorial', 'warm', 'viral', 'technology', 'unknown']),
+};
+const STYLE_FONTS = new Set(['Inter', 'Anton', 'Montserrat', 'Poppins', 'DM Sans', 'Playfair Display', 'Cormorant Garamond', 'Rajdhani', 'JetBrains Mono', 'Oswald', 'Bebas Neue']);
+const STYLE_ANIMATIONS = new Set(['fade', 'slide-up', 'slide-down', 'pop', 'scale-reveal', 'blur-reveal', 'glow-reveal', 'typewriter', 'unknown']);
+const STYLE_TRANSITIONS = new Set(['flash', 'dip', 'whip-left', 'whip-right', 'zoom-punch', 'glitch', 'speed-lines', 'circle-wipe', 'bar-wipe', 'blinds', 'diagonal-wipe', 'soft-blur', 'push-left', 'push-right', 'color-flash', 'unknown']);
+const isHexColor = value => typeof value === 'string' && /^#[\da-f]{6}$/i.test(value);
+
+/** Keep provider output inside the documented profile contract before caching it. */
+function normalizeVisualStyleProfile(raw, { mediaKind, frames, duration }) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const enumValue = (key, value) => {
+        const normalized = String(value || '').toLowerCase().replace(/[ -]+/g, '_');
+        return STYLE_ENUMS[key]?.has(normalized) ? normalized : 'unknown';
+    };
+    const normalizeTextStyle = value => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+        const color = isHexColor(value.color) ? value.color.toUpperCase() : null;
+        const accentColor = isHexColor(value.accentColor) ? value.accentColor.toUpperCase() : null;
+        const x = Number.isFinite(Number(value.x)) && Number(value.x) >= 0 && Number(value.x) <= 100 ? Number(value.x) : null;
+        const y = Number.isFinite(Number(value.y)) && Number(value.y) >= 0 && Number(value.y) <= 100 ? Number(value.y) : null;
+        const weight = [400, 500, 600, 700, 800, 900].includes(Number(value.fontWeight)) ? Number(value.fontWeight) : null;
+        const fontFamily = STYLE_FONTS.has(value.fontFamily) ? value.fontFamily : 'unknown';
+        const animationIn = STYLE_ANIMATIONS.has(value.animationIn) ? value.animationIn : 'unknown';
+        return { fontFamily, fontWeight: weight, color, accentColor, x, y, animationIn };
+    };
+    const sampleTimes = (frames || []).map(frame => Number(frame.timestamp)).filter(Number.isFinite);
+    const validSampleTime = time => {
+        if (!Number.isFinite(Number(time)) || mediaKind !== 'video' || !sampleTimes.length) return null;
+        const value = Number(time);
+        const nearest = sampleTimes.reduce((best, candidate) => Math.abs(candidate - value) < Math.abs(best - value) ? candidate : best, sampleTimes[0]);
+        return Math.abs(nearest - value) <= Math.max(1.5, Number(duration || 0) * 0.08) ? Math.max(0, Math.min(Number(duration) || value, value)) : null;
+    };
+    const sceneDirections = (Array.isArray(raw.sceneDirections) ? raw.sceneDirections : []).slice(0, 9).map(item => {
+        if (!item || typeof item !== 'object') return null;
+        const time = validSampleTime(item.time);
+        const confidence = Number.isFinite(Number(item.confidence)) ? Math.max(0, Math.min(1, Number(item.confidence))) : null;
+        const role = ['hook', 'title', 'caption', 'graphic', 'transition', 'unknown'].includes(item.role) ? item.role : 'unknown';
+        return {
+            ...(time !== null ? { time } : {}),
+            role,
+            ...normalizeTextStyle({ ...item, color: item.textColor }),
+            textColor: isHexColor(item.textColor) ? item.textColor.toUpperCase() : null,
+            transitionAfter: STYLE_TRANSITIONS.has(item.transitionAfter) ? item.transitionAfter : 'unknown',
+            confidence,
+        };
+    }).filter(item => item && item.time !== undefined && (item.confidence === null || item.confidence >= 0.45));
+    const confidence = Number.isFinite(Number(raw.confidence)) ? Math.max(0, Math.min(1, Number(raw.confidence))) : 0;
+    return {
+        profileVersion: 3,
+        mediaKind,
+        confidence,
+        sampleCount: sampleTimes.length,
+        sampledAtSec: sampleTimes.slice(0, 12),
+        durationSec: Number.isFinite(Number(duration)) ? Number(duration) : null,
+        motionEnergy: enumValue('motionEnergy', raw.motionEnergy),
+        captionTreatment: enumValue('captionTreatment', raw.captionTreatment),
+        titleTreatment: enumValue('titleTreatment', raw.titleTreatment),
+        graphicsDensity: enumValue('graphicsDensity', raw.graphicsDensity),
+        transitionPacing: enumValue('transitionPacing', raw.transitionPacing),
+        visualTone: enumValue('visualTone', raw.visualTone),
+        colorPalette: [...new Set((Array.isArray(raw.colorPalette) ? raw.colorPalette : []).filter(isHexColor).map(color => color.toUpperCase()))].slice(0, 5),
+        motifs: (Array.isArray(raw.motifs) ? raw.motifs : []).map(value => String(value || '').trim().slice(0, 100)).filter(Boolean).slice(0, 8),
+        titleStyle: normalizeTextStyle(raw.titleStyle),
+        captionStyle: normalizeTextStyle(raw.captionStyle),
+        transitionTypes: [...new Set((Array.isArray(raw.transitionTypes) ? raw.transitionTypes : []).filter(value => STYLE_TRANSITIONS.has(value) && value !== 'unknown'))].slice(0, 6),
+        sceneDirections,
+    };
+}
+
 class VisualAnalyzer {
 
     constructor() {
@@ -145,7 +220,7 @@ class VisualAnalyzer {
             const frames = await this.extractFrames(filePath, realDuration, tempFiles, samplePositions);
             if (!frames.length) return ERROR_RESULT;
 
-            const result = await this.analyzeWithVision(frames, 'video', { styleReference });
+            const result = await this.analyzeWithVision(frames, 'video', { styleReference, durationSec: realDuration });
             return result;
 
         } catch (err) {
@@ -304,8 +379,11 @@ class VisualAnalyzer {
         const ts = Date.now();
 
         for (const pct of positions) {
-            const t = Math.max(0.1, (duration || 10) * pct);
-            const outPath = path.join('/tmp', `frame_${ts}_${Math.round(t * 10)}.jpg`);
+            const safeDuration = Math.max(0.1, Number(duration) || 10);
+            const latestSafeTime = Math.max(0, safeDuration - Math.min(0.05, safeDuration * 0.08));
+            const t = Math.max(0, Math.min(latestSafeTime, safeDuration * pct));
+            if (frames.some(frame => Math.abs(frame.timestamp - t) < 0.04)) continue;
+            const outPath = path.join('/tmp', `frame_${ts}_${frames.length}_${Math.round(t * 1000)}.jpg`);
             tempFiles.push(outPath);
 
             try {
@@ -336,7 +414,7 @@ class VisualAnalyzer {
      * @param {{ timestamp: number, base64: string }[]} frames
      * @returns {Promise<Object>}
      */
-    async analyzeWithVision(frames, mediaKind = 'video', { styleReference = false } = {}) {
+    async analyzeWithVision(frames, mediaKind = 'video', { styleReference = false, durationSec = null } = {}) {
         try {
             const imageMessages = frames.map(f => ({
                 type: 'image_url',
@@ -471,7 +549,7 @@ Return ONLY the JSON object, no explanation.`;
                 contentDescription: parsed.contentDescription || null,
                 suggestedLabel:     parsed.suggestedLabel     || null,
                 ...(styleReference && parsed.visualStyleProfile && typeof parsed.visualStyleProfile === 'object'
-                    ? { visualStyleProfile: { ...parsed.visualStyleProfile, profileVersion: 2 } }
+                    ? { visualStyleProfile: normalizeVisualStyleProfile(parsed.visualStyleProfile, { mediaKind, frames, duration: durationSec }) }
                     : {}),
             };
 
@@ -507,7 +585,7 @@ Return ONLY the JSON object, no explanation.`;
                 return { ...ERROR_RESULT, error: false, sceneType: 'unknown' };
             }
 
-            return await this.analyzeWithVision([{ timestamp: 0, base64 }], 'image', { styleReference });
+            return await this.analyzeWithVision([{ timestamp: 0, base64 }], 'image', { styleReference, durationSec: null });
         } catch (err) {
             console.error('[VisualAnalyzer] analyzeImageBase64 error:', err.message);
             return ERROR_RESULT;

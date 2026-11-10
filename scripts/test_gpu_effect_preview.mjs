@@ -251,6 +251,46 @@ assert.match(playerSource, /setClipEffects\?\.\(activeClip\?\.id, activeClip\?\.
   'VideoPlayer routes direct footage effects to the decoded clip shader graph');
 
 const calls = [];
+const previewCapabilities = Object.create(GPUEffectEngine.prototype);
+Object.assign(previewCapabilities, {
+  programs: new Map([['fade_in', {}], ['fade_out', {}], ['blur_gaussian', {}]]),
+  textures: [{ id: 'preview-fb0' }, { id: 'preview-fb1' }],
+  initialized: true,
+});
+assert.equal(previewCapabilities.supportsPreviewEffect({ type: 'fade_in', engine: 'cpu' }), true,
+  'CPU-classified fade effects can use their existing live preview shader');
+assert.equal(previewCapabilities.supportsPreviewEffect({ type: 'blur_gaussian', engine: 'cpu' }), false,
+  'a shader with a matching name does not route unrelated CPU effects into GPU preview');
+const processedFadeEffects = [];
+previewCapabilities.processEffect = effect => {
+  processedFadeEffects.push(effect.type);
+  return { id: `preview-${effect.type}` };
+};
+const fadeTexture = previewCapabilities.processChain([
+  { type: 'fade_in', engine: 'cpu', enabled: true, isActiveAt: () => true },
+  { type: 'fade_out', engine: 'cpu', enabled: true, isActiveAt: () => true },
+], { id: 'fade-source' }, 0);
+assert.deepEqual(processedFadeEffects, ['fade_in', 'fade_out'],
+  'the GPU preview chain executes both CPU-export fades using their shader implementations');
+assert.equal(fadeTexture.id, 'preview-fade_out', 'consecutive fades retain graph execution order');
+
+const fadePreviewWarnings = [];
+let routedFadeEffects = [];
+const fadePreviewPipeline = new EffectPipeline({
+  gpuEngine: {
+    supportsEffect: type => type.startsWith('fade_'),
+    supportsPreviewEffect: effect => effect.engine === 'gpu' || ['fade_in', 'fade_out'].includes(effect.type),
+    processChain: effects => { routedFadeEffects = effects; return { id: 'faded-preview' }; },
+  },
+  onPreviewWarning: warning => fadePreviewWarnings.push(warning),
+});
+fadePreviewPipeline.addEffect({ type: 'fade_in', targetId: 'fade-preview-clip', params: { duration: 0.5 } });
+assert.equal(fadePreviewPipeline.processPreview({ id: 'source' }, 'fade-preview-clip', 0).id, 'faded-preview',
+  'live preview renders a CPU-export fade through the supported shader path');
+assert.deepEqual(routedFadeEffects.map(effect => effect.type), ['fade_in'],
+  'the fade effect reaches the GPU preview chain');
+assert.equal(fadePreviewWarnings.length, 0, 'a shader-backed fade does not report a false CPU-preview limitation');
+
 const fadePlacement = { startTime: 4, duration: 2 };
 assert.equal(resolveFadeProgress({ type: 'fade_in' }, 4, fadePlacement, { duration: 0.5 }), 0,
   'fade-in begins at the clip start when no authored start is set');
@@ -558,6 +598,47 @@ assert.equal(missingRendererPipeline.processPreview(unprocessedPreviewTexture, '
 assert.equal(missingRendererWarnings.length, 1,
   'a missing GPU renderer emits one deduplicated preview warning for the active effect stack');
 assert.equal(missingRendererWarnings[0].type, 'gpu_effect_preview_unavailable');
+const cpuPreviewWarnings = [];
+const cpuOnlyPreviewPipeline = new EffectPipeline({ onPreviewWarning: warning => cpuPreviewWarnings.push(warning) });
+cpuOnlyPreviewPipeline.getActiveEffects = () => [{
+  id: 'cpu-lut-effect', type: 'lut_apply', name: 'Custom LUT', engine: 'cpu', enabled: true,
+}];
+assert.equal(cpuOnlyPreviewPipeline.processPreview(unprocessedPreviewTexture, 'cpu-preview-target', 0), unprocessedPreviewTexture,
+  'CPU-only effects keep playback running when real-time preview cannot render them');
+assert.equal(cpuPreviewWarnings.length, 1, 'CPU-only effects report their preview limitation once');
+assert.equal(cpuPreviewWarnings[0].type, 'cpu_effect_preview_unavailable');
+assert.match(cpuPreviewWarnings[0].message, /not rendered in real-time preview: Custom LUT/);
+assert.equal(cpuOnlyPreviewPipeline.processPreview(unprocessedPreviewTexture, 'cpu-preview-target', 1), unprocessedPreviewTexture);
+assert.equal(cpuPreviewWarnings.length, 1, 'CPU preview limitation warnings are deduplicated for a stable stack');
+const noWebGLWarnings = [];
+const noWebGLPipeline = new EffectPipeline({ onPreviewWarning: warning => noWebGLWarnings.push(warning) });
+noWebGLPipeline.getActiveEffects = () => [{ id: 'webgl-lost-effect', engine: 'gpu', enabled: true }];
+const noWebGLRenderer = new EffectRenderer({ pipeline: noWebGLPipeline });
+const noWebGLTexture = { id: 'source-without-webgl' };
+const noWebGLPlacement = { id: 'placement-with-gpu-effect' };
+assert.equal(noWebGLRenderer.renderPreview(noWebGLTexture, [noWebGLPlacement], 0), noWebGLTexture,
+  'missing WebGL preserves the source preview frame');
+assert.equal(noWebGLRenderer.renderPreview(noWebGLTexture, [noWebGLPlacement], 1), noWebGLTexture,
+  'missing WebGL does not interrupt subsequent preview frames');
+assert.equal(noWebGLWarnings.length, 1,
+  'missing WebGL reports the skipped GPU effect once per active stack');
+assert.equal(noWebGLWarnings[0].type, 'gpu_effect_preview_unavailable');
+const noWebGLCpuWarnings = [];
+const noWebGLCpuPipeline = new EffectPipeline({ onPreviewWarning: warning => noWebGLCpuWarnings.push(warning) });
+noWebGLCpuPipeline.getActiveEffects = () => [{ id: 'no-webgl-cpu-effect', engine: 'cpu', enabled: true }];
+const noWebGLCpuRenderer = new EffectRenderer({ pipeline: noWebGLCpuPipeline });
+assert.equal(noWebGLCpuRenderer.renderPreview(noWebGLTexture, [noWebGLPlacement], 0), noWebGLTexture,
+  'CPU effects do not interrupt playback when the preview has no WebGL context');
+assert.equal(noWebGLCpuWarnings.length, 1, 'the no-WebGL fallback also reports CPU effects omitted from preview');
+assert.equal(noWebGLCpuWarnings[0].type, 'cpu_effect_preview_unavailable');
+const placementNoWebGLWarnings = [];
+const placementNoWebGLPipeline = new EffectPipeline({ onPreviewWarning: warning => placementNoWebGLWarnings.push(warning) });
+placementNoWebGLPipeline.getActiveEffects = () => [{ id: 'placement-webgl-lost-effect', engine: 'gpu', enabled: true }];
+const placementNoWebGLRenderer = new EffectRenderer({ pipeline: placementNoWebGLPipeline });
+assert.equal(placementNoWebGLRenderer.renderPlacementPreview(noWebGLTexture, noWebGLPlacement, 0), noWebGLTexture,
+  'per-placement preview preserves the source frame when WebGL is unavailable');
+assert.equal(placementNoWebGLWarnings.length, 1,
+  'per-placement preview reports active GPU effects when WebGL is unavailable');
 const unsupportedGpuWarnings = [];
 let processedGpuEffects = [];
 const supportAwarePipeline = new EffectPipeline({

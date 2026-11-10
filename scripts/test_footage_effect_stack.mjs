@@ -523,6 +523,23 @@ const radialBlurRender = spawnSync(ffmpeg, [
   '-vf', radialBlur.join(','), '-f', 'null', '-',
 ], { encoding: 'utf8', timeout: 20000 });
 assert.equal(radialBlurRender.status, 0, `FFmpeg accepts and renders radial blur: ${radialBlurRender.stderr || radialBlurRender.error?.message || ''}`);
+const animatedRadialBlur = compileTimelineVisualEffects([{
+  kind: 'blur_radial', startTime: 0, endTime: 1,
+  params: { intensity: 0.6, centerX: 0.2, centerY: 0.7, samples: 8 },
+  keyframes: {
+    centerX: [{ time: 0, value: 0.2 }, { time: 1, value: 0.8 }],
+    centerY: [{ time: 0, value: 0.7 }, { time: 1, value: 0.3 }],
+  },
+}]);
+assert.ok(animatedRadialBlur[0].includes('if(lt(T,1.000000)') && animatedRadialBlur[0].includes('0.800000')
+  && animatedRadialBlur[0].includes('0.300000'),
+  'primary footage radial blur preserves animated center keyframes');
+const animatedRadialBlurRender = spawnSync(ffmpeg, [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=64x64:rate=2:duration=1',
+  '-vf', animatedRadialBlur.join(','), '-frames:v', '2', '-f', 'null', '-',
+], { encoding: 'utf8', timeout: 20000 });
+assert.equal(animatedRadialBlurRender.status, 0,
+  `FFmpeg accepts and renders keyframed radial blur center: ${animatedRadialBlurRender.stderr || animatedRadialBlurRender.error?.message || ''}`);
 const directionalBlur = compileTimelineVisualEffects([{ kind: 'blur_motion', params: {
   intensity: 0.65, angle: 45, samples: 12,
 } }]);
@@ -700,6 +717,124 @@ for (const effect of [
   assert.equal(render.status, 0,
     `FFmpeg accepts a windowed ${effect.kind || effect.id} effect: ${render.stderr || render.error?.message || ''}`);
 }
+const animatedOverlayGaussianBlur = compileOverlaySource({
+  outputStart: 0, outputEnd: 1, source: { type: 'video' },
+  geometry: [{ t: 0, x: 0.5, y: 0.5, w: 0.75, h: 0.75, opacity: 1, rotation: 0 }],
+  effects: [{ kind: 'blur_gaussian', params: { radius: 0 }, samples: {
+    radius: [{ t: 0, value: 0 }, { t: 1, value: 18 }],
+  } }],
+}, 1, 'animated_gaussian_blur_overlay', { width: 96, height: 96, fps: 2 });
+assert.ok(animatedOverlayGaussianBlur.includes('sendcmd=c=')
+  && animatedOverlayGaussianBlur.includes('effect0_gaussian_blur sigma 18\''),
+  'scene overlay Gaussian blur keyframes compile to runtime sigma commands');
+const animatedOverlayGaussianRender = spawnSync(ffmpeg, [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=96x96:r=2:d=1',
+  '-f', 'lavfi', '-i', 'testsrc2=size=96x96:rate=2:duration=1',
+  '-filter_complex', animatedOverlayGaussianBlur, '-map', '[animated_gaussian_blur_overlay]',
+  '-frames:v', '2', '-pix_fmt', 'rgba', '-f', 'rawvideo', 'pipe:1',
+], { encoding: null, timeout: 20000 });
+assert.equal(animatedOverlayGaussianRender.status, 0,
+  `FFmpeg renders keyframed scene overlay Gaussian blur: ${animatedOverlayGaussianRender.stderr?.toString() || animatedOverlayGaussianRender.error?.message || ''}`);
+const animatedOverlayGaussianFrameBytes = 72 * 72 * 4;
+assert.notDeepEqual(
+  animatedOverlayGaussianRender.stdout.subarray(0, animatedOverlayGaussianFrameBytes),
+  animatedOverlayGaussianRender.stdout.subarray(animatedOverlayGaussianFrameBytes, animatedOverlayGaussianFrameBytes * 2),
+  'keyframed overlay Gaussian blur changes exported pixels over time');
+const animatedOverlayFilmGrain = compileOverlaySource({
+  outputStart: 0, outputEnd: 1, source: { type: 'video' },
+  geometry: [{ t: 0, x: 0.5, y: 0.5, w: 0.75, h: 0.75, opacity: 1, rotation: 0 }],
+  effects: [{ kind: 'film_grain', params: { intensity: 0, size: 1.5, seed: 41, animated: false }, samples: {
+    intensity: [{ t: 0, value: 0 }, { t: 1, value: 1 }],
+  } }],
+}, 1, 'animated_film_grain_overlay', { width: 96, height: 96, fps: 2 });
+const canonicalOverlayFilmGrain = compileOverlaySource({
+  outputStart: 0, outputEnd: 1, source: { type: 'video' },
+  geometry: [{ t: 0, x: 0.5, y: 0.5, w: 0.75, h: 0.75, opacity: 1, rotation: 0 }],
+  effects: [{ kind: 'film_grain', params: { intensity: 0.2, size: 1.5, seed: 41, animated: false } }],
+}, 1, 'canonical_film_grain_overlay', { width: 96, height: 96, fps: 2 });
+const aliasOverlayFilmGrain = compileOverlaySource({
+  outputStart: 0, outputEnd: 1, source: { type: 'video' },
+  geometry: [{ t: 0, x: 0.5, y: 0.5, w: 0.75, h: 0.75, opacity: 1, rotation: 0 }],
+  effects: [{ kind: 'film-grain', params: { intensity: 0.2, size: 1.5, seed: 41, animated: false } }],
+}, 1, 'canonical_film_grain_overlay', { width: 96, height: 96, fps: 2 });
+assert.equal(aliasOverlayFilmGrain, canonicalOverlayFilmGrain, 'hyphenated overlay film-grain alias compiles identically to canonical kind');
+assert.ok(animatedOverlayFilmGrain.includes('if(lt(T\\,1)') && animatedOverlayFilmGrain.includes(')*48'),
+  'scene overlay film-grain intensity keyframes compile into frame-evaluated grain strength');
+const animatedOverlayGrainRender = spawnSync(ffmpeg, [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=96x96:r=2:d=1',
+  '-f', 'lavfi', '-i', 'color=c=0x808080:s=96x96:r=2:d=1',
+  '-filter_complex', animatedOverlayFilmGrain, '-map', '[animated_film_grain_overlay]',
+  '-frames:v', '2', '-pix_fmt', 'rgba', '-f', 'rawvideo', 'pipe:1',
+], { encoding: null, timeout: 20000 });
+assert.equal(animatedOverlayGrainRender.status, 0,
+  `FFmpeg renders keyframed scene overlay film grain: ${animatedOverlayGrainRender.stderr?.toString() || animatedOverlayGrainRender.error?.message || ''}`);
+assert.notDeepEqual(
+  animatedOverlayGrainRender.stdout.subarray(0, animatedOverlayGaussianFrameBytes),
+  animatedOverlayGrainRender.stdout.subarray(animatedOverlayGaussianFrameBytes, animatedOverlayGaussianFrameBytes * 2),
+  'keyframed overlay film-grain intensity changes exported pixels over time');
+const animatedOverlayDistortion = compileOverlaySource({
+  outputStart: 0, outputEnd: 1, source: { type: 'video' },
+  geometry: [{ t: 0, x: 0.5, y: 0.5, w: 1, h: 1, opacity: 1, rotation: 0 }],
+  effects: [{ kind: 'distortion', params: { amount: 0.08, phase: 0 }, samples: {
+    amount: [{ t: 0, value: 0.08 }, { t: 1, value: 0.08 }],
+    phase: [{ t: 0, value: 0 }, { t: 1, value: 3 }],
+  } }],
+}, 1, 'animated_distortion_overlay', { width: 96, height: 96, fps: 2 });
+assert.ok(animatedOverlayDistortion.includes('sin(Y*0.045+(if(lt(T\\,1)')
+  && animatedOverlayDistortion.includes('0+(3)*(T-0)/1'),
+  'scene overlay distortion applies its sampled phase track to the displacement wave');
+const animatedOverlayDistortionRender = spawnSync(ffmpeg, [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=96x96:r=2:d=1',
+  '-f', 'lavfi', '-i', 'testsrc2=size=96x96:rate=2:duration=1',
+  '-filter_complex', animatedOverlayDistortion, '-map', '[animated_distortion_overlay]',
+  '-frames:v', '2', '-pix_fmt', 'rgba', '-f', 'rawvideo', 'pipe:1',
+], { encoding: null, timeout: 20000 });
+assert.equal(animatedOverlayDistortionRender.status, 0,
+  `FFmpeg renders keyframed scene overlay distortion phase: ${animatedOverlayDistortionRender.stderr?.toString() || animatedOverlayDistortionRender.error?.message || ''}`);
+const animatedDistortionFrameBytes = 96 * 96 * 4;
+assert.notDeepEqual(
+  animatedOverlayDistortionRender.stdout.subarray(0, animatedDistortionFrameBytes),
+  animatedOverlayDistortionRender.stdout.subarray(animatedDistortionFrameBytes, animatedDistortionFrameBytes * 2),
+  'keyframed overlay distortion phase changes exported pixels over time');
+const animatedOverlayGlitch = compileOverlaySource({
+  outputStart: 0, outputEnd: 1, source: { type: 'video' },
+  geometry: [{ t: 0, x: 0.5, y: 0.5, w: 1, h: 1, opacity: 1, rotation: 0 }],
+  effects: [{ kind: 'glitch', params: { intensity: 0, blockSize: 12, colorShift: true, scanlines: true, seed: 17 }, samples: {
+    intensity: [{ t: 0, value: 0 }, { t: 1, value: 1 }],
+    blockSize: [{ t: 0, value: 12 }, { t: 1, value: 64 }],
+  } }],
+}, 1, 'animated_glitch_overlay', { width: 96, height: 96, fps: 2 });
+assert.ok(animatedOverlayGlitch.includes('floor(X/(if(lt(T,1),12+(52)*(T-0)/1,64)))')
+  && animatedOverlayGlitch.includes(')*40') && animatedOverlayGlitch.includes('sin(Y*PI)'),
+  'scene overlay glitch samples intensity and block size and applies its color-shift and scanline controls');
+const animatedOverlayGlitchRender = spawnSync(ffmpeg, [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=96x96:r=2:d=1',
+  '-f', 'lavfi', '-i', 'testsrc2=size=96x96:rate=2:duration=1',
+  '-filter_complex', animatedOverlayGlitch, '-map', '[animated_glitch_overlay]',
+  '-frames:v', '2', '-pix_fmt', 'rgba', '-f', 'rawvideo', 'pipe:1',
+], { encoding: null, timeout: 20000 });
+assert.equal(animatedOverlayGlitchRender.status, 0,
+  `FFmpeg renders keyframed scene overlay glitch controls: ${animatedOverlayGlitchRender.stderr?.toString() || animatedOverlayGlitchRender.error?.message || ''}`);
+assert.notDeepEqual(
+  animatedOverlayGlitchRender.stdout.subarray(0, animatedDistortionFrameBytes),
+  animatedOverlayGlitchRender.stdout.subarray(animatedDistortionFrameBytes, animatedDistortionFrameBytes * 2),
+  'keyframed overlay glitch intensity and block size change exported pixels over time');
+const simpleOverlayGlitch = compileOverlaySource({
+  outputStart: 0, source: { type: 'video' },
+  geometry: [{ t: 0, x: 0.5, y: 0.5, w: 1, h: 1, opacity: 1, rotation: 0 }],
+  effects: [{ kind: 'glitch', params: { intensity: 0.8, blockSize: 16, colorShift: false, scanlines: false, seed: 17 } }],
+}, 1, 'simple_glitch_overlay', { width: 96, height: 96, fps: 2 });
+const simpleOverlayGlitchRender = spawnSync(ffmpeg, [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=96x96:r=2:d=1',
+  '-f', 'lavfi', '-i', 'testsrc2=size=96x96:rate=2:duration=1',
+  '-filter_complex', simpleOverlayGlitch, '-map', '[simple_glitch_overlay]',
+  '-frames:v', '1', '-pix_fmt', 'rgba', '-f', 'rawvideo', 'pipe:1',
+], { encoding: null, timeout: 20000 });
+assert.equal(simpleOverlayGlitchRender.status, 0,
+  `FFmpeg renders scene overlay glitch with optional controls disabled: ${simpleOverlayGlitchRender.stderr?.toString() || simpleOverlayGlitchRender.error?.message || ''}`);
+assert.notDeepEqual(simpleOverlayGlitchRender.stdout,
+  animatedOverlayGlitchRender.stdout.subarray(0, animatedDistortionFrameBytes),
+  'glitch color-shift and scanline settings alter the scene overlay render');
 const overlayGradeExport = compileOverlaySource({
   outputStart: 0, source: { type: 'image' },
   geometry: [{ t: 0, x: 0.5, y: 0.5, w: 0.5, h: 0.5, opacity: 1, rotation: 0 }],
@@ -763,13 +898,36 @@ const overlayRegistryMotionExport = compileOverlaySource({
 }, 1, 'registry_motion_blur_overlay', { width: 1080, height: 1920, fps: 30 });
 assert.match(overlayRegistryMotionExport, /gblur=sigma=7\.7942:sigmaV=0/,
   'registry motion-blur intensity scales against the actual overlay pixel width');
+const animatedOverlayMotionBlur = compileOverlaySource({
+  outputStart: 0, outputEnd: 1, source: { type: 'video' },
+  geometry: [{ t: 0, x: 0.5, y: 0.5, w: 0.75, h: 0.75, opacity: 1, rotation: 0 }],
+  effects: [{ kind: 'blur_motion', params: { intensity: 0.8, angle: 0 }, samples: {
+    angle: [{ t: 0, value: 0 }, { t: 1, value: 90 }],
+  } }],
+}, 1, 'animated_motion_blur_overlay', { width: 96, height: 96, fps: 2 });
+assert.ok(animatedOverlayMotionBlur.includes("rotate=a='-")
+  && animatedOverlayMotionBlur.includes('if(lt(t,1),0+(90)'),
+  'scene overlay motion-blur rotation uses the authored animated angle track');
+const animatedOverlayMotionRender = spawnSync(ffmpeg, [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=96x96:r=2:d=1',
+  '-f', 'lavfi', '-i', 'testsrc2=size=96x96:rate=2:duration=1',
+  '-filter_complex', animatedOverlayMotionBlur, '-map', '[animated_motion_blur_overlay]',
+  '-frames:v', '2', '-pix_fmt', 'rgba', '-f', 'rawvideo', 'pipe:1',
+], { encoding: null, timeout: 20000 });
+assert.equal(animatedOverlayMotionRender.status, 0,
+  `FFmpeg renders scene overlay motion blur with an animated angle: ${animatedOverlayMotionRender.stderr?.toString() || animatedOverlayMotionRender.error?.message || ''}`);
+const animatedOverlayFrameBytes = 72 * 72 * 4;
+assert.notDeepEqual(
+  animatedOverlayMotionRender.stdout.subarray(0, animatedOverlayFrameBytes),
+  animatedOverlayMotionRender.stdout.subarray(animatedOverlayFrameBytes, animatedOverlayFrameBytes * 2),
+  'keyframed overlay motion-blur angle changes exported pixels over time');
 const overlayRadialBlurExport = compileOverlaySource({
   outputStart: 0, source: { type: 'video' },
   geometry: [{ t: 0, x: 0.5, y: 0.5, w: 0.5, h: 0.5, opacity: 1, rotation: 0 }],
   effects: [{ kind: 'blur_radial', params: { intensity: 0.6, centerX: 0.25, centerY: 0.7, samples: 8 } }],
 }, 1, 'radial_blur_overlay', { width: 1080, height: 1920, fps: 30 });
-assert.ok(overlayRadialBlurExport.includes('geq=') && overlayRadialBlurExport.includes('0.25-X/W')
-  && overlayRadialBlurExport.includes('0.7-Y/H'),
+assert.ok(overlayRadialBlurExport.includes('geq=') && overlayRadialBlurExport.includes('(0.25)-X/W')
+  && overlayRadialBlurExport.includes('(0.7)-Y/H'),
   'scene overlay radial blur export follows its authored center instead of substituting gaussian blur');
 const overlayRadialRender = spawnSync(ffmpeg, [
   '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=64x64:r=2:d=1',
@@ -779,6 +937,39 @@ const overlayRadialRender = spawnSync(ffmpeg, [
 ], { encoding: 'utf8', timeout: 20000 });
 assert.equal(overlayRadialRender.status, 0,
   `FFmpeg accepts scene overlay radial blur: ${overlayRadialRender.stderr || overlayRadialRender.error?.message || ''}`);
+const animatedOverlayRadialBlur = compileOverlaySource({
+  outputStart: 0, outputEnd: 1, source: { type: 'video' },
+  geometry: [{ t: 0, x: 0.5, y: 0.5, w: 0.5, h: 0.5, opacity: 1, rotation: 0 }],
+  effects: [{ kind: 'blur_radial', params: { intensity: 0.6, centerX: 0.25, centerY: 0.7, samples: 8 }, samples: {
+    centerX: [{ t: 0, value: 0.2 }, { t: 1, value: 0.8 }],
+    centerY: [{ t: 0, value: 0.7 }, { t: 1, value: 0.3 }],
+  } }],
+}, 1, 'animated_radial_blur_overlay', { width: 1080, height: 1920, fps: 30 });
+assert.ok(animatedOverlayRadialBlur.includes('if(lt(T') && animatedOverlayRadialBlur.includes('0.2+(0.6)')
+  && animatedOverlayRadialBlur.includes('(-0.4)'), 'overlay radial blur samples animated center coordinates');
+const animatedOverlayRadialRender = spawnSync(ffmpeg, [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=64x64:r=2:d=1',
+  '-f', 'lavfi', '-i', 'testsrc2=size=64x64:rate=2:duration=1',
+  '-filter_complex', animatedOverlayRadialBlur, '-map', '[animated_radial_blur_overlay]',
+  '-frames:v', '2', '-f', 'null', '-',
+], { encoding: 'utf8', timeout: 20000 });
+assert.equal(animatedOverlayRadialRender.status, 0,
+  `FFmpeg accepts animated scene overlay radial blur centers: ${animatedOverlayRadialRender.stderr || animatedOverlayRadialRender.error?.message || ''}`);
+const calloutMaskedOverlay = compileOverlaySource({
+  outputStart: 0, outputEnd: 1, source: { type: 'image' },
+  geometry: [{ t: 0, x: 0.5, y: 0.5, w: 0.8, h: 0.8, opacity: 1, rotation: 0 }],
+  sceneMask: { kind: 'shape', shape: 'callout', tailSize: 0.16, tailPosition: 0.7 },
+}, 1, 'callout_mask_overlay', { width: 64, height: 64, fps: 2 });
+assert.match(calloutMaskedOverlay, /between\(Y,H\*0\.84,H\*1\).*lte\(abs\(X-W\*0\.7\)/,
+  'FFmpeg compositor compiles the same speech tail position and size used by canvas mattes');
+const calloutMaskRender = spawnSync(ffmpeg, [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=64x64:r=2:d=1',
+  '-f', 'lavfi', '-i', 'color=c=white:s=64x64:r=2:d=1',
+  '-filter_complex', calloutMaskedOverlay, '-map', '[callout_mask_overlay]', '-frames:v', '1',
+  '-f', 'null', '-',
+], { encoding: 'utf8', timeout: 20000 });
+assert.equal(calloutMaskRender.status, 0,
+  `FFmpeg executes a masked callout overlay: ${calloutMaskRender.stderr || calloutMaskRender.error?.message || ''}`);
 const fadeFilters = compileTimelineVisualEffects([
   { kind: 'fade_in', params: { duration: 0.25, color: [0, 0, 0] } },
   { kind: 'fade_out', params: { duration: 0.25, color: [1, 1, 1] } },
@@ -974,6 +1165,9 @@ for (const [id, definition] of Object.entries(EFFECT_DEFINITIONS)) {
     `catalogued ${id} has an export implementation or an explicit warning`);
 }
 const staticGrain = compileTimelineVisualEffects([{ kind: 'film_grain', params: { intensity: 0.2, size: 2.5, seed: 41, animated: false } }]);
+const hyphenatedFilmGrain = compileTimelineVisualEffects([{ kind: 'film-grain', params: { intensity: 0.2, size: 2.5, seed: 41, animated: false } }]);
+assert.deepEqual(hyphenatedFilmGrain, staticGrain, 'the hyphenated footage film-grain alias exports with the same treatment as film_grain');
+assert.deepEqual(collectTimelineEffectWarnings([{ name: 'Film grain alias', effects: [{ kind: 'film-grain', params: { intensity: 0.2 } }] }]), [], 'the film-grain alias is not falsely reported as skipped');
 const animatedGrain = compileTimelineVisualEffects([{ kind: 'film_grain', params: { intensity: 0.2, size: 1, seed: 41, animated: { value: true } } }]);
 assert.ok(staticGrain[0].includes('floor(X/2.5000)') && staticGrain[0].includes('41*7.1') && !staticGrain[0].includes('floor(T*30)'), 'film grain export applies authored size and seed while holding the pattern when animation is disabled');
 assert.ok(animatedGrain[0].includes('floor(X/1.0000)') && animatedGrain[0].includes('floor(T*30)'), 'wrapped animation control advances the seeded grain at 30 fps');

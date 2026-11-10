@@ -493,6 +493,10 @@ void main() {
 
 // Public capability manifest used by registry validation and diagnostics.
 export const GPU_SHADER_TYPES = Object.freeze(Object.keys(SHADERS));
+// Some effects are authored as CPU effects because export uses FFmpeg, while
+// the equivalent preview shader already exists here. Keep this allowlist
+// explicit so a future same-named shader cannot silently change engine policy.
+const GPU_PREVIEW_CPU_EFFECT_TYPES = new Set(['fade_in', 'fade_out']);
 
 // ============================================================================
 // GPU EFFECT ENGINE CLASS
@@ -520,6 +524,12 @@ export class GPUEffectEngine {
 
     supportsEffect(type) {
         return this.programs.has(String(type || ''));
+    }
+
+    supportsPreviewEffect(effect) {
+        if (!effect || !this.supportsEffect(effect.type)) return false;
+        return effect.engine === ENGINE_TYPES.GPU
+            || (effect.engine === ENGINE_TYPES.CPU && GPU_PREVIEW_CPU_EFFECT_TYPES.has(effect.type));
     }
 
     // ========================================================================
@@ -679,7 +689,7 @@ export class GPUEffectEngine {
      * @returns {WebGLTexture} Output texture
      */
     processEffect(effect, inputTexture, time, context = {}) {
-        if (!this.initialized || effect.engine !== ENGINE_TYPES.GPU) {
+        if (!this.initialized || !this.supportsPreviewEffect(effect)) {
             return inputTexture;
         }
 
@@ -881,7 +891,7 @@ export class GPUEffectEngine {
         let current = inputTexture;
 
         for (const effect of effects) {
-            if (effect.enabled && effect.engine === ENGINE_TYPES.GPU && effect.isActiveAt(time)) {
+            if (effect.enabled && this.supportsPreviewEffect(effect) && effect.isActiveAt(time)) {
                 // Select a target different from the current input to avoid a
                 // WebGL feedback loop, including after multi-pass effects.
                 const fbIndex = current === this.textures[0] ? 1 : 0;

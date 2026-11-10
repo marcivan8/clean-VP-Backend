@@ -240,6 +240,21 @@ export const COMMANDS = [
         destructive: false,
     },
 
+    {
+        id: 'apply_motion_effect_stack',
+        category: 'transform',
+        label: 'Apply footage effects',
+        summary: 'Applies explicitly requested supported visual effects to the video clip under the playhead or selected video clips.',
+        phrases: ['apply motion effects', 'add motion effects to footage', 'add a footage effect', 'add footage effects',
+                  'add film grain', 'film grain effect', 'add a vignette', 'add vignette effect', 'add glow effect',
+                  'add a glow effect', 'add chromatic aberration', 'add rgb split', 'add glitch effect',
+                  'add gaussian blur', 'add radial blur', 'add motion blur', 'add a motion blur',
+                  'fade the footage in', 'fade the footage out', 'add a fade in to the video',
+                  'add a fade out to the video', 'ajoute du grain', 'ajoute un vignettage', 'ajoute un effet glitch'],
+        negative: ['title', 'text', 'caption', 'subtitle', 'graphic', 'graphics', 'transition'],
+        destructive: false,
+    },
+
     // ── R92: free background removal (vision/MatteBaker.js) ────────────────
     {
         id: 'remove_background',
@@ -949,16 +964,18 @@ export function scoreCommand(cmd, text) {
     let best = 0;
     for (const p of cmd.phrases || []) {
         const pTokens = p.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/\s+/).filter(Boolean);
-        // Ordered subsequence match: every phrase token appears in order,
-        // with filler words allowed in between.
-        let ti = 0, matched = 0;
+        // Phrase match with only declared natural-language filler between
+        // terms. Arbitrary words used to be ignored here, so "animate this
+        // title" could match unrelated phrases several clauses away.
+        let ti = 0, matched = 0, contentGap = 0, valid = true;
         for (const pt of pTokens) {
             while (ti < tokens.length && tokens[ti] !== pt) {
-                if (!SKIP.has(tokens[ti]) && matched > 0) { /* real word gap — still allowed */ }
+                if (matched > 0 && !SKIP.has(tokens[ti]) && ++contentGap > 2) { valid = false; break; }
                 ti++;
             }
+            if (!valid) break;
             if (ti >= tokens.length) { matched = 0; break; }
-            matched++; ti++;
+            matched++; ti++; contentGap = 0;
         }
         if (matched === pTokens.length) {
             // Longer phrases are more specific → higher score
@@ -996,10 +1013,9 @@ export function resolveCommand(text) {
     const [top, second] = ranked;
     // Two commands matched on phrases of near-identical length → genuinely unclear
     const tooClose = !!second && (top.score - second.score) <= 2;
-    const destructive = !!top.command.destructive;
     return {
         match: top.command,
-        ambiguous: tooClose && destructive,
+        ambiguous: tooClose,
         alternatives: ranked.slice(1).map(r => r.command),
         confidence: tooClose ? 'low' : 'high',
     };

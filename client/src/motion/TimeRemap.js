@@ -1,7 +1,8 @@
 import { sampleKeyframeTrack } from './MotionResolver.js';
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+const number = (value, fallback = 0) => value !== null && value !== undefined && value !== ''
+    && Number.isFinite(Number(value)) ? Number(value) : fallback;
 
 /** Return the exact scene-owned shutter timestamps used for one output frame. */
 export function getSceneShutterSampleTimes(frame, duration = 1, fps = 30, motionBlur = {}) {

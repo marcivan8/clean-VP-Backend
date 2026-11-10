@@ -409,7 +409,7 @@ function checkEffects(entry, issues, leaves = []) {
         }
     }
     const shapeMaskSupported = node.mask?.kind === 'shape'
-        && ['ellipse', 'circle', 'rectangle', 'rounded-rectangle', 'capsule', 'polygon', 'star', 'arrow'].includes(node.mask.shape)
+        && ['ellipse', 'circle', 'rectangle', 'rounded-rectangle', 'capsule', 'callout', 'polygon', 'star', 'arrow'].includes(node.mask.shape)
         && ((node.type === NODE_TYPES.SHAPE && (!!node.template || !!node.vector))
             || [NODE_TYPES.IMAGE, NODE_TYPES.VIDEO, NODE_TYPES.STICKER].includes(node.type));
     const maskSource = node.mask?.kind === 'node'
@@ -418,7 +418,7 @@ function checkEffects(entry, issues, leaves = []) {
     const sourceVectorKind = String(maskSource?.node?.vector?.kind || 'rect').toLowerCase();
     const nodeMaskShapeSupported = (maskSource?.node?.type === NODE_TYPES.SHAPE
         && !!maskSource.node.vector
-        && ['circle', 'ellipse', 'capsule', 'rect', 'rectangle', 'rounded-rectangle', 'polygon', 'star', 'arrow', 'path'].includes(sourceVectorKind))
+        && ['circle', 'ellipse', 'capsule', 'callout', 'rect', 'rectangle', 'rounded-rectangle', 'polygon', 'star', 'arrow', 'path'].includes(sourceVectorKind))
         || [NODE_TYPES.IMAGE, NODE_TYPES.VIDEO, NODE_TYPES.STICKER].includes(maskSource?.node?.type);
     const nodeMaskModeSupported = !node.mask?.mode || ['alpha', 'luma', 'luminance'].includes(node.mask.mode);
     const nodeMaskSupported = !!maskSource && nodeMaskShapeSupported && maskSource.box.w > 0 && maskSource.box.h > 0

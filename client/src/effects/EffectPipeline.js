@@ -12,6 +12,79 @@ import { effectRegistry } from './EffectRegistry.js';
 import { GPUEffectEngine } from './engines/GPUEffects.js';
 import { CPUEffectEngine } from './engines/CPUEffects.js';
 import { AIEffectEngine } from './engines/AIEffects.js';
+import { resolveEffectParameter } from '../motion/EffectTiming.js';
+
+const MAX_EFFECT_EXPRESSION_SAMPLES = 60;
+
+function boundExpressionSamples(samples, max = MAX_EFFECT_EXPRESSION_SAMPLES) {
+    if (!Array.isArray(samples) || samples.length <= max || max < 2) return samples;
+    const retained = new Set([0, samples.length - 1]);
+    while (retained.size < max) {
+        const anchors = [...retained].sort((a, b) => a - b);
+        let worstError = 0.002;
+        let worstIndex = -1;
+        for (let span = 0; span < anchors.length - 1; span++) {
+            const lo = anchors[span], hi = anchors[span + 1];
+            const a = samples[lo], b = samples[hi];
+            const range = Number(b.t) - Number(a.t);
+            for (let index = lo + 1; index < hi; index++) {
+                const point = samples[index];
+                const t = range > 0 ? (Number(point.t) - Number(a.t)) / range : (index - lo) / (hi - lo);
+                const av = Array.isArray(a.value) ? a.value : [a.value];
+                const bv = Array.isArray(b.value) ? b.value : [b.value];
+                const pv = Array.isArray(point.value) ? point.value : [point.value];
+                const length = Math.max(av.length, bv.length, pv.length);
+                let error = 0;
+                for (let channel = 0; channel < length; channel++) {
+                    const from = Number(av[channel]), to = Number(bv[channel]), actual = Number(pv[channel]);
+                    if (![from, to, actual].every(Number.isFinite)) continue;
+                    const projected = from + (to - from) * t;
+                    error = Math.max(error, Math.abs(actual - projected) / Math.max(1, Math.abs(actual), Math.abs(projected)));
+                }
+                if (error > worstError) { worstError = error; worstIndex = index; }
+            }
+        }
+        if (worstIndex < 0) break;
+        retained.add(worstIndex);
+    }
+    return [...retained].sort((a, b) => a - b).map(index => samples[index]);
+}
+
+function sampleEffectExpressions(effect, clip, fps) {
+    const expressions = effect?.expressions || {};
+    const keys = Object.keys(expressions).filter(key => typeof expressions[key] === 'string' && expressions[key].trim());
+    if (!keys.length) return null;
+    const duration = Math.max(0, Number(clip?.duration) || 0);
+    if (!duration) return null;
+    const clipStart = Number(clip?.start) || 0;
+    const requestedRate = Math.max(1, Math.min(120, Number(fps) || 30));
+    // Effect expressions are executable JavaScript-free formulas in the
+    // browser. The worker's FFmpeg graph consumes numeric samples, so bake the
+    // shared resolver's output at the target frame cadence before serialization.
+    const requestedCount = Math.ceil(duration * requestedRate);
+    const count = Math.max(1, Math.min(18000, requestedCount));
+    const sampleInterval = requestedCount > count ? duration / count : 1 / requestedRate;
+    const samples = {};
+    for (const key of keys) {
+        const raw = effect.params?.[key];
+        const fallbackValue = raw?.value ?? raw;
+        const fallback = Array.isArray(fallbackValue) ? fallbackValue
+            : Number.isFinite(Number(fallbackValue)) ? Number(fallbackValue) : 0;
+        const denseSamples = Array.from({ length: count + 1 }, (_, index) => {
+            const localTime = index === count ? duration : Math.min(duration, index * sampleInterval);
+            const value = resolveEffectParameter(effect, key, fallback, clipStart + localTime, {
+                clipStart,
+                clipDuration: duration,
+            });
+            const sampled = Array.isArray(value) ? value.map(Number) : Number(value);
+            return { t: localTime, value: sampled };
+        }).filter(point => Array.isArray(point.value)
+            ? point.value.length > 0 && point.value.every(Number.isFinite)
+            : Number.isFinite(point.value));
+        samples[key] = boundExpressionSamples(denseSamples);
+    }
+    return samples;
+}
 
 function appendKeyframes(track, values) {
     const byTime = new Map((Array.isArray(track) ? track : [])
@@ -426,6 +499,26 @@ export class EffectPipeline {
     // PREVIEW PROCESSING (GPU Only)
     // ========================================================================
 
+    _warnCpuEffectsUnavailable(targetId, effects) {
+        const cpuEffects = (effects || []).filter(effect => effect.engine === ENGINE_TYPES.CPU
+            && !this.gpuEngine?.supportsPreviewEffect?.(effect));
+        if (!cpuEffects.length) return;
+        const effectIds = cpuEffects.map(effect => effect.id);
+        const key = `cpu-effect-preview-unavailable:${targetId}:${effectIds.join(',')}`;
+        if (this._previewWarnings.has(key)) return;
+        this._previewWarnings.add(key);
+        const names = cpuEffects.map(effect => effect.name || effect.type).join(', ');
+        const warning = {
+            type: 'cpu_effect_preview_unavailable',
+            targetId,
+            effectIds,
+            message: `These CPU effects are applied during export but are not rendered in real-time preview: ${names}.`,
+            recoverable: true,
+        };
+        console.warn('[EffectPipeline]', warning.message, warning);
+        this.onPreviewWarning?.(warning);
+    }
+
     /**
      * Process effects for real-time preview
      * @param {WebGLTexture} texture - Input texture
@@ -435,9 +528,13 @@ export class EffectPipeline {
      * @returns {WebGLTexture} Processed texture
      */
     processPreview(texture, targetId, time, context = {}) {
-        // Get active GPU effects for this target
-        const activeEffects = this.getActiveEffects(targetId, time, context.placement)
-            .filter(e => e.engine === ENGINE_TYPES.GPU);
+        const activeAtTime = this.getActiveEffects(targetId, time, context.placement);
+        this._warnCpuEffectsUnavailable(targetId, activeAtTime);
+        // Most CPU effects are export-only. Fade in/out also have equivalent
+        // shaders, so route those through the live renderer to keep preview and
+        // export in sync without changing their canonical export engine.
+        const activeEffects = activeAtTime.filter(effect => effect.engine === ENGINE_TYPES.GPU
+            || this.gpuEngine?.supportsPreviewEffect?.(effect));
 
         if (activeEffects.length === 0) {
             return texture;
@@ -460,9 +557,12 @@ export class EffectPipeline {
             return texture;
         }
 
-        const unsupportedEffects = typeof this.gpuEngine.supportsEffect === 'function'
-            ? activeEffects.filter(effect => !this.gpuEngine.supportsEffect(effect.type))
-            : [];
+        const supportsPreviewEffect = typeof this.gpuEngine.supportsPreviewEffect === 'function'
+            ? effect => this.gpuEngine.supportsPreviewEffect(effect)
+            : typeof this.gpuEngine.supportsEffect === 'function'
+                ? effect => effect.engine === ENGINE_TYPES.GPU && this.gpuEngine.supportsEffect(effect.type)
+                : () => true;
+        const unsupportedEffects = activeEffects.filter(effect => !supportsPreviewEffect(effect));
         if (unsupportedEffects.length) {
             const effectIds = unsupportedEffects.map(effect => effect.id);
             const key = `unsupported-gpu-effects:${targetId}:${effectIds.join(',')}`;
@@ -659,6 +759,7 @@ export class EffectPipeline {
                 // effects. Their verified results are already compiled into
                 // native keyframes or concrete effects above; serializing the
                 // AI directive itself leaves an unknown no-op in the export.
+                const outputFps = context.settings?.fps || context.exportSettings?.fps || 30;
                 const compiledEffects = effects.filter(effect => effect.engine !== ENGINE_TYPES.AI).map((effect, executionOrder) => ({
                     id: effect.id,
                     kind: effect.type,
@@ -672,6 +773,8 @@ export class EffectPipeline {
                     endTime: effect.endTime,
                     params: effect.getParamsSnapshot(),
                     keyframes: effect.keyframes,
+                    expressions: { ...effect.expressions },
+                    samples: sampleEffectExpressions(effect, clip, outputFps) || undefined,
                     metadata: { ...effect.metadata, aiData: this.aiAnalysisCache.get(effect.id) }
                 }));
                 const graphEffectIds = new Set(compiledEffects.map(effect => effect.id));
@@ -686,7 +789,9 @@ export class EffectPipeline {
                 for (const effect of compiledEffects.map(effect => ({
                     ...effect,
                     params: { ...effect.params },
-                    keyframes: { ...effect.keyframes }
+                    keyframes: { ...effect.keyframes },
+                    expressions: { ...effect.expressions },
+                    samples: effect.samples ? { ...effect.samples } : effect.samples,
                 }))) {
                     mergedEffects.push(effect);
                 }

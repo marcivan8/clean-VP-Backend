@@ -377,7 +377,9 @@ export function sanitizeAnimations(raw, { duration = 3, kind } = {}) {
             if (Object.keys(props).length === 0) continue;
             const t = clampNum(k.time, 0, clipDur, null);
             if (t === null) continue;
-            keyframes.push(createKeyframe(round3(t), props, isKnownEasing(k.easing) ? k.easing : undefined));
+            const easingByProperty = Object.fromEntries(Object.entries(k.easingByProperty || {})
+                .filter(([property, easing]) => props[property] !== undefined && isKnownEasing(easing)));
+            keyframes.push(createKeyframe(round3(t), props, isKnownEasing(k.easing) ? k.easing : undefined, easingByProperty));
         }
         if (keyframes.length === 0) continue;
         keyframes.sort((x, y) => x.time - y.time);

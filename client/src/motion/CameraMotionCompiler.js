@@ -49,6 +49,24 @@ export function evaluateKeyframes(kfs, t, fallback = 1) {
     return sampleKeyframeTrack(kfs, t, fallback);
 }
 
+/** Compose a static camera crop with animated zoom and image-pan keyframes. */
+export function composeAnimatedCrop(baseCrop, extraScale = 1, panX = 0, panY = 0) {
+    if (!baseCrop) return null;
+    const scale = Number(extraScale) > 0 ? Number(extraScale) : 1;
+    const cropW = Math.max(0.05, Math.min(1, Number(baseCrop.cropW) || 1));
+    const cropH = Math.max(0.05, Math.min(1, Number(baseCrop.cropH) || 1));
+    const width = Math.min(1, cropW / scale);
+    const height = Math.min(1, cropH / scale);
+    const centerX = (Number(baseCrop.cropX) || 0) + cropW / 2 - (Number(panX) || 0) * width;
+    const centerY = (Number(baseCrop.cropY) || 0) + cropH / 2 - (Number(panY) || 0) * height;
+    return {
+        cropX: Math.max(0, Math.min(1 - width, centerX - width / 2)),
+        cropY: Math.max(0, Math.min(1 - height, centerY - height / 2)),
+        cropW: width,
+        cropH: height,
+    };
+}
+
 /**
  * Derive the export camera track for one clip:
  *   { scale: [{time,value}], panX: [{time,value}] | null, panY: ... | null }
@@ -140,8 +158,9 @@ export function applyCameraMotionToBaseTrack(tracks, baseTrackId) {
 }
 
 /**
- * Compute smooth dynamic pan/tilt keyframes from an active speaker bounding box track
- * (e.g. from MatteBaker.js / MediaPipe person detection: `[{ t, x, y, w, h }]`).
+ * Compute smooth dynamic pan/tilt keyframes from an active subject bounding box
+ * track. Accepts both top-left `{t,x,y,w,h}` boxes and center-based
+ * `{t,cx,cy,w,h}` samples written by MatteBaker / MediaPipe.
  *
  * Smooths raw coordinates using exponential moving average (EMA) damping,
  * preventing jitter while smoothly following moving speakers across the frame.
@@ -151,6 +170,8 @@ export function applyCameraMotionToBaseTrack(tracks, baseTrackId) {
  * @param {object} [opts]
  * @param {number} [opts.smoothing=0.82] 0 (instant) to 0.95 (heavy smoothing)
  * @param {number} [opts.deadzone=0.04] normalized fraction of frame to ignore micro-movement
+ * @param {number} [opts.sourceStart=0] source-time in point represented by clip-local t=0
+ * @param {number} [opts.speed=1] source seconds per timeline second
  * @returns {{panX: Array<{time:number, value:number}>, panY: Array<{time:number, value:number}>, scale: Array<{time:number, value:number}>}|null}
  */
 export function computeActiveSpeakerPan(bboxTrack, clipDuration, opts = {}) {
@@ -158,16 +179,44 @@ export function computeActiveSpeakerPan(bboxTrack, clipDuration, opts = {}) {
     const dur = Number(clipDuration) || 0;
     if (!(dur > 0)) return null;
 
-    const alpha = Math.max(0.05, Math.min(0.95, 1 - (Number(opts.smoothing) || 0.82)));
-    const deadzone = Number(opts.deadzone) || 0.04;
+    const smoothing = Number.isFinite(Number(opts.smoothing))
+        ? Math.max(0, Math.min(0.95, Number(opts.smoothing))) : 0.82;
+    const alpha = Math.max(0.05, Math.min(1, 1 - smoothing));
+    const deadzone = Number.isFinite(Number(opts.deadzone))
+        ? Math.max(0, Number(opts.deadzone)) : 0.04;
+    const sourceStart = opts.sourceStart != null && Number.isFinite(Number(opts.sourceStart)) ? Number(opts.sourceStart) : 0;
+    const speed = Number(opts.speed) > 0 ? Number(opts.speed) : 1;
+    const anchorX = Number.isFinite(Number(opts.anchorX)) ? Number(opts.anchorX) : 0.5;
+    const anchorY = Number.isFinite(Number(opts.anchorY)) ? Number(opts.anchorY) : 0.5;
+    const cropW = Math.max(0.05, Number(opts.cropW) || 1);
+    const cropH = Math.max(0.05, Number(opts.cropH) || 1);
+    const sourceEnd = sourceStart + dur * speed;
 
     const samples = [...bboxTrack]
-        .filter(b => b && Number.isFinite(b.t) && Number.isFinite(b.x) && Number.isFinite(b.y))
+        .filter(b => b && Number.isFinite(b.t)
+            && (Number.isFinite(b.cx) || Number.isFinite(b.x))
+            && (Number.isFinite(b.cy) || Number.isFinite(b.y))
+            && b.t >= sourceStart && b.t <= sourceEnd)
+        .map(b => {
+            const cx = Number.isFinite(b.cx) ? b.cx : b.x + (Number(b.w) || 0) / 2;
+            const cy = Number.isFinite(b.cy) ? b.cy : b.y + (Number(b.h) || 0) / 2;
+            return {
+                ...b,
+                localTime: (b.t - sourceStart) / speed,
+                // pan keyframes describe image movement. Move the image
+                // opposite the subject's displacement, normalized by the
+                // crop window so the source-space crop reaches the target.
+                targetX: (anchorX - cx) / cropW,
+                // A person box is taller than the face; bias toward the upper
+                // third. A face anchor is already centered on the face.
+                targetY: (anchorY - (cy + (opts.anchorType === 'face' ? (Number(b.h) || 0) * 0.1 : (Number(b.h) || 0) * -0.15))) / cropH,
+            };
+        })
         .sort((a, b) => a.t - b.t);
     if (samples.length === 0) return null;
 
-    let currentTargetX = (samples[0].x + (samples[0].w || 0) / 2) - 0.5;
-    let currentTargetY = (samples[0].y + (samples[0].h || 0) * 0.35) - 0.5;
+    let currentTargetX = samples[0].targetX;
+    let currentTargetY = samples[0].targetY;
 
     let smoothedX = currentTargetX;
     let smoothedY = currentTargetY;
@@ -175,9 +224,8 @@ export function computeActiveSpeakerPan(bboxTrack, clipDuration, opts = {}) {
     const rawKeyframes = [];
 
     for (const sample of samples) {
-        if (sample.t > dur) break;
-        const targetX = (sample.x + (sample.w || 0) / 2) - 0.5;
-        const targetY = (sample.y + (sample.h || 0) * 0.35) - 0.5;
+        const targetX = sample.targetX;
+        const targetY = sample.targetY;
 
         if (Math.abs(targetX - currentTargetX) > deadzone) currentTargetX = targetX;
         if (Math.abs(targetY - currentTargetY) > deadzone) currentTargetY = targetY;
@@ -189,7 +237,7 @@ export function computeActiveSpeakerPan(bboxTrack, clipDuration, opts = {}) {
         const py = Math.max(-0.3, Math.min(0.3, smoothedY));
 
         rawKeyframes.push({
-            t: Number(sample.t.toFixed(4)),
+            t: Number(sample.localTime.toFixed(4)),
             px: Number(px.toFixed(4)),
             py: Number(py.toFixed(4)),
         });
@@ -215,7 +263,15 @@ export function computeActiveSpeakerPan(bboxTrack, clipDuration, opts = {}) {
 export function applyActiveSpeakerTracking(clip, bboxTrack, opts = {}) {
     if (!clip) return clip;
     const dur = Number(clip.duration) || 0;
-    const tracking = computeActiveSpeakerPan(bboxTrack, dur, opts);
+    const tracking = computeActiveSpeakerPan(bboxTrack, dur, {
+        ...opts,
+        sourceStart: opts.sourceStart != null && Number.isFinite(Number(opts.sourceStart)) ? Number(opts.sourceStart) : (Number(clip.offset) || 0),
+        speed: opts.speed != null && Number(opts.speed) > 0 ? Number(opts.speed) : (Number(clip.speed) > 0 ? Number(clip.speed) : 1),
+        anchorX: opts.anchorX ?? (clip.virtualCam ? Number(clip.virtualCam.cropX || 0) + Number(clip.virtualCam.cropW || 1) / 2 : 0.5),
+        anchorY: opts.anchorY ?? (clip.virtualCam ? Number(clip.virtualCam.cropY || 0) + Number(clip.virtualCam.cropH || 1) / 2 : 0.5),
+        cropW: opts.cropW ?? clip.virtualCam?.cropW ?? 1,
+        cropH: opts.cropH ?? clip.virtualCam?.cropH ?? 1,
+    });
     if (!tracking) return clip;
     const keyframes = {
         ...(clip.keyframes || {}),
@@ -229,6 +285,7 @@ export default {
     deriveCameraKeyframes,
     deriveZoomKeyframes,
     evaluateKeyframes,
+    composeAnimatedCrop,
     applyCameraMotionToBaseTrack,
     computeActiveSpeakerPan,
     applyActiveSpeakerTracking,

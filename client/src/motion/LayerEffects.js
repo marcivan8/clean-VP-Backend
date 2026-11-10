@@ -13,7 +13,7 @@ export const GRAPHIC_EFFECT_KINDS = Object.freeze([
     'distortion', 'color_grade', 'vignette', 'glitch',
 ]);
 const GRAPHIC_EFFECT_KIND_SET = new Set(GRAPHIC_EFFECT_KINDS);
-const SHAPE_MASK_KINDS = new Set(['ellipse', 'circle', 'rectangle', 'rounded-rectangle', 'capsule', 'polygon', 'star', 'arrow']);
+const SHAPE_MASK_KINDS = new Set(['ellipse', 'circle', 'rectangle', 'rounded-rectangle', 'capsule', 'callout', 'polygon', 'star', 'arrow']);
 
 const readNumber = (value, fallback = 0) => {
     const raw = value && typeof value === 'object' && 'value' in value ? value.value : value;
@@ -34,6 +34,23 @@ function sampleEffect(effect, timeSeconds, context = {}) {
         if ((!Array.isArray(track) || !track.length) && typeof expression !== 'string') continue;
         const base = raw && typeof raw === 'object' && 'value' in raw ? raw.value : raw;
         sampled[key] = resolveEffectParameter(effect, key, base, timeSeconds, context);
+    }
+    // Parameters are normally initialized from EffectRegistry, but imported
+    // scenes and hand-authored motion data can provide a track/expression
+    // without a matching params entry. Keep this path aligned with
+    // resolveEffectAtTime, which materializes those sparse controls for the
+    // overlay preview.
+    const animatedKeys = new Set([
+        ...Object.keys(effect?.keyframes || {}),
+        ...Object.keys(effect?.expressions || {}),
+    ]);
+    for (const key of animatedKeys) {
+        if (Object.prototype.hasOwnProperty.call(sampled, key)) continue;
+        const track = effect?.keyframes?.[key];
+        const expression = effect?.expressions?.[key];
+        if ((Array.isArray(track) && track.length) || (typeof expression === 'string' && expression.trim())) {
+            sampled[key] = resolveEffectParameter(effect, key, 0, timeSeconds, context);
+        }
     }
     // EffectRegistry records its discriminator as `type`; scene and timeline
     // serializers commonly use `kind`. Normalize once at the renderer boundary
@@ -295,7 +312,11 @@ function applyPixelEffects(ctx, effects, timeSeconds = 0) {
                 const intensity = clamp(p.intensity ?? 0.5, 0, 1);
                 const radius = Math.round(clamp(p.amount ?? 2, 1, 8));
                 const extentX = directional ? Math.cos(angle) * intensity * 0.1 * width : Math.cos(angle) * radius;
-                const extentY = directional ? Math.sin(angle) * intensity * 0.1 * height : Math.sin(angle) * radius;
+                // Use the horizontal pixel span for both axes, matching the
+                // GPU shader's pixel-space shutter vector. Scaling Y by frame
+                // height made the same authored angle turn steeper on portrait
+                // footage and disagree with preview/export on CPU renderers.
+                const extentY = directional ? Math.sin(angle) * intensity * 0.1 * width : Math.sin(angle) * radius;
                 for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
                     const i = (y * width + x) * 4;
                     if (!directional) {
@@ -508,6 +529,13 @@ function traceShapeMask(ctx, mask, width, height) {
             ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
             ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y);
         }
+    } else if (mask.shape === 'callout') {
+        const tail = h * 0.2, bottom = y + h - tail, radius = Math.min(w, bottom - y) * 0.12, tx = x + w * 0.28;
+        ctx.moveTo(x + radius, y); ctx.lineTo(x + w - radius, y); ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+        ctx.lineTo(x + w, bottom - radius); ctx.quadraticCurveTo(x + w, bottom, x + w - radius, bottom);
+        ctx.lineTo(tx + tail * 0.55, bottom); ctx.lineTo(tx, y + h); ctx.lineTo(tx - tail * 0.55, bottom);
+        ctx.lineTo(x + radius, bottom); ctx.quadraticCurveTo(x, bottom, x, bottom - radius);
+        ctx.lineTo(x, y + radius); ctx.quadraticCurveTo(x, y, x + radius, y);
     } else if (mask.shape === 'polygon' || mask.shape === 'star' || mask.shape === 'arrow') {
         const cx = x + w / 2, cy = y + h / 2;
         const rotation = (Number(mask.rotation) || 0) * Math.PI / 180 - Math.PI / 2;

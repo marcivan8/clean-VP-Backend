@@ -1,6 +1,6 @@
 // R100 — intelligent reframe now runs AUTOMATICALLY on every aspect-ratio
 // switch, from any entry point, not just when an AI command explicitly asked
-// for face-aware reframing. Covers: the store action itself (used by the
+// for subject-aware reframing. Covers: the store action itself (used by the
 // settings panel, timeline dropdown, mobile sheet), the AI-command path
 // through MediaExecutionEngine, and switching back to a wide frame correctly
 // dropping the crop again.
@@ -48,7 +48,7 @@ st().setAspectRatio('9:16');
 assert.equal(st().aspectRatio, '9:16');
 let vc = clip().virtualCam;
 assert.ok(vc && vc.reframe === '9:16', `expected an automatic crop, got ${JSON.stringify(vc)}`);
-assert.equal(vc.faceAware, true, 'bboxTrack was present, so the crop should be face-aware');
+assert.equal(vc.subjectAware, true, 'person bboxTrack was present, so the crop should follow the detected subject');
 ok('setAspectRatio("9:16") alone — no explicit reframe request — crops the clip automatically');
 
 // ── 2 · switching back to a wide frame drops the crop again ───────────────

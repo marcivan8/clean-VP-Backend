@@ -270,7 +270,7 @@ class MediaIntelligencePipeline {
         // Old reference profiles stored only broad labels and cannot direct
         // scene typography/placement/motion. Re-analyse those once with the
         // timestamped, detailed profile schema.
-        if (Number(asset.visual_style_profile?.profileVersion) >= 2) return asset.visual_style_profile;
+        if (Number(asset.visual_style_profile?.profileVersion) >= 3) return asset.visual_style_profile;
         if (!asset.gcs_path) return null;
 
         const { localPath, cleanupPath } = await this._resolveToLocalFile(asset.gcs_path, asset.id);

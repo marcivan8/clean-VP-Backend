@@ -26,6 +26,13 @@ export const STYLE_POLICY = Object.freeze({
         "calm": false,
         "allowPunchIns": true,
         "motions": null,
+        "preferredCommands": [
+            "silence_removal",
+            "enhance_audio",
+            "add_transition",
+            "auto_captions",
+            "place_contextual_illustrations"
+        ],
         "aside": [
             "removing every filler word",
             "hook-first reordering"
@@ -47,6 +54,14 @@ export const STYLE_POLICY = Object.freeze({
         "calm": false,
         "allowPunchIns": true,
         "motions": null,
+        "preferredCommands": [
+            "silence_removal",
+            "remove_filler_words",
+            "remove_repetition",
+            "rhythm_zoom",
+            "auto_captions",
+            "enhance_audio"
+        ],
         "aside": [
             "music beds unless asked",
             "heavy b-roll"
@@ -70,6 +85,12 @@ export const STYLE_POLICY = Object.freeze({
         "motions": [
             "push_in",
             "static"
+        ],
+        "preferredCommands": [
+            "silence_removal",
+            "auto_captions",
+            "apply_angle",
+            "detect_speakers"
         ],
         "aside": [
             "hook-first reordering",
@@ -96,6 +117,13 @@ export const STYLE_POLICY = Object.freeze({
             "push_in",
             "static"
         ],
+        "preferredCommands": [
+            "enhance_audio",
+            "normalize_audio",
+            "silence_removal",
+            "auto_captions",
+            "repurpose_shorts"
+        ],
         "aside": [
             "impact sound effects",
             "fast zooms",
@@ -120,6 +148,13 @@ export const STYLE_POLICY = Object.freeze({
         "calm": false,
         "allowPunchIns": true,
         "motions": null,
+        "preferredCommands": [
+            "extract_short",
+            "set_aspect_ratio",
+            "auto_captions",
+            "polish_short",
+            "rhythm_zoom"
+        ],
         "aside": [
             "long-form structure (intro, chapters, outro)"
         ],

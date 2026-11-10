@@ -97,7 +97,7 @@ export function sampleAnimation(animation, localTime) {
             if (!kf?.properties || kf.properties[prop] === undefined || kf.properties[prop] === null || kf.properties[prop] === '') continue;
             const time = Number(kf.time), value = Number(kf.properties[prop]);
             if (!Number.isFinite(time) || !Number.isFinite(value)) continue;
-            track.push({ time, value, easing: kf.easing, index });
+            track.push({ time, value, easing: kf.easingByProperty?.[prop] || kf.easing, index });
         }
         track.sort((a, b) => a.time - b.time || a.index - b.index);
         if (track.length === 0) continue;

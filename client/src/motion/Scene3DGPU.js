@@ -133,18 +133,21 @@ function validTextureCoordinates(face) {
             && Number.isFinite(Number(uv[0])) && Number.isFinite(Number(uv[1])));
 }
 
-/** Only accept scenes whose visible result maps to a depth-tested source-over color pass. */
+/** Only accept untextured scenes whose visible result maps to a depth-tested source-over color pass. */
 export function canRenderScene3DGpu(faces, depthOfField = null) {
     return !depthOfField && Array.isArray(faces) && faces.length > 0 && faces.every(face =>
         !face.shadow && !face.particle && !face.text && !face.wireframe
+        // A texture can mix opaque and transparent pixels. The current GPU
+        // path cannot write depth only for opaque texels, so letting a later
+        // triangle use its depth buffer can incorrectly cover opaque texture
+        // pixels. The software renderer resolves these fragments per pixel.
+        && !face.image
         && face.projected?.length === 3
         && Number.isFinite(Number(face.opacity ?? 1))
         && Number(face.opacity ?? 1) >= 0 && Number(face.opacity ?? 1) <= 1
         && (!face.blendMode || face.blendMode === 'source-over')
         && (!face.maskShape || face.maskShape === 'none')
-        && (face.image
-            ? validTextureCoordinates(face) && (textureMetrics(face.image)?.bytes || Infinity) <= MAX_TEXTURE_CACHE_BYTES
-            : !!parseOpaqueColor(face.color)));
+        && !!parseOpaqueColor(face.color));
 }
 
 /** Backwards-compatible strict predicate for integrations requiring opaque geometry. */

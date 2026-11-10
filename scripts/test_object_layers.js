@@ -142,6 +142,10 @@ section('5 · store wiring');
     check('defines applyLayerSeparation', /applyLayerSeparation:/.test(store));
     check('defines zoomToSpeaker', /zoomToSpeaker:/.test(store));
     check('defines trackSpeaker', /trackSpeaker:/.test(store));
+    check('trackSpeaker defaults to animated crop keyframes on the original clip',
+        /if\s*\(opts\.mode\s*!==\s*'segments'\)[\s\S]*?applyActiveSpeakerTracking\([\s\S]*?get\(\)\.updateClip\(trackId,\s*clipId,[\s\S]*?keyframes:\s*trackedClip\.keyframes/.test(store));
+    check('static recenter segmentation remains available only by explicit segments mode',
+        /if\s*\(opts\.mode\s*!==\s*'segments'\)[\s\S]*?const segments = deriveTrackingSegments/.test(store));
     check('defines setLayerTarget', /setLayerTarget:/.test(store));
     check('updateClip allow-list includes layerMask', /updates\.layerMask !== undefined/.test(store));
     check('updateClip allow-list includes layerTarget', /updates\.layerTarget !== undefined/.test(store));

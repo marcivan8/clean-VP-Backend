@@ -88,7 +88,7 @@ export function buildShortTimeline(tracks, short, opts = {}) {
     // R100: the per-clip crop maths (fillFrameCrop + the aspectOf/assetOf
     // lookups) is shared with the live editor's reframeToFrame()
     // (useTimelineStore.js) via computeReframePlan() -- the short/repurposing
-    // pipeline gets the SAME intelligent, face-aware reframe instead of a
+    // pipeline gets the SAME intelligent, subject-aware reframe instead of a
     // second, separately-maintained copy of the same logic.
     const { work } = computeReframePlan(sliced, { frameAspect, assets: opts.assets, aspectRatio });
     const cropByKey = new Map(work.map(w => [`${w.trackId}::${w.clipId}`, w.crop]));

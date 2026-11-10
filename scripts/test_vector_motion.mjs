@@ -65,7 +65,10 @@ assert.match(featheredEllipse, /<ellipse cx="50" cy="50" rx="30" ry="40"/, 'feat
 assert.match(featheredEllipse, /<feGaussianBlur stdDeviation="8"\/>/, 'shape matte feather is rendered into its alpha source');
 const fullRectMatte = decodeURIComponent(vectorMatteDataUrl({ kind: 'rect', w: 100, h: 100 }).split(',')[1]);
 assert.match(fullRectMatte, /<rect x="0" y="0" width="100" height="100"/, 'ordinary vector mattes retain full-canvas defaults');
-for (const shape of ['capsule', 'polygon', 'star', 'arrow']) {
+const calloutMatte = decodeURIComponent(vectorMatteDataUrl({ kind: 'callout', w: 100, h: 80, tailSize: 16, tailPosition: 0.7 }).split(',')[1]);
+assert.match(calloutMatte, /<path d="M 7\.68 0 H 92\.32/, 'callout mask produces a rounded speech bubble body');
+assert.match(calloutMatte, /L 70 80 L 61\.2 64/, 'callout matte includes an authored adjustable tail');
+for (const shape of ['capsule', 'callout', 'polygon', 'star', 'arrow']) {
   const maskedScene = createScene({ duration: 1, nodes: [createNode(NODE_TYPES.SHAPE, {
     duration: 1, vector: { kind: 'rect', w: 100, h: 100, fill: '#fff' },
     mask: { kind: 'shape', shape, sides: 5, points: 5 },
@@ -78,15 +81,17 @@ const outOfRangeFeatherScene = createScene({ duration: 1, nodes: [createNode(NOD
 })] });
 assert.ok(validateScene(outOfRangeFeatherScene).issues.some(issue => issue.code === ISSUE_CODES.UNSUPPORTED_MASK),
   'scene validation warns when mask feather exceeds the preview and export contract');
-function morphFrame(time) {
+function morphFrame(time, morphStartTime = 0) {
   const canvas = Canvas.createCanvas(32, 32);
   drawVectorFrame(canvas.getContext('2d'), {
     kind: 'path', x: 0, y: 0, w: 32, h: 32, pathData: 'M 2 2 L 30 2 L 30 30 Z', fill: '#FFFFFF',
-    motion: { pathFrom: 'M 2 2 L 30 2 L 30 30 Z', pathTo: 'M 2 2 C 2 30 30 30 30 2 Z', morphDuration: 1, easing: 'linear' },
+    motion: { pathFrom: 'M 2 2 L 30 2 L 30 30 Z', pathTo: 'M 2 2 C 2 30 30 30 30 2 Z', morphStartTime, morphDuration: 0.5, easing: 'linear' },
   }, time, 1);
   return canvas.toBuffer('image/png');
 }
 assert.notDeepEqual(morphFrame(0), morphFrame(0.5), 'normalized contour morphs are visible in rendered preview frames');
+assert.deepEqual(morphFrame(0.2, 0.25), morphFrame(0), 'delayed path morph holds the source shape until its authored start time');
+assert.notDeepEqual(morphFrame(0.5, 0.25), morphFrame(0.2, 0.25), 'delayed path morph animates after its authored start time');
 const compoundPathCanvas = Canvas.createCanvas(100, 100);
 drawVectorGraphic(compoundPathCanvas.getContext('2d'), {
   kind: 'path', x: 0, y: 0, w: 100, h: 100,
@@ -98,6 +103,31 @@ assert.equal(compoundPixels[(50 * 100 + 50) * 4 + 3], 0,
   'even-odd compound vector paths preserve transparent holes in Canvas preview/export');
 assert.equal(compoundPixels[(15 * 100 + 15) * 4 + 3], 255,
   'even-odd compound vector paths still render their filled outer contour');
+const ellipseCanvas = Canvas.createCanvas(100, 60);
+drawVectorGraphic(ellipseCanvas.getContext('2d'), { kind: 'ellipse', x: 10, y: 10, w: 80, h: 40, fill: '#FFFFFF' });
+const ellipsePixels = ellipseCanvas.getContext('2d').getImageData(0, 0, 100, 60).data;
+assert.equal(ellipsePixels[(10 * 100 + 10) * 4 + 3], 0, 'ellipse graphics keep transparent bounding-box corners');
+assert.equal(ellipsePixels[(30 * 100 + 50) * 4 + 3], 255, 'ellipse graphics fill their center');
+const calloutCanvas = Canvas.createCanvas(100, 80);
+drawVectorGraphic(calloutCanvas.getContext('2d'), { kind: 'callout', x: 0, y: 0, w: 100, h: 80, fill: '#FFFFFF', tailSize: 16, tailPosition: 0.7 });
+const calloutPixels = calloutCanvas.getContext('2d').getImageData(0, 0, 100, 80).data;
+assert.equal(calloutPixels[(70 * 100 + 70) * 4 + 3], 255, 'callout renderer fills the speech tail');
+assert.equal(calloutPixels[(79 * 100 + 20) * 4 + 3], 0, 'callout renderer leaves pixels outside the speech tail transparent');
+const ellipseFallbackCanvas = Canvas.createCanvas(100, 60);
+const ellipseFallbackContext = ellipseFallbackCanvas.getContext('2d');
+drawVectorGraphic(new Proxy(ellipseFallbackContext, {
+  get(target, property) {
+    if (property === 'ellipse') return undefined;
+    const value = Reflect.get(target, property, target);
+    return typeof value === 'function' ? value.bind(target) : value;
+  },
+  set(target, property, value) { return Reflect.set(target, property, value, target); },
+}), { kind: 'ellipse', x: 10, y: 10, w: 80, h: 40, fill: '#FFFFFF' });
+assert.deepEqual(ellipseFallbackContext.getImageData(0, 0, 100, 60).data, ellipsePixels,
+  'ellipse path construction remains correct on Canvas implementations without ellipse()');
+const vectorPanelSource = fs.readFileSync(new URL('../client/src/components/TemplatePanel.jsx', import.meta.url), 'utf8');
+assert.match(vectorPanelSource, /\['path', 'rect', 'circle', 'ellipse', 'capsule', 'callout'/,
+  'callout is exposed in the vector shape authoring menu');
 assert.equal(interpolateSvgPaths('M 0 0 L 10 0 Z', 'M 0 0 L 10 0', 0.5), null,
   'open and closed paths are rejected instead of morphing into invalid topology');
 const compatibleMorphScene = createScene({ duration: 1, nodes: [createNode(NODE_TYPES.SHAPE, {
@@ -166,6 +196,15 @@ try {
   }
   assert.equal(scaledImage.width, 192);
   assert.ok(scaledMaxX >= 171, 'SVG path geometry scales with high-resolution export dimensions');
+  const ellipseExport = await renderVectorFrames({ kind: 'ellipse', x: 10, y: 10, w: 80, h: 40, fill: '#FFFFFF' }, {
+    durationSec: 0.2, fps: 1, widthPx: 100, tmpDir, name: 'ellipse-export', canvasModule: Canvas,
+  });
+  const ellipseImage = await Canvas.loadImage(fs.readFileSync(ellipseExport.files[0]));
+  const ellipseExportCanvas = Canvas.createCanvas(ellipseImage.width, ellipseImage.height);
+  ellipseExportCanvas.getContext('2d').drawImage(ellipseImage, 0, 0);
+  const ellipseExportPixels = ellipseExportCanvas.getContext('2d').getImageData(0, 0, ellipseImage.width, ellipseImage.height).data;
+  assert.equal(ellipseExportPixels[3], 0, 'ellipse export preserves transparent corners');
+  assert.equal(ellipseExportPixels[(25 * ellipseImage.width + 50) * 4 + 3], 255, 'ellipse export matches the preview silhouette');
   const morphVector = {
     kind: 'path', w: 96, h: 96, x: 0, y: 0,
     pathData: 'M 10 10 L 86 10 L 86 86 L 10 86 Z',
@@ -173,11 +212,11 @@ try {
     motion: {
       pathFrom: 'M 10 10 L 86 10 L 86 86 L 10 86 Z',
       pathTo: 'M 48 8 C 96 24 72 96 48 86 C 24 96 0 24 48 8 Z',
-      morphDuration: 1, easing: 'linear',
+      morphStartTime: 0.25, morphDuration: 0.5, easing: 'linear',
     },
   };
   const morphExport = await renderVectorFrames(morphVector, {
-    durationSec: 1, fps: 2, widthPx: 96, tmpDir, name: 'path-morph-export', canvasModule: Canvas,
+    durationSec: 1, fps: 4, widthPx: 96, tmpDir, name: 'path-morph-export', canvasModule: Canvas,
   });
   const morphPixels = await Promise.all(morphExport.files.map(async file => {
     const image = await Canvas.loadImage(fs.readFileSync(file));
@@ -186,7 +225,8 @@ try {
     context.drawImage(image, 0, 0);
     return context.getImageData(0, 0, image.width, image.height).data;
   }));
-  assert.notDeepEqual(morphPixels[0], morphPixels[1], 'exported SVG path morph changes actual frame pixels');
+  assert.deepEqual(morphPixels[0], morphPixels[1], 'export keeps the source SVG path before the delayed morph begins');
+  assert.notDeepEqual(morphPixels[1], morphPixels[2], 'exported SVG path morph changes actual frame pixels after its authored start time');
 } finally {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 }

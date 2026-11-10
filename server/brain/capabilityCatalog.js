@@ -166,9 +166,14 @@ const trim = (text, max) => {
  */
 function commandsPromptSection(ctx) {
     const { ready, blocked } = partition(ctx);
+    const styleId = typeof ctx?.editingStyle === 'string' ? ctx.editingStyle : ctx?.editingStyle?.id;
+    const style = catalog.styles?.[styleId] || null;
+    const mode = catalog.modes?.[ctx?.editingMode] || null;
 
-    const line = (cmd) =>
-        `  "${cmd.phrase}" → ${cmd.id}${cmd.destructive ? ' [cuts footage]' : ''} — ${trim(cmd.summary || cmd.label, 62)}`;
+    const line = (cmd) => {
+        const inputs = (cmd.inputs || []).filter(input => input.name).map(input => input.name);
+        return `  "${cmd.phrase}" → ${cmd.id}${cmd.destructive ? ' [cuts footage]' : ''}${inputs.length ? ` [inputs: ${inputs.join(', ')}]` : ''} — ${trim(cmd.summary || cmd.label, 62)}`;
+    };
 
     /**
      * The one sentence that unblocks a command.
@@ -228,6 +233,27 @@ function commandsPromptSection(ctx) {
         byCategory(ready, line),
     ];
 
+    if (style) {
+        const readyIds = new Set(ready.map(command => command.id));
+        const styleCommands = (style.preferredCommands || []).filter(id => readyIds.has(id));
+        parts.push(
+            '',
+            `ACTIVE EDITING STYLE: ${style.label}${style.platform ? ` (platform: ${style.platform})` : ''}.`,
+            `Use this style to fill unspecified choices; explicit user instructions take priority.`,
+            `Style defaults: ${style.keepsRecordedOrder ? 'preserve recorded order' : 'a stronger opening may be selected when the request calls for it'}; ${style.calm ? 'keep motion and transitions restrained' : 'motion may follow the requested energy'}; sound effects: ${style.sfxLevel}; ${style.expectsMusic ? 'music can be part of the style' : 'do not add music unless requested'}.`,
+            `Style-aligned commands available now: ${styleCommands.length ? styleCommands.join(', ') : 'none of its preferred commands are currently ready; check prerequisites above'}.`,
+        );
+    }
+
+    if (mode) {
+        parts.push(
+            '',
+            `EDITING MODE: ${mode.label}.`,
+            mode.planning,
+            mode.execution,
+        );
+    }
+
     if (blocked.length > 0) {
         parts.push(
             '',
@@ -247,6 +273,8 @@ function commandsPromptSection(ctx) {
         '- Commands gated on a selection, a shadow, a blur zone, keyword highlights, a',
         '  brand kit or undo history are listed as ready because this prompt cannot see',
         '  those. Do not assert they are present — offer, or ask.',
+        '- Never claim an edit succeeded from this advisory response. The execution',
+        '  pipeline must run the command and verify its postcondition first.',
     );
 
     return parts.join('\n');

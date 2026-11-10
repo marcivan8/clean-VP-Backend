@@ -61,6 +61,7 @@ export const COMMAND_PHRASE = Object.freeze({
     "animate_automatically": "Animate automatically",
     "apply_angle": "Apply camera angles",
     "apply_lut": "Apply a LUT",
+    "apply_motion_effect_stack": "add motion effects to footage",
     "clear_lut": "clear the lut",
     "color_grade": "Colour grade",
     "compose_motion": "Design the motion",

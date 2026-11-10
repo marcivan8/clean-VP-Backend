@@ -47,8 +47,11 @@ function isFiniteEffectValue(value) {
 }
 
 function isRecoverableEffectTrackValue(value) {
-    return isFiniteEffectValue(value)
-        || (Array.isArray(value) && value.length > 0 && value.some(item => Number.isFinite(item)));
+    // Vector parameters are atomic values. Accepting a partly malformed
+    // vector here lets interpolation combine channels from two different
+    // keyframes, while MotionResolver correctly drops that keyframe. Keep
+    // effect preview and the shared timeline/export sampler consistent.
+    return isFiniteEffectValue(value);
 }
 
 // ============================================================================
@@ -184,6 +187,7 @@ export class EffectNode {
     getParamAt(paramName, time) {
         const keyframes = this.keyframes[paramName];
         const baseValue = this.getParam(paramName);
+        const paramType = this.params[paramName]?.type;
 
         // No keyframes, return base value
         if (!keyframes || keyframes.length === 0) {
@@ -193,15 +197,25 @@ export class EffectNode {
         // Ignore malformed keys and keep author order stable. When multiple
         // keys share a timestamp, the later-authored key wins, matching the
         // canonical motion resolver and avoiding zero-width interpolation.
-        const sorted = keyframes.map((keyframe, index) => ({ keyframe, index, time: Number(keyframe?.time) }))
-            .filter(entry => Number.isFinite(entry.time) && isRecoverableEffectTrackValue(entry.keyframe?.value))
+        const sorted = keyframes.map((keyframe, index) => {
+            // Older scene/timeline serializers stored sparse effect tracks as
+            // `{ time, properties: { [paramName]: value } }`. The shared
+            // resolver still accepts that shape, so GPU preview must as well.
+            const rawValue = keyframe?.value ?? keyframe?.properties?.[paramName];
+            const numericType = [PARAM_TYPES.FLOAT, PARAM_TYPES.INT, PARAM_TYPES.ANGLE].includes(paramType);
+            const value = numericType && typeof rawValue === 'string' && rawValue.trim() !== ''
+                ? Number(rawValue)
+                : rawValue;
+            return { keyframe, value, index, time: Number(keyframe?.time) };
+        })
+            .filter(entry => Number.isFinite(entry.time) && isRecoverableEffectTrackValue(entry.value))
             .sort((a, b) => a.time - b.time || a.index - b.index)
             .reduce((unique, entry) => {
                 if (unique.at(-1)?.time === entry.time) unique[unique.length - 1] = entry;
                 else unique.push(entry);
                 return unique;
             }, [])
-            .map(entry => ({ ...entry.keyframe, time: entry.time }));
+            .map(entry => ({ ...entry.keyframe, value: entry.value, time: entry.time }));
         if (!sorted.length) return baseValue;
 
         const sampleTime = Number(time);
@@ -267,14 +281,9 @@ export class EffectNode {
             if (from.every(Number.isFinite) && to.every(Number.isFinite) && from.length !== to.length) {
                 return t < 0.5 ? from : to;
             }
-            const preferred = t < 0.5 ? from : to;
-            const fallback = t < 0.5 ? to : from;
-            const length = Math.max(preferred.length, fallback.length);
-            return Array.from({ length }, (_, index) => (
-                Number.isFinite(preferred[index]) ? preferred[index]
-                    : Number.isFinite(fallback[index]) ? fallback[index]
-                        : 0
-            ));
+            // Malformed vectors have no safe channel mapping. Hold the
+            // nearest authored value rather than synthesizing a hybrid.
+            return t < 0.5 ? from : to;
         }
 
         // Boolean - just switch at 0.5
@@ -299,6 +308,8 @@ export class EffectNode {
                 continue;
             }
             result[paramName] = resolveEffectParameter({
+                startTime: this.startTime,
+                endTime: this.endTime,
                 params: { [paramName]: { value: this.getParam(paramName), expression } },
                 expressions: { [paramName]: expression },
                 keyframes: { [paramName]: this.keyframes[paramName] || [] },

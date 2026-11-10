@@ -102,17 +102,23 @@ function nextId(prefix) {
  * @param {object} properties subset of ANIMATABLE_PROPS
  * @param {string} [easing] overrides the parent animation's easing
  */
-export function createKeyframe(time, properties = {}, easing) {
+export function createKeyframe(time, properties = {}, easing, easingByProperty) {
     const props = {};
     for (const key of ANIMATABLE_PROPS) {
         if (properties[key] !== undefined && Number.isFinite(Number(properties[key]))) {
             props[key] = Number(properties[key]);
         }
     }
+    const perPropertyEasing = easingByProperty && typeof easingByProperty === 'object'
+        ? Object.fromEntries(ANIMATABLE_PROPS
+            .filter(key => props[key] !== undefined && typeof easingByProperty[key] === 'string')
+            .map(key => [key, easingByProperty[key]]))
+        : {};
     return {
         time: Math.max(0, Number(time) || 0),
         properties: props,
         ...(easing ? { easing } : {}),
+        ...(Object.keys(perPropertyEasing).length ? { easingByProperty: perPropertyEasing } : {}),
     };
 }
 

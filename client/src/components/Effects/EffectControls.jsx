@@ -17,6 +17,7 @@ import {
 import { normalizeHex, changedKeys } from '../ui/panelControls.js';
 import { sampleKeyframeTrack } from '../../motion/MotionResolver.js';
 import { validateMotionExpression } from '../../motion/MotionExpression.js';
+import { audioEngineAPI } from '../../audio-engine/AudioEngineAPI.js';
 
 // ============================================================================
 // CONTROL COMPONENTS
@@ -260,9 +261,35 @@ const EffectControls = ({
     // render and takes the panel down instead of just showing the controls.
     const params = definition?.params || {};
     const currentValues = effect?.params || {};
+    const [lutOptions, setLutOptions] = useState([]);
     // useMemo so hasKeyframeAt below keeps a stable identity across renders
     // (a fresh {} literal every render would rebuild it every time).
     const keyframes = useMemo(() => effect?.keyframes || {}, [effect]);
+
+    useEffect(() => {
+        if (effect?.type !== 'lut_apply') return undefined;
+        let cancelled = false;
+        audioEngineAPI.listLUTs({ limit: 100 }).then(({ luts = [] } = {}) => {
+            if (cancelled) return;
+            const options = luts.map(item => item?.asset || item).filter(lut => lut?.id).map(lut => ({
+                value: String(lut.id),
+                label: lut.display_name || lut.name || String(lut.id),
+            }));
+            const selectedId = currentValues.lutId?.value ?? currentValues.lutId;
+            if (selectedId && !options.some(option => option.value === String(selectedId))) {
+                options.unshift({ value: String(selectedId), label: 'Selected LUT' });
+            }
+            setLutOptions([{ value: '', label: 'Choose a look' }, ...options]);
+        }).catch(error => {
+            if (cancelled) return;
+            console.warn('[EffectControls] Could not load LUT library:', error.message);
+            const selectedId = currentValues.lutId?.value ?? currentValues.lutId;
+            setLutOptions(selectedId
+                ? [{ value: '', label: 'Choose a look' }, { value: String(selectedId), label: 'Selected LUT' }]
+                : [{ value: '', label: 'LUT library unavailable' }]);
+        });
+        return () => { cancelled = true; };
+    }, [effect?.type, currentValues.lutId]);
 
     const handleParamChange = useCallback((paramName, value) => {
         if (!effect) return;
@@ -374,7 +401,7 @@ const EffectControls = ({
                         name={paramName}
                         label={paramDef.label || paramName}
                         value={value}
-                        options={paramDef.options || []}
+                        options={name === 'lutId' ? lutOptions : (paramDef.options || [])}
                         onChange={handleParamChange}
                     />
                 );
@@ -442,7 +469,7 @@ const EffectControls = ({
                 onReset={dirty ? handleReset : null}
                 resetLabel={t('effects.reset', 'Reset')}
             >
-                {Object.entries(params).map(([name, def]) => renderControl(name, def))}
+                {Object.entries(params).filter(([, def]) => !def.uiHidden).map(([name, def]) => renderControl(name, def))}
             </PanelSection>
         </div>
     );

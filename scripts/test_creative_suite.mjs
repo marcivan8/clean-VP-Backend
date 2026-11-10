@@ -148,20 +148,47 @@ await check('computeActiveSpeakerPan calculates smooth damped pan keyframes', ()
     assert.ok(Array.isArray(r.panX) && r.panX.length >= 2, 'panX keyframes exist');
     assert.ok(Array.isArray(r.panY) && r.panY.length >= 1, 'panY keyframes exist');
 
-    // Pan moves towards the right to keep speaker centered
+    // The subject moves right, so the image/camera pan moves left to keep it centered.
     const firstPan = r.panX[0].value;
     const lastPan = r.panX[r.panX.length - 1].value;
-    assert.ok(lastPan > firstPan, 'camera pans to follow the moving speaker');
+    assert.ok(lastPan < firstPan, 'camera moves opposite the subject to keep it centered');
+});
+
+await check('computeActiveSpeakerPan accepts MatteBaker center-based bboxTrack samples', () => {
+    const track = [
+        { t: 0, cx: 0.25, cy: 0.45, w: 0.3, h: 0.7 },
+        { t: 1, cx: 0.75, cy: 0.45, w: 0.3, h: 0.7 },
+    ];
+    const r = CMC.computeActiveSpeakerPan(track, 1, { smoothing: 0, deadzone: 0 });
+    assert.ok(r?.panX?.length >= 2, 'center-based samples produce pan keyframes');
+    assert.ok(r.panX.at(-1).value < r.panX[0].value, 'image pan moves opposite the detected subject');
+    assert.equal(r.panX[0].time, 0);
+    assert.equal(r.panX.at(-1).time, 1);
+});
+
+await check('animated camera crop shares bounded zoom and pan composition across renderers', () => {
+    const crop = CMC.composeAnimatedCrop({ cropX: 0.3, cropY: 0.2, cropW: 0.4, cropH: 0.6 }, 2, -0.25, 0.1);
+    assert.equal(crop.cropW, 0.2);
+    assert.equal(crop.cropH, 0.3);
+    assert.ok(Math.abs(crop.cropX - 0.45) < 1e-8, 'leftward image pan shifts the crop window right');
+    assert.ok(crop.cropY >= 0 && crop.cropY + crop.cropH <= 1, 'crop remains within source bounds');
+    const edge = CMC.composeAnimatedCrop({ cropX: 0.8, cropY: 0.8, cropW: 0.2, cropH: 0.2 }, 1, -0.5, -0.5);
+    assert.ok(edge.cropX >= 0 && edge.cropX + edge.cropW <= 1);
+    assert.ok(edge.cropY >= 0 && edge.cropY + edge.cropH <= 1);
 });
 
 await check('applyActiveSpeakerTracking injects pan keyframes onto a video clip', () => {
-    const clip = { id: 'v1', type: 'video', duration: 3.0 };
+    const clip = { id: 'v1', type: 'video', duration: 2.0, offset: 6, speed: 1.5 };
     const bboxTrack = [
-        { t: 0.0, x: 0.2, y: 0.3, w: 0.25, h: 0.5 },
-        { t: 1.5, x: 0.6, y: 0.3, w: 0.25, h: 0.5 },
+        { t: 5.5, x: 0.1, y: 0.3, w: 0.25, h: 0.5 }, // before this clip's source in-point
+        { t: 6.0, x: 0.2, y: 0.3, w: 0.25, h: 0.5 },
+        { t: 7.5, x: 0.6, y: 0.3, w: 0.25, h: 0.5 },
+        { t: 9.1, x: 0.9, y: 0.3, w: 0.25, h: 0.5 }, // after this clip's source out-point
     ];
     const updated = CMC.applyActiveSpeakerTracking(clip, bboxTrack);
     assert.ok(updated.keyframes?.panX?.length > 0);
+    assert.equal(updated.keyframes.panX[0].time, 0, 'source in-point maps to clip-local zero');
+    assert.equal(updated.keyframes.panX.at(-1).time, 1, '1.5 source seconds map to 1 timeline second at 1.5x');
     assert.equal(updated.virtualCam?.tracking, 'active-speaker');
 });
 

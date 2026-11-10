@@ -14,7 +14,8 @@ const texturedTriangle = {
     image: { width: 2, height: 2 },
     uvs: [[0, 0], [1, 0], [0.5, 1]],
 };
-assert.equal(canRenderScene3DGpu([texturedTriangle]), true, 'UV-mapped source-over triangles are eligible for GPU texture sampling');
+assert.equal(canRenderScene3DGpu([texturedTriangle]), false,
+    'textured triangles stay on software rendering so transparent texels do not write incorrect GPU depth');
 assert.equal(canRenderScene3DGpu([{ ...texturedTriangle, uvs: null }]), false, 'textured geometry without complete UVs remains on software rendering');
 assert.equal(canRenderOpaqueScene3DGpu([texturedTriangle]), false,
     'the strict opaque-only predicate does not claim an image texture is opaque without inspecting its pixels');
@@ -113,59 +114,27 @@ try {
         'distinct transparent surfaces use the per-pixel software compositor instead of average-depth GPU ordering');
     assert.equal(calls.length, transparentCalls, 'ambiguous transparent scenes are rejected before issuing GPU work');
     const textureStart = calls.length;
-    assert.equal(renderOpaqueScene3DGpu(ctx, [texturedTriangle, { ...texturedTriangle, projected: triangle.projected }], 640, 360), true,
-        'UV-mapped triangles render through the GPU texture path');
-    const textureCalls = calls.slice(textureStart);
-    const texturedVertices = textureCalls.find(([name]) => name === 'bufferData')[1];
-    assert.deepEqual(Array.from(texturedVertices.slice(8, 11)), [0, 0, 1], 'UV coordinates and the texture selector reach the GPU vertices');
-    assert.equal(textureCalls.filter(([name]) => name === 'texImage2D').length, 1,
-        'adjacent triangles sharing a texture upload it once per frame');
-    assert.ok(textureCalls.some(([name, ...args]) => name === 'blendFuncSeparate'
-        && args.join(',') === '14,15,16,15'), 'textured scenes enable source-over for image alpha');
-    assert.ok(textureCalls.some(([name, value]) => name === 'depthMask' && value === false),
-        'transparent texture pixels do not write occluding depth');
-    assert.ok(textureCalls.some(([name, count, start]) => name === 'drawArrays' && start === 0 && count === 6),
-        'adjacent triangles sharing a texture render in one draw batch');
+    assert.equal(renderOpaqueScene3DGpu(ctx, [texturedTriangle, { ...texturedTriangle, projected: triangle.projected }], 640, 360), false,
+        'textured scenes stay on the software path so transparent pixels participate in per-pixel depth resolution');
     const litTexture = { ...texturedTriangle, textureLighting: {
         diffuse: [0.5, 0.6, 0.7], metallicSpecular: [0.1, 0.2, 0.3],
         dielectricSpecular: [0, 64, 128], emission: [0, 32, 64],
     } };
-    const litTextureStart = calls.length;
-    assert.equal(renderOpaqueScene3DGpu(ctx, [litTexture], 640, 360), true);
-    const litTextureVertices = calls.slice(litTextureStart).find(([name]) => name === 'bufferData')[1];
-    assert.ok(Math.abs(litTextureVertices[11] - 0.6) < 1e-6
-        && Math.abs(litTextureVertices[12] - 0.8) < 1e-6
-        && Math.abs(litTextureVertices[13] - 1) < 1e-6
-        && Math.abs(litTextureVertices[14] - 0) < 1e-6
-        && Math.abs(litTextureVertices[15] - 96 / 255) < 1e-6
-        && Math.abs(litTextureVertices[16] - 192 / 255) < 1e-6,
-    'per-face diffuse, metallic, dielectric and emissive texture lighting reaches the GPU shader');
-    const staticTextureCalls = calls.length;
-    assert.equal(renderOpaqueScene3DGpu(ctx, [texturedTriangle], 640, 360), true);
-    assert.equal(calls.slice(staticTextureCalls).filter(([name]) => name === 'texImage2D').length, 0,
-        'a cached still texture is not uploaded again on every scene frame');
+    assert.equal(renderOpaqueScene3DGpu(ctx, [litTexture], 640, 360), false,
+        'lit textures remain on the software path until alpha-correct GPU depth is supported');
     const videoCanvas = { tagName: 'CANVAS', width: 640, height: 360 };
     const dynamicTexture = { ...texturedTriangle, image: videoCanvas };
-    const dynamicFirstFrame = calls.length;
-    assert.equal(renderOpaqueScene3DGpu(ctx, [dynamicTexture], 640, 360), true);
-    const dynamicSecondFrame = calls.length;
-    assert.equal(renderOpaqueScene3DGpu(ctx, [dynamicTexture], 640, 360), true);
-    assert.equal(calls.slice(dynamicFirstFrame, dynamicSecondFrame).filter(([name]) => name === 'texImage2D').length, 1,
-        'a canvas-backed video texture uploads its current frame');
-    assert.equal(calls.slice(dynamicSecondFrame).filter(([name]) => name === 'texImage2D').length, 1,
-        'a canvas-backed video texture refreshes on the next frame');
-    const textureEvictionStart = calls.length;
     const manyTextures = Array.from({ length: 18 }, (_, index) => ({ ...texturedTriangle, order: 1, image: { id: index, width: 2, height: 2 } }));
-    assert.equal(renderOpaqueScene3DGpu(ctx, manyTextures, 640, 360), true);
-    assert.ok(calls.slice(textureEvictionStart).some(([name]) => name === 'deleteTexture'),
-        'the GPU texture cache disposes least-recently-used handles at its bound');
-    const byteEvictionStart = calls.length;
+    assert.equal(renderOpaqueScene3DGpu(ctx, [dynamicTexture], 640, 360), false,
+        'video textures also use alpha-correct software rendering');
+    assert.equal(renderOpaqueScene3DGpu(ctx, manyTextures, 640, 360), false,
+        'a texture-heavy scene is rejected before allocating GPU texture handles');
     const largeTextures = Array.from({ length: 4 }, (_, index) => ({
         ...texturedTriangle, order: 1, image: { id: `large-${index}`, width: 2048, height: 2048 },
     }));
-    assert.equal(renderOpaqueScene3DGpu(ctx, largeTextures, 640, 360), true);
-    assert.ok(calls.slice(byteEvictionStart).some(([name]) => name === 'deleteTexture'),
-        'the GPU texture cache evicts by allocated bytes before exhausting its memory budget');
+    assert.equal(renderOpaqueScene3DGpu(ctx, largeTextures, 640, 360), false,
+        'large texture arrays are rejected before GPU allocation');
+    assert.equal(calls.length, textureStart, 'unsupported textured scenes issue no GPU work');
     const drawnBeforeRecovery = drawn.length;
     gpuContextLost = true;
     assert.equal(renderOpaqueScene3DGpu(ctx, [triangle], 640, 360), false,

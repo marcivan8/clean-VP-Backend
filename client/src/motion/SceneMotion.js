@@ -269,7 +269,7 @@ export function expandRepeat(animation, ctx = {}) {
             const kf = pass[i];
             const local = backwards ? span - (kf.time - base[0].time) : kf.time - base[0].time;
             const seam = (i === 0 && c > 0 && !backwards) ? SEAM : 0;
-            keyframes.push(createKeyframe(round(c * span + local + seam, 3), kf.properties, kf.easing));
+            keyframes.push(createKeyframe(round(c * span + local + seam, 3), kf.properties, kf.easing, kf.easingByProperty));
         }
     }
     const { repeat: _used, ...rest } = animation;

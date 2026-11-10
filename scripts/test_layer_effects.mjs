@@ -120,6 +120,14 @@ const animatedGraphicBrightness = [{ kind: 'brightness', params: { amount: 1 }, 
 ] } }];
 assert.notDeepEqual(render(animatedGraphicBrightness, 0), render(animatedGraphicBrightness, 1),
   'graphic layer effects sample their keyframes at the render time');
+const sparseAnimatedBrightness = [{ kind: 'brightness', keyframes: { amount: [
+  { time: 0, value: 0.25 }, { time: 1, value: 1.75, easing: 'linear' },
+] } }];
+assert.notDeepEqual(render(sparseAnimatedBrightness, 0), render(sparseAnimatedBrightness, 1),
+  'graphic layer effects materialize top-level keyframes when the parameter is absent');
+const sparseExpressionBrightness = [{ kind: 'brightness', expressions: { amount: '1 + t' } }];
+assert.notDeepEqual(render(sparseExpressionBrightness, 0), render(sparseExpressionBrightness, 1),
+  'graphic layer effects materialize top-level expressions when the parameter is absent');
 const boundedGraphicBrightness = [{ kind: 'brightness', startTime: 0.5, endTime: 1.5, params: { amount: 1.8 } }];
 assert.deepEqual(render(boundedGraphicBrightness, 0), render([], 0),
   'graphic effects respect their authored start time');
@@ -137,6 +145,27 @@ assert.notDeepEqual(render([]), render([{ kind: 'vignette', params: { intensity:
 assert.notDeepEqual(render([{ kind: 'glitch', params: { amount: 24, seed: 3 } }], 0), render([{ kind: 'glitch', params: { amount: 24, seed: 3 } }], 0.5), 'glitch varies with frame time');
 assert.notDeepEqual(render([]), render([{ kind: 'glitch', params: { intensity: { value: 0.8 }, seed: 3 } }], 0), 'glitch resolves registry-wrapped intensity parameters');
 assert.notDeepEqual(render([]), render([{ kind: 'blur_radial', params: { intensity: 0.8, centerX: 0.1, centerY: 0.2, samples: 12 } }]), 'radial blur changes graphic layer pixels');
+function directionalBlurBounds(width, height) {
+  const source = Canvas.createCanvas(width, height);
+  const sourceContext = source.getContext('2d');
+  const pixel = sourceContext.createImageData(width, height);
+  const center = (Math.floor(height / 2) * width + Math.floor(width / 2)) * 4;
+  pixel.data.set([255, 255, 255, 255], center);
+  sourceContext.putImageData(pixel, 0, 0);
+  const output = Canvas.createCanvas(width, height);
+  drawLayerWithEffects(output.getContext('2d'), [{ kind: 'blur_motion', params: { intensity: 1, angle: 45, samples: 64 } }], ctx => ctx.drawImage(source, 0, 0));
+  const data = output.getContext('2d').getImageData(0, 0, width, height).data;
+  let minX = width, maxX = -1, minY = height, maxY = -1;
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    if (data[(y * width + x) * 4 + 3] <= 0) continue;
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+  }
+  return { x: maxX - minX + 1, y: maxY - minY + 1 };
+}
+const portraitDirectionalBlur = directionalBlurBounds(40, 100);
+assert.ok(Math.abs(portraitDirectionalBlur.x - portraitDirectionalBlur.y) <= 2,
+  `45 degree CPU motion blur keeps equal pixel travel in portrait frames, got ${JSON.stringify(portraitDirectionalBlur)}`);
 const radialGradient = Canvas.createCanvas(101, 5);
 const radialGradientCtx = radialGradient.getContext('2d');
 const radialPixels = radialGradientCtx.createImageData(101, 5);

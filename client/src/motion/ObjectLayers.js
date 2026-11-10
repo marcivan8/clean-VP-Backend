@@ -32,18 +32,10 @@
  * padded bounding box). Use for "zoom speaker" / "animate speaker", where a
  * single well-chosen framing is what's wanted, not continuous tracking.
  *
- * `deriveTrackingSegments` — splits a clip into re-centering pieces wherever
- * the subject's bbox center drifts past `threshold`, each with its own
- * static crop. This is "track speaker" — the SAME piece-splitting shape
- * `virtual_multicam` already uses for per-turn angle changes (see
- * MediaExecutionEngine.js's `virtual_multicam` case: `pieceCursor` laid out
- * inside the clip's own span), applied to subject motion instead of speaker
- * turns. A continuously-ANIMATED crop (x/y keyframed every frame) was
- * explicitly ruled out by R64 for camera-whip/shake for the same reason it's
- * ruled out here: teaching zoompan's x=/y= pan window a per-frame expression
- * is materially higher risk than reusing the existing static-crop-per-piece
- * path, and re-centering every `threshold` of drift already reads as
- * "tracking" without it.
+ * `deriveTrackingSegments` — optional editorial alternative that splits a
+ * clip into static re-centering pieces wherever the subject drifts. The
+ * default "track speaker" action uses animated camera keyframes, supported
+ * by the preview and FFmpeg camera-motion pipeline.
  */
 
 export const LAYER_TARGETS = { SPEAKER: 'speaker', BACKGROUND: 'background' };

@@ -27,7 +27,7 @@
 'use strict';
 
 const express = require('express');
-const { sanitizeEditingStyle, platformForStyle } = require('../brain/editingStyles');
+const { sanitizeEditingStyle, sanitizeEditingMode, platformForStyle } = require('../brain/editingStyles');
 const router  = express.Router();
 
 const { authenticateUser }      = require('../../middleware/auth');
@@ -98,6 +98,8 @@ router.post('/command', authenticateUser, async (req, res) => {
             trigger,
             context: {
                 ...projectState,
+                editingStyle: sanitizeEditingStyle(projectState.editingStyle),
+                editingMode: sanitizeEditingMode(projectState.editingMode),
                 projectId: projectState.projectId,
             },
         };
@@ -121,6 +123,7 @@ router.post('/analyze', authenticateUser, async (req, res) => {
         // R91: the editing style picked under the chat box overrides the format
         // the brain detects; a reel or podcast also implies its platform.
         const editingStyle = sanitizeEditingStyle(projectState.editingStyle);
+        const editingMode = sanitizeEditingMode(projectState.editingMode);
         const platform = projectState.platform || platformForStyle(editingStyle) || null;
 
         // ── Enrich with MEDIA INTELLIGENCE ────────────────────────────────────
@@ -208,6 +211,7 @@ router.post('/analyze', authenticateUser, async (req, res) => {
             context: {
                 ...projectState,
                 editingStyle,
+                editingMode,
                 platform,
                 assetIntelligence,
                 projectMap,

@@ -124,6 +124,20 @@ function isRevideoTextStyleSupported(clip) {
     return !highlightMode || ['none', 'color', 'opacity', 'scale'].includes(highlightMode);
 }
 
+const REVVIDEO_LEGACY_TEXT_CHANNELS = new Set([
+    'x', 'y', 'scale', 'scaleX', 'scaleY', 'rotation', 'opacity',
+]);
+
+function isRevideoLegacyTextKeyframesSupported(keyframes) {
+    if (!keyframes || typeof keyframes !== 'object' || Array.isArray(keyframes)) return false;
+    return Object.entries(keyframes).every(([channel, frames]) => {
+        if (!REVVIDEO_LEGACY_TEXT_CHANNELS.has(channel)) return false;
+        if (!Array.isArray(frames)) return false;
+        return frames.every(frame => frame?.time != null && frame?.value != null
+            && Number.isFinite(Number(frame.time)) && Number.isFinite(Number(frame.value)));
+    });
+}
+
 function isRevideoTrackSupported(track, audioWaveformsByAsset = {}) {
     if (!track || !Array.isArray(track.clips) || track.clips.length === 0) return false;
     const transformProps = new Set(['x', 'y', 'scale', 'rotation', 'opacity']);
@@ -146,11 +160,13 @@ function isRevideoTrackSupported(track, audioWaveformsByAsset = {}) {
                 || effect.outputWindows.some(window => !window || !Number.isFinite(Number(window.start))
                     || !Number.isFinite(Number(window.end)) || Number(window.start) < 0
                     || Number(window.end) <= Number(window.start))))) return false;
-        // The Revideo layer adapter reads the motion-engine animation schema,
-        // but does not yet translate the legacy per-clip keyframes or the
-        // nested-composition stack. Keep these clips on the compositor path;
-        // accepting them here would export a static/flattened approximation.
-        if (Object.values(clip.keyframes || {}).some(track => Array.isArray(track) && track.length > 0)) return false;
+        // Revideo text nodes evaluate legacy transform tracks directly. The
+        // image/video overlay branches do not, so keep those clips (as well as
+        // unknown or malformed tracks) on the compositor path.
+        if (Object.keys(clip.keyframes || {}).length > 0
+            && (track.type !== 'text' || !isRevideoLegacyTextKeyframesSupported(clip.keyframes))) return false;
+        // Nested composition stacks are not yet represented by the Revideo
+        // adapter. The compositor path preserves group transforms and effects.
         if (Array.isArray(clip.compositionStack) && clip.compositionStack.length > 0) return false;
         if (clip.sceneMask || clip.layerMask || clip.mask || clip.shadow || (clip.blendMode && clip.blendMode !== 'source-over')) return false;
         const expressions = clip.expressions || {};
@@ -1564,7 +1580,7 @@ function renderRetimeAudio(source, outputPath, retime, { offset = 0, duration, v
 const EXPORTABLE_TIMELINE_EFFECTS = new Set([
     'blur', 'blur_gaussian', 'blur_radial', 'blur_motion', 'motion-blur',
     'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate', 'color_grade',
-    'grain', 'film_grain', 'chromatic-aberration', 'rgb_split', 'distortion', 'vignette',
+    'grain', 'film_grain', 'film-grain', 'chromatic-aberration', 'rgb_split', 'distortion', 'vignette',
     'glow', 'fade_in', 'fade_out', 'glitch', 'shake', 'speed_change', 'lut_apply',
     'audio_normalize', 'audio_denoise',
 ]);
@@ -1727,15 +1743,20 @@ function compileTimelineVisualEffects(effects = [], { width = 1080, height = 192
                     const intensityValue = Math.max(0, Math.min(1, read('intensity', 0.3)));
                     const intensityTrack = animated('intensity', intensityValue, 0, 1);
                     const intensity = String(intensityTrack || intensityValue.toFixed(6)).replace(/\bt\b/g, 'T');
-                    const centerX = Math.max(0, Math.min(1, read('centerX', 0.5)));
-                    const centerY = Math.max(0, Math.min(1, read('centerY', 0.5)));
+                    const centerXValue = Math.max(0, Math.min(1, read('centerX', 0.5)));
+                    const centerYValue = Math.max(0, Math.min(1, read('centerY', 0.5)));
+                    const centerXTrack = animated('centerX', centerXValue, 0, 1);
+                    const centerYTrack = animated('centerY', centerYValue, 0, 1);
+                    const centerX = centerXTrack ? String(centerXTrack).replace(/\bt\b/g, 'T') : centerXValue;
+                    const centerY = centerYTrack ? String(centerYTrack).replace(/\bt\b/g, 'T') : centerYValue;
                     const samples = Math.max(8, Math.min(64, Math.round(read('samples', 32))));
                     const sampleChannel = channel => {
                         const terms = [];
                         for (let index = 0; index < samples; index++) {
                             const progress = (index / samples).toFixed(6);
-                            const x = `clip(X+(${centerX}-X/W)*(${progress})*(${intensity})*sqrt(pow(${centerX}-X/W,2)+pow(${centerY}-Y/H,2))*0.5*W,0,W-1)`;
-                            const y = `clip(Y+(${centerY}-Y/H)*(${progress})*(${intensity})*sqrt(pow(${centerX}-X/W,2)+pow(${centerY}-Y/H,2))*0.5*H,0,H-1)`;
+                            const distance = `sqrt(pow(${centerX}-X/W,2)+pow(${centerY}-Y/H,2))`;
+                            const x = `clip(X+(${centerX}-X/W)*(${progress})*(${intensity})*${distance}*0.5*W,0,W-1)`;
+                            const y = `clip(Y+(${centerY}-Y/H)*(${progress})*(${intensity})*${distance}*0.5*H,0,H-1)`;
                             terms.push(`${channel}(${x},${y})`);
                         }
                         return `(${terms.join('+')})/${samples}`;
@@ -1851,7 +1872,7 @@ function compileTimelineVisualEffects(effects = [], { width = 1080, height = 192
                     break;
                 }
                 case 'grain': filters.push(`noise=alls=${Math.max(0, Math.min(48, Number.isFinite(amount) ? amount : 8))}:allf=t+u`); break;
-                case 'film_grain': {
+                case 'film_grain': case 'film-grain': {
                     const rawAnimated = p.animated?.value ?? p.animated;
                     const animated = rawAnimated == null ? true : Boolean(rawAnimated);
                     const intensity = Math.max(0, Math.min(1, read('intensity', 0.15)));

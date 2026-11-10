@@ -927,8 +927,8 @@
     "pip": "Incrustation",
     "reset": "Retirer la mise en page",
     "panHint": "Faites glisser l’image dans l’aperçu pour la recadrer.",
-    "splitFace": "Cadrage du locuteur à partir de la détection.",
-    "splitNoFace": "Locuteur cadré au centre. Lancez « séparer le locuteur » pour un cadrage sur le visage.",
+    "splitSubject": "Le cadrage du locuteur suit le sujet détecté.",
+    "splitNoSubject": "Locuteur cadré au centre. Lancez « séparer le locuteur » pour suivre le sujet.",
     "failed": "Impossible d’appliquer cette mise en page."
   },
   "transitions": {
@@ -1088,7 +1088,11 @@
         "fov": "Distance focale",
         "orthoScale": "Échelle orthographique",
         "near": "Plan de coupe proche",
-        "far": "Plan de coupe lointain"
+        "far": "Plan de coupe lointain",
+        "dofFocusDistance": "Distance de mise au point",
+        "dofFocusRange": "Plage de mise au point",
+        "dofStrength": "Intensité de profondeur de champ",
+        "dofMaxBlur": "Flou maximal hors focus"
       },
       "projection": "Projection",
       "perspective": "Perspective",
@@ -1157,10 +1161,22 @@
         "scaleX": "Échelle X",
         "scaleY": "Échelle Y",
         "scaleZ": "Échelle Z",
+        "radius": "Rayon",
+        "height": "Hauteur",
+        "tube": "Rayon du tube",
+        "sizeX": "Largeur",
+        "sizeY": "Hauteur",
+        "sizeZ": "Profondeur",
         "opacity": "Opacité",
         "roughness": "Rugosité du matériau",
         "metalness": "Métal du matériau",
-        "emissiveIntensity": "Intensité émissive"
+        "emissiveIntensity": "Intensité émissive",
+        "colorR": "Rouge de la couleur de base",
+        "colorG": "Vert de la couleur de base",
+        "colorB": "Bleu de la couleur de base",
+        "emissiveR": "Rouge de l’émission",
+        "emissiveG": "Vert de l’émission",
+        "emissiveB": "Bleu de l’émission"
       },
       "lighting": "Éclairage",
       "ambient": "Lumière ambiante",
@@ -1175,12 +1191,15 @@
       "lightTypes": {
         "point": "Ponctuelle",
         "directional": "Directionnelle",
-        "spot": "Projecteur"
+        "spot": "Projecteur",
+        "area": "Surface"
       },
       "lightDirection": "Direction du rayon {{axis}}",
       "lightRange": "Portée",
       "lightDecay": "Atténuation",
       "lightTarget": "Cible {{axis}}",
+      "lightWidth": "Largeur de la source",
+      "lightHeight": "Hauteur de la source",
       "spotAngle": "Angle du cône°",
       "lightColor": "Couleur de lumière",
       "lightAnimation": "Animation de la lumière",
@@ -1202,6 +1221,8 @@
         "range": "Portée",
         "decay": "Atténuation",
         "angle": "Angle du cône",
+        "width": "Largeur de la source",
+        "height": "Hauteur de la source",
         "positionX": "Position X",
         "positionY": "Position Y",
         "positionZ": "Position Z",
@@ -1210,7 +1231,10 @@
         "directionZ": "Direction du rayon Z",
         "targetX": "Cible X",
         "targetY": "Cible Y",
-        "targetZ": "Cible Z"
+        "targetZ": "Cible Z",
+        "colorR": "Rouge de la lumière",
+        "colorG": "Vert de la lumière",
+        "colorB": "Bleu de la lumière"
       },
       "motionBlur": "Flou de mouvement",
       "enableMotionBlur": "Activer le flou d’obturation",
@@ -1233,6 +1257,8 @@
       "particleCount": "Quantité",
       "particleSize": "Taille",
       "particleSpeed": "Vitesse",
+      "particleShape": "Forme des particules",
+      "particleShapes": { "circle": "Cercle", "square": "Carré", "diamond": "Losange", "star": "Étoile" },
       "particleColor": "Couleur des particules",
       "particleSimulation": "Émetteur et comportement des particules",
       "emitterShape": "Forme de l’émetteur",
@@ -1255,6 +1281,7 @@
       "particleAudioTarget": "Réponse audio",
       "particleAudioTargets": {
         "size": "Taille des particules",
+        "spread": "Dispersion des particules",
         "speed": "Vitesse des particules",
         "opacity": "Opacité des particules"
       },
@@ -1280,6 +1307,11 @@
       "audioSource": "Source audio",
       "audioDisabled": "Désactivé",
       "audioTarget": "Réagir sur",
+      "audioTargets": {
+        "scale": "Échelle", "rotationX": "Rotation X", "rotationY": "Rotation Y", "rotationZ": "Rotation Z",
+        "opacity": "Opacité", "positionX": "Position X", "positionY": "Position Y", "positionZ": "Position Z",
+        "radius": "Rayon", "height": "Hauteur", "tube": "Épaisseur", "sizeX": "Taille X", "sizeY": "Taille Y", "sizeZ": "Taille Z"
+      },
       "audioAmount": "Intensité",
       "proceduralMotion": "Expression de mouvement procédural",
       "expressionHelp": "Utilisez t, time, duration ou progress (0–1), pi ou e, les opérations arithmétiques, sin, cos, tan, abs, ceil, floor, round, min, max, sqrt, clamp, smoothstep, noise ou wiggle."
@@ -1293,6 +1325,7 @@
     "pathData": "Tracé SVG",
     "morphFrom": "Tracé de départ",
     "morphTo": "Tracé d’arrivée",
+    "morphStartTime": "Début du morphing (s)",
     "morphDuration": "Durée du morphing (s)",
     "fill": "Remplissage",
     "stroke": "Contour",

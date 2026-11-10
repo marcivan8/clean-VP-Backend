@@ -369,17 +369,23 @@ section('3 · Compilation produces a sane filter graph');
 
 section('3a · Shape masks compile through the shared scene plan');
 {
-    for (const shape of ['circle', 'rounded-rectangle', 'capsule', 'polygon', 'star', 'arrow']) {
+    for (const shape of ['circle', 'rounded-rectangle', 'capsule', 'callout', 'polygon', 'star', 'arrow']) {
         const plan = planFor([vclip({ id: `mask-${shape}`, start: 0.5, duration: 2, extra: {
-            x: 50, y: 50, sceneMask: { kind: 'shape', shape, radius: 0.2, sides: 5, points: 5, inset: 0.1, x: null, y: null, w: null, h: null,
+            x: 50, y: 50, sceneMask: { kind: 'shape', shape, radius: 0.2, sides: 5, points: 5, inset: 0.1,
+                x: shape === 'circle' ? 0.1 : null, y: shape === 'circle' ? 0.1 : null,
+                w: shape === 'circle' ? 0.8 : null, h: shape === 'circle' ? 0.6 : null,
                 feather: shape === 'circle' ? 0.04 : 0 },
         } })]);
         const compiled = compileCompositionPlan(plan, [{ overlayId: plan.overlays[0].id, inputIndex: 1 }]);
         check(`${shape} mask is accepted by worker validation`, validateCompositionPlanShape(plan, W, H).length === 0);
         check(`${shape} mask compiles to an alpha expression`, compiled.filterComplex.includes("a='if(")
             && (shape === 'circle' ? compiled.filterComplex.includes('pow((X-W*')
-                : shape === 'rounded-rectangle' || shape === 'capsule' ? compiled.filterComplex.includes('sqrt(pow(max(')
+                : shape === 'rounded-rectangle' || shape === 'capsule' || shape === 'callout' ? compiled.filterComplex.includes('sqrt(pow(max(')
                     : compiled.filterComplex.includes('mod(')));
+        if (shape === 'circle') {
+            check('circle masks use equal horizontal and vertical radii inside non-square bounds',
+                compiled.filterComplex.includes('pow((X-W*0.5)/(W*0.3),2)+pow((Y-H*0.4)/(H*0.3),2)'));
+        }
         if (shape === 'circle') {
             check('feathered shape mask compiles to alpha-only blur', compiled.filterComplex.includes('gblur=sigma=')
                 && compiled.filterComplex.includes(':planes=8'));
@@ -510,6 +516,70 @@ if (!FFMPEG) {
     check('inverted luminance matte reverses bright and transparent coverage',
         colorDist(regionColor(invertedLumaOutput, 1, { x: 314, y: 174, w: 12, h: 12 }), '808080') < 25
         && colorDist(regionColor(invertedLumaOutput, 1, { x: 244, y: 104, w: 12, h: 12 }), 'ff0000') < 40);
+
+    target.sceneMask.invert = false;
+    target.sceneMask.mode = 'alpha';
+    target.motionBlur = { enabled: true, samples: 5, shutterAngle: 180, frameRate: 15 };
+    target.geometry = [
+        { t: 0, x: 0.25, y: 0.25, w: 0.5, h: 0.5, opacity: 1, rotation: 0, blur: 0 },
+        { t: 3, x: 0.4, y: 0.25, w: 0.5, h: 0.5, opacity: 1, rotation: 0, blur: 0 },
+    ];
+    const blurredMatteErrors = validateCompositionPlanShape(plan, W, H);
+    const blurredMatte = compileCompositionPlan(plan, [
+        { overlayId: target.id, inputIndex: 1 }, { overlayId: matte.id, inputIndex: 2 },
+    ]);
+    check('transform motion blur and a layer matte compile together', blurredMatteErrors.length === 0
+        && (blurredMatte.filterComplex.match(/alphamerge/g) || []).length >= 5,
+        blurredMatteErrors.join('; '));
+    const blurredMatteOutput = path.join(dir, 'matte-motion-blur-output.mp4');
+    const blurredMatteRender = spawnSync(FFMPEG, [
+        '-hide_banner', '-loglevel', 'error', '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
+        '-loop', '1', '-t', '3', '-i', maskPath, '-filter_complex', blurredMatte.filterComplex,
+        '-map', `[${blurredMatte.outputLabel}]`, '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', blurredMatteOutput,
+    ], { encoding: 'utf8', timeout: 120_000 });
+    check('FFmpeg executes transform-blurred layer matte compositing', blurredMatteRender.status === 0,
+        (blurredMatteRender.stderr || '').split('\n').slice(-5).join(' | '));
+    check('the moving shutter samples remain clipped outside the layer matte', blurredMatteRender.status === 0
+        && colorDist(regionColor(blurredMatteOutput, 1, { x: 244, y: 104, w: 12, h: 12 }), '808080') < 30);
+    const blurredInside = blurredMatteRender.status === 0
+        ? regionColor(blurredMatteOutput, 1, { x: 314, y: 174, w: 12, h: 12 }) : null;
+    check('the moving shutter samples retain footage inside the layer matte', blurredInside
+        && parseInt(blurredInside.slice(0, 2), 16) > parseInt(blurredInside.slice(2, 4), 16) + 25,
+        `inside=${blurredInside}`);
+
+    target.geometry = [
+        { t: 0, x: 0.25, y: 0.25, w: 0.5, h: 0.5, opacity: 1, rotation: 0, blur: 0 },
+        { t: 3, x: 0.26, y: 0.25, w: 0.5, h: 0.5, opacity: 1, rotation: 0, blur: 0 },
+    ];
+    matte.geometry = [
+        { t: 0, x: 0.1, y: 0.25, w: 0.5, h: 0.5, opacity: 1, rotation: 0, blur: 0 },
+        { t: 3, x: 0.55, y: 0.25, w: 0.5, h: 0.5, opacity: 1, rotation: 0, blur: 0 },
+    ];
+    const animatedMatteGraph = compileCompositionPlan(plan, [
+        { overlayId: target.id, inputIndex: 1 }, { overlayId: matte.id, inputIndex: 2 },
+    ]);
+    check('animated matte transforms are sampled at every shutter offset',
+        /matte\d+mf\d+/.test(animatedMatteGraph.filterComplex)
+        && (animatedMatteGraph.filterComplex.match(/ov\d+mask\d+s\d+/g) || []).length >= 5
+        && animatedMatteGraph.filterComplex.includes('min(max((t+'),
+        'each shutter sample should receive an independently positioned matte frame');
+    const animatedMatteOutput = path.join(dir, 'animated-matte-motion-blur-output.mp4');
+    const animatedMatteRender = spawnSync(FFMPEG, [
+        '-hide_banner', '-loglevel', 'error', '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
+        '-loop', '1', '-t', '3', '-i', maskPath, '-filter_complex', animatedMatteGraph.filterComplex,
+        '-map', `[${animatedMatteGraph.outputLabel}]`, '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', animatedMatteOutput,
+    ], { encoding: 'utf8', timeout: 120_000 });
+    check('FFmpeg renders motion-blurred footage through an animated layer matte', animatedMatteRender.status === 0,
+        (animatedMatteRender.stderr || '').split('\n').slice(-5).join(' | '));
+    const matteEarly = animatedMatteRender.status === 0
+        ? regionColor(animatedMatteOutput, 1, { x: 245, y: 174, w: 12, h: 12 }) : null;
+    const matteLate = animatedMatteRender.status === 0
+        ? regionColor(animatedMatteOutput, 2.5, { x: 245, y: 174, w: 12, h: 12 }) : null;
+    check('animated matte position changes actual exported coverage over time',
+        matteEarly && matteLate
+        && parseInt(matteEarly.slice(0, 2), 16) > parseInt(matteEarly.slice(2, 4), 16) + 35
+        && colorDist(matteLate, '808080') < 30,
+        `early=${matteEarly} late=${matteLate}`);
     fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -1133,6 +1203,32 @@ if (!FFMPEG) {
     const neutral = framePixels(out, 1.0);
     check('the overlay visibly shifts at the authored shake frequency', shifted && neutral && !shifted.equals(neutral),
         `shifted frame bytes=${shifted?.length} neutral frame bytes=${neutral?.length}`);
+    const animatedPlan = planFor([vclip({ id: 'animated-shake-fx', start: 0.5, duration: 2, extra: {
+        x: 50, y: 50,
+        effects: [{ kind: 'shake', params: { intensity: 0, frequency: 2, randomSeed: 3, rotationAmount: 0 }, keyframes: {
+            intensity: [{ time: 0.5, value: 0 }, { time: 2.5, value: 40 }],
+            frequency: [{ time: 0.5, value: 2 }, { time: 2.5, value: 8 }],
+            rotationAmount: [{ time: 0.5, value: 0 }, { time: 2.5, value: 8 }],
+        } }],
+    } })]);
+    const animatedCompiled = compileCompositionPlan(animatedPlan, [{ overlayId: animatedPlan.overlays[0].id, inputIndex: 1 }]);
+    const sampledShake = animatedPlan.overlays[0].effects[0].samples;
+    check('keyframed shake intensity and frequency reach overlay position and rotation expressions',
+        sampledShake.intensity.at(-1)?.value === 40 && sampledShake.frequency.at(-1)?.value === 8
+            && sampledShake.rotationAmount.at(-1)?.value === 8
+            && animatedCompiled.filterComplex.includes("sin(2*PI*t*(if(lt(t,")
+            && animatedCompiled.filterComplex.includes("rotate=a='if((gte(t,0.5)")
+            && animatedCompiled.filterComplex.includes(')*PI/180,0)'),
+        JSON.stringify({ samples: Object.fromEntries(Object.entries(sampledShake).map(([key, points]) => [key, points.at(-1)?.value])),
+            dynamicPosition: animatedCompiled.filterComplex.includes("sin(2*PI*t*(if(lt(t,"),
+            dynamicRotation: animatedCompiled.filterComplex.includes("rotate=a='if((gte(t,0.5)") }));
+    const animatedShakeResult = runGraph(dir, animatedCompiled, 'overlay-shake-keyframed.mp4');
+    check('FFmpeg renders keyframed overlay shake intensity, frequency, and rotation', animatedShakeResult.r.status === 0,
+        (animatedShakeResult.r.stderr || '').split('\n').slice(-4).join(' | '));
+    const earlyAnimatedShake = framePixels(animatedShakeResult.out, 0.75);
+    const lateAnimatedShake = framePixels(animatedShakeResult.out, 2.25);
+    check('keyframed shake changes the rendered overlay over time', earlyAnimatedShake && lateAnimatedShake && !earlyAnimatedShake.equals(lateAnimatedShake),
+        `early frame bytes=${earlyAnimatedShake?.length} late frame bytes=${lateAnimatedShake?.length}`);
     fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -1306,7 +1402,7 @@ if (!FFMPEG) {
         x: 50, y: 50, effects: [{ kind: 'distortion', params: { amount: 0.08, phase: 0.4 } }],
     } })]);
     const compiled = compileCompositionPlan(plan, [{ overlayId: plan.overlays[0].id, inputIndex: 1 }]);
-    check('distortion compiles to the same bounded sine displacement as preview', /geq=.*sin\(Y\*0\.045\+0\.4\).*sin\(X\*0\.04\)/.test(compiled.filterComplex));
+    check('distortion compiles to the same bounded sine displacement as preview', /geq=.*sin\(Y\*0\.045\+\(?0\.4\)?\).*sin\(X\*0\.04\)/.test(compiled.filterComplex));
     const distorted = runGraph(dir, compiled, 'distorted.mp4');
     const plainPlan = planFor([vclip({ id: 'distortion-plain', start: 0.5, duration: 2, extra: { x: 50, y: 50 } })]);
     const plainGraph = compileCompositionPlan(plainPlan, [{ overlayId: plainPlan.overlays[0].id, inputIndex: 1 }]);
@@ -1348,7 +1444,7 @@ if (!FFMPEG) {
     const vertical = renderAngle(90);
     check('RGB split compiles to radial per-channel sampling, not fixed chromashift',
         horizontal.compiled.filterComplex.includes("geq=r='r(clip(X+")
-            && horizontal.compiled.filterComplex.includes('pow(X/W-0.15,2)')
+            && horizontal.compiled.filterComplex.includes('pow(X/W-(0.15),2)')
             && !horizontal.compiled.filterComplex.includes('chromashift='));
     check('angled RGB split overlay filters render in FFmpeg', horizontal.rendered.status === 0 && vertical.rendered.status === 0,
         `${horizontal.rendered.stderr || ''} ${vertical.rendered.stderr || ''}`.trim());
@@ -1358,6 +1454,57 @@ if (!FFMPEG) {
         : 0;
     check('changing the RGB split angle changes rendered overlay pixels', difference > 1000,
         `summed frame-channel difference=${difference}`);
+
+    const animatedEffects = [{ kind: 'rgb_split', enabled: true,
+        params: { amount: 0, angle: 0, centerX: 0.5, centerY: 0.5 },
+        samples: {
+            amount: [{ t: 0.5, value: 0 }, { t: 2.5, value: 42 }],
+            angle: [{ t: 0.5, value: 0 }, { t: 2.5, value: 90 }],
+        } }];
+    const animatedPlan = planFor([vclip({ id: 'rgb-animated', start: 0.5, duration: 2, extra: { x: 50, y: 50, effects: animatedEffects } })]);
+    const plainPlan = planFor([vclip({ id: 'rgb-plain', start: 0.5, duration: 2, extra: { x: 50, y: 50 } })]);
+    const animatedCompiled = compileCompositionPlan(animatedPlan, [{ overlayId: animatedPlan.overlays[0].id, inputIndex: 1 }]);
+    const plainCompiled = compileCompositionPlan(plainPlan, [{ overlayId: plainPlan.overlays[0].id, inputIndex: 1 }]);
+    const renderPlan = (compiled, name) => {
+        const output = path.join(dir, `${name}.mp4`);
+        const rendered = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-i', path.join(dir, 'base.mp4'),
+            '-i', pattern, '-filter_complex', compiled.filterComplex, '-map', `[${compiled.outputLabel}]`,
+            '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', output], { encoding: 'utf8', timeout: 120_000 });
+        return { output, rendered };
+    };
+    const animatedOutput = renderPlan(animatedCompiled, 'rgb-animated');
+    const plainOutput = renderPlan(plainCompiled, 'rgb-plain');
+    check('overlay RGB split keyframes compile into frame-evaluated channel offsets',
+        animatedCompiled.filterComplex.includes('cos(((if(lt(T')
+        && animatedCompiled.filterComplex.includes('sin(((if(lt(T'));
+    check('FFmpeg renders the animated overlay RGB split', animatedOutput.rendered.status === 0,
+        (animatedOutput.rendered.stderr || '').split('\n').slice(-4).join(' | '));
+    const frameDifference = (a, b) => a && b && a.length === b.length
+        ? a.reduce((sum, channel, index) => sum + Math.abs(channel - b[index]), 0) : 0;
+    const earlyDelta = frameDifference(framePixels(animatedOutput.output, 0.75), framePixels(plainOutput.output, 0.75));
+    const lateDelta = frameDifference(framePixels(animatedOutput.output, 2.25), framePixels(plainOutput.output, 2.25));
+    check('keyframed overlay RGB split grows from its zero setting in the exported pixels',
+        animatedOutput.rendered.status === 0 && lateDelta > earlyDelta + 500,
+        `early delta=${earlyDelta}, late delta=${lateDelta}`);
+
+    const chromaticPlan = planFor([vclip({ id: 'chromatic-animated', start: 0.5, duration: 2, extra: {
+        x: 50, y: 50, effects: [{ kind: 'chromatic-aberration', enabled: true, params: { amount: 0 },
+            samples: { amount: [{ t: 0.5, value: 0 }, { t: 2.5, value: 10 }] } }],
+    } })]);
+    const chromaticPlainPlan = planFor([vclip({ id: 'chromatic-plain', start: 0.5, duration: 2, extra: { x: 50, y: 50 } })]);
+    const chromaticGraph = compileCompositionPlan(chromaticPlan, [{ overlayId: chromaticPlan.overlays[0].id, inputIndex: 1 }]);
+    const chromaticPlainGraph = compileCompositionPlan(chromaticPlainPlan, [{ overlayId: chromaticPlainPlan.overlays[0].id, inputIndex: 1 }]);
+    const chromaticOutput = renderPlan(chromaticGraph, 'chromatic-animated');
+    const chromaticPlainOutput = renderPlan(chromaticPlainGraph, 'chromatic-plain');
+    check('chromatic aberration compiles its sampled amount into horizontal channel offsets',
+        chromaticGraph.filterComplex.includes('round(if(lt(T'));
+    check('FFmpeg renders keyframed chromatic aberration on a media overlay', chromaticOutput.rendered.status === 0,
+        (chromaticOutput.rendered.stderr || '').split('\n').slice(-4).join(' | '));
+    const chromaticEarlyDelta = frameDifference(framePixels(chromaticOutput.output, 0.75), framePixels(chromaticPlainOutput.output, 0.75));
+    const chromaticLateDelta = frameDifference(framePixels(chromaticOutput.output, 2.25), framePixels(chromaticPlainOutput.output, 2.25));
+    check('keyframed chromatic aberration grows in the exported pixels',
+        chromaticOutput.rendered.status === 0 && chromaticLateDelta > chromaticEarlyDelta + 300,
+        `early delta=${chromaticEarlyDelta}, late delta=${chromaticLateDelta}`);
     fs.rmSync(dir, { recursive: true, force: true });
 }
 

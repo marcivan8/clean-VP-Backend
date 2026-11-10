@@ -21,6 +21,7 @@ const LABELS = {
     long_form_edit: 'Cleaned up the video', compound_clean_dynamic: 'Cleaned up and added zoom rhythm', enhance_audio: 'Enhanced the voice',
     denoise_audio: 'Reduced background noise', normalize_audio: 'Levelled the audio', auto_captions: 'Added captions',
     rhythm_zoom: 'Added a zoom rhythm', animate_automatically: 'Animated the key moments', compose_motion: 'Wrote custom motion',
+    add_motion_component: 'Added a motion composition', apply_motion_effect_stack: 'Applied footage effects', design_scene: 'Designed a motion graphics scene',
     apply_style_recipe: 'Applied a style recipe', add_transition: 'Added transitions', add_template: 'Added an animated graphic',
     add_sfx: 'Added sound effects', remove_background: 'Changed the background', set_aspect_ratio: 'Changed the frame',
     extract_short: 'Kept the strongest moment as a short', repurpose_shorts: 'Picked shorts for each platform',

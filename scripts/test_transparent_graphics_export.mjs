@@ -52,7 +52,7 @@ const sceneEffectCompiled = compileCompositionPlan(planned, [{ overlayId: 'ov-ov
 assert.match(sceneEffectCompiled.filterComplex, /geq=.*alpha\(X,Y\)/, 'enabled overlay vignette effects compile into the export graph');
 assert.match(sceneEffectCompiled.filterComplex, /geq=.*floor\(T\*12\)/, 'enabled overlay glitch effects export as preview-matched timed displacement bands');
 assert.match(sceneEffectCompiled.filterComplex, /gblur=sigma=.*:sigmaV=0/, 'overlay motion blur exports as a directional spatial blur');
-assert.match(sceneEffectCompiled.filterComplex, /geq=.*sin\(Y\*0\.045\+0\).*\(0\.03\)\*W/, 'wrapped distortion values reach the preview-matched displacement filter');
+assert.match(sceneEffectCompiled.filterComplex, /geq=.*sin\(Y\*0\.045\+\(?0\)?\).*\(0\.03\)\*W/, 'wrapped distortion values reach the preview-matched displacement filter');
 assert.match(sceneEffectCompiled.filterComplex, /lutrgb=r='0\*val\+0':g='0\*val\+255':b='0\*val\+0'/, 'array-valued glow colors are preserved by overlay export');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vibed-alpha-graphics-'));
 try {
@@ -393,13 +393,15 @@ try {
     ], shadow: null }],
   };
   const parameterizedGraph = compileCompositionPlan(parameterizedPlan, [{ overlayId: 'icon', inputIndex: 1 }], { preserveAlpha: true }).filterComplex;
-  assert.match(parameterizedGraph, /chromashift=cbh=-7:crh=7/, 'chromatic shift uses the requested amount and matches preview channel direction');
-  assert.ok(parameterizedGraph.includes("geq=r='r(clip(X+(0)*(sqrt(pow(X/W-0.2,2)+pow(Y/H-0.7,2)))"), 'registered RGB split alias preserves wrapped amount, direction and center on overlays');
-  assert.ok(parameterizedGraph.includes("clip(Y+(4)*(sqrt(pow(X/W-0.2,2)+pow(Y/H-0.7,2)))"), 'vertical RGB split direction reaches overlay export');
+  assert.ok(parameterizedGraph.includes("r(clip(X-round(7),0,W-1),Y)")
+    && parameterizedGraph.includes("b(clip(X+round(7),0,W-1),Y)"), 'chromatic shift uses the requested amount and matches preview channel direction');
+  assert.ok(parameterizedGraph.includes("cos(((90)*PI/180))*(4)")
+    && parameterizedGraph.includes('pow(X/W-(0.2),2)+pow(Y/H-(0.7),2)'), 'registered RGB split alias preserves wrapped amount, direction and center on overlays');
+  assert.ok(parameterizedGraph.includes("sin(((90)*PI/180))*(4)"), 'vertical RGB split direction reaches overlay export');
   assert.match(parameterizedGraph, /colorchannelmixer=rr=1\.1:gg=1\.1:bb=1\.1,eq=contrast=1\.2:saturation=0\.9/, 'registered color grade uses multiplicative CSS brightness semantics in overlays');
   assert.match(parameterizedGraph, /geq=.*floor\(X\/1\.5\).*floor\(T\*30\).*\*9\.6/, 'overlay film grain preserves intensity, authored size, and animation timing');
   assert.match(parameterizedGraph, /gblur=sigma=.*:sigmaV=0/, 'motion blur uses a directional spatial kernel instead of frame trails');
-  assert.match(parameterizedGraph, /sin\(Y\*0\.045\+0\).*\(0\)\*W/, 'zero distortion remains zero instead of falling back to a default');
+  assert.match(parameterizedGraph, /sin\(Y\*0\.045\+\(?0\)?\).*\(0\)\*W/, 'zero distortion remains zero instead of falling back to a default');
   const parameterizedGraphPath = path.join(tmp, 'parameterized-effects.txt');
   const parameterizedOutput = path.join(tmp, 'parameterized-effects.png');
   fs.writeFileSync(parameterizedGraphPath, parameterizedGraph);

@@ -434,12 +434,15 @@ await check('3D renderer fallbacks for unsupported authored values are reported'
         } } },
     })] }));
     const issues = SV.validateScene(scene).issues.filter(item => item.code === SV.ISSUE_CODES.SCENE_COMPATIBILITY);
-    assert.equal(issues.length, 4);
+    // Area lights are now rendered by the software 3D path, so only the
+    // primitive, material side and blend mode should report fallbacks.
+    assert.equal(issues.length, 3);
     assert.ok(issues.every(item => item.severity === 'warn'));
     assert.match(issues[0].message, /render as a box/);
     assert.match(issues[1].message, /front-sided/);
     assert.match(issues[2].message, /source-over/);
-    assert.match(issues[3].message, /point light/);
+    assert.ok(issues.every(item => !/area light.*point light/i.test(item.message)),
+        'supported area lights must not be reported as falling back to point lights');
 });
 
 await check('animation tracks and keyframes above renderer caps are reported before flattening', () => {

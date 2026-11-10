@@ -1448,7 +1448,7 @@ OUTPUT FORMAT:
   ]
 }
 
-Keep steps atomic and ordered. Include all necessary parameters. Use only tools in context.toolCapabilities and assets in context.mediaBin. Treat context.assetManifest as the complete inventory; it may be large. Never turn a reference asset into timeline footage. Explicit user instructions override the selected style's defaults; style guidance fills only unspecified choices. If required analysis is incomplete or a requested target is ambiguous, add an unresolved question instead of guessing.`;
+Keep steps atomic and ordered. Include all necessary parameters. Use only tools in context.toolCapabilities and assets in context.mediaBin. Treat context.assetManifest as the complete inventory; it may be large. Never turn a reference asset into timeline footage. Explicit user instructions override the selected style's defaults; style guidance fills only unspecified choices. When the user asks to match an attached reference, use context.referenceStyle only as bounded design guidance for supported choices; do not copy its subject or treat it as footage. If context.referenceAnalysisStatus is pending, unavailable, or not_attached, do not claim that reference details were extracted. If required analysis is incomplete or a requested target is ambiguous, add an unresolved question instead of guessing.`;
 
         const completion = await openai.chat.completions.create({
             messages: [

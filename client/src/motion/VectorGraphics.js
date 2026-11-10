@@ -992,6 +992,12 @@ export function vectorMatteDataUrl(vector = {}, fallbackWidth = 100, fallbackHei
         shape = `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="white"/>`;
     } else if (kind === 'ellipse') {
         shape = `<ellipse cx="${cx}" cy="${cy}" rx="${bw / 2}" ry="${bh / 2}" fill="white"/>`;
+    } else if (kind === 'callout') {
+        const tail = Math.max(0, Math.min(bh * 0.4, Number(vector.tailSize) || bh * 0.2));
+        const bodyBottom = by + bh - tail;
+        const corner = Math.min(bw, bodyBottom - by) * Math.max(0, Math.min(0.45, Number(vector.radius) || 0.12));
+        const tx = bx + bw * Math.max(0.15, Math.min(0.85, Number(vector.tailPosition) || 0.28));
+        shape = `<path d="M ${bx + corner} ${by} H ${bx + bw - corner} Q ${bx + bw} ${by} ${bx + bw} ${by + corner} V ${bodyBottom - corner} Q ${bx + bw} ${bodyBottom} ${bx + bw - corner} ${bodyBottom} H ${tx + tail * 0.55} L ${tx} ${by + bh} L ${tx - tail * 0.55} ${bodyBottom} H ${bx + corner} Q ${bx} ${bodyBottom} ${bx} ${bodyBottom - corner} V ${by + corner} Q ${bx} ${by} ${bx + corner} ${by} Z" fill="white"/>`;
     } else if (['rect', 'rectangle', 'rounded-rectangle', 'capsule'].includes(kind)) {
         const rawRadius = vector.radius ?? vector.radii;
         const corner = kind === 'capsule' ? radius
@@ -1036,7 +1042,7 @@ export function vectorMatteDataUrl(vector = {}, fallbackWidth = 100, fallbackHei
  * @param {CanvasRenderingContext2D} ctx
  * @param {object} shape
  *   {
- *     kind: 'rect'|'circle'|'polygon'|'star'|'arrow'|'capsule'|'path',
+ *     kind: 'rect'|'circle'|'polygon'|'star'|'arrow'|'capsule'|'callout'|'path',
  *     x, y, w, h,
  *     radii, sides, points, innerRadius, outerRadius,
  *     pathData,
@@ -1086,6 +1092,18 @@ export function drawVectorGraphic(ctx, shape = {}) {
 
     // Path creation
     switch (kind) {
+        case 'ellipse':
+            ctx.beginPath();
+            if (typeof ctx.ellipse === 'function') ctx.ellipse(cx, cy, Math.abs(w) / 2, Math.abs(h) / 2, 0, 0, Math.PI * 2);
+            else {
+                ctx.save();
+                ctx.translate(cx, cy);
+                ctx.scale(Math.abs(w) / 2, Math.abs(h) / 2);
+                ctx.arc(0, 0, 1, 0, Math.PI * 2);
+                ctx.restore();
+            }
+            break;
+
         case 'circle':
             ctx.beginPath();
             ctx.arc(cx, cy, Math.min(w, h) / 2, 0, 2 * Math.PI);
@@ -1094,6 +1112,21 @@ export function drawVectorGraphic(ctx, shape = {}) {
         case 'capsule':
             drawCapsule(ctx, x, y, w, h);
             break;
+
+        case 'callout': {
+            const tail = Math.max(0, Math.min(h * 0.4, Number(shape.tailSize) || h * 0.2));
+            const bodyBottom = y + h - tail;
+            const radius = Math.min(w, bodyBottom - y) * Math.max(0, Math.min(0.45, Number(shape.radius) || 0.12));
+            const tx = x + w * Math.max(0.15, Math.min(0.85, Number(shape.tailPosition) || 0.28));
+            ctx.beginPath();
+            ctx.moveTo(x + radius, y); ctx.lineTo(x + w - radius, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+            ctx.lineTo(x + w, bodyBottom - radius); ctx.quadraticCurveTo(x + w, bodyBottom, x + w - radius, bodyBottom);
+            ctx.lineTo(tx + tail * 0.55, bodyBottom); ctx.lineTo(tx, y + h); ctx.lineTo(tx - tail * 0.55, bodyBottom);
+            ctx.lineTo(x + radius, bodyBottom); ctx.quadraticCurveTo(x, bodyBottom, x, bodyBottom - radius);
+            ctx.lineTo(x, y + radius); ctx.quadraticCurveTo(x, y, x + radius, y); ctx.closePath();
+            break;
+        }
 
         case 'polygon':
             drawPolygon(ctx, cx, cy, Math.min(w, h) / 2, shape.sides || 3);
@@ -1149,6 +1182,10 @@ export function drawVectorGraphic(ctx, shape = {}) {
             ? estimateSvgPathLength(shape.pathData)
             : kind === 'circle'
                 ? Math.PI * Math.min(w, h)
+            : kind === 'ellipse'
+                ? Math.PI * (3 * (Math.abs(w) + Math.abs(h)) / 2 - Math.sqrt(Math.max(0, (3 * Math.abs(w) + Math.abs(h)) * (Math.abs(w) + 3 * Math.abs(h))) / 4))
+            : kind === 'callout'
+                ? 2 * (w + h) + Math.min(w, h) * 0.4
                 : kind === 'polygon'
                     ? Math.max(3, Number(shape.sides) || 3) * Math.min(w, h) * Math.sin(Math.PI / Math.max(3, Number(shape.sides) || 3))
                     : 2 * (w + h);
@@ -1182,8 +1219,12 @@ export function drawVectorFrame(ctx, vector = {}, localTime = 0, duration = 1) {
     const eased = resolveEasing(easing)(t);
     const progress = Math.max(0, Math.min(1.12, eased));
     if (shape.kind === 'path' && motion?.pathFrom && motion?.pathTo) {
-        const morphDuration = Math.max(0.001, Math.min(Number(motion.morphDuration) || Number(duration) || 1, Number(duration) || 1));
-        const morphT = Math.max(0, Math.min(1, (Number(localTime) || 0) / morphDuration));
+        const clipDuration = Math.max(0.001, Number(duration) || 1);
+        const morphStart = Math.max(0, Math.min(clipDuration, Number(motion.morphStartTime) || 0));
+        const remaining = Math.max(0.001, clipDuration - morphStart);
+        const requestedDuration = Number(motion.morphDuration);
+        const morphDuration = Math.max(0.001, Math.min(Number.isFinite(requestedDuration) && requestedDuration > 0 ? requestedDuration : remaining, remaining));
+        const morphT = Math.max(0, Math.min(1, ((Number(localTime) || 0) - morphStart) / morphDuration));
         const morphProgress = Math.max(0, Math.min(1, resolveEasing(easing)(morphT)));
         const pathData = interpolateSvgPaths(motion.pathFrom, motion.pathTo, morphProgress);
         if (pathData) shape.pathData = pathData;

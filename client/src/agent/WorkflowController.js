@@ -36,6 +36,8 @@ const OPERATION_META = {
     // R91 — Auto mode (editing style playbook) and the Reel short picker
     auto_edit:         { description: 'Your editing style was applied from start to finish. One undo reverts the whole edit.', suggestion: 'Export for social', suggestionPrompt: 'Export for TikTok' },
     design_scene:      { description: 'A graphics sequence was designed from the brief: titles, points and a call to action, timed in order.', suggestion: 'Open the Scene panel', suggestionPrompt: null },
+    add_motion_component: { description: 'An editable multi-layer motion composition was added to the timeline.', suggestion: 'Animate the new title or graphic', suggestionPrompt: 'Animate the new title with a subtle, polished entrance' },
+    apply_motion_effect_stack: { description: 'The requested footage effects were applied to the selected video clip or the clip under the playhead.', suggestion: 'Fine-tune the effect stack', suggestionPrompt: null, suggestionTab: 'effects' },
     polish_short:      { description: 'The short got a pro finish: hook title, platform captions, camera moves, pops, transitions and sounds.', suggestion: 'Export it', suggestionPrompt: null },
     repurpose_shorts:  { description: 'Shorts were picked from the strongest moments, several per video for variety. The main edit is unchanged.', suggestion: 'Open the Shorts tab', suggestionPrompt: null, suggestionTab: 'shorts' },
     remove_background: { description: 'The background behind the person was changed. Fine-tune it in the Background panel.', suggestion: 'Try a solid colour', suggestionPrompt: 'Replace the background with black' },

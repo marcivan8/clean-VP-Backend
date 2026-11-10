@@ -31,7 +31,7 @@ const LayoutPresetPicker = ({ trackId, clip }) => {
             const r = store.applyLayout(trackId, clip.id, preset);
             if (!r?.success) { setNote(r?.error || t('layout.failed')); return; }
             if (preset === 'split') {
-                setNote(r.faceAware ? t('layout.splitFace') : t('layout.splitNoFace'));
+                setNote(r.subjectAware ? t('layout.splitSubject') : t('layout.splitNoSubject'));
             } else {
                 setNote(null);
             }

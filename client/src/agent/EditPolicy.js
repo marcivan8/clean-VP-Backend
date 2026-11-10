@@ -154,13 +154,6 @@ export const FIT = Object.freeze({
  * Kept small and obvious on purpose — a long list here would be a second
  * playbook, which is the thing this module exists to remove.
  */
-const PREFERRED_BY_STYLE = Object.freeze({
-    talking_head: ['silence_removal', 'remove_filler_words', 'rhythm_zoom', 'auto_captions', 'enhance_audio'],
-    podcast:      ['enhance_audio', 'normalize_audio', 'silence_removal', 'auto_captions', 'repurpose_shorts'],
-    interview:    ['silence_removal', 'auto_captions', 'apply_angle', 'detect_speakers'],
-    vlog:         ['silence_removal', 'enhance_audio', 'add_transition', 'auto_captions'],
-    reel:         ['extract_short', 'set_aspect_ratio', 'auto_captions', 'polish_short', 'rhythm_zoom'],
-});
 
 /**
  * How a style feels about a command.
@@ -191,7 +184,7 @@ export function styleFit(commandId, styleId) {
             reason: `${policy.label} changes framing at topic boundaries — use slow push-ins, not punch-ins.`,
         };
     }
-    if ((PREFERRED_BY_STYLE[styleId] || []).includes(commandId)) {
+    if ((policy.preferredCommands || []).includes(commandId)) {
         return { fit: FIT.PREFERRED, reason: `${policy.label} leads with this.` };
     }
     return { fit: FIT.NEUTRAL, reason: null };

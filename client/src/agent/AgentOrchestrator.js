@@ -13,6 +13,7 @@ import { authFetch } from '../utils/authFetch.js';
 import { VideoEditorTools, TOOL_DEFINITIONS } from './VideoEditorTools.js';
 import { ContextGenerator } from './ContextGenerator.js';
 import useTimelineStore from '../store/useTimelineStore.js';
+import { getToolExecutionStatus, summarizeToolExecutionResults } from './ToolExecutionResults.js';
 
 export class AgentOrchestrator {
     constructor() {
@@ -53,8 +54,15 @@ export class AgentOrchestrator {
             try {
                 const result = await this.tools.execute(action);
                 const duration = (performance.now() - startTime).toFixed(2);
-                console.log(`✅ Action Succeeded: ${action.name} (${duration}ms)`, result);
-                results.push({ action: action.name, status: 'success', result, duration });
+                // Tool execution may return success:false without throwing.
+                // An absent success flag is unverified, not a verified edit.
+                const status = getToolExecutionStatus(result);
+                if (status === 'success') {
+                    console.log(`✅ Action Succeeded: ${action.name} (${duration}ms)`, result);
+                } else {
+                    console.warn(`⚠️ Action ${status}: ${action.name} (${duration}ms)`, result);
+                }
+                results.push({ action: action.name, status, result, duration });
             } catch (err) {
                 const duration = (performance.now() - startTime).toFixed(2);
                 console.error(`❌ Action Failed: ${action.name} (${duration}ms)`, err);
@@ -63,11 +71,13 @@ export class AgentOrchestrator {
         }
 
         const verification = this.verifyTimeline();
+        const summary = summarizeToolExecutionResults(results);
 
         return {
-            success: true,
-            message: 'Plan executed.',
+            success: summary.success,
+            message: summary.message,
             results,
+            failedActions: summary.failedActions,
             issues: verification.issues
         };
     }
@@ -85,10 +95,24 @@ export class AgentOrchestrator {
 
         const executionResult = await this.executePlan(planResult.actions);
 
+        if (!executionResult.success) {
+            const failedNames = (executionResult.failedActions || []).map(item => item.action).join(', ');
+            return {
+                success: false,
+                partial: executionResult.results.some(item => item.status === 'success'),
+                message: failedNames
+                    ? `Some requested edits were not completed or verified: ${failedNames}.`
+                    : 'No edit actions were verified as successful.',
+                details: executionResult.results,
+                issues: executionResult.issues || []
+            };
+        }
+
         if (executionResult.issues && executionResult.issues.length > 0) {
             console.warn('⚠️ Verification Issues Found:', executionResult.issues);
             return {
-                success: true,
+                success: false,
+                partial: true,
                 message: 'Edits applied but issues found.',
                 details: executionResult.results,
                 issues: executionResult.issues

@@ -1173,6 +1173,7 @@ const COMMAND_REGISTRY = new Map([
     ['add_template',              { compiler: compileAtomicStore('add_template', 'Add an animated template') }],
     ['addMotionComponent',        { compiler: compileAtomicStore('addMotionComponent', 'Add a motion graphics component') }],
     ['design_scene',              { compiler: compileAtomicStore('design_scene', 'Design a graphics sequence from the brief') }],
+    ['apply_motion_effect_stack', { compiler: compileAtomicStore('apply_motion_effect_stack', 'Apply a footage effect stack') }],
     ['set_brand_kit',             { compiler: compileAtomicStore('set_brand_kit', 'Store the brand colours and fonts') }],
     ['storyboard_video',          { compiler: compileAtomicStore('storyboard_video', 'Plan and place graphics across the whole video') }],
     ['place_contextual_illustrations', { compiler: compileAtomicStore('place_contextual_illustrations', 'Place contextual animated vector illustrations') }],

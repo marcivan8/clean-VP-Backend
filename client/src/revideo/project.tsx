@@ -4,6 +4,7 @@ import { makeScene2D, Video, Audio, Img, Txt, Node, brightness, contrast, satura
 import { waitFor, useScene, all, any, createRef } from '@revideo/core';
 import { clipToMotionLayer } from '../motion/ClipAdapter.js';
 import { resolveMotionAt, sampleKeyframeTrack } from '../motion/MotionResolver.js';
+import { composeAnimatedCrop } from '../motion/CameraMotionCompiler.js';
 
 /**
  * PATCH: DependencyContext.collectPromise uses Promise.all in consumePromises(),
@@ -232,8 +233,18 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     const vc = clip.virtualCam;
                     const hasVc = vc && typeof vc.cropW === 'number' && vc.cropW > 0 && vc.cropW < 0.999;
                     const vcZoom = hasVc ? 1 / vc.cropW : 1;
-                    const vcCx = hasVc ? ((vc.cropX ?? 0) + vc.cropW / 2) - 0.5 : 0;
-                    const vcCy = hasVc ? ((vc.cropY ?? 0) + (vc.cropH ?? 1) / 2) - 0.5 : 0;
+                    // Camera pan is image motion, so the crop window follows in
+                    // the opposite direction. Keep this in source-frame units
+                    // to match VideoPlayer's composed UV crop and FFmpeg export.
+                    const vcLocalTime = clipLocalTime(playback.time, clip.start);
+                    const vcPanX = evaluateKF(kf.panX, vcLocalTime, 0);
+                    const vcPanY = evaluateKF(kf.panY, vcLocalTime, 0);
+                    const animatedCrop = hasVc ? composeAnimatedCrop(
+                        { cropX: vc.cropX ?? 0, cropY: vc.cropY ?? 0, cropW: vc.cropW, cropH: vc.cropH ?? 1 },
+                        evaluateKF(kf.scale, vcLocalTime, 1), vcPanX, vcPanY,
+                    ) : null;
+                    const vcCx = animatedCrop ? (animatedCrop.cropX + animatedCrop.cropW / 2) - 0.5 : 0;
+                    const vcCy = animatedCrop ? (animatedCrop.cropY + animatedCrop.cropH / 2) - 0.5 : 0;
 
                     const overlayScaleBase = canvasWidth * 0.25 / Math.max(1, fitted.w);
                     const totalScaleX = () => {

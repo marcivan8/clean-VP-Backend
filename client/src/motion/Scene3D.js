@@ -39,6 +39,8 @@ export const MAX_MESH_FACES = 5000;
 export const MAX_MESH_TRIANGLES = 10_000;
 export const MAX_SCENE_TRIANGLES = 50_000;
 export const MAX_SCENE_SHADOW_RECEIVERS = 16;
+const SCENE3D_MULTIPLICATIVE_ANIMATION_PROPERTIES = new Set(['scale', 'scaleX', 'scaleY', 'scaleZ', 'opacity']);
+const SCENE3D_COLOR_CHANNEL_PROPERTIES = new Set(['colorR', 'colorG', 'colorB', 'emissiveR', 'emissiveG', 'emissiveB']);
 /** Limits that truncate content in the deterministic 3D renderer. */
 export function getScene3DRenderLimitWarnings(scene = {}) {
     const objects = Array.isArray(scene.objects) ? scene.objects : [];
@@ -82,8 +84,8 @@ export function getScene3DRenderLimitWarnings(scene = {}) {
 }
 /** Report authored 3D values that the renderer silently substitutes. */
 export function getScene3DCompatibilityWarnings(scene = {}) {
-    const supportedObjects = new Set(['box', 'sphere', 'cylinder', 'cone', 'torus', 'plane', 'image', 'video', 'text', 'mesh']);
-    const supportedLights = new Set(['point', 'directional', 'spot']);
+    const supportedObjects = new Set(['box', 'sphere', 'capsule', 'cylinder', 'cone', 'torus', 'plane', 'image', 'video', 'text', 'mesh']);
+    const supportedLights = new Set(['point', 'directional', 'spot', 'area']);
     const supportedSides = new Set(['front', 'back', 'double']);
     const warnings = [];
     const checkRange = (record, key, label, min, max, owner, fallback) => {
@@ -121,7 +123,13 @@ export function getScene3DCompatibilityWarnings(scene = {}) {
         checkRange(light, 'range', 'Range', 0.1, 1000, owner, '24');
         checkRange(light, 'decay', 'Decay', 0, 8, owner, '0.3');
         checkRange(light, 'angle', 'Spot angle', 1, 179, owner, '60');
+        checkRange(light, 'width', 'Area-light width', 0.1, 40, owner, '4');
+        checkRange(light, 'height', 'Area-light height', 0.1, 40, owner, '4');
     });
+    const particleShape = scene.particles?.shape;
+    if (particleShape != null && !SCENE3D_PARTICLE_SHAPES.includes(particleShape)) {
+        warnings.push({ message: `3D particles use unsupported shape “${particleShape}”; they will render as circles.` });
+    }
     return warnings.map(({ messageOwner, ...warning }) => warning);
 }
 export const SCENE3D_BLEND_MODES = Object.freeze([
@@ -130,6 +138,33 @@ export const SCENE3D_BLEND_MODES = Object.freeze([
     'hue', 'saturation', 'color', 'luminosity',
 ]);
 export const resolveParticleSeed = (particles = {}) => n(particles.seed, 17);
+export const SCENE3D_PARTICLE_SHAPES = Object.freeze(['circle', 'square', 'diamond', 'star']);
+function particleContains(shape, dx, dy, radius) {
+    const x = dx / radius, y = dy / radius;
+    if (shape === 'square') return Math.abs(x) <= 1 && Math.abs(y) <= 1;
+    if (shape === 'diamond') return Math.abs(x) + Math.abs(y) <= 1;
+    if (shape === 'star') {
+        const angle = Math.atan2(y, x) + Math.PI / 2;
+        const sector = ((angle % (Math.PI / 5)) + Math.PI / 5) % (Math.PI / 5);
+        return Math.hypot(x, y) <= 0.52 + 0.48 * Math.cos(sector * 10);
+    }
+    return x * x + y * y <= 1;
+}
+function traceParticlePath(ctx, shape, x, y, radius) {
+    ctx.beginPath();
+    if (shape === 'square') ctx.rect(x - radius, y - radius, radius * 2, radius * 2);
+    else if (shape === 'diamond') {
+        ctx.moveTo(x, y - radius); ctx.lineTo(x + radius, y); ctx.lineTo(x, y + radius); ctx.lineTo(x - radius, y); ctx.closePath();
+    } else if (shape === 'star') {
+        for (let point = 0; point < 10; point++) {
+            const angle = -Math.PI / 2 + point * Math.PI / 5;
+            const reach = radius * (point % 2 === 0 ? 1 : 0.52);
+            const px = x + Math.cos(angle) * reach, py = y + Math.sin(angle) * reach;
+            if (point === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+    } else ctx.arc(x, y, radius, 0, Math.PI * 2);
+}
 const rad = (deg) => n(deg) * Math.PI / 180;
 const V = (x = 0, y = 0, z = 0) => ({ x: n(x), y: n(y), z: n(z) });
 
@@ -280,6 +315,41 @@ function radialMesh(radius, height, segments = 20, pointed = false) {
     return { vertices, faces };
 }
 
+function capsuleMesh(radius, height, segments = 24, hemisphereRings = 8) {
+    // Y-up capsule with a cylindrical waist and rounded hemispherical ends.
+    // Height is the end-to-end dimension; keep the geometry inside that
+    // authored bound when its requested radius is too large.
+    const r = Math.min(radius, height / 2);
+    const halfWaist = Math.max(0, height / 2 - r);
+    const rings = [];
+    for (let step = 0; step <= hemisphereRings; step++) {
+        const angle = Math.PI / 2 - (Math.PI / 2) * step / hemisphereRings;
+        rings.push({ y: halfWaist + r * Math.sin(angle), radius: r * Math.cos(angle) });
+    }
+    // When the waist collapses (radius === height / 2), the top hemisphere's
+    // equator is already the bottom hemisphere's start. Avoid a duplicate
+    // ring, which would introduce zero-area faces into the sphere-like limit.
+    if (halfWaist > 0) rings.push({ y: -halfWaist, radius: r });
+    for (let step = 1; step <= hemisphereRings; step++) {
+        const angle = -(Math.PI / 2) * step / hemisphereRings;
+        rings.push({ y: -halfWaist + r * Math.sin(angle), radius: r * Math.cos(angle) });
+    }
+    const vertices = [];
+    for (const ring of rings) for (let segment = 0; segment < segments; segment++) {
+        const angle = 2 * Math.PI * segment / segments;
+        vertices.push(V(Math.cos(angle) * ring.radius, ring.y, Math.sin(angle) * ring.radius));
+    }
+    const faces = [];
+    for (let ring = 0; ring < rings.length - 1; ring++) for (let segment = 0; segment < segments; segment++) {
+        const a = ring * segments + segment;
+        const next = ring * segments + (segment + 1) % segments;
+        const below = (ring + 1) * segments + segment;
+        const belowNext = (ring + 1) * segments + (segment + 1) % segments;
+        faces.push([a, next, belowNext, below]);
+    }
+    return { vertices, faces };
+}
+
 function torusMesh(radius, tube, segments = 24, sides = 10) {
     const vertices = [], faces = [];
     for (let i = 0; i <= segments; i++) {
@@ -305,7 +375,10 @@ export function normalizeSceneMesh(object) {
     // from their current data. Built-in primitive topology only depends on a
     // small set of dimensions and is identical across animation frames.
     if (object?.type === 'mesh' && Array.isArray(object.vertices) && Array.isArray(object.faces)) {
-        const vertices = object.vertices.slice(0, MAX_MESH_VERTICES).map(p => V(p?.x, p?.y, p?.z));
+        const size = object.size || {};
+        const vertices = object.vertices.slice(0, MAX_MESH_VERTICES).map(p => V(
+            n(p?.x) * n(size.x, 1), n(p?.y) * n(size.y, 1), n(p?.z) * n(size.z, 1),
+        ));
         const authoredFaces = object.faces.slice(0, MAX_MESH_FACES).filter(face => Array.isArray(face)
             && face.length >= 3 && face.length <= 64
             && face.every(index => Number.isInteger(index) && index >= 0 && index < vertices.length));
@@ -340,6 +413,7 @@ export function normalizeSceneMesh(object) {
         return mesh;
     }
     if (type === 'sphere') mesh = sphereMesh(radius);
+    else if (type === 'capsule') mesh = capsuleMesh(radius, height);
     else if (type === 'cylinder') mesh = radialMesh(radius, height);
     else if (type === 'cone') mesh = radialMesh(radius, height, 20, true);
     else if (type === 'torus') mesh = torusMesh(radius, tube);
@@ -362,6 +436,13 @@ function parseHexColor(hex) {
     const value = String(hex || '#7C3AED').match(/^#([\da-f]{3}|[\da-f]{6})$/i)?.[1] || '7C3AED';
     const full = value.length === 3 ? value.split('').map(c => c + c).join('') : value;
     return [0, 2, 4].map(i => parseInt(full.slice(i, i + 2), 16));
+}
+
+function colorFromChannels(baseColor, animated, prefix) {
+    const base = parseHexColor(baseColor);
+    const channels = ['R', 'G', 'B'].map((channel, index) => clamp(
+        n(animated[`${prefix}${channel}`], base[index]), 0, 255));
+    return `#${channels.map(channel => Math.round(channel).toString(16).padStart(2, '0')).join('').toUpperCase()}`;
 }
 
 function shadeMaterial(baseColor, ambient, contributions, metalness, roughness, emissiveColor = null, emissiveIntensity = 0) {
@@ -960,7 +1041,7 @@ function rasterizeDepthBuffer(ctx, faces, logicalWidth, logicalHeight, depthOfFi
         const alpha = clamp(n(particle.opacity, 1), 0, 1);
         for (let y = minY; y <= maxY; y++) for (let x = minX; x <= maxX; x++) {
             const dx = x + 0.5 - particle.x, dy = y + 0.5 - particle.y;
-            if (dx * dx + dy * dy > radius * radius) continue;
+            if (!particleContains(particle.shape, dx, dy, radius)) continue;
             const pixel = y * pixelWidth + x;
             if (particle.z > depths[pixel] + 1e-4) continue;
             const offset = pixel * 4;
@@ -1153,6 +1234,15 @@ export function normalizeScene3D(scene = {}) {
     return { scene: { ...scene, objects }, issues };
 }
 
+/** Sample a scene animation on the same bounded local clock as MotionResolver. */
+function sampleSceneAnimation(animation, localTime) {
+    const inferredDuration = Math.max(0, ...(Array.isArray(animation?.keyframes)
+        ? animation.keyframes.map(keyframe => n(keyframe?.time, 0)) : [0]));
+    const duration = animation?.duration == null || animation.duration === ''
+        ? inferredDuration : Math.max(0, n(animation.duration));
+    return sampleAnimation(animation, clamp(n(localTime), 0, duration));
+}
+
 function resolveObjectTransform(object, time, duration, byId, audioWaveformsByAsset = {}, seen = new Set()) {
     const id = object?.id;
     if (!object || (id && seen.has(id)) || seen.size > MAX_SCENE_OBJECT_PARENT_DEPTH) return { position: V(), rotation: V(), scale: V(1, 1, 1), matrix: IDENTITY_3, opacity: 1 };
@@ -1171,9 +1261,30 @@ function resolveObjectTransform(object, time, duration, byId, audioWaveformsByAs
     for (const animation of Array.isArray(object.animations) ? object.animations : []) {
         const start = Math.max(0, n(animation?.startTime));
         if (localTime < start) continue;
-        const values = sampleAnimation(animation, localTime - start);
-        for (const [key, value] of Object.entries(values)) animated[key] = value;
+        const values = sampleSceneAnimation(animation, localTime - start);
+        for (const [key, value] of Object.entries(values)) {
+            if (!Number.isFinite(Number(value))) continue;
+            const contribution = Number(value);
+            if (SCENE3D_MULTIPLICATIVE_ANIMATION_PROPERTIES.has(key)) {
+                animated[key] = (key in animated ? animated[key] : 1) * contribution;
+            } else if (SCENE3D_COLOR_CHANNEL_PROPERTIES.has(key)) {
+                // RGB channels are absolute 0–255 values, unlike transform
+                // tracks whose values compose as offsets across animations.
+                animated[key] = contribution;
+            } else {
+                animated[key] = (key in animated ? animated[key] : 0) + contribution;
+            }
+        }
     }
+    const authoredSize = object.size || {};
+    const geometryBase = {
+        radius: n(object.radius, object.type === 'torus' ? 0.8 : 0.65),
+        height: n(object.height, 1.5),
+        tube: n(object.tube, 0.2),
+        sizeX: n(authoredSize.x, 1),
+        sizeY: n(authoredSize.y, 1),
+        sizeZ: n(authoredSize.z, 1),
+    };
     const objectExpressionBase = {
         x: n(position.x), y: n(position.y), z: n(position.z),
         scale: 1, scaleX: 1, scaleY: 1, scaleZ: 1,
@@ -1182,9 +1293,16 @@ function resolveObjectTransform(object, time, duration, byId, audioWaveformsByAs
         roughness: clamp(n(object.material?.roughness, 0.62), 0.04, 1),
         metalness: clamp(n(object.material?.metalness, 0.08), 0, 1),
         emissiveIntensity: clamp(n(object.material?.emissiveIntensity, 0), 0, 10),
+        ...Object.fromEntries(['R', 'G', 'B'].map((channel, index) => [
+            `color${channel}`, parseHexColor(object.color || object.material?.color || '#7C3AED')[index],
+        ])),
+        ...Object.fromEntries(['R', 'G', 'B'].map((channel, index) => [
+            `emissive${channel}`, parseHexColor(object.material?.emissiveColor || object.material?.emissive || '#000000')[index],
+        ])),
+        ...geometryBase,
     };
     for (const [property, expression] of Object.entries(object.expressions || {})) {
-        if (!['x', 'y', 'z', 'scale', 'scaleX', 'scaleY', 'scaleZ', 'rotationX', 'rotationY', 'rotationZ', 'opacity', 'roughness', 'metalness', 'emissiveIntensity'].includes(property)) continue;
+        if (!['x', 'y', 'z', 'scale', 'scaleX', 'scaleY', 'scaleZ', 'rotationX', 'rotationY', 'rotationZ', 'opacity', 'roughness', 'metalness', 'emissiveIntensity', 'colorR', 'colorG', 'colorB', 'emissiveR', 'emissiveG', 'emissiveB', 'radius', 'height', 'tube', 'sizeX', 'sizeY', 'sizeZ'].includes(property)) continue;
         const current = property in objectExpressionBase
             ? objectExpressionBase[property] + (property in animated ? n(animated[property]) : 0)
             : n(animated[property], objectExpressionBase[property]);
@@ -1192,7 +1310,8 @@ function resolveObjectTransform(object, time, duration, byId, audioWaveformsByAs
             t: localTime, time: localTime, duration, progress: duration > 0 ? localTime / duration : 0,
             value: current,
         });
-        if (value !== null) animated[property] = ['roughness', 'metalness', 'emissiveIntensity'].includes(property)
+        if (value !== null) animated[property] = SCENE3D_COLOR_CHANNEL_PROPERTIES.has(property) ? value
+            : ['roughness', 'metalness', 'emissiveIntensity', 'radius', 'height', 'tube', 'sizeX', 'sizeY', 'sizeZ'].includes(property)
             ? value - objectExpressionBase[property] : value;
     }
     const reactive = object.audioReactive || {};
@@ -1206,6 +1325,10 @@ function resolveObjectTransform(object, time, duration, byId, audioWaveformsByAs
         n(animated.y, n(position.y)) + (target === 'positionY' ? amount : 0),
         n(animated.z, n(position.z)) + (target === 'positionZ' ? amount : 0));
     const reactiveScale = target === 'scale' ? Math.max(0.01, 1 + amount) : 1;
+    const reactiveGeometry = {};
+    if (['radius', 'height', 'tube', 'sizeX', 'sizeY', 'sizeZ'].includes(target)) {
+        reactiveGeometry[target] = amount;
+    }
     const localScale = V(
         n(scale.x, 1) * n(animated.scale, 1) * n(animated.scaleX, 1) * reactiveScale,
         n(scale.y, 1) * n(animated.scale, 1) * n(animated.scaleY, 1) * reactiveScale,
@@ -1214,13 +1337,28 @@ function resolveObjectTransform(object, time, duration, byId, audioWaveformsByAs
     const composed = composeSceneTransform(outer, localPosition, r, localScale);
     const animatedMaterial = {
         ...(object.material || {}),
+        ...Object.fromEntries([...SCENE3D_COLOR_CHANNEL_PROPERTIES]
+            .filter(property => Number.isFinite(animated[property]))
+            .map(property => [property, animated[property]])),
+        emissiveColor: colorFromChannels(object.material?.emissiveColor || object.material?.emissive || '#000000', animated, 'emissive'),
         roughness: clamp(objectExpressionBase.roughness + n(animated.roughness), 0.04, 1),
         metalness: clamp(objectExpressionBase.metalness + n(animated.metalness), 0, 1),
         emissiveIntensity: clamp(objectExpressionBase.emissiveIntensity + n(animated.emissiveIntensity), 0, 10),
     };
+    const geometry = {
+        radius: clamp(geometryBase.radius + n(animated.radius) + n(reactiveGeometry.radius), 0.02, 10),
+        height: clamp(geometryBase.height + n(animated.height) + n(reactiveGeometry.height), 0.02, 20),
+        tube: clamp(geometryBase.tube + n(animated.tube) + n(reactiveGeometry.tube), 0.01, 3),
+        size: {
+            x: clamp(geometryBase.sizeX + n(animated.sizeX) + n(reactiveGeometry.sizeX), 0, 1000),
+            y: clamp(geometryBase.sizeY + n(animated.sizeY) + n(reactiveGeometry.sizeY), 0, 1000),
+            z: clamp(geometryBase.sizeZ + n(animated.sizeZ) + n(reactiveGeometry.sizeZ), 0, 1000),
+        },
+    };
     return {
         ...composed,
         material: animatedMaterial,
+        geometry,
         opacity: outer.opacity * clamp(n(object.opacity, 1) * n(animated.opacity, 1) + (target === 'opacity' ? amount : 0), 0, 1),
     };
 }
@@ -1458,7 +1596,7 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
     for (const animation of Array.isArray(cameraConfig.animations) ? cameraConfig.animations : []) {
         const start = Math.max(0, n(animation?.startTime));
         if (time < start) continue;
-        Object.assign(animatedCamera, sampleAnimation(animation, time - start));
+        Object.assign(animatedCamera, sampleSceneAnimation(animation, time - start));
     }
     const lookAt = cameraConfig.lookAt;
     const hasLookAt = lookAt && [lookAt.x, lookAt.y, lookAt.z].every(value => Number.isFinite(Number(value)));
@@ -1479,9 +1617,14 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
     // Camera properties use the same safe procedural expression evaluator as
     // scene objects, so expressions survive identically in preview and export.
     for (const [property, expression] of Object.entries(cameraConfig.expressions || {})) {
-        if (!['x', 'y', 'z', 'yaw', 'pitch', 'roll', 'fov', 'orthoScale', 'near', 'far', 'targetX', 'targetY', 'targetZ'].includes(property)) continue;
+        if (!['x', 'y', 'z', 'yaw', 'pitch', 'roll', 'fov', 'orthoScale', 'near', 'far', 'targetX', 'targetY', 'targetZ',
+            'dofFocusDistance', 'dofFocusRange', 'dofStrength', 'dofMaxBlur'].includes(property)) continue;
         const targetAxis = property.startsWith('target') ? property.slice(-1).toLowerCase() : null;
-        const baseValue = targetAxis && Number.isFinite(Number(lookAt?.[targetAxis]))
+        const dofBase = cameraConfig.depthOfField || scene.depthOfField || {};
+        const dofProperty = ({ dofFocusDistance: 'focusDistance', dofFocusRange: 'focusRange', dofStrength: 'strength', dofMaxBlur: 'maxBlur' })[property];
+        const baseValue = dofProperty
+            ? n(dofBase[dofProperty], property === 'dofFocusDistance' ? n(cameraConfig.z, SCENE3D_CAMERA_DEFAULTS.z) : ({ focusRange: 0.35, strength: 1, maxBlur: 6 })[dofProperty])
+            : targetAxis && Number.isFinite(Number(lookAt?.[targetAxis]))
             ? Number(lookAt[targetAxis])
             : n(cameraConfig[property], derivedLookAtAngle(property) ?? SCENE3D_CAMERA_DEFAULTS[property]);
         const value = evaluateMotionExpression(expression, {
@@ -1516,7 +1659,12 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
     const cameraZ = Math.max(0.1, n(animatedCamera.z, SCENE3D_CAMERA_DEFAULTS.z));
     const authoredDepthOfField = animatedCamera.depthOfField || scene.depthOfField;
     const depthOfField = authoredDepthOfField && typeof authoredDepthOfField === 'object'
-        ? { ...authoredDepthOfField, focusDistance: n(authoredDepthOfField.focusDistance, cameraZ) }
+        ? { ...authoredDepthOfField,
+            focusDistance: Math.max(0.1, n(animatedCamera.dofFocusDistance, n(authoredDepthOfField.focusDistance, cameraZ))),
+            focusRange: Math.max(0, n(animatedCamera.dofFocusRange, n(authoredDepthOfField.focusRange, 0.35))),
+            strength: clamp(n(animatedCamera.dofStrength, n(authoredDepthOfField.strength, 1)), 0, 2),
+            maxBlur: clamp(n(animatedCamera.dofMaxBlur, n(authoredDepthOfField.maxBlur, 6)), 0, 12),
+        }
         : null;
     const camera = {
         x: n(animatedCamera.x, SCENE3D_CAMERA_DEFAULTS.x), y: n(animatedCamera.y, SCENE3D_CAMERA_DEFAULTS.y), z: cameraZ,
@@ -1530,15 +1678,15 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
         for (const animation of Array.isArray(light?.animations) ? light.animations : []) {
             const start = Math.max(0, n(animation?.startTime));
             if (time < start) continue;
-            Object.assign(animated, sampleAnimation(animation, time - start));
+            Object.assign(animated, sampleSceneAnimation(animation, time - start));
         }
         // Procedural light motion uses the same sandboxed expression language
         // as cameras and objects. Expressions are evaluated after keyframes,
         // so an explicitly authored expression is the final driver for that
         // channel, while unconfigured channels retain their keyframed values.
         for (const [property, expression] of Object.entries(light?.expressions || {})) {
-            if (!['intensity', 'range', 'decay', 'angle', 'positionX', 'positionY', 'positionZ',
-                'directionX', 'directionY', 'directionZ', 'targetX', 'targetY', 'targetZ'].includes(property)) continue;
+            if (!['intensity', 'range', 'decay', 'angle', 'width', 'height', 'positionX', 'positionY', 'positionZ',
+                'directionX', 'directionY', 'directionZ', 'targetX', 'targetY', 'targetZ', 'colorR', 'colorG', 'colorB'].includes(property)) continue;
             const axis = property.endsWith('X') ? 'x' : property.endsWith('Y') ? 'y' : property.endsWith('Z') ? 'z' : null;
             const nested = property.startsWith('position') ? animated.position
                 : property.startsWith('direction') ? animated.direction
@@ -1547,10 +1695,12 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
                 : property === 'range' ? 24
                     : property === 'decay' ? 0.3
                         : property === 'angle' ? 60
+                        : property === 'width' || property === 'height' ? 4
                             : axis ? n(nested?.[axis]) : 0;
             const value = evaluateMotionExpression(expression, {
                 t: time, time, duration, progress: duration > 0 ? time / duration : 0,
-                value: n(animated[property], fallback),
+                value: property.startsWith('color') ? n(animated[property], parseHexColor(light?.color || '#FFFFFF')[property === 'colorR' ? 0 : property === 'colorG' ? 1 : 2])
+                    : n(animated[property], fallback),
             });
             if (value !== null && Number.isFinite(value)) animated[property] = value;
         }
@@ -1562,20 +1712,38 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
             if (Number.isFinite(Number(animated[`direction${axis.toUpperCase()}`]))) animated.direction[axis] = Number(animated[`direction${axis.toUpperCase()}`]);
             if (Number.isFinite(Number(animated[`target${axis.toUpperCase()}`]))) animated.target[axis] = Number(animated[`target${axis.toUpperCase()}`]);
         }
+        const type = ['directional', 'spot', 'area'].includes(animated?.type) ? animated.type : 'point';
         return {
-            type: ['directional', 'spot'].includes(animated?.type) ? animated.type : 'point',
+            type,
             position: V(animated?.position?.x, animated?.position?.y, animated?.position?.z),
             direction: V(animated?.direction?.x, animated?.direction?.y, animated?.direction?.z),
             target: V(animated?.target?.x, animated?.target?.y, animated?.target?.z),
             intensity: clamp(n(animated?.intensity, 0.8), 0, 4),
-            color: animated?.color || '#FFFFFF',
+            color: colorFromChannels(light?.color || '#FFFFFF', animated, 'color'),
             range: clamp(n(animated?.range, 24), 0.1, 1000),
             decay: clamp(n(animated?.decay, 0.3), 0, 8),
             angle: clamp(n(animated?.angle, 60), 1, 179),
+            width: clamp(n(animated?.width, 4), 0.1, 40),
+            height: clamp(n(animated?.height, 4), 0.1, 40),
             castsShadow: animated?.castsShadow !== false,
         };
     });
     if (!lights.length) lights.push({ type: 'point', position: V(-3, 5, 6), intensity: 0.9, color: '#FFFFFF', range: 24, decay: 0.3 });
+    // Area emitters are integrated with the same deterministic software
+    // shading and shadow pipeline as point lights. Four stratified samples
+    // approximate both the larger diffuse source and its softer penumbra.
+    for (const light of lights) {
+        if (light.type !== 'area') continue;
+        const targetDirection = sub(light.target, light.position);
+        const normal = Math.hypot(targetDirection.x, targetDirection.y, targetDirection.z) > 1e-6
+            ? norm(targetDirection) : V(0, 0, -1);
+        const reference = Math.abs(normal.y) < 0.9 ? V(0, 1, 0) : V(1, 0, 0);
+        const tangent = norm(cross(normal, reference));
+        const bitangent = norm(cross(normal, tangent));
+        const hx = light.width * 0.25, hy = light.height * 0.25;
+        light.areaSamples = [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([x, y]) => add(light.position,
+            V(tangent.x * hx * x + bitangent.x * hy * y, tangent.y * hx * x + bitangent.y * hy * y, tangent.z * hx * x + bitangent.z * hy * y)));
+    }
     const ambient = clamp(n(scene.ambient, 0.24), 0, 1);
     const faces = [];
     let sceneTriangleCount = 0;
@@ -1598,8 +1766,8 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
     }
     for (const receiverObject of objects) {
         if (receiverObject?.type !== 'plane' || receiverObject.receivesShadow !== true || receiverObject.visible === false) continue;
-        const receiverMesh = normalizeSceneMesh(receiverObject);
         const receiverTransform = resolveObjectTransform(receiverObject, time, duration, byId, scene.audioWaveformsByAsset || {});
+        const receiverMesh = normalizeSceneMesh({ ...receiverObject, ...receiverTransform.geometry });
         const receiverVertices = receiverMesh.vertices.map(vertex => worldVertex(vertex, receiverTransform));
         const firstFace = receiverMesh.faces.find(face => face.length >= 3 && face.slice(0, 3).every(index => receiverVertices[index]));
         if (!firstFace) continue;
@@ -1609,19 +1777,25 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
     }
     if (!receiverPlanes.length) receiverPlanes.push({ point: V(0, groundY, 0), normal: V(0, 1, 0), authored: false });
     receiverPlanes.length = Math.min(receiverPlanes.length, MAX_SCENE_SHADOW_RECEIVERS);
-    const shadowLights = lights.filter(light => light.castsShadow && light.intensity > 0).map(light => ({
-        ...light,
-        projectionPoint: light.type === 'directional'
-            ? V(-light.direction.x * 100, -light.direction.y * 100, -light.direction.z * 100)
-            : light.position,
-    }));
+    const shadowLights = lights.filter(light => light.castsShadow && light.intensity > 0).flatMap(light => {
+        const samples = light.areaSamples || [light.position];
+        return samples.map(position => ({
+            ...light,
+            position,
+            intensity: light.intensity / samples.length,
+            areaRadius: light.type === 'area' ? Math.max(light.width, light.height) * 0.25 : 0,
+            projectionPoint: light.type === 'directional'
+                ? V(-light.direction.x * 100, -light.direction.y * 100, -light.direction.z * 100)
+                : position,
+        }));
+    });
     const totalShadowIntensity = shadowLights.reduce((sum, light) => sum + light.intensity, 0);
     for (let objectOrder = 0; objectOrder < objects.length; objectOrder++) {
         if (sceneTriangleCount >= MAX_SCENE_TRIANGLES) break;
         const object = objects[objectOrder];
         if (object?.visible === false) continue;
-        const mesh = normalizeSceneMesh(object);
         const transform = resolveObjectTransform(object, time, duration, byId, scene.audioWaveformsByAsset || {});
+        const mesh = normalizeSceneMesh({ ...object, ...transform.geometry });
         // Material opacity participates in the same inherited alpha as the
         // object's transform opacity. Keeping it here makes transparent
         // materials behave consistently for meshes, image planes, and 3D text
@@ -1805,7 +1979,7 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
                         points: shapePoints.map(point => project(point, camera, width, height)),
                         ...(shape.edgeFlags && shapeUnchanged ? { edgeFlags: shape.edgeFlags } : {}),
                         opacity: clamp(n(shadowConfig.opacity, 0.24) * (light.intensity / Math.max(0.001, totalShadowIntensity)) * shadowCone * shadowAttenuation * objectOpacity, 0, 0.75),
-                        blur: clamp(n(shadowConfig.blur, 12), 0, 80), color: shadowConfig.color || '#111827',
+                        blur: clamp(n(shadowConfig.blur, 12) + n(light.areaRadius, 0) * 0.35, 0, 80), color: shadowConfig.color || '#111827',
                     });
                 }
                 }
@@ -1838,29 +2012,32 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
             const emissiveIntensity = clamp(n(transform.material?.emissiveIntensity, 0), 0, 10);
             const contributions = [];
             for (const light of lights) {
-                const toLight = sub(light.position, centre);
-                const distance = Math.hypot(toLight.x, toLight.y, toLight.z);
-                const direction = light.type === 'directional'
-                    ? norm(V(-light.direction.x, -light.direction.y, -light.direction.z))
-                    : norm(toLight);
-                const attenuation = light.type === 'directional' ? 1 : 1 / (1 + light.decay * (distance / light.range) ** 2);
-                let cone = 1;
-                if (light.type === 'spot') {
-                    const forward = norm(sub(light.target, light.position));
-                    const fromLight = norm(sub(centre, light.position));
-                    const outer = Math.cos(rad(light.angle / 2));
-                    const inner = Math.cos(rad(light.angle * 0.4));
-                    cone = clamp((dot(forward, fromLight) - outer) / Math.max(1e-5, inner - outer), 0, 1);
-                    cone *= cone;
+                const samples = light.areaSamples || [light.position];
+                for (const position of samples) {
+                    const toLight = sub(position, centre);
+                    const distance = Math.hypot(toLight.x, toLight.y, toLight.z);
+                    const direction = light.type === 'directional'
+                        ? norm(V(-light.direction.x, -light.direction.y, -light.direction.z))
+                        : norm(toLight);
+                    const attenuation = light.type === 'directional' ? 1 : 1 / (1 + light.decay * (distance / light.range) ** 2);
+                    let cone = 1;
+                    if (light.type === 'spot') {
+                        const forward = norm(sub(light.target, position));
+                        const fromLight = norm(sub(centre, position));
+                        const outer = Math.cos(rad(light.angle / 2));
+                        const inner = Math.cos(rad(light.angle * 0.4));
+                        cone = clamp((dot(forward, fromLight) - outer) / Math.max(1e-5, inner - outer), 0, 1);
+                        cone *= cone;
+                    }
+                    const energy = light.intensity * attenuation * cone / samples.length;
+                    const diffuse = Math.max(0, dot(shadedNormal, direction)) * energy;
+                    const half = norm(add(direction, view));
+                    const exponent = 8 + (1 - roughness) ** 2 * 112;
+                    const specular = (Math.max(0, dot(shadedNormal, half)) ** exponent) * energy * (0.18 + metalness * 0.55) * (1 - roughness * 0.7);
+                    contributions.push({ color: light.color, diffuse, specular });
                 }
-                const energy = light.intensity * attenuation * cone;
-                const diffuse = Math.max(0, dot(shadedNormal, direction)) * energy;
-                const half = norm(add(direction, view));
-                const exponent = 8 + (1 - roughness) ** 2 * 112;
-                const specular = (Math.max(0, dot(shadedNormal, half)) ** exponent) * energy * (0.18 + metalness * 0.55) * (1 - roughness * 0.7);
-                contributions.push({ color: light.color, diffuse, specular });
             }
-            const color = shadeMaterial(object.color || '#7C3AED', ambient, contributions, metalness, roughness, emissiveColor, emissiveIntensity);
+            const color = shadeMaterial(colorFromChannels(object.color || object.material?.color || '#7C3AED', transform.material, 'color'), ambient, contributions, metalness, roughness, emissiveColor, emissiveIntensity);
             const uvByIndex = mesh.uvs || [[0, 1], [1, 1], [1, 0], [0, 0]];
             const cameraVertices = points.map((p, pointIndex) => {
                 const point = cameraPoint(p, camera);
@@ -1939,19 +2116,30 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
     const particleWaveform = scene.audioWaveformsByAsset?.[particleReactive.assetId];
     const particleEnvelope = sampleAudioEnvelope(particleWaveform?.peaks || particleWaveform, time, particleWaveform?.duration || duration);
     const particleAmount = clamp(n(particleReactive.amount, 0), -1, 3) * particleEnvelope;
+    const particleSpreadScale = particleReactive.target === 'spread' ? Math.max(0, 1 + particleAmount) : 1;
     const rand = (i, salt) => {
         const value = Math.sin((i + 1) * 127.1 + (seed + salt) * 311.7) * 43758.5453;
         return value - Math.floor(value);
     };
     const hasParticleSimulation = !!(particleConfig.emitter || particleConfig.velocity || particleConfig.gravity
-        || particleConfig.lifetime != null || particleConfig.turbulence != null);
+        || particleConfig.lifetime != null || particleConfig.turbulence != null || particleConfig.loop === false);
     for (let i = 0; i < particleCount; i++) {
         if (faces.length >= MAX_SCENE_TRIANGLES) break;
-        const spread = clamp(n(particleConfig.spread, 3.8), 0.2, 20);
+        const spread = clamp(n(particleConfig.spread, 3.8) * particleSpreadScale, 0, 80);
         const baseSpeed = clamp(n(particleConfig.speed, 0.18), 0, 3);
         const speed = clamp(baseSpeed * (particleReactive.target === 'speed' ? Math.max(0, 1 + particleAmount) : 1), 0, 3);
+        const emitter = particleConfig.emitter && typeof particleConfig.emitter === 'object'
+            ? particleConfig.emitter : null;
+        const emitterSize = emitter?.size;
+        const reactiveEmitter = particleSpreadScale !== 1 && emitter
+            ? { ...emitter, size: {
+                x: n(emitterSize?.x, n(emitterSize?.radius, n(particleConfig.spread, 3.8))) * particleSpreadScale,
+                y: n(emitterSize?.y, n(emitterSize?.radius, n(particleConfig.spread, 3.8))) * particleSpreadScale,
+                z: n(emitterSize?.z, n(emitterSize?.radius, n(particleConfig.spread, 3.8) * 0.35)) * particleSpreadScale,
+            } }
+            : emitter;
         const simulated = hasParticleSimulation
-            ? sampleProceduralParticle({ ...particleConfig, speed }, i, time)
+            ? sampleProceduralParticle({ ...particleConfig, ...(reactiveEmitter ? { emitter: reactiveEmitter } : {}), spread, speed }, i, time)
             : null;
         if (hasParticleSimulation && !simulated) continue;
         const phase = (rand(i, 1) + time * speed / Math.max(0.5, duration)) % 1;
@@ -1965,7 +2153,7 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
             * (particleReactive.target === 'size' ? Math.max(0, 1 + particleAmount) : 1), 0.5, 30) * projected.scale;
         const baseOpacity = simulated ? simulated.opacity : 0.25 + rand(i, 4) * 0.65;
         const opacity = clamp(baseOpacity * (particleReactive.target === 'opacity' ? Math.max(0, 1 + particleAmount) : 1), 0, 1);
-        faces.push({ z: projected.z, order: objects.length + i, particle: true, point: projected, radius, color: particleConfig.color || '#C4B5FD', opacity });
+        faces.push({ z: projected.z, order: objects.length + i, particle: true, shape: SCENE3D_PARTICLE_SHAPES.includes(particleConfig.shape) ? particleConfig.shape : 'circle', point: projected, radius, color: particleConfig.color || '#C4B5FD', opacity });
     }
     // The fallback painter still handles unsupported/oversized surfaces. On
     // normal scene canvases the z-buffer pass below handles opaque, transparent,
@@ -1996,7 +2184,7 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
         if (face.particle) {
             ctx.globalAlpha = face.opacity;
             ctx.fillStyle = face.color;
-            ctx.beginPath(); ctx.arc(face.point.x, face.point.y, face.radius, 0, Math.PI * 2); ctx.fill();
+            traceParticlePath(ctx, face.shape, face.point.x, face.point.y, face.radius); ctx.fill();
             continue;
         }
         if (face.image) {
@@ -2104,4 +2292,4 @@ export function drawScene3D(ctx, scene = {}, time = 0, duration = 1, width = 108
     ctx.restore();
 }
 
-export const SCENE3D_PRIMITIVES = Object.freeze({ box: 'box', sphere: 'sphere', cylinder: 'cylinder', cone: 'cone', torus: 'torus', plane: 'plane', image: 'image', video: 'video', text: 'text', mesh: 'mesh' });
+export const SCENE3D_PRIMITIVES = Object.freeze({ box: 'box', sphere: 'sphere', capsule: 'capsule', cylinder: 'cylinder', cone: 'cone', torus: 'torus', plane: 'plane', image: 'image', video: 'video', text: 'text', mesh: 'mesh' });

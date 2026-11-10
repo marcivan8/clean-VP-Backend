@@ -14,6 +14,26 @@
 'use strict';
 
 const EDITING_STYLE_IDS = ['vlog', 'talking_head', 'interview', 'podcast', 'reel'];
+const EDITING_MODE_IDS = ['normal', 'auto'];
+const MODE_POLICY = {
+    normal: {
+        id: 'normal',
+        label: 'Prompt mode',
+        planning: 'Plan only the requested change. Use style rules as defaults only where the user left a choice open.',
+        execution: 'The normal edit pipeline plans, executes, and verifies each requested action.',
+    },
+    auto: {
+        id: 'auto',
+        label: 'Auto mode',
+        planning: 'The client runs the selected style playbook as an ordered multi-step edit through the normal planner and executor.',
+        execution: 'This Brain response is advisory only; do not claim Auto ran or report an edit as complete.',
+    },
+};
+
+/** Unknown mode values fall back to normal, matching the client. */
+function sanitizeEditingMode(value) {
+    return EDITING_MODE_IDS.includes(value) ? value : 'normal';
+}
 
 const STYLE_LABEL = {
     vlog: 'Vlog', talking_head: 'Talking head', interview: 'Interview', podcast: 'Podcast', reel: 'Reel',
@@ -155,6 +175,17 @@ const STYLE_FOCUS = {
     },
 };
 
+// Command ids are the executable counterpart of STYLE_FOCUS.priorities.
+// Kept beside the server's canonical style rules and copied into the generated
+// client policy/catalog so planners and the advisory Brain share the same map.
+const STYLE_COMMANDS = {
+    talking_head: ['silence_removal', 'remove_filler_words', 'remove_repetition', 'rhythm_zoom', 'auto_captions', 'enhance_audio'],
+    podcast: ['enhance_audio', 'normalize_audio', 'silence_removal', 'auto_captions', 'repurpose_shorts'],
+    interview: ['silence_removal', 'auto_captions', 'apply_angle', 'detect_speakers'],
+    vlog: ['silence_removal', 'enhance_audio', 'add_transition', 'auto_captions', 'place_contextual_illustrations'],
+    reel: ['extract_short', 'set_aspect_ratio', 'auto_captions', 'polish_short', 'rhythm_zoom'],
+};
+
 /** "STYLE FOCUS" section for the Brain, with the project's current numbers. '' with no style. */
 function styleFocusSection(styleId, ctx = {}) {
     const id = sanitizeEditingStyle(styleId);
@@ -236,8 +267,11 @@ function rhythmZoomStyle(styleId) {
 
 module.exports = {
     EDITING_STYLE_IDS,
+    EDITING_MODE_IDS,
+    MODE_POLICY,
     STYLE_LABEL,
     sanitizeEditingStyle,
+    sanitizeEditingMode,
     platformForStyle,
     keepsRecordedOrder,
     isCalmStyle,
@@ -245,6 +279,7 @@ module.exports = {
     styleFocusSection,
     ledgerSection,
     STYLE_FOCUS,
+    STYLE_COMMANDS,
     expectsMusic,
     brainStyleSection,
     projectMapStyleNote,

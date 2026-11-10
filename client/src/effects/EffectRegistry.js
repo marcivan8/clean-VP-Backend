@@ -509,10 +509,11 @@ export const EFFECT_DEFINITIONS = {
         description: 'Apply color lookup table',
         icon: 'image',
         params: {
-            lutFile: {
+            lutId: {
                 value: '',
-                type: PARAM_TYPES.FILE,
-                label: 'LUT File'
+                type: PARAM_TYPES.SELECT,
+                options: [],
+                label: 'Look'
             },
             intensity: {
                 value: 1.0,
@@ -522,8 +523,9 @@ export const EFFECT_DEFINITIONS = {
                 label: 'Intensity'
             }
         },
-        ffmpegFilter: (params) =>
-            params.lutFile ? `lut3d=${params.lutFile}` : null
+        // Export resolves lutId through the authenticated LUT library. Never
+        // put a client supplied filesystem path into an FFmpeg filter string.
+        ffmpegFilter: () => null
     },
 
     // === Audio Effects ===

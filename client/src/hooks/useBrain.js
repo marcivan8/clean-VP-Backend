@@ -141,6 +141,10 @@ function buildProjectState() {
         // R91: the editing style picked under the chat box. The server derives
         // the platform from it (reel, podcast) and every brain reads it.
         editingStyle:     state.editingStyle || null,
+        // Prompt mode and Auto mode have different planning semantics. Send the
+        // selected mode explicitly so server-side advice can describe the same
+        // workflow the client will actually run.
+        editingMode:      state.editingMode === 'auto' ? 'auto' : 'normal',
         aspectRatio:      state.aspectRatio  || '16:9',
         duration,
         clipCount,

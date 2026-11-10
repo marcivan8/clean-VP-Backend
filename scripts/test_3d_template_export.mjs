@@ -100,6 +100,38 @@ try {
     assert.equal(frames.frames, fps, 'the 3D template renderer emits one frame per output tick');
     assert.ok(fs.existsSync(frames.files[0]), 'the worker produces a real rendered 3D frame');
 
+    // Exercise the production template frame renderer with asset-keyed audio
+    // data, rather than only checking that waveform JSON survives planning.
+    const reactiveTemplate = {
+        ...overlay.source.template,
+        params: {
+            ...overlay.source.template.params,
+            scene: {
+                ...overlay.source.template.params.scene,
+                objects: overlay.source.template.params.scene.objects.map(object => ({
+                    ...object,
+                    audioReactive: { assetId: 'music-bed', target: 'scale', amount: 1 },
+                })),
+            },
+        },
+    };
+    const withWaveform = peaks => ({
+        ...reactiveTemplate,
+        params: {
+            ...reactiveTemplate.params,
+            scene: { ...reactiveTemplate.params.scene,
+                audioWaveformsByAsset: { 'music-bed': { peaks, duration: 1 } } },
+        },
+    });
+    const quietReactiveFrames = await renderTemplateFrames(withWaveform([0, 0]), {
+        durationSec: 1, fps: 1, widthPx: 360, tmpDir: path.join(tmp, 'quiet'), name: 'reactive-quiet',
+    });
+    const loudReactiveFrames = await renderTemplateFrames(withWaveform([1, 1]), {
+        durationSec: 1, fps: 1, widthPx: 360, tmpDir: path.join(tmp, 'loud'), name: 'reactive-loud',
+    });
+    assert.notDeepEqual(fs.readFileSync(quietReactiveFrames.files[0]), fs.readFileSync(loudReactiveFrames.files[0]),
+        'the production 3D export renderer applies audio-reactive object motion to rendered frame pixels');
+
     const base = path.join(tmp, 'base.mp4');
     const baseResult = spawnSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i',
         `color=c=0x808080:s=${width}x${height}:r=${fps}:d=2`, '-pix_fmt', 'yuv420p', '-y', base],

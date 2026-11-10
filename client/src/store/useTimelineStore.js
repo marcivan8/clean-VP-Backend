@@ -33,6 +33,7 @@ import { framingPlan } from '../motion/StoryboardFraming.js';
 import { inspect as inspectStoryboard, repair as repairStoryboard, describe as describeQa } from '../motion/StoryboardQA.js';
 import { findNode, updateNode, removeNode as removeSceneNodeFrom, listNodes, wrapNodeInComposition } from '../motion/SceneSchema.js';
 import { deriveSpeakerCrop, deriveTrackingSegments } from '../motion/ObjectLayers.js';
+import { applyActiveSpeakerTracking } from '../motion/CameraMotionCompiler.js';
 import { frameForPreset, splitSpeakerCrop, computeReframePlan, LAYOUT_PRESETS } from '../motion/LayoutPresets.js';
 import { TEMPLATE_KINDS, TEMPLATE_WIDTH_FRACTION, TEMPLATE_DEFAULTS, templateParams, templateSize } from '../motion/TemplateGraphics.js';
 import { applyBrand, normalizeBrand, brandFromProject } from '../motion/BrandKit.js';
@@ -464,10 +465,10 @@ const useTimelineStore = create(
                 const prevRatio = get().aspectRatio;
                 set({ aspectRatio: newRatio });
                 timelineManager.dispatch(TimelineActions.setAspectRatio(newRatio));
-                // R100: the smart speaker/face-aware crop now runs automatically on
+                // R100: the smart subject-aware crop now runs automatically on
                 // EVERY aspect-ratio switch, from every entry point (AI command,
                 // settings panel, timeline dropdown, mobile sheet) — not just when an
-                // explicit AI command asked for a face-aware reframe. reframeToFrame()
+                // explicit AI command asked for a tracked-subject reframe. reframeToFrame()
                 // is self-skipping: fillFrameCrop() returns null (nothing to do) once
                 // the new frame is wide enough to not need a crop, and in that case
                 // reframeToFrame() also drops any crop IT previously applied, so
@@ -2991,13 +2992,9 @@ const useTimelineStore = create(
             },
 
             /**
-             * "Track speaker": splits the clip into re-centering pieces (see
-             * ObjectLayers.deriveTrackingSegments), each with its own static
-             * virtualCam crop — the SAME piece-splitting shape virtual_multicam
-             * already uses for per-turn angle changes, applied to subject
-             * motion. Replaces the original clip with N new clips as ONE
-             * history step (removeClip/addClip below run with skipHistory
-             * since this wrapper already called _saveHistory once).
+             * Track speaker smoothly by default: retain the original clip and
+             * animate its camera crop from the analyzed subject bounds. Use
+             * mode:'segments' when editorial recenter cuts are preferred.
              */
             trackSpeaker: (trackId, clipId, opts = {}) => {
                 const track = get().tracks.find(t => t.id === trackId);
@@ -3005,6 +3002,28 @@ const useTimelineStore = create(
                 if (!clip) return { success: false, error: `clip "${clipId}" not found on track "${trackId}"` };
                 if (!clip.layerMask?.bboxTrack?.length) {
                     return { success: false, error: 'No SAM2 separation on this clip yet — run "separate speaker" first.' };
+                }
+
+                if (opts.mode !== 'segments') {
+                    const sourceOffset = Number(clip.offset) || 0;
+                    const duration = Number(clip.duration) || 0;
+                    const crop = deriveSpeakerCrop(clip.layerMask.bboxTrack, {
+                        sourceStart: sourceOffset,
+                        duration: duration * (Number(clip.speed) > 0 ? Number(clip.speed) : 1),
+                        padding: opts.padding,
+                    });
+                    if (!crop) return { success: false, error: 'Could not derive tracking — no mask samples cover this clip\'s trimmed range.' };
+                    const framedClip = { ...clip, virtualCam: { ...crop, tracking: 'active-speaker' } };
+                    const trackedClip = applyActiveSpeakerTracking(framedClip, clip.layerMask.bboxTrack, opts);
+                    if (!trackedClip?.keyframes?.panX?.length) {
+                        return { success: false, error: 'Could not derive speaker motion from the available mask samples.' };
+                    }
+                    get().updateClip(trackId, clipId, {
+                        virtualCam: trackedClip.virtualCam,
+                        keyframes: trackedClip.keyframes,
+                        layerTarget: 'speaker',
+                    });
+                    return { success: true, mode: 'smooth', keyframes: trackedClip.keyframes.panX.length };
                 }
 
                 const sourceOffset = Number(clip.offset) || 0;
@@ -3119,7 +3138,7 @@ const useTimelineStore = create(
             /**
              * R88 (to-do A1) — layout presets for a visual on the overlay track:
              * 'split' (speaker top, this clip bottom), 'fullscreen' (cutaway)
-             * or 'pip' (small, in a corner). Geometry and the face-aware speaker
+             * or 'pip' (small, in a corner). Geometry and the subject-aware speaker
              * crop come from the pure motion/LayoutPresets.js.
              *
              * Split reframes the speaker ONLY under the overlay: each base clip
@@ -3131,17 +3150,18 @@ const useTimelineStore = create(
              * the original clip start and would replay at the wrong moment.
              * One undo step for the whole operation.
              *
-             * @returns {{success:boolean, error?:string, faceAware?:boolean, reframed?:number}}
+             * @returns {{success:boolean, error?:string, subjectAware?:boolean, reframed?:number}}
              */
             /**
              * R91 — fill a narrower frame (9:16 reel from a 16:9 talk) with a
              * crop centred on the speaker instead of bars. Each base video clip
              * without its own crop gets a full-height crop (motion/LayoutPresets.js
-             * fillFrameCrop), face-centred from its SAM2 samples when it has
-             * them. Clips whose source shape is unknown, or that already carry
+             * fillFrameCrop), centred on the tracked person's horizontal
+             * midpoint when subject samples are available. Clips whose source
+             * shape is unknown, or that already carry
              * a crop (multicam angle, split layout), are left as they are.
              * One undo step.
-             * @returns {{reframed:number, faceAware:number, skipped:number}}
+             * @returns {{reframed:number, subjectAware:number, skipped:number}}
              */
             reframeToFrame: () => {
                 // R100: the per-clip crop maths is shared with the shorts/
@@ -3153,10 +3173,10 @@ const useTimelineStore = create(
                 const state = get();
                 const dims = getPlayerDimensions(state.aspectRatio);
                 const frameAspect = dims.width / dims.height;
-                const { work, faceAwareCount, skippedCount } = computeReframePlan(state.tracks, {
+                const { work, subjectAwareCount, skippedCount } = computeReframePlan(state.tracks, {
                     frameAspect, assets: state.assets, aspectRatio: state.aspectRatio,
                 });
-                const result = { reframed: 0, faceAware: faceAwareCount, skipped: skippedCount };
+                const result = { reframed: 0, subjectAware: subjectAwareCount, skipped: skippedCount };
                 if (work.length === 0) return result;
                 get()._saveHistory();
                 for (const w of work) {
@@ -3199,10 +3219,10 @@ const useTimelineStore = create(
                 const s1 = s0 + (Number(clip.duration) || 0);
                 const fresh = get();
                 const baseTrack = fresh.tracks.find(t => t.type === 'video' && (t.clips || []).length > 0);
-                if (!baseTrack) return { success: true, preset, reframed: 0, faceAware: false };
+                if (!baseTrack) return { success: true, preset, reframed: 0, subjectAware: false };
 
                 let reframed = 0;
-                let faceAware = false;
+                let subjectAware = false;
                 const overlapping = baseTrack.clips.filter(b => b.start < s1 - 0.01 && b.start + b.duration > s0 + 0.01);
                 for (const b of overlapping) {
                     const bStart = Number(b.start) || 0;
@@ -3216,14 +3236,14 @@ const useTimelineStore = create(
                     pieces.push({ kind: 'during', start: dStart, end: dEnd });
                     if (bEnd - dEnd > 0.05) pieces.push({ kind: 'after', start: dEnd, end: bEnd });
 
-                    const { crop, faceAware: fa } = splitSpeakerCrop({
+                    const { crop, subjectAware: trackedSubject } = splitSpeakerCrop({
                         bboxTrack: b.layerMask?.bboxTrack || null,
                         sourceStart: offset + (dStart - bStart) * speed,
                         duration: (dEnd - dStart) * speed,
                         sourceAspect: resOf(b) || frameAspect,
                         frameAspect,
                     });
-                    faceAware = faceAware || fa;
+                    subjectAware = subjectAware || trackedSubject;
                     const layoutBase = { preset: 'split', overlayClipId: clip.id, previousVirtualCam: b.virtualCam ?? null };
 
                     if (pieces.length === 1) {
@@ -3253,7 +3273,7 @@ const useTimelineStore = create(
                     }
                     reframed++;
                 }
-                return { success: true, preset, reframed, faceAware };
+                return { success: true, preset, reframed, subjectAware };
             },
 
             /** Remove an overlay's layout: back to a free sticker, speaker framing restored. */

@@ -198,6 +198,46 @@ export function resolveTimelineEffectFilter(effects = [], time = 0, context = {}
         .join(' ');
 }
 
+/** CSS approximation for authenticated LUT previews attached to a clip effect. */
+export function resolveTimelineLutPreviewFilter(effects = [], lutFilters = {}, time = 0, context = {}) {
+    const ordered = (Array.isArray(effects) ? effects : [])
+        .map((effect, index) => ({ effect, index }))
+        .sort((a, b) => (Number(a.effect?.order) || 0) - (Number(b.effect?.order) || 0) || a.index - b.index)
+        .map(({ effect }) => effect);
+    const result = [];
+    for (const effect of ordered) {
+        if (!effect || effect.enabled === false || !isEffectActiveAtTime(effect, time)
+            || (effect.kind || effect.type || effect.id) !== 'lut_apply') continue;
+        const lutParam = effect.params?.lutId;
+        const lutId = lutParam && typeof lutParam === 'object' && 'value' in lutParam
+            ? lutParam.value : lutParam;
+        const cssFilter = lutFilters[String(lutId || '')];
+        if (!cssFilter || cssFilter === 'none') continue;
+        const intensity = Math.max(0, Math.min(1, Number(readEffectParam(effect, 'intensity', 1, time, context))));
+        if (!intensity) continue;
+        // Interpolate CSS filter functions that have a neutral identity at
+        // brightness/contrast/saturate/sepia/grayscale/invert=1/1/1/0/0/0.
+        // Unknown functions are included only at full strength rather than
+        // pretending a partial blend is accurate.
+        const functions = [...String(cssFilter).matchAll(/([a-z-]+)\(([-+\d.]+)(%|deg|px)?\)/gi)];
+        const supported = new Set(['brightness', 'contrast', 'saturate', 'sepia', 'grayscale', 'invert', 'hue-rotate']);
+        if (!functions.length || functions.some(match => !supported.has(match[1].toLowerCase()))) {
+            if (intensity >= 0.999) result.push(cssFilter);
+            continue;
+        }
+        const scaled = functions.map(match => {
+            const [, name, raw, unit = ''] = match;
+            const numeric = Number(raw);
+            const identity = name.toLowerCase() === 'hue-rotate' ? 0
+                : ['sepia', 'grayscale', 'invert'].includes(name.toLowerCase()) ? 0 : 1;
+            const value = identity + (numeric - identity) * intensity;
+            return `${name}(${Number(value.toFixed(4))}${unit})`;
+        }).join(' ');
+        if (scaled) result.push(scaled);
+    }
+    return result.join(' ');
+}
+
 /** Parameterized SVG filters need one definition per effect instance so stacked
  * copies keep their own values instead of all inheriting the last instance. */
 export function resolveTimelineSvgEffectInstances(effects = [], time = 0, context = {}) {

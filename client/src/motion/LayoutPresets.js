@@ -30,7 +30,7 @@
 
 export const LAYOUT_PRESETS = ['split', 'fullscreen', 'pip'];
 
-/** Head position inside a SAM2 speaker box: the upper part of the body. */
+/** Approximate head position inside a person-segmentation box. */
 const HEAD_FROM_TOP = 0.2;
 /** Talking-head fallback anchor used across the codebase (zoom anchor, R85). */
 const FALLBACK_HEAD = { x: 0.5, y: 0.28 };
@@ -88,12 +88,12 @@ export function hasLayoutFrame(clip) {
  * The speaker crop for the split layout's top half.
  *
  * @param {object} opts
- *   bboxTrack     SAM2 samples [{t,cx,cy,w,h}] in SOURCE fractions, or null
+ *   bboxTrack     person segmentation samples [{t,cx,cy,w,h}] in SOURCE fractions, or null
  *   sourceStart   source seconds where the reframed span starts
  *   duration      length of that span (source seconds)
  *   sourceAspect  width / height of the speaker video
  *   frameAspect   width / height of the project frame
- * @returns {{crop:{cropX,cropY,cropW,cropH}, faceAware:boolean}}
+ * @returns {{crop:{cropX,cropY,cropW,cropH}, subjectAware:boolean}}
  */
 export function splitSpeakerCrop({ bboxTrack = null, sourceStart = 0, duration = Infinity, sourceAspect, frameAspect } = {}) {
     const sa = Number(sourceAspect) > 0 ? Number(sourceAspect) : 9 / 16;
@@ -111,7 +111,7 @@ export function splitSpeakerCrop({ bboxTrack = null, sourceStart = 0, duration =
     let headX = FALLBACK_HEAD.x;
     let headY = FALLBACK_HEAD.y;
     let cropH = maxH;
-    let faceAware = false;
+    let subjectAware = false;
     if (samples.length > 0) {
         const cx = median(samples.map(s => s.cx));
         const cy = median(samples.map(s => s.cy));
@@ -122,7 +122,7 @@ export function splitSpeakerCrop({ bboxTrack = null, sourceStart = 0, duration =
             // Head and shoulders (about half of the body box) fill most of the
             // visible top half (cropH / 2) of the frame.
             cropH = clamp((0.5 * h) / (0.8 * 0.5), 0.3, maxH);
-            faceAware = true;
+            subjectAware = true;
         }
     }
     const cropW = clamp(cropH * ratio, 0.05, 1);
@@ -131,17 +131,17 @@ export function splitSpeakerCrop({ bboxTrack = null, sourceStart = 0, duration =
     const cropX = clamp(headX - cropW / 2, 0, 1 - cropW);
     const cropY = clamp(headY - cropH / 4, 0, Math.max(0, 1 - cropH));
     const r = (v) => Math.round(v * 10000) / 10000;
-    return { crop: { cropX: r(cropX), cropY: r(cropY), cropW: r(cropW), cropH: r(cropH) }, faceAware };
+    return { crop: { cropX: r(cropX), cropY: r(cropY), cropW: r(cropW), cropH: r(cropH) }, subjectAware };
 }
 
 /**
  * R91 — full-frame reframe when the project frame is narrower than the video
  * (a 16:9 talk set to 9:16 for a reel): the crop keeps the full height and is
- * centred on the speaker's head (SAM2 samples over the clip's span), or on
- * the centre when there is no face data. Null when no crop is needed (the
+ * centred on the tracked person's horizontal midpoint, or on the centre when
+ * there is no subject track. Null when no crop is needed (the
  * video is already as narrow as the frame).
  *
- * @returns {{crop:{cropX,cropY,cropW,cropH}, faceAware:boolean}|null}
+ * @returns {{crop:{cropX,cropY,cropW,cropH}, subjectAware:boolean}|null}
  */
 export function fillFrameCrop({ bboxTrack = null, sourceStart = 0, duration = Infinity, sourceAspect, frameAspect } = {}) {
     const sa = Number(sourceAspect);
@@ -157,7 +157,7 @@ export function fillFrameCrop({ bboxTrack = null, sourceStart = 0, duration = In
     const headX = cx != null ? cx : FALLBACK_HEAD.x;
     const cropX = clamp(headX - cropW / 2, 0, 1 - cropW);
     const r = (v) => Math.round(v * 10000) / 10000;
-    return { crop: { cropX: r(cropX), cropY: 0, cropW: r(cropW), cropH: 1 }, faceAware: cx != null };
+    return { crop: { cropX: r(cropX), cropY: 0, cropW: r(cropW), cropH: 1 }, subjectAware: cx != null };
 }
 
 /**
@@ -181,7 +181,7 @@ export function fillFrameCrop({ bboxTrack = null, sourceStart = 0, duration = In
  * @param {{frameAspect:number, assets?:Array, aspectRatio:string}} opts
  *   `aspectRatio` is the human label ('9:16' etc) stamped onto the crop so a
  *   later call can tell "this crop is ours" from a crop set some other way.
- * @returns {{work:Array<{trackId:string, clipId:string, crop:object|null}>, faceAwareCount:number, skippedCount:number}}
+ * @returns {{work:Array<{trackId:string, clipId:string, crop:object|null}>, subjectAwareCount:number, skippedCount:number}}
  */
 export function computeReframePlan(tracks, { frameAspect, assets = [], aspectRatio } = {}) {
     const assetOf = (c) => (assets || []).find(a => a.id === c?.assetId) || null;
@@ -195,7 +195,7 @@ export function computeReframePlan(tracks, { frameAspect, assets = [], aspectRat
         return null;
     };
     const work = [];
-    let faceAwareCount = 0, skippedCount = 0;
+    let subjectAwareCount = 0, skippedCount = 0;
     for (const t of (tracks || []).filter(tr => tr.type === 'video')) {
         for (const c of (t.clips || [])) {
             if (c.type && c.type !== 'video') continue;
@@ -214,11 +214,11 @@ export function computeReframePlan(tracks, { frameAspect, assets = [], aspectRat
                 else if (aspectOf(c) == null) skippedCount++;
                 continue;
             }
-            work.push({ trackId: t.id, clipId: c.id, crop: { ...fit.crop, reframe: aspectRatio, faceAware: !!fit.faceAware } });
-            if (fit.faceAware) faceAwareCount++;
+            work.push({ trackId: t.id, clipId: c.id, crop: { ...fit.crop, reframe: aspectRatio, subjectAware: !!fit.subjectAware } });
+            if (fit.subjectAware) subjectAwareCount++;
         }
     }
-    return { work, faceAwareCount, skippedCount };
+    return { work, subjectAwareCount, skippedCount };
 }
 
 /**

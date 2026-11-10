@@ -399,10 +399,14 @@ function reduceEffectSampleRows(rows, keys, protectedTimes, max = 60) {
     // The worker validator will refuse this over-budget track explicitly.
     if (retained.size > max) return [...retained].sort((a, b) => a - b).map(index => rows[index]);
     const ranges = Object.fromEntries(keys.map(key => {
-        const values = rows.map(row => row.values[key]).filter(Number.isFinite);
-        let low = Infinity, high = -Infinity;
-        for (const value of values) { low = Math.min(low, value); high = Math.max(high, value); }
-        return [key, Math.max(1e-9, high - low)];
+        const vectors = rows.map(row => row.values[key]).filter(Array.isArray);
+        const length = vectors.length ? Math.max(...vectors.map(value => value.length)) : 1;
+        return [key, Array.from({ length }, (_, channel) => {
+            const values = rows.map(row => Array.isArray(row.values[key]) ? row.values[key][channel] : row.values[key]).filter(Number.isFinite);
+            let low = Infinity, high = -Infinity;
+            for (const value of values) { low = Math.min(low, value); high = Math.max(high, value); }
+            return Math.max(1e-9, high - low);
+        })];
     }));
     const tolerance = 0.0015;
     while (retained.size < max) {
@@ -418,9 +422,14 @@ function reduceEffectSampleRows(rows, keys, protectedTimes, max = 60) {
                 const progress = dt > 0 ? (point.localTime - a.localTime) / dt : 0;
                 let deviation = 0;
                 for (const key of keys) {
-                    const actual = point.values[key], from = a.values[key], to = b.values[key];
-                    if (![actual, from, to].every(Number.isFinite)) continue;
-                    deviation = Math.max(deviation, Math.abs(actual - (from + (to - from) * progress)) / ranges[key]);
+                    const actuals = Array.isArray(point.values[key]) ? point.values[key] : [point.values[key]];
+                    const froms = Array.isArray(a.values[key]) ? a.values[key] : [a.values[key]];
+                    const tos = Array.isArray(b.values[key]) ? b.values[key] : [b.values[key]];
+                    for (let channel = 0; channel < Math.max(actuals.length, froms.length, tos.length); channel++) {
+                        const actual = actuals[channel], from = froms[channel], to = tos[channel];
+                        if (![actual, from, to].every(Number.isFinite)) continue;
+                        deviation = Math.max(deviation, Math.abs(actual - (from + (to - from) * progress)) / ranges[key][channel]);
+                    }
                 }
                 if (deviation > worst) { worst = deviation; worstIndex = index; }
             }
@@ -495,16 +504,20 @@ function sampleEffectTracks(effects, layer, timeMap, { clipLocalOutputTime = fal
             localTime,
             t: Number((clipLocalOutputTime ? localTime : timelineToOutputTime(timeMap, layer.startTime + localTime)).toFixed(4)),
             values: Object.fromEntries(keys.map(key => [key,
-                Number(resolveEffectParameter(effect, key, Number(params[key]?.value ?? params[key]) || 0, (Number(layer.startTime) || 0) + localTime, {
+                resolveEffectParameter(effect, key, Array.isArray(params[key]?.value ?? params[key])
+                    ? (params[key]?.value ?? params[key])
+                    : Number(params[key]?.value ?? params[key]) || 0, (Number(layer.startTime) || 0) + localTime, {
                     clipStart: Number(layer.startTime) || 0,
                     clipDuration: duration,
-                })),
+                }),
             ])),
         }));
         const reducedRows = reduceEffectSampleRows(rows, keys, protectedTimes, 60);
         const samples = Object.fromEntries(keys.map(key => [key,
             reducedRows.map(row => ({ t: row.t, value: row.values[key] }))
-                .filter(point => Number.isFinite(point.t) && Number.isFinite(point.value)),
+                .filter(point => Number.isFinite(point.t) && (Array.isArray(point.value)
+                    ? point.value.length > 0 && point.value.every(Number.isFinite)
+                    : Number.isFinite(point.value))),
         ]));
         return { ...effect, ...(outputWindows ? { outputWindows } : {}), samples, sourceIndex: effectIndex };
     });
@@ -898,7 +911,7 @@ export function validateCompositionPlan(plan) {
 
     (plan.overlays || []).forEach((ov, i) => {
         const vector = ov.source?.vector;
-        const vectorKinds = new Set(['rect', 'circle', 'ellipse', 'capsule', 'polygon', 'star', 'arrow', 'path']);
+        const vectorKinds = new Set(['rect', 'circle', 'ellipse', 'capsule', 'callout', 'polygon', 'star', 'arrow', 'path']);
         const inlineVector = ov.source?.type === 'vector' && vector && typeof vector === 'object'
             && vectorKinds.has(String(vector.kind || 'rect'))
             && (!('w' in vector) || (Number.isFinite(Number(vector.w)) && Number(vector.w) > 0 && Number(vector.w) <= 10000))
@@ -929,7 +942,7 @@ export function validateCompositionPlan(plan) {
             || (group.effects != null && (!Array.isArray(group.effects) || group.effects.some(effect => !validClientIsolatedGroupEffect(effect))))))) {
             errors.push(`overlays[${i}]: compositionStack must contain groups with ids and opacity in [0, 1]`);
         }
-        const supportedShapeMasks = ['ellipse', 'circle', 'rectangle', 'rounded-rectangle', 'polygon', 'star', 'arrow'];
+        const supportedShapeMasks = ['ellipse', 'circle', 'rectangle', 'rounded-rectangle', 'capsule', 'callout', 'polygon', 'star', 'arrow'];
         if (ov.sceneMask && (ov.sceneMask.kind !== 'shape' || !supportedShapeMasks.includes(ov.sceneMask.shape))) {
             const matte = (plan.overlays || []).find(candidate => candidate?.id === ov.sceneMask?.sourceOverlayId);
             if (ov.sceneMask.kind !== 'layer' || !matte?.matteOnly || matte.id === ov.id) {

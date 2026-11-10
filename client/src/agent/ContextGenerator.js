@@ -3,6 +3,7 @@ import { styleContext } from './EditingStyles.js';
 import { applyStyleToAnalysis } from './ContentAnalyzer.js';
 import { buildTimelineSourceMap } from '../timeline/targetRangeResolver.js';
 import { buildAssetManifest, manifestSummary } from './AssetManifest.js';
+import { buildStyleReferencePlan } from '../motion/StyleReferenceAdapter.js';
 
 export class ContextGenerator {
     static getTimelineContext() {
@@ -35,6 +36,21 @@ export class ContextGenerator {
         if (editingStyle) displayStr += `- Editing style: ${editingStyle.id}; mode: ${editingStyle.mode}. Explicit user instructions override style defaults; use the style only for choices the user left open.\n`;
         const assetManifest = buildAssetManifest(assets);
         const editableAssets = assetManifest.filter(asset => asset.editable);
+        const styleReferenceAssets = (assets || []).filter(asset => asset?.assistantReference === true
+            && ['video', 'image'].includes(String(asset.type || '').toLowerCase()));
+        const latestStyleReference = styleReferenceAssets[styleReferenceAssets.length - 1] || null;
+        const referenceStyle = latestStyleReference
+            ? buildStyleReferencePlan(latestStyleReference.visualStyleProfile)
+            : null;
+        const referenceAnalysisStatus = latestStyleReference
+            ? (referenceStyle ? 'ready' : latestStyleReference.visualStyleProfile
+                ? 'low_confidence'
+                : latestStyleReference.referenceAnalysisStatus || 'pending')
+            : 'not_attached';
+        if (latestStyleReference) {
+            displayStr += `- Style reference: ${latestStyleReference.name || 'Attached reference'}; analysis=${referenceAnalysisStatus}${referenceStyle ? `, confidence=${referenceStyle.confidence.toFixed(2)}, sampled=${referenceStyle.evidence.sampleCount ?? 'unknown'} frame(s)` : ''}. It is design guidance only, never an edit source.\n`;
+            if (referenceStyle) displayStr += `  Supported visual guidance: ${JSON.stringify(referenceStyle)}\n`;
+        }
         if (editableAssets.length) {
             displayStr += `- Editable media bin assets (${editableAssets.length}; complete inventory follows):\n`;
             editableAssets.forEach(asset => {
@@ -95,6 +111,8 @@ export class ContextGenerator {
             selectedClipIds: Array.isArray(selectedClipIds) ? selectedClipIds : [],
             selectedTimelineRange: selectedTimelineRange || null,
             editingStyle,
+            referenceStyle,
+            referenceAnalysisStatus,
             instructionPriority: 'Explicit user instructions override style defaults; style guidance fills only unspecified choices.',
             // Give the API planner the same grounded source inventory used by
             // local media tools. Never expose assistant-only references as

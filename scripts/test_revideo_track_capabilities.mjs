@@ -56,8 +56,24 @@ assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type
   'non-centred text alignment stays on the caption compositor path');
 assert.equal(isRevideoTrackSupported({ type: 'overlay', clips: [{ id: 'logo', type: 'image', url: '/logo.png', sceneMask: { kind: 'shape' } }] }), false,
   'masked overlays stay on the compositor path');
-assert.equal(isRevideoTrackSupported({ type: 'overlay', clips: [{ id: 'logo', type: 'image', url: '/logo.png', keyframes: { scale: [{ time: 0, value: 1 }, { time: 1, value: 1.5 }] } }] }), false,
-  'legacy clip keyframes stay on the compositor path until the worker adapter translates them');
+assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type: 'text', content: 'Hello', keyframes: {
+  x: [{ time: 0, value: 20 }, { time: 1, value: 60 }],
+  scale: [{ time: 0, value: 1 }, { time: 1, value: 1.5 }],
+  opacity: [{ time: 0, value: 0 }, { time: 1, value: 1 }],
+} }] }), true,
+  'Revideo text layers evaluate supported legacy clip transform keyframes');
+assert.equal(isRevideoTrackSupported({ type: 'overlay', clips: [{ id: 'logo', type: 'image', url: '/logo.png', keyframes: {
+  scale: [{ time: 0, value: 1 }, { time: 1, value: 1.5 }],
+} }] }), false,
+  'overlay image and video nodes keep legacy keyframes on the compositor path because their Revideo branch does not evaluate them');
+assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type: 'text', content: 'Hello', keyframes: {
+  unknownChannel: [{ time: 0, value: 1 }],
+} }] }), false,
+  'unknown legacy text channels stay on the compositor path');
+assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type: 'text', content: 'Hello', keyframes: {
+  scale: [{ time: 0, value: Number.NaN }],
+} }] }), false,
+  'malformed legacy text keyframes stay on the compositor path');
 assert.equal(isRevideoTrackSupported({ type: 'overlay', clips: [{ id: 'logo', type: 'image', url: '/logo.png', compositionStack: [{ id: 'group', transformExpressions: { x: 't' } }] }] }), false,
   'nested-composition transforms stay on the compositor path until the worker adapter preserves the stack');
 assert.equal(isRevideoTrackSupported({ type: 'overlay', clips: [{ id: 'logo', type: 'image', url: '/logo.png', blendMode: 'screen' }] }), false,

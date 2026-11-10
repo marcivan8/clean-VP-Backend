@@ -2,9 +2,11 @@ import React, { useRef, useState, useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../../store/useTimelineStore';
+import { audioEngineAPI } from '../../audio-engine/AudioEngineAPI.js';
 import { getVisualTrackRoles } from '../../motion/Compositor.js';
 import { clipToMotionLayer } from '../../motion/ClipAdapter.js';
 import { resolveMotionAt, sampleKeyframeTrack } from '../../motion/MotionResolver.js';
+import { composeAnimatedCrop } from '../../motion/CameraMotionCompiler.js';
 import CaptionOverlay from './CaptionOverlay';
 import TextOverlay from './TextOverlay';
 import GraphicOverlay from './GraphicOverlay';
@@ -15,7 +17,7 @@ import ObjectLayerOverlay from './ObjectLayerOverlay'; // R67 — Object Intelli
 import TransitionLayer from './TransitionLayer.jsx';
 import { transitionTransform, transitionFilter } from './transitionStyle.js';
 import { transitionWindows, fxAtTime } from '../../motion/TransitionFX.js';
-import { combinePreviewFilters, resolveTimelineEffectFilter, resolveTimelineEffectTransform, resolveTimelineFadeOverlays, resolveTimelineSvgEffectParams, resolveTimelineSvgEffectInstances, resolveTimelineVignetteStyle } from '../../motion/TimelineVisualEffects.js';
+import { combinePreviewFilters, resolveTimelineEffectFilter, resolveTimelineLutPreviewFilter, resolveTimelineEffectTransform, resolveTimelineFadeOverlays, resolveTimelineSvgEffectParams, resolveTimelineSvgEffectInstances, resolveTimelineVignetteStyle } from '../../motion/TimelineVisualEffects.js';
 import { drawRadialBlur, previewCanvasSize } from '../../motion/RadialBlurPreview.js';
 import { useDeviceType } from '../../hooks/useDeviceType.js';
 import { createTimelineRetimeMap, mapSourceTimeToTimeline, mapTimelineTimeToRate, mapTimelineTimeToSource, serializeTimelineRetimeMap } from '../../timeline/retimeMap.js';
@@ -89,20 +91,6 @@ function interpolateKeyframes(propKeyframes, defaultVal, localTime) {
  * @param {number} extraScale  — interpolated keyframe scale (1.0 = no extra zoom)
  * @returns {{cropX:number,cropY:number,cropW:number,cropH:number}}
  */
-function composeCropWithZoom(baseCrop, extraScale) {
-    if (!extraScale || extraScale <= 1.0001) return baseCrop;
-    const cx = baseCrop.cropX + baseCrop.cropW / 2;
-    const cy = baseCrop.cropY + baseCrop.cropH / 2;
-    const w  = baseCrop.cropW / extraScale;
-    const h  = baseCrop.cropH / extraScale;
-    return {
-        cropX: Math.max(0, Math.min(1 - w, cx - w / 2)),
-        cropY: Math.max(0, Math.min(1 - h, cy - h / 2)),
-        cropW: w,
-        cropH: h,
-    };
-}
-
 function RadialFootageCanvas({ videoRef, radial, isPlaying, style }) {
     const canvasRef = useRef(null);
     const [ready, setReady] = useState(false);
@@ -160,6 +148,7 @@ function RadialFootageCanvas({ videoRef, radial, isPlaying, style }) {
 }
 
 const VideoPlayer = () => {
+    const [clipLutPreviewFilters, setClipLutPreviewFilters] = useState({});
     // Phones take the cheap transition filter: the full SVG chain over a live
     // video is what makes playback stutter through a cut on a phone GPU.
     const { isMobile: isMobileViewport } = useDeviceType();
@@ -263,6 +252,23 @@ const VideoPlayer = () => {
     const activeClip = (videoTrack?.clips || []).find(isPlayableClip)
         || videoTracks.filter(track => track.id !== videoTrack?.id)
             .flatMap(track => track.clips || []).find(isPlayableClip);
+
+    const clipLutIds = [...new Set((activeClip?.effects || [])
+        .filter(effect => effect && effect.enabled !== false && (effect.kind || effect.type || effect.id) === 'lut_apply')
+        .map(effect => effect.params?.lutId?.value ?? effect.params?.lutId)
+        .filter(Boolean).map(String))].sort();
+    const clipLutIdsKey = clipLutIds.join('|');
+    useEffect(() => {
+        if (!clipLutIds.length) {
+            setClipLutPreviewFilters({});
+            return undefined;
+        }
+        let cancelled = false;
+        setClipLutPreviewFilters({});
+        Promise.all(clipLutIds.map(async lutId => [lutId, await audioEngineAPI.getLUTPreview(lutId)]))
+            .then(entries => { if (!cancelled) setClipLutPreviewFilters(Object.fromEntries(entries)); });
+        return () => { cancelled = true; };
+    }, [clipLutIdsKey]);
 
     // activeClipForEngine: stable reference that only changes when properties the
     // engine actually cares about change. x / y / scale / rotation are pure CSS
@@ -575,15 +581,13 @@ const VideoPlayer = () => {
         const { cropX = 0, cropY = 0, cropW = 1, cropH = 1 } = activeClip.virtualCam;
         const baseCrop = { cropX, cropY, cropW, cropH };
 
-        const scaleKfs = activeClip.keyframes?.scale;
-        if (scaleKfs?.length) {
-            const localTime   = currentTime - activeClip.start;
-            const extraScale  = interpolateKeyframes(scaleKfs, 1.0, localTime);
-            const composed    = composeCropWithZoom(baseCrop, extraScale);
-            engineRef.current.setCrop(composed.cropX, composed.cropY, composed.cropW, composed.cropH);
-        } else {
-            engineRef.current.setCrop(cropX, cropY, cropW, cropH);
-        }
+        const localTime = currentTime - activeClip.start;
+        const kf = activeClip.keyframes || {};
+        const extraScale = interpolateKeyframes(kf.scale, 1.0, localTime);
+        const panX = interpolateKeyframes(kf.panX, 0, localTime);
+        const panY = interpolateKeyframes(kf.panY, 0, localTime);
+        const composed = composeAnimatedCrop(baseCrop, extraScale, panX, panY);
+        engineRef.current.setCrop(composed.cropX, composed.cropY, composed.cropW, composed.cropH);
     }, [currentTime, activeClip?.id, activeClip?.start, activeClip?.virtualCam, activeClip?.keyframes]);
 
     // --- Fallback <video> element sync (only active while useFallbackPlayer) ---
@@ -914,6 +918,17 @@ const VideoPlayer = () => {
         { clipStart: Number(activeClip?.start ?? activeClip?.startTime) || 0, clipDuration: Number(activeClip?.duration) || 0 },
     );
     const previewBaseTransform = [baseTransform, shakeTransform].filter(Boolean).join(' ') || undefined;
+    const animatedVirtualCrop = (vc) => {
+        if (!vc) return null;
+        const localTime = currentTime - (Number(activeClip?.start) || 0);
+        const kf = activeClip?.keyframes || {};
+        return composeAnimatedCrop(
+            { cropX: Number(vc.cropX) || 0, cropY: Number(vc.cropY) || 0, cropW: Number(vc.cropW) || 1, cropH: Number(vc.cropH) || 1 },
+            interpolateKeyframes(kf.scale, 1, localTime),
+            interpolateKeyframes(kf.panX, 0, localTime),
+            interpolateKeyframes(kf.panY, 0, localTime),
+        );
+    };
     // The normal WebGL path applies virtualCam as a UV crop. When WebCodecs or
     // WebGL fails, reproduce that crop with CSS so multicam does not look wide
     // just because playback switched to the native-video fallback.
@@ -921,14 +936,15 @@ const VideoPlayer = () => {
         const vc = activeClip?.virtualCam;
         if (!useFallbackPlayer || !vc) return previewBaseTransform;
 
-        const cropW = Math.max(0.05, Math.min(1, Number(vc.cropW) || 1));
-        const cropH = Math.max(0.05, Math.min(1, Number(vc.cropH) || cropW));
+        const crop = animatedVirtualCrop(vc);
+        const cropW = Math.max(0.05, Math.min(1, Number(crop?.cropW) || 1));
+        const cropH = Math.max(0.05, Math.min(1, Number(crop?.cropH) || cropW));
         if (cropW >= 0.999 && cropH >= 0.999) return previewBaseTransform;
 
         const scaleX = 1 / cropW;
         const scaleY = 1 / cropH;
-        const centerX = (Number(vc.cropX) || 0) + cropW / 2;
-        const centerY = (Number(vc.cropY) || 0) + cropH / 2;
+        const centerX = (Number(crop?.cropX) || 0) + cropW / 2;
+        const centerY = (Number(crop?.cropY) || 0) + cropH / 2;
         const translateX = (0.5 - centerX) * scaleX * 100;
         const translateY = (0.5 - centerY) * scaleY * 100;
         const cropTransform = `translate(${translateX}%, ${translateY}%) scale(${scaleX}, ${scaleY})`;
@@ -940,19 +956,21 @@ const VideoPlayer = () => {
     const matteTransform = (() => {
         const vc = activeClip?.virtualCam;
         if (!vc) return previewBaseTransform;
-        const cropW = Math.max(0.05, Math.min(1, Number(vc.cropW) || 1));
-        const cropH = Math.max(0.05, Math.min(1, Number(vc.cropH) || cropW));
+        const crop = animatedVirtualCrop(vc);
+        const cropW = Math.max(0.05, Math.min(1, Number(crop?.cropW) || 1));
+        const cropH = Math.max(0.05, Math.min(1, Number(crop?.cropH) || cropW));
         if (cropW >= 0.999 && cropH >= 0.999) return previewBaseTransform;
         const scaleX = 1 / cropW;
         const scaleY = 1 / cropH;
-        const centerX = (Number(vc.cropX) || 0) + cropW / 2;
-        const centerY = (Number(vc.cropY) || 0) + cropH / 2;
+        const centerX = (Number(crop?.cropX) || 0) + cropW / 2;
+        const centerY = (Number(crop?.cropY) || 0) + cropH / 2;
         const x = (0.5 - centerX) * scaleX * 100;
         const y = (0.5 - centerY) * scaleY * 100;
         return [previewBaseTransform, `translate(${x}%, ${y}%) scale(${scaleX}, ${scaleY})`].filter(Boolean).join(' ');
     })();
     const effectContext = { clipStart: Number(activeClip?.start ?? activeClip?.startTime) || 0, clipDuration: Number(activeClip?.duration) || 0 };
     const effectFilter = resolveTimelineEffectFilter(activeClip?.effects, currentTime, effectContext);
+    const clipLutFilter = resolveTimelineLutPreviewFilter(activeClip?.effects, clipLutPreviewFilters, currentTime, effectContext);
     const gpuClipEffectPreview = Boolean(!useFallbackPlayer && engineRef.current?.supportsClipEffectPreview?.());
     const gpuSupportedEffectTypes = gpuClipEffectPreview
         ? engineRef.current?.getSupportedClipEffectTypes?.() ?? []
@@ -962,6 +980,7 @@ const VideoPlayer = () => {
         gpuPreview: gpuClipEffectPreview,
         gpuSupportedEffectTypes,
     });
+    const canvasClipLutFilter = resolveTimelineLutPreviewFilter(activeClip?.effects, clipLutPreviewFilters, currentTime, effectContext);
     const previewEffectContext = { ...effectContext, gpuPreview: gpuClipEffectPreview, gpuSupportedEffectTypes };
     const svgEffectParams = resolveTimelineSvgEffectParams(activeClip?.effects, currentTime, previewEffectContext);
     const svgEffectInstances = resolveTimelineSvgEffectInstances(activeClip?.effects, currentTime, previewEffectContext);
@@ -989,11 +1008,13 @@ const VideoPlayer = () => {
     const baseFilter = combinePreviewFilters(
         transitionFilter(tfx, previewProjectLutFilter, { cheap: isMobileViewport, frameWidth: frameWidthPx }),
         effectFilter,
+        clipLutFilter,
         useFallbackPlayer ? fallbackClipGradeFilter : '',
     );
     const canvasFilter = combinePreviewFilters(
         transitionFilter(tfx, previewProjectLutFilter, { cheap: isMobileViewport, frameWidth: frameWidthPx }),
         canvasEffectFilter,
+        canvasClipLutFilter,
     );
 
     // Show overlay when user presses play but no proxy exists yet.

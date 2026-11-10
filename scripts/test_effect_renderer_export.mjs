@@ -65,6 +65,68 @@ try {
     assert.equal(movedJob.timeline.tracks[0].clips[1].effects[0].kind, 'saturation',
         'export applies the edited effect only to its current target');
 
+    const expressionPipeline = new EffectPipeline();
+    expressionPipeline.addEffect({
+        id: 'procedural-brightness', type: 'brightness', targetId: 'expression-clip',
+        startTime: 10, endTime: 12,
+        params: { amount: { value: 0, expression: '0.25 + progress' } },
+    });
+    const expressionJob = await expressionPipeline.buildRenderJob({
+        tracks: [{ id: 'video-track', clips: [{ id: 'expression-clip', start: 10, duration: 2 }] }],
+        assets: [],
+    }, null, { settings: { fps: 24 } });
+    const expressionEffect = expressionJob.timeline.tracks[0].clips[0].effects[0];
+    assert.equal(expressionEffect.expressions.amount, '0.25 + progress',
+        'effect expression source survives graph-to-export serialization');
+    assert.equal(expressionEffect.samples.amount.length, 49,
+        'expression export samples include each target-frame boundary and the clip endpoint');
+    assert.equal(expressionEffect.samples.amount[0].value, 0.25,
+        'the first expression sample uses effect-local progress zero');
+    assert.equal(expressionEffect.samples.amount.at(-1).value, 1.25,
+        'the last expression sample uses effect-local progress one');
+    const expressionFilters = compileTimelineVisualEffects([expressionEffect], { duration: 2, clipStart: 10 });
+    assert.ok(expressionFilters.some(filter => filter.includes('0.250000') && filter.includes('1.250000')),
+        'the export filter compiler consumes materialized effect expression samples');
+    const expressionRender = spawnSync(ffmpeg, [
+        '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=0x404040:size=64x64:rate=24:duration=2',
+        '-vf', expressionFilters.join(','), '-frames:v', '48', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'
+    ], { encoding: null, timeout: 20000, maxBuffer: 2 * 1024 * 1024 });
+    assert.equal(expressionRender.status, 0,
+        `FFmpeg executes the sampled procedural effect curve: ${expressionRender.stderr?.toString() || expressionRender.error?.message || ''}`);
+    const frameBytes = 64 * 64 * 3;
+    const meanFrameLuma = frameIndex => {
+        const frame = expressionRender.stdout.subarray(frameIndex * frameBytes, (frameIndex + 1) * frameBytes);
+        return frame.reduce((sum, channel) => sum + channel, 0) / frame.length;
+    };
+    assert.ok(meanFrameLuma(47) > meanFrameLuma(0) + 20,
+        'exported expression samples visibly animate the rendered footage over time');
+    const longExpressionPipeline = new EffectPipeline();
+    longExpressionPipeline.addEffect({
+        id: 'long-procedural-brightness', type: 'brightness', targetId: 'long-expression-clip',
+        params: { amount: { value: 0, expression: '1 + 0.5 * sin(time * 6.283185307)' } },
+    });
+    const longExpressionJob = await longExpressionPipeline.buildRenderJob({
+        tracks: [{ id: 'video-track', clips: [{ id: 'long-expression-clip', duration: 10 }] }],
+        assets: [],
+    });
+    const longExpressionSamples = longExpressionJob.timeline.tracks[0].clips[0].effects[0].samples.amount;
+    assert.ok(longExpressionSamples.length <= 60,
+        'long expression curves are decimated to the FFmpeg filter expression budget');
+    assert.equal(longExpressionSamples[0].t, 0, 'long-curve decimation preserves the initial value');
+    assert.equal(longExpressionSamples.at(-1).t, 10, 'long-curve decimation preserves the final value');
+    assert.ok(longExpressionSamples.some(point => point.value > 1.45)
+        && longExpressionSamples.some(point => point.value < 0.55),
+    'long-curve decimation retains meaningful procedural peaks and troughs');
+    const longExpressionFilters = compileTimelineVisualEffects(
+        [longExpressionJob.timeline.tracks[0].clips[0].effects[0]], { duration: 10 }
+    );
+    const longExpressionRender = spawnSync(ffmpeg, [
+        '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=96x64:rate=24:duration=10',
+        '-vf', longExpressionFilters.join(','), '-f', 'null', '-'
+    ], { encoding: 'utf8', timeout: 20000 });
+    assert.equal(longExpressionRender.status, 0,
+        `FFmpeg executes a bounded long procedural effect curve: ${longExpressionRender.stderr || longExpressionRender.error?.message || ''}`);
+
     const updatedEffectPipeline = new EffectPipeline();
     updatedEffectPipeline.addEffect({ id: 'update-target', type: 'brightness', targetId: 'clip-old', params: { amount: 0.7 } });
     updatedEffectPipeline.updateEffect('update-target', { targetId: 'clip-new' });

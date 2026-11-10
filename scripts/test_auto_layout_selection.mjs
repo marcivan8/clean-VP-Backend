@@ -6,7 +6,7 @@
 //   1. decideAutoLayout() (VideoEditorTools.js) — the pure decision rule: a
 //      cutaway short enough to read fine covering the whole frame gets no
 //      layout at all (the existing implicit default); a longer one gets
-//      'split' when the covered base clip has face-tracking data, else the
+//      'split' when the covered base clip has a subject track, else the
 //      safer 'pip' (no face dependency).
 //   2. compilePlaceContextualBroll (CommandCompiler.js) used to hardcode {}
 //      for this action's args, silently dropping ANY step.args a planner
@@ -39,8 +39,8 @@ const ok = (name) => realLog(`✓ ${name}`);
 
 {
     const short = AUTO_LAYOUT_MIN_DURATION_S - 1;
-    assert.equal(decideAutoLayout(short, true), null, 'a short cutaway gets no layout even with face tracking');
-    assert.equal(decideAutoLayout(short, false), null, 'a short cutaway gets no layout without face tracking either');
+    assert.equal(decideAutoLayout(short, true), null, 'a short cutaway gets no layout even with a subject track');
+    assert.equal(decideAutoLayout(short, false), null, 'a short cutaway gets no layout without a subject track either');
     assert.equal(decideAutoLayout(0, true), null, 'zero duration gets no layout');
     assert.equal(decideAutoLayout(undefined, true), null, 'missing/NaN duration gets no layout (treated as 0)');
     ok('short cutaways (< threshold) always get null — no layout, matches today\'s implicit fullscreen-cutaway default');
@@ -48,9 +48,9 @@ const ok = (name) => realLog(`✓ ${name}`);
 
 {
     const long = AUTO_LAYOUT_MIN_DURATION_S + 2;
-    assert.equal(decideAutoLayout(long, true), 'split', 'a long cutaway with face-tracking data gets split (keeps speaker visible, face-aware)');
-    assert.equal(decideAutoLayout(long, false), 'pip', 'a long cutaway without face-tracking data gets pip (keeps speaker visible, no face dependency)');
-    ok('long cutaways (>= threshold) get split when face-tracking data exists, pip otherwise');
+    assert.equal(decideAutoLayout(long, true), 'split', 'a long cutaway with subject-tracking data gets split (keeps speaker visible)');
+    assert.equal(decideAutoLayout(long, false), 'pip', 'a long cutaway without subject tracking gets pip (keeps speaker visible)');
+    ok('long cutaways (>= threshold) get split when subject tracking exists, pip otherwise');
 }
 
 {

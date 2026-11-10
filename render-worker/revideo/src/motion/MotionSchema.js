@@ -1,4 +1,20 @@
 /**
+ * render-worker/revideo/src/motion/MotionSchema.js
+ *
+ * SYNCED COPY of client/src/motion/MotionSchema.js — verbatim below the header divider.
+ * This file has ZERO dependencies beyond its siblings in this directory, so
+ * it is safe to duplicate rather than import: the render-worker Docker build
+ * context is render-worker/ only (see render-worker/Dockerfile's `COPY . .`),
+ * so `client/src/motion/` is unreachable at build time regardless.
+ *
+ * KEEP IN SYNC BY HAND. If you change the original, copy the change here too —
+ * scripts/test_revideo_render_path.js checks the two bodies match (ignoring
+ * this header) and fails loudly if they drift, so a missed sync is caught in
+ * CI/local test runs rather than silently rendering exports wrong.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+
+/**
  * client/src/motion/MotionSchema.js
  *
  * The MotionLayer / Animation / Keyframe model — PHASE 1 + PHASE 2.
@@ -102,17 +118,23 @@ function nextId(prefix) {
  * @param {object} properties subset of ANIMATABLE_PROPS
  * @param {string} [easing] overrides the parent animation's easing
  */
-export function createKeyframe(time, properties = {}, easing) {
+export function createKeyframe(time, properties = {}, easing, easingByProperty) {
     const props = {};
     for (const key of ANIMATABLE_PROPS) {
         if (properties[key] !== undefined && Number.isFinite(Number(properties[key]))) {
             props[key] = Number(properties[key]);
         }
     }
+    const perPropertyEasing = easingByProperty && typeof easingByProperty === 'object'
+        ? Object.fromEntries(ANIMATABLE_PROPS
+            .filter(key => props[key] !== undefined && typeof easingByProperty[key] === 'string')
+            .map(key => [key, easingByProperty[key]]))
+        : {};
     return {
         time: Math.max(0, Number(time) || 0),
         properties: props,
         ...(easing ? { easing } : {}),
+        ...(Object.keys(perPropertyEasing).length ? { easingByProperty: perPropertyEasing } : {}),
     };
 }
 

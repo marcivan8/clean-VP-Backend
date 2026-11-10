@@ -405,6 +405,12 @@ section('6 · The plan is safe to hand to a worker');
         M.validateCompositionPlan({ ...plan, overlays: [{ ...plan.overlays[0], sceneMask: {
             kind: 'shape', shape: 'rectangle', inset: 0.1, x: null, y: null, w: null, h: null,
         } }] }).valid === true);
+    for (const shape of ['capsule', 'callout']) {
+        check(`${shape} masks supported by preview and export pass client plan validation`,
+            M.validateCompositionPlan({ ...plan, overlays: [{ ...plan.overlays[0], sceneMask: {
+                kind: 'shape', shape, inset: 0.1, x: null, y: null, w: null, h: null,
+            } }] }).valid === true);
+    }
     check('duplicate zIndex is rejected',
         M.validateCompositionPlan({ ...plan,
             overlays: [{ ...plan.overlays[0], zIndex: 1 }, { ...plan.overlays[0], id: 'x', zIndex: 1 }] }).valid === false,

@@ -927,8 +927,8 @@
     "pip": "Picture in picture",
     "reset": "Remove layout",
     "panHint": "Drag the picture in the preview to reframe it.",
-    "splitFace": "Speaker framed from the speaker detection.",
-    "splitNoFace": "Speaker framed from the centre. Run \"separate speaker\" first for face-aware framing.",
+    "splitSubject": "Speaker framing follows the detected subject.",
+    "splitNoSubject": "Speaker framed from the centre. Run \"separate speaker\" first to track the subject.",
     "failed": "Could not apply this layout."
   },
   "transitions": {
@@ -1088,7 +1088,11 @@
         "fov": "Focal length",
         "orthoScale": "Orthographic scale",
         "near": "Near clipping plane",
-        "far": "Far clipping plane"
+        "far": "Far clipping plane",
+        "dofFocusDistance": "Focus distance",
+        "dofFocusRange": "Focus range",
+        "dofStrength": "Depth of field strength",
+        "dofMaxBlur": "Maximum defocus blur"
       },
       "projection": "Projection",
       "perspective": "Perspective",
@@ -1157,10 +1161,22 @@
         "scaleX": "Scale X",
         "scaleY": "Scale Y",
         "scaleZ": "Scale Z",
+        "radius": "Radius",
+        "height": "Height",
+        "tube": "Tube radius",
+        "sizeX": "Width",
+        "sizeY": "Height",
+        "sizeZ": "Depth",
         "opacity": "Opacity",
         "roughness": "Material roughness",
         "metalness": "Material metalness",
-        "emissiveIntensity": "Emissive intensity"
+        "emissiveIntensity": "Emissive intensity",
+        "colorR": "Base color red",
+        "colorG": "Base color green",
+        "colorB": "Base color blue",
+        "emissiveR": "Emission red",
+        "emissiveG": "Emission green",
+        "emissiveB": "Emission blue"
       },
       "lighting": "Lighting",
       "ambient": "Ambient light",
@@ -1175,12 +1191,15 @@
       "lightTypes": {
         "point": "Point",
         "directional": "Directional",
-        "spot": "Spot"
+        "spot": "Spot",
+        "area": "Area"
       },
       "lightDirection": "Ray direction {{axis}}",
       "lightRange": "Range",
       "lightDecay": "Falloff",
       "lightTarget": "Target {{axis}}",
+      "lightWidth": "Emitter width",
+      "lightHeight": "Emitter height",
       "spotAngle": "Cone angle°",
       "lightColor": "Light colour",
       "lightAnimation": "Light animation",
@@ -1202,6 +1221,8 @@
         "range": "Range",
         "decay": "Falloff",
         "angle": "Cone angle",
+        "width": "Emitter width",
+        "height": "Emitter height",
         "positionX": "Position X",
         "positionY": "Position Y",
         "positionZ": "Position Z",
@@ -1210,7 +1231,10 @@
         "directionZ": "Ray direction Z",
         "targetX": "Target X",
         "targetY": "Target Y",
-        "targetZ": "Target Z"
+        "targetZ": "Target Z",
+        "colorR": "Color red",
+        "colorG": "Color green",
+        "colorB": "Color blue"
       },
       "motionBlur": "Motion blur",
       "enableMotionBlur": "Enable shutter-based blur",
@@ -1233,6 +1257,8 @@
       "particleCount": "Count",
       "particleSize": "Size",
       "particleSpeed": "Speed",
+      "particleShape": "Particle shape",
+      "particleShapes": { "circle": "Circle", "square": "Square", "diamond": "Diamond", "star": "Star" },
       "particleColor": "Particle colour",
       "particleSimulation": "Emitter and particle behavior",
       "emitterShape": "Emitter shape",
@@ -1255,6 +1281,7 @@
       "particleAudioTarget": "Audio response",
       "particleAudioTargets": {
         "size": "Particle size",
+        "spread": "Particle spread",
         "speed": "Particle speed",
         "opacity": "Particle opacity"
       },
@@ -1280,6 +1307,11 @@
       "audioSource": "Audio source",
       "audioDisabled": "Disabled",
       "audioTarget": "React to",
+      "audioTargets": {
+        "scale": "Scale", "rotationX": "Rotation X", "rotationY": "Rotation Y", "rotationZ": "Rotation Z",
+        "opacity": "Opacity", "positionX": "Position X", "positionY": "Position Y", "positionZ": "Position Z",
+        "radius": "Radius", "height": "Height", "tube": "Tube", "sizeX": "Size X", "sizeY": "Size Y", "sizeZ": "Size Z"
+      },
       "audioAmount": "Amount",
       "proceduralMotion": "Procedural motion expression",
       "expressionHelp": "Use t, time, duration, or progress (0–1), pi or e, arithmetic, sin, cos, tan, abs, ceil, floor, round, min, max, sqrt, clamp, smoothstep, noise, or wiggle."
@@ -1293,6 +1325,7 @@
     "pathData": "SVG path",
     "morphFrom": "Morph from path",
     "morphTo": "Morph to path",
+    "morphStartTime": "Morph starts at (s)",
     "morphDuration": "Morph duration (s)",
     "fill": "Fill",
     "stroke": "Stroke",

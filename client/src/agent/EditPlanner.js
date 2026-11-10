@@ -134,6 +134,7 @@ export class EditPlanner {
                 if (planned?.success && planned.plan) planned.plan = this.attachEditorialBrief(planned.plan, intent, state);
                 return planned;
             }
+            if (plan.error) return { success: false, error: plan.error };
 
             this.attachEditorialBrief(plan, intent, state);
             console.log(`[AG_DEBUG] [EditPlanner] Plan generated successfully. Steps: ${plan.steps.length}`);
@@ -206,6 +207,42 @@ export class EditPlanner {
 
     static createPlan(intent, state, planId) {
         const operation = intent.operation;
+        if (operation === 'multi_command') {
+            const requested = Array.isArray(intent.commands) ? intent.commands : [];
+            if (requested.length < 2) return this.errorPlan(planId, 'A combined edit needs at least two recognized actions.');
+            const steps = [];
+            let requiresApproval = false;
+            for (let commandIndex = 0; commandIndex < requested.length; commandIndex++) {
+                const command = requested[commandIndex];
+                const subIntent = {
+                    ...intent,
+                    operation: command.operation,
+                    commands: undefined,
+                    constraints: { ...(command.constraints || {}) },
+                    parameters: { ...(command.constraints || {}) },
+                    originalPrompt: command.prompt || intent.originalPrompt,
+                };
+                const subPlan = this.createPlan(subIntent, state, `${planId}_${commandIndex + 1}`);
+                if (!subPlan) return null; // Let the plan model handle a genuinely unsupported combination.
+                if (subPlan.error || !Array.isArray(subPlan.steps) || subPlan.steps.length === 0) {
+                    return this.errorPlan(planId, `Could not plan every requested action. ${command.operation} was not planned.`);
+                }
+                requiresApproval ||= !!subPlan.requiresApproval || !!command.destructive;
+                for (let stepIndex = 0; stepIndex < subPlan.steps.length; stepIndex++) {
+                    const step = subPlan.steps[stepIndex];
+                    steps.push({
+                        ...step,
+                        step_id: `${commandIndex + 1}_${step.step_id || stepIndex + 1}`,
+                        reason: step.reason || command.prompt || command.operation,
+                        _commandOperation: command.operation,
+                    });
+                }
+            }
+            return this.buildPlan(planId, 'multi_command', steps, {
+                requiresApproval,
+                commandOperations: requested.map(command => command.operation),
+            });
+        }
         const targets = intent.targets || [];
         const constraints = intent.constraints || {};
         const trackId = intent.target_track_id;
@@ -245,7 +282,8 @@ export class EditPlanner {
             case 'adjust_volume': return this.planVolumeAdjust(planId, clip, constraints);
             case 'add_transition': return this.planAddTransition(planId, clip, constraints, intent.originalPrompt);
             case 'add_filter': return this.planAddFilter(planId, clip, constraints);
-            case 'add_text': return this.planAddText(planId, constraints);
+            case 'add_text':
+            case 'add_text_overlay': return this.planAddText(planId, constraints);
             case 'color_grade': return this.planColorGrade(planId, clip, constraints, intent.originalPrompt);
             case 'export_video': return this.planExport(planId, constraints);
             case 'compare_versions': return this.planCompare(planId);
@@ -384,6 +422,26 @@ export class EditPlanner {
                 const brief = String(intent.originalPrompt || '').slice(0, 600);
                 return this.buildPlan(planId, 'compose_motion', [
                     { step_id: 'step_1', action: 'compose_motion', args: { brief }, reason: 'Write custom motion for the requested layers' },
+                ]);
+            }
+            case 'apply_motion_effect_stack': {
+                const prompt = String(intent.originalPrompt || '').toLowerCase();
+                const effects = [];
+                const add = type => { if (!effects.some(effect => effect.type === type)) effects.push({ type }); };
+                if (/\b(film grain|grain|noise texture|analog noise)\b/.test(prompt)) add('film_grain');
+                if (/\b(vignette|darken the edges|dark corners)\b/.test(prompt)) add('vignette');
+                if (/\b(glow|bloom|halation)\b/.test(prompt)) add('glow');
+                if (/\b(chromatic aberration|rgb split|color fringing)\b/.test(prompt)) add('rgb_split');
+                if (/\b(glitch|digital distortion)\b/.test(prompt)) add('glitch');
+                if (/\b(radial blur|zoom blur)\b/.test(prompt)) add('blur_radial');
+                else if (/\b(motion blur|directional blur)\b/.test(prompt)) add('blur_motion');
+                else if (/\b(gaussian blur|soft focus|blur the footage|blur the video)\b/.test(prompt)) add('blur_gaussian');
+                if (/\b(fade in|fade into the footage)\b/.test(prompt)) add('fade_in');
+                if (/\b(fade out|fade from the footage)\b/.test(prompt)) add('fade_out');
+                return this.buildPlan(planId, 'apply_motion_effect_stack', [
+                    { step_id: 'step_1', action: 'apply_motion_effect_stack', args: { effects }, reason: effects.length
+                        ? `Apply ${effects.map(effect => effect.type.replaceAll('_', ' ')).join(' and ')} to the footage`
+                        : 'Resolve the requested footage effects' },
                 ]);
             }
             case 'apply_style_recipe': {

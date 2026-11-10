@@ -86,11 +86,11 @@ async function styleReferenceProfileFor(state, visualProfiles = [], signal) {
     const ids = new Set(references.map(asset => String(asset.id)));
     const cached = visualProfiles.find(profile =>
         profile?.isReference && ids.has(String(profile.assetId)) && profile?.visualStyleProfile
-        && Number(profile.visualStyleProfile.profileVersion) >= 2
+        && Number(profile.visualStyleProfile.profileVersion) >= 3
     )?.visualStyleProfile;
     if (cached) return cached;
-    const localProfile = references.find(asset => asset?.visualStyleProfile)?.visualStyleProfile;
-    if (localProfile && Number(localProfile.profileVersion) >= 2) return localProfile;
+    const localProfile = references.find(asset => Number(asset?.visualStyleProfile?.profileVersion) >= 3)?.visualStyleProfile;
+    if (localProfile) return localProfile;
     const reference = references.find(asset => asset?.id);
     if (!reference) return null;
     try {
@@ -1156,12 +1156,19 @@ export class MediaExecutionEngine {
         }
 
         switch (action) {
+            case 'apply_motion_effect_stack': {
+                // Reuse ROKA's schema validation, target resolution, shared
+                // preview/export capability checks, and persisted-state QA.
+                const { VideoEditorTools } = await import('./VideoEditorTools.js');
+                const result = await new VideoEditorTools().execute({ name: action, args });
+                return { action, ...result };
+            }
             case 'addClip':        this._callStore(store, 'addClip', args.trackId, args.clip); return { action, success: true, message: `Added clip to ${args.trackId}` };
             case 'splitClip':      { this._callStore(store, 'splitClip', args.trackId, args.clipId, args.splitTime); return { action, success: true, message: `Split at ${args.splitTime}s` }; }
             case 'removeClip':     this._callStore(store, 'removeClip', args.trackId, args.clipId); return { action, success: true, message: `Removed clip ${args.clipId}` };
             case 'setClipSpeed':   this._callStore(store, 'setClipSpeed', args.trackId, args.clipId, args.speed); return { action, success: true };
             case 'setAspectRatio': {
-                // R100: store.setAspectRatio() now runs the speaker/face-aware
+                // R100: store.setAspectRatio() now runs the tracked-subject
                 // reframe itself on every switch (see useTimelineStore.js), so this
                 // handler only needs to report what happened — it no longer decides
                 // whether to reframe.
@@ -1171,9 +1178,9 @@ export class MediaExecutionEngine {
                     .flatMap(t => (t.clips || []))
                     .filter(c => c.virtualCam?.reframe === args.ratio);
                 if (reframedClips.length > 0) {
-                    const faceAware = reframedClips.filter(c => c.virtualCam?.faceAware).length;
-                    const face = faceAware > 0 ? `, ${faceAware} centred on the detected speaker` : ', centred (no face data yet)';
-                    return { action, success: true, message: `Set to ${args.ratio}. Reframed ${reframedClips.length} clip(s) to fill the frame${face}.` };
+                    const subjectAware = reframedClips.filter(c => c.virtualCam?.subjectAware || c.virtualCam?.faceAware).length;
+                    const subject = subjectAware > 0 ? `, ${subjectAware} centred on the detected subject` : ', centred (no subject track available)';
+                    return { action, success: true, message: `Set to ${args.ratio}. Reframed ${reframedClips.length} clip(s) to fill the frame${subject}.` };
                 }
                 return { action, success: true };
             }
@@ -1426,6 +1433,7 @@ export class MediaExecutionEngine {
 
             case 'design_scene': {
                 const st = useTimelineStore.getState();
+                const clipsBefore = new Set((st.tracks || []).flatMap(track => (track.clips || []).map(clip => clip.id)));
                 const brief = String(args.brief || '').trim();
                 if (!brief) return { action, success: false, message: 'Tell me what the graphics should say or feel like, and I will design the sequence.' };
 
@@ -1496,13 +1504,16 @@ export class MediaExecutionEngine {
                 if (result.fixes?.length) message += ` Adjusted to fit the frame: ${result.fixes[0].message}`;
                 if (left.length) message += ` Worth a look: ${left[0].message}`;
                 message += ' One undo reverts the whole sequence.';
+                const fresh = useTimelineStore.getState();
+                const clipIds = (fresh.tracks || []).flatMap(track => (track.clips || []).map(clip => clip.id)).filter(id => !clipsBefore.has(id));
                 return {
                     action, success: true, message,
-                    details: { sceneId: result.sceneId, clipCount: result.clipCount, beats, tone: result.plan?.tone, placeholders: result.placeholders?.length || 0, usedAiWords: !!plan },
+                    details: { sceneId: result.sceneId, groupId: result.groupId || null, clipCount: result.clipCount, clipIds, beats, tone: result.plan?.tone, placeholders: result.placeholders?.length || 0, usedAiWords: !!plan },
                 };
             }
 
             case 'addMotionComponent': {
+                const clipsBefore = new Set((store.tracks || []).flatMap(track => (track.clips || []).map(clip => clip.id)));
                 const result = this._callStore(store, 'addMotionComponent', args.component, args.preset, args.params || {});
                 if (!result?.success) return { action, success: false, error: result?.error, message: result?.error };
                 // R94: the scene was checked before it landed. Say what was
@@ -1517,9 +1528,11 @@ export class MediaExecutionEngine {
                     if (fixes.length > 1) message += ` And ${fixes.length - 1} more.`;
                 }
                 if (left.length) message += ` Worth a look: ${left[0].message}`;
+                const fresh = useTimelineStore.getState();
+                const clipIds = (fresh.tracks || []).flatMap(track => (track.clips || []).map(clip => clip.id)).filter(id => !clipsBefore.has(id));
                 return {
                     action, success: true, message,
-                    details: { sceneId: result.sceneId || null, groupId: result.groupId || null, clipCount: result.clipCount || 0, fixes: fixes.length, issues: left.length },
+                    details: { sceneId: result.sceneId || null, groupId: result.groupId || null, clipCount: result.clipCount || 0, clipIds, fixes: fixes.length, issues: left.length },
                 };
             }
             // R66 — clip grouping. `groupId` is returned by `addMotionComponent`
@@ -1653,7 +1666,7 @@ export class MediaExecutionEngine {
                 const tm = await this._ensureMatte(trackId, clipId, job);
                 if (!tm.ok) return { action, success: false, error: tm.error };
                 const result = this._callStore(useTimelineStore.getState(), 'trackSpeaker', trackId, clipId, args.options || {});
-                return { action, success: !!result?.success, error: result?.error, segments: result?.segments };
+                return { action, success: !!result?.success, error: result?.error, mode: result?.mode, segments: result?.segments, keyframes: result?.keyframes };
             }
             case 'blur_background': {
                 // R92: same free matte path as remove_background, blur look.
@@ -1794,9 +1807,11 @@ export class MediaExecutionEngine {
                 if (!baseRecipe) return { action, success: false, message: `Which style recipe? Choose one: ${Object.keys(STYLE_RECIPES).join(', ')} (for example "apply the punchy recipe").` };
                 let recipe = baseRecipe;
                 let referenceStyle = null;
+                let referenceAnalysisStatus = 'not_attached';
                 const recipeState = useTimelineStore.getState();
                 const hasReference = (recipeState.assets || []).some(asset => asset?.assistantReference);
                 if (hasReference) {
+                    referenceAnalysisStatus = 'analyzing';
                     let profiles = [];
                     try {
                         const { fetchShortVisualContext } = await import('./shortFinisher.js');
@@ -1806,6 +1821,7 @@ export class MediaExecutionEngine {
                     }
                     const rawStyle = await styleReferenceProfileFor(recipeState, profiles, job?.signal);
                     referenceStyle = buildStyleReferencePlan(rawStyle);
+                    referenceAnalysisStatus = referenceStyle ? 'applied' : rawStyle ? 'low_confidence' : 'unavailable';
                     if (referenceStyle) {
                         const cycle = referenceStyle.transitionTypes.length
                             ? referenceStyle.transitionTypes
@@ -1941,7 +1957,22 @@ export class MediaExecutionEngine {
                     return { action, success: false, message: `Nothing could be applied yet: ${skipped.join(', ')}.` };
                 }
                 const skippedText = skipped.length ? ` Skipped: ${skipped.join(', ')}.` : '';
-                return { action, success: true, message: `Style recipe applied: ${done.join(', ')}. One undo reverts it.${skippedText}` };
+                const referenceText = referenceAnalysisStatus === 'applied'
+                    ? ' Reference style was applied.'
+                    : ['unavailable', 'low_confidence'].includes(referenceAnalysisStatus)
+                        ? ` Reference style ${referenceAnalysisStatus === 'low_confidence' ? 'did not meet the confidence threshold' : 'could not be analyzed'}; recipe defaults were used.`
+                        : '';
+                return {
+                    action, success: true,
+                    message: `Style recipe applied: ${done.join(', ')}. One undo reverts it.${referenceText}${skippedText}`,
+                    details: {
+                        referenceStyle: {
+                            status: referenceAnalysisStatus,
+                            confidence: Number.isFinite(Number(referenceStyle?.confidence)) ? Number(referenceStyle.confidence) : null,
+                            evidence: referenceStyle?.evidence || null,
+                        },
+                    },
+                };
             }
 
             // ── R92: sound effects on the whole edit ("add sound effects") ────
@@ -2155,6 +2186,8 @@ export class MediaExecutionEngine {
                 let plan = null;
                 let scenePlan = null;
                 let referenceStyleProfile = null;
+                const hasStyleReference = (st.assets || []).some(asset => asset?.assistantReference === true && ['video', 'image'].includes(asset.type));
+                let referenceAnalysisStatus = hasStyleReference ? 'awaiting_analysis' : 'not_attached';
                 const text = words.slice(0, 400).map(w => String(w.word ?? w.text ?? '')).join(' ');
                 if (text) {
                     const { fetchShortPlan, fetchShortMotionTechniques, fetchShortVisualContext } = await import('./shortFinisher.js');
@@ -2172,6 +2205,10 @@ export class MediaExecutionEngine {
                     // grammar is translated through a bounded adapter before
                     // it can affect the local scene planner or polish choices.
                     referenceStyleProfile = await styleReferenceProfileFor(st, visualContext, job?.signal);
+                    const adaptedReference = buildStyleReferencePlan(referenceStyleProfile);
+                    referenceAnalysisStatus = !hasStyleReference ? 'not_attached'
+                        : adaptedReference ? 'applied'
+                            : referenceStyleProfile ? 'low_confidence' : 'unavailable';
                     scenePlan = fallbackShortScenePlan(words, {
                         headline: plan?.headline,
                         duration: total,
@@ -2182,6 +2219,8 @@ export class MediaExecutionEngine {
                         editingStyle: st.editingStyle,
                         platform,
                     });
+                } else if (hasStyleReference) {
+                    referenceAnalysisStatus = 'not_applied_no_transcript';
                 }
                 // Earlier finish replaced, not stacked.
                 const before = JSON.parse(JSON.stringify(st.tracks || []));
@@ -2285,9 +2324,18 @@ export class MediaExecutionEngine {
                     sceneNote = ' Scene direction used the local transcript and visual planner.';
                 }
                 const reportStyle = referenceStyleProfile ? buildStyleReferencePlan(referenceStyleProfile) : null;
+                const referenceStatusNote = referenceAnalysisStatus === 'applied'
+                    ? ' Reference visual style was applied.'
+                    : referenceAnalysisStatus === 'low_confidence'
+                        ? ' The reference was analyzed, but its profile was too weak to guide the edit; style defaults were used.'
+                        : referenceAnalysisStatus === 'unavailable'
+                            ? ' The reference could not be analyzed; style defaults were used.'
+                            : referenceAnalysisStatus === 'not_applied_no_transcript'
+                                ? ' The reference was not applied because no transcript was available.'
+                                : '';
                 return {
                     action, success: true,
-                    message: `Finished for ${profile.label}: ${by}${polished.applied.join(', ')}${brollNote}${sfxNote}. One undo reverts it.${sceneNote}`,
+                    message: `Finished for ${profile.label}: ${by}${polished.applied.join(', ')}${brollNote}${sfxNote}. One undo reverts it.${sceneNote}${referenceStatusNote}`,
                     details: {
                         applied: polished.applied,
                         platform,
@@ -2295,6 +2343,11 @@ export class MediaExecutionEngine {
                         sceneSource: scenePlan?.source || null,
                         techniques: usedTechniques,
                         quality: polished.quality || { checked: false, repairs: [], issues: [] },
+                        referenceStyleAnalysis: {
+                            status: referenceAnalysisStatus,
+                            confidence: Number.isFinite(Number(referenceStyleProfile?.confidence)) ? Number(referenceStyleProfile.confidence) : null,
+                            evidence: reportStyle?.evidence || null,
+                        },
                         capabilities: {
                             broll: { requested: brollRequested, placed: brollPlaced, status: brollPlaced ? 'used' : brollRequested ? 'unavailable' : 'not-needed', ...(brollFailure ? { reason: String(brollFailure).slice(0, 180) } : {}) },
                             soundEffects: { requested: sfxRequested, placed: sfxPlaced, missing: sfxMissing.slice(0, 6), status: sfxPlaced ? (sfxMissing.length ? 'partial' : 'used') : sfxRequested ? 'unavailable' : 'not-needed' },
@@ -2544,6 +2597,7 @@ export class MediaExecutionEngine {
                 }
                 st._saveHistory?.();
                 let applied = 0;
+                const clipIds = [];
                 const verbs = new Set();
                 for (const l of layers) {
                     const duration = Math.max(0.2, Number(l.clip.duration) || 3);
@@ -2555,11 +2609,12 @@ export class MediaExecutionEngine {
                     (script.beats || []).forEach(b => b?.verb && verbs.add(String(b.verb)));
                     useTimelineStore.getState().updateClip(l.trackId, l.clip.id, { animations, animation: 'none' }, { skipHistory: true });
                     applied += 1;
+                    clipIds.push(l.clip.id);
                 }
                 if (applied === 0) return { action, success: false, message: 'No motion could be built from that description. Try naming a motion, for example "slam in" or "float".' };
                 const by = source === 'llm' ? 'written by the AI' : source === 'mixed' ? 'partly written by the AI' : 'built from the motion library';
                 const what = verbs.size ? ` (${[...verbs].slice(0, 6).join(', ')})` : '';
-                return { action, success: true, message: `Animated ${applied} layer(s), ${label}${what}, ${by}.${notes ? ` ${notes}` : ''} One undo reverts it.`, details: { applied, source, verbs: [...verbs] } };
+                return { action, success: true, message: `Animated ${applied} layer(s), ${label}${what}, ${by}.${notes ? ` ${notes}` : ''} One undo reverts it.`, details: { applied, clipIds, source, verbs: [...verbs] } };
             }
 
             // R68 — AI Animation Intelligence. "Brain chooses animations.

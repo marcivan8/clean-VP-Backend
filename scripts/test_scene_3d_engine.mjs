@@ -8,6 +8,13 @@ import { renderTemplateFrames } from '../server/compositor/TemplateRenderer.js';
 import { drawScene3D, remapSceneObjectTime, resolveSceneVideoSourceTime, maxSceneObjectSourceTime, getSceneShutterSampleTimes, sampleAudioEnvelope, composeSceneRotation, composeSceneTransform, normalizeScene3D, normalizeSceneMesh, MAX_MESH_TRIANGLES, MAX_SCENE_TRIANGLES, getScene3DRenderLimitWarnings, getScene3DCompatibilityWarnings, resolveParticleSeed, SCENE3D_CAMERA_DEFAULTS, SCENE3D_PRIMITIVES, SCENE3D_BLEND_MODES } from '../client/src/motion/Scene3D.js';
 import { evaluateMotionExpression } from '../client/src/motion/MotionExpression.js';
 import { sampleProceduralParticle, sampleProceduralParticles } from '../client/src/motion/ProceduralParticles.js';
+import { canRenderScene3DGpu } from '../client/src/motion/Scene3DGPU.js';
+
+const gpuEligibleTriangle = { projected: [{ x: 0, y: 0, z: 1 }, { x: 1, y: 0, z: 1 }, { x: 0, y: 1, z: 1 }], color: '#FFFFFF' };
+assert.equal(canRenderScene3DGpu([gpuEligibleTriangle]), true,
+  'the GPU fast path accepts supported untextured geometry');
+assert.equal(canRenderScene3DGpu([{ ...gpuEligibleTriangle, image: Canvas.createCanvas(2, 2), uvs: [[0, 0], [1, 0], [0, 1]] }]), false,
+  'textured geometry uses software per-pixel depth compositing until the GPU can preserve mixed texture alpha');
 
 function countGroundShadowPixels(enabled, forcePainterFallback = false, lights = [{ type: 'point', position: { x: -3, y: 5, z: 4 }, intensity: 1,
   color: '#FFFFFF', range: 50, decay: 0.1 }]) {
@@ -52,6 +59,34 @@ assert.ok(countGroundShadowPixels(true, false, [spotLight]) > 100,
 assert.ok(countGroundShadowPixels(true, true, [spotLight]) > 100,
   'spotlight shadows respect the authored cone in the painter fallback');
 
+function renderAreaLightFixture(light, time = 0) {
+  const canvas = Canvas.createCanvas(180, 180);
+  drawScene3D(canvas.getContext('2d'), {
+    camera: { z: 7, fov: 720 }, ambient: 0,
+    shadows: { enabled: false }, lights: [light],
+    objects: [{ type: 'sphere', size: { x: 2, y: 2, z: 2 }, color: '#FFFFFF', castsShadow: false,
+      material: { side: 'double', roughness: 0.8, metalness: 0 } }],
+  }, time, 1, 180, 180, {});
+  return canvas.getContext('2d').getImageData(0, 0, 180, 180).data;
+}
+const pointLightPixels = renderAreaLightFixture({ type: 'point', position: { x: -3, y: 3, z: 5 }, target: { x: 0, y: 0, z: 0 }, intensity: 1, range: 50, decay: 0 });
+const areaLightPixels = renderAreaLightFixture({ type: 'area', position: { x: -3, y: 3, z: 5 }, target: { x: 0, y: 0, z: 0 }, width: 6, height: 6, intensity: 1, range: 50, decay: 0 });
+let areaLightDifference = 0;
+for (let index = 0; index < pointLightPixels.length; index += 4) {
+  areaLightDifference += Math.abs(areaLightPixels[index] - pointLightPixels[index])
+    + Math.abs(areaLightPixels[index + 1] - pointLightPixels[index + 1])
+    + Math.abs(areaLightPixels[index + 2] - pointLightPixels[index + 2]);
+}
+assert.ok(areaLightDifference > 0, 'area-light sampling produces a rendered result distinct from a point source');
+const animatedAreaLight = { type: 'area', position: { x: -3, y: 3, z: 5 }, target: { x: 0, y: 0, z: 0 },
+  width: 0.5, height: 0.5, intensity: 1, range: 50, decay: 0,
+  animations: [{ startTime: 0, duration: 1, keyframes: [
+    { time: 0, properties: { width: 0.5, height: 0.5 } },
+    { time: 1, properties: { width: 8, height: 8 } },
+  ] }] };
+assert.notDeepEqual(renderAreaLightFixture(animatedAreaLight, 1), renderAreaLightFixture(animatedAreaLight, 0),
+  'area source dimensions follow authored light keyframes and change the rendered illumination');
+
 const oversizedPolygonMesh = normalizeSceneMesh({
   type: 'mesh',
   vertices: Array.from({ length: 64 }, (_, index) => ({ x: index % 8, y: Math.floor(index / 8), z: 0 })),
@@ -73,23 +108,27 @@ assert.deepEqual(getScene3DRenderLimitWarnings({ particles: { count: 500.4 } }),
   'particle validation rounds with the same rule as the renderer before deciding if content will be dropped');
 assert.deepEqual(getScene3DCompatibilityWarnings({
   objects: [{ id: 'bad-primitive', name: 'Authored shape', type: 'star-poly', material: { side: 'both' }, blendMode: 'linear-dodge' }],
-  lights: [{ type: 'area' }],
+  lights: [{ type: 'sun' }],
 }).map(warning => warning.message), [
   '3D object “Authored shape” uses unsupported type “star-poly”; it will render as a box.',
   '3D object “Authored shape” uses unsupported material side “both”; it will render as front-sided.',
   '3D object “Authored shape” uses unsupported blend mode “linear-dodge”; it will render as source-over.',
-  '3D light 1 uses unsupported type “area”; it will render as a point light.',
+  '3D light 1 uses unsupported type “sun”; it will render as a point light.',
 ], '3D compatibility checks disclose renderer substitutions');
 assert.deepEqual(getScene3DCompatibilityWarnings({ objects: [{ type: 'box', material: { side: 'double' }, blendMode: 'multiply' }], lights: [{ type: 'spot' }] }), [],
   'supported 3D authored values do not produce compatibility warnings');
+assert.match(getScene3DCompatibilityWarnings({ particles: { shape: 'triangle' } })[0]?.message || '', /unsupported shape.*circles/,
+  'unsupported particle shapes are disclosed before rendering falls back to circles');
+assert.deepEqual(getScene3DCompatibilityWarnings({ lights: [{ type: 'area', width: 40, height: 40 }] }), [],
+  'area emitters are a supported light type with supported dimensions');
 assert.equal(getScene3DCompatibilityWarnings({
   objects: [{ type: '', material: { side: null }, blendMode: '' }], lights: [{ type: null }],
 }).length, 4, 'explicit empty and null 3D values are warned while omitted properties retain defaults');
 const clampedSceneWarnings = getScene3DCompatibilityWarnings({
   objects: [{ id: 'out-of-range-material', type: 'sphere', material: { opacity: 1.5, roughness: 'bad', metalness: -0.2, emissiveIntensity: 12 } }],
-  lights: [{ type: 'point', intensity: 5, range: 0, decay: 9, angle: 180 }],
+  lights: [{ type: 'point', intensity: 5, range: 0, decay: 9, angle: 180, width: 50, height: 50 }],
 });
-assert.equal(clampedSceneWarnings.length, 8, 'all clamped material and light controls are surfaced to validation and export');
+assert.equal(clampedSceneWarnings.length, 10, 'all clamped material and light controls are surfaced to validation and export');
 assert.ok(clampedSceneWarnings.some(warning => /Material roughness.*invalid.*use 0\.62/.test(warning.message)));
 assert.ok(clampedSceneWarnings.some(warning => /Intensity.*outside the supported range 0–4.*clamp/.test(warning.message)));
 const denseMesh = {
@@ -424,9 +463,41 @@ const animatedEmissiveMaterialPixel = materialPixel({ emissiveColor: '#00FF00', 
 }]);
 assert.ok(animatedEmissiveMaterialPixel[1] > unlitMaterialPixel[1] + 100,
   '3D object keyframes animate material emissive intensity');
+const animatedEmissiveColorPixel = materialPixel({ emissiveColor: '#FF0000', emissiveIntensity: 0.5 }, 1, [{ duration: 1, keyframes: [
+  { time: 0, properties: { emissiveR: 255, emissiveG: 0, emissiveB: 0 } },
+  { time: 1, properties: { emissiveR: 0, emissiveG: 255, emissiveB: 0 } },
+] }]);
+assert.ok(animatedEmissiveColorPixel[1] > animatedEmissiveColorPixel[0] + 100,
+  '3D object emissive color channels can be keyframed and affect rendered pixels');
 const expressedEmissiveMaterialPixel = materialPixel({ emissiveColor: '#00FF00', emissiveIntensity: 0 }, 0, [], { emissiveIntensity: 'value + 0.5' });
 assert.ok(expressedEmissiveMaterialPixel[1] > unlitMaterialPixel[1] + 100,
   '3D object expressions animate material emissive intensity');
+const expressedEmissiveColorPixel = materialPixel({ emissiveColor: '#FF0000', emissiveIntensity: 0.5 }, 0, [], { emissiveR: '0', emissiveG: '255' });
+assert.ok(expressedEmissiveColorPixel[1] > expressedEmissiveColorPixel[0] + 100,
+  '3D object emissive color channels can be procedurally driven by expressions');
+const animatedBaseColorPixel = (() => {
+  const canvas = Canvas.createCanvas(120, 120);
+  drawScene3D(canvas.getContext('2d'), { camera: { z: 7 }, ambient: 1, shadows: { enabled: false }, lights: [],
+    objects: [{ id: 'animated-color', type: 'box', position: { x: 0, y: 0, z: 0 }, size: { x: 2, y: 2, z: 1 },
+      color: '#FF0000', animations: [{ duration: 1, keyframes: [
+        { time: 0, properties: { colorR: 255, colorG: 0, colorB: 0 } },
+        { time: 1, properties: { colorR: 0, colorG: 255, colorB: 0 } },
+      ] }], castsShadow: false }],
+  }, 1, 1, 120, 120, {});
+  return [...canvas.getContext('2d').getImageData(60, 60, 1, 1).data];
+})();
+assert.ok(animatedBaseColorPixel[1] > animatedBaseColorPixel[0] + 100,
+  '3D object color RGB channels can be keyframed and affect rendered pixels');
+const expressedBaseColorPixel = (() => {
+  const canvas = Canvas.createCanvas(120, 120);
+  drawScene3D(canvas.getContext('2d'), { camera: { z: 7 }, ambient: 1, shadows: { enabled: false }, lights: [],
+    objects: [{ id: 'expressed-color', type: 'box', position: { x: 0, y: 0, z: 0 }, size: { x: 2, y: 2, z: 1 },
+      color: '#FF0000', expressions: { colorR: '0', colorG: '255', colorB: '0' }, castsShadow: false }],
+  }, 0, 1, 120, 120, {});
+  return [...canvas.getContext('2d').getImageData(60, 60, 1, 1).data];
+})();
+assert.ok(expressedBaseColorPixel[1] > expressedBaseColorPixel[0] + 100,
+  '3D object color channels can be procedurally driven by expressions');
 
 function texturedMaterialPixel(material, time = 0, animations = [], expressions = undefined, lightColor = '#FFFFFF') {
   const texture = Canvas.createCanvas(4, 4);
@@ -613,6 +684,61 @@ assert.equal(resolveParticleSeed({}), 17, 'unconfigured particles retain the sta
 assert.equal(particleAlphaAtDepth({ near: 7.1 }), false, 'particles in front of the near plane are clipped');
 assert.equal(particleAlphaAtDepth({ far: 6 }), false, 'particles beyond the far plane are clipped');
 
+function particleShapeFrame(shape, forcePainterFallback = false) {
+  const canvas = Canvas.createCanvas(180, 180);
+  const context = canvas.getContext('2d');
+  const target = forcePainterFallback ? new Proxy(context, {
+    get(object, property) {
+      if (property === 'getImageData' || property === 'putImageData') return undefined;
+      const value = Reflect.get(object, property, object);
+      return typeof value === 'function' ? value.bind(object) : value;
+    },
+    set(object, property, value) { return Reflect.set(object, property, value, object); },
+  }) : context;
+  drawScene3D(target, { camera: { z: 7, projection: 'orthographic', orthoScale: 1 }, shadows: { enabled: false },
+    particles: { count: 1, seed: 4, size: 0.08, speed: 0, spread: 0.2, color: '#FFFFFF', shape }, objects: [] }, 0, 1, 180, 180, {});
+  return Array.from(context.getImageData(0, 0, 180, 180).data);
+}
+for (const forcePainterFallback of [false, true]) {
+  const shapeFrames = ['circle', 'square', 'diamond', 'star'].map(shape => particleShapeFrame(shape, forcePainterFallback));
+  assert.equal(new Set(shapeFrames.map(frame => frame.join(','))).size, 4,
+    `circle, square, diamond, and star particles render distinctly (${forcePainterFallback ? 'painter' : 'depth'} path)`);
+}
+
+function legacyEmitterFrame(time, loop) {
+  const canvas = Canvas.createCanvas(240, 240);
+  drawScene3D(canvas.getContext('2d'), {
+    camera: { z: 7, fov: 780 }, shadows: { enabled: false },
+    particles: { count: 16, seed: 12, size: 14, speed: 0, spread: 0.2, loop },
+    objects: [],
+  }, time, 2, 240, 240, {});
+  return canvas.getContext('2d').getImageData(0, 0, 240, 240).data;
+}
+assert.ok(!legacyEmitterFrame(4.1, false).some((channel, index) => index % 4 === 3 && channel > 0),
+  'loop=false expires the default emitter after its default lifetime even without explicit simulation controls');
+assert.ok(legacyEmitterFrame(4.1, true).some((channel, index) => index % 4 === 3 && channel > 0),
+  'the default looping emitter remains visible after one particle lifetime');
+
+function animatedObjectFrame(animations) {
+  const canvas = Canvas.createCanvas(240, 240);
+  drawScene3D(canvas.getContext('2d'), {
+    camera: { z: 7, fov: 780 }, ambient: 1, shadows: { enabled: false },
+    objects: [{ id: 'animated-object', type: 'sphere', position: { x: 0, y: 0, z: 0 }, radius: 0.9,
+      color: '#3578FF', castsShadow: false, animations }],
+  }, 1, 1, 240, 240, {});
+  return canvas.getContext('2d').getImageData(0, 0, 240, 240).data;
+}
+const xAnimation = value => ({ startTime: 0, keyframes: [
+  { time: 0, properties: { x: 0 } }, { time: 1, properties: { x: value } },
+] });
+const scaleAnimation = value => ({ startTime: 0, keyframes: [
+  { time: 0, properties: { scale: 1 } }, { time: 1, properties: { scale: value } },
+] });
+assert.notDeepEqual(animatedObjectFrame([xAnimation(0.5), xAnimation(0.5)]), animatedObjectFrame([xAnimation(0.5)]),
+  'overlapping 3D position tracks add their authored contributions');
+assert.notDeepEqual(animatedObjectFrame([scaleAnimation(1.5), scaleAnimation(1.5)]), animatedObjectFrame([scaleAnimation(1.5)]),
+  'overlapping 3D scale tracks multiply their authored contributions');
+
 const proceduralConfig = {
   count: 16, seed: 123, size: 3, speed: 1, lifetime: 2, fadeIn: 0.1, fadeOut: 0.2,
   emitter: { shape: 'sphere', position: { x: 1, y: 2, z: 3 }, size: { x: 2, y: 1, z: 3 } },
@@ -689,6 +815,46 @@ assert.notDeepEqual(silentReactiveFrame, loudReactiveFrame,
 assert.deepEqual(audioReactiveFrame(null), silentReactiveFrame,
   'missing waveform data leaves audio-reactive objects at their authored transform');
 
+function audioReactiveGeometryFrame(object, envelope) {
+  const canvas = Canvas.createCanvas(160, 160);
+  drawScene3D(canvas.getContext('2d'), {
+    camera: { z: 7, fov: 780 }, ambient: 1,
+    audioWaveformsByAsset: envelope ? { music: { peaks: envelope, duration: 1 } } : {},
+    objects: [object],
+  }, 0.5, 1, 160, 160, {});
+  return Array.from(canvas.getContext('2d').getImageData(0, 0, 160, 160).data);
+}
+const reactiveRadius = { id: 'reactive-radius', type: 'sphere', radius: 0.5, color: '#3578FF',
+  audioReactive: { assetId: 'music', target: 'radius', amount: 0.5 } };
+assert.deepEqual(audioReactiveGeometryFrame(reactiveRadius, [1, 1, 1]),
+  audioReactiveGeometryFrame({ ...reactiveRadius, radius: 1, audioReactive: null }, null),
+  'audio envelope drives primitive radius through the shared 3D renderer');
+const reactiveHeight = { id: 'reactive-height', type: 'capsule', radius: 0.3, height: 1, color: '#3578FF',
+  audioReactive: { assetId: 'music', target: 'height', amount: 0.5 } };
+assert.deepEqual(audioReactiveGeometryFrame(reactiveHeight, [1, 1, 1]),
+  audioReactiveGeometryFrame({ ...reactiveHeight, height: 1.5, audioReactive: null }, null),
+  'audio envelope drives capsule height through the shared 3D renderer');
+const reactiveTube = { id: 'reactive-tube', type: 'torus', radius: 0.8, tube: 0.2, color: '#3578FF',
+  audioReactive: { assetId: 'music', target: 'tube', amount: 0.5 } };
+assert.deepEqual(audioReactiveGeometryFrame(reactiveTube, [1, 1, 1]),
+  audioReactiveGeometryFrame({ ...reactiveTube, tube: 0.7, audioReactive: null }, null),
+  'audio envelope drives torus tube thickness through the shared 3D renderer');
+const reactiveCustomMesh = { id: 'reactive-mesh', type: 'mesh', vertices: [
+  { x: -0.5, y: -0.5, z: -0.5 }, { x: 0.5, y: -0.5, z: -0.5 },
+  { x: 0, y: 0.5, z: -0.5 }, { x: 0, y: 0, z: 0.5 },
+], faces: [[0, 1, 2], [0, 1, 3], [1, 2, 3], [2, 0, 3]], color: '#3578FF',
+audioReactive: { assetId: 'music', target: 'sizeX', amount: 1 } };
+for (const [target, expectedSize, label] of [
+  ['sizeX', { x: 2, y: 1, z: 1 }, 'width'],
+  ['sizeY', { x: 1, y: 1.5, z: 1 }, 'height'],
+  ['sizeZ', { x: 1, y: 1, z: 1.5 }, 'depth'],
+]) {
+  const reactiveMesh = { ...reactiveCustomMesh, audioReactive: { assetId: 'music', target, amount: target === 'sizeX' ? 1 : 0.5 } };
+  assert.deepEqual(audioReactiveGeometryFrame(reactiveMesh, [1, 1, 1]),
+    audioReactiveGeometryFrame({ ...reactiveMesh, size: expectedSize, audioReactive: null }, null),
+    `audio envelope drives custom mesh ${label} through the shared 3D renderer`);
+}
+
 function audioReactiveParticles(envelope, target = 'size') {
   const canvas = Canvas.createCanvas(240, 240);
   const context = canvas.getContext('2d');
@@ -705,8 +871,25 @@ const silentParticles = audioReactiveParticles([0, 0, 0]);
 const loudParticles = audioReactiveParticles([1, 1, 1]);
 assert.notDeepEqual(silentParticles, loudParticles,
   'audio waveform data changes deterministic 3D particle size');
+assert.notDeepEqual(audioReactiveParticles([0, 0, 0], 'spread'), audioReactiveParticles([1, 1, 1], 'spread'),
+  'audio waveform data changes deterministic 3D particle spread');
 assert.deepEqual(audioReactiveParticles(null), audioReactiveParticles([0, 0, 0]),
   'missing waveform data leaves audio-reactive particles at their authored settings');
+function audioReactiveEmitterSpread(envelope) {
+  const canvas = Canvas.createCanvas(240, 240);
+  const context = canvas.getContext('2d');
+  drawScene3D(context, {
+    camera: { z: 7, fov: 80 }, shadows: { enabled: false },
+    audioWaveformsByAsset: envelope ? { music: { peaks: envelope, duration: 1 } } : {},
+    particles: { count: 24, seed: 9, size: 0.5, speed: 0.2, lifetime: 4,
+      emitter: { shape: 'sphere', size: { x: 1, y: 1, z: 1 } },
+      audioReactive: { assetId: 'music', target: 'spread', amount: 2 } },
+    objects: [],
+  }, 0.5, 1, 240, 240, {});
+  return context.getImageData(0, 0, 240, 240).data;
+}
+assert.notDeepEqual(audioReactiveEmitterSpread([0, 0, 0]), audioReactiveEmitterSpread([1, 1, 1]),
+  'audio waveform data changes deterministic procedural-emitter size in all axes');
 
 function renderWireframeBox() {
   const canvas = Canvas.createCanvas(240, 240);
@@ -891,6 +1074,29 @@ assert.deepEqual(frameForDelayedAnimation(0), staticFrame, '3D object animation 
 assert.notDeepEqual(frameForDelayedAnimation(1), staticFrame, '3D object animation applies its first keyframe at the configured start time');
 assert.deepEqual(frameForDelayedAnimation(0, { objectAnimation: false, cameraAnimation: true }), staticFrame, '3D camera animation leaves the base camera intact before its start time');
 assert.notDeepEqual(frameForDelayedAnimation(1, { objectAnimation: false, cameraAnimation: true }), staticFrame, '3D camera animation applies at the configured start time');
+function frameForDurationBoundedSceneAnimation(owner, time) {
+  const canvas = Canvas.createCanvas(160, 160);
+  const animation = { startTime: 0, duration: 1, keyframes: [
+    { time: 0, properties: owner === 'light' ? { positionX: -2 } : { x: 0 } },
+    { time: 2, properties: owner === 'light' ? { positionX: 2 } : { x: 4 } },
+  ] };
+  const scene = {
+    camera: { z: 7, fov: 780, ...(owner === 'camera' ? { animations: [animation] } : {}) },
+    ambient: owner === 'light' ? 0.02 : 0.8,
+    shadows: { enabled: false },
+    lights: owner === 'light' ? [{ type: 'point', position: { x: -2, y: 2, z: 4 }, intensity: 0.8,
+      animations: [animation] }] : [],
+    objects: [{ id: 'duration-bounded-object', type: 'box', position: { x: 0, y: 0, z: 0 },
+      size: { x: 1.2, y: 1.2, z: 1.2 }, color: '#FFFFFF', castsShadow: false,
+      ...(owner === 'object' ? { animations: [animation] } : {}) }],
+  };
+  drawScene3D(canvas.getContext('2d'), scene, time, 3, 160, 160, {});
+  return Array.from(canvas.getContext('2d').getImageData(0, 0, 160, 160).data);
+}
+for (const owner of ['object', 'camera', 'light']) {
+  assert.deepEqual(frameForDurationBoundedSceneAnimation(owner, 1), frameForDurationBoundedSceneAnimation(owner, 2),
+    `3D ${owner} animation holds its duration-clamped value instead of advancing through later keyframes`);
+}
 assert.notDeepEqual(frameForDelayedAnimation(0, { objectAnimation: false, cameraExpression: '3' }), staticFrame,
   '3D camera expressions procedurally change camera position in the shared renderer');
 assert.ok(frameForDelayedAnimation(0, { objectAnimation: false, cameraExpression: { near: '8' } })
@@ -908,6 +1114,26 @@ function renderExpressionValueScene(scene) {
   }, 0, 2, 160, 160, {});
   return Array.from(canvas.getContext('2d').getImageData(0, 0, 160, 160).data);
 }
+function renderGeometryAnimationScene(object, time) {
+  const canvas = Canvas.createCanvas(160, 160);
+  drawScene3D(canvas.getContext('2d'), { camera: { z: 7, fov: 780 }, ambient: 0.8, shadows: { enabled: false }, objects: [object] }, time, 1, 160, 160, {});
+  return Array.from(canvas.getContext('2d').getImageData(0, 0, 160, 160).data);
+}
+const animatedSphereRadius = { id: 'animated-radius', type: 'sphere', radius: 0.5, color: '#D83838', castsShadow: false,
+  animations: [{ startTime: 0, duration: 1, keyframes: [{ time: 0, properties: { radius: 0 } }, { time: 1, properties: { radius: 0.5 } }] }] };
+assert.deepEqual(renderGeometryAnimationScene(animatedSphereRadius, 1),
+  renderGeometryAnimationScene({ ...animatedSphereRadius, radius: 1, animations: [] }, 1),
+  '3D radius keyframes alter generated primitive geometry in the shared renderer');
+const animatedBoxWidth = { id: 'animated-width', type: 'box', size: { x: 1, y: 1, z: 1 }, color: '#D83838', castsShadow: false,
+  animations: [{ startTime: 0, duration: 1, keyframes: [{ time: 0, properties: { sizeX: 0 } }, { time: 1, properties: { sizeX: 1 } }] }] };
+assert.deepEqual(renderGeometryAnimationScene(animatedBoxWidth, 1),
+  renderGeometryAnimationScene({ ...animatedBoxWidth, size: { x: 2, y: 1, z: 1 }, animations: [] }, 1),
+  '3D dimension keyframes alter box geometry in the shared renderer');
+const animatedCapsuleHeight = { id: 'animated-height', type: 'capsule', radius: 0.3, height: 1, color: '#D83838', castsShadow: false,
+  animations: [{ startTime: 0, duration: 1, keyframes: [{ time: 0, properties: { height: 0 } }, { time: 1, properties: { height: 1 } }] }] };
+assert.deepEqual(renderGeometryAnimationScene(animatedCapsuleHeight, 1),
+  renderGeometryAnimationScene({ ...animatedCapsuleHeight, height: 2, animations: [] }, 1),
+  '3D capsule height keyframes reshape rounded ends and waist in the shared renderer');
 const keyedObjectPosition = { id: 'value-expression-box', type: 'box', position: { x: 0, y: 0, z: 0 },
   size: { x: 1.2, y: 1.2, z: 1 }, color: '#D83838', castsShadow: false,
   animations: [{ startTime: 0, duration: 1, keyframes: [{ time: 0, properties: { x: 1 } }] }],
@@ -921,6 +1147,18 @@ const keyedCamera = { x: 1, z: 7, fov: 780,
 assert.deepEqual(renderExpressionValueScene({ camera: keyedCamera }),
   renderExpressionValueScene({ camera: { x: 2, z: 7, fov: 780 } }),
   '3D camera expressions compose on the resolved keyframed property value');
+const proceduralSphereRadius = { id: 'procedural-radius', type: 'sphere', radius: 0.5, color: '#D83838', castsShadow: false,
+  animations: [{ startTime: 0, duration: 1, keyframes: [{ time: 0, properties: { radius: 0.25 } }] }],
+  expressions: { radius: 'value + 0.25' } };
+assert.deepEqual(renderExpressionValueScene({ objects: [proceduralSphereRadius] }),
+  renderExpressionValueScene({ objects: [{ ...proceduralSphereRadius, radius: 1, animations: [], expressions: {} }] }),
+  '3D geometry expressions compose over keyframes and rebuild primitive meshes');
+const proceduralMesh = { id: 'procedural-mesh-size', type: 'mesh', vertices: [
+  { x: -0.5, y: -0.5, z: 0 }, { x: 0.5, y: -0.5, z: 0 }, { x: 0, y: 0.5, z: 0 },
+], faces: [[0, 1, 2]], color: '#D83838', castsShadow: false, expressions: { sizeX: '2' } };
+assert.deepEqual(renderExpressionValueScene({ objects: [proceduralMesh] }),
+  renderExpressionValueScene({ objects: [{ ...proceduralMesh, size: { x: 2, y: 1, z: 1 }, expressions: {} }] }),
+  '3D custom mesh dimension expressions scale authored vertices in the shared renderer');
 const lookAtYaw = Math.atan2(1, 7) * 180 / Math.PI;
 assert.deepEqual(renderExpressionValueScene({ camera: { lookAt: { x: 1, y: 0, z: 0 }, expressions: { yaw: 'value + 10' } } }),
   renderExpressionValueScene({ camera: { yaw: lookAtYaw + 10 } }),
@@ -931,6 +1169,27 @@ const keyedLight = { type: 'point', position: { x: 0, y: 2, z: 4 }, intensity: 0
 assert.deepEqual(renderExpressionValueScene({ lights: [keyedLight] }), renderExpressionValueScene({
   lights: [{ type: 'point', position: { x: 0, y: 2, z: 4 }, intensity: 1, range: 24, decay: 0.3 }],
 }), '3D light expressions compose on the resolved keyframed property value');
+function renderLightColorScene(light, time = 1) {
+  const canvas = Canvas.createCanvas(160, 160);
+  drawScene3D(canvas.getContext('2d'), { camera: { z: 7, fov: 780 }, ambient: 0.02, shadows: { enabled: false },
+    lights: [light], objects: [{ id: 'color-lit-object', type: 'box', position: { x: 0, y: 0, z: 0 },
+      size: { x: 2, y: 2, z: 1 }, color: '#888888', castsShadow: false }],
+  }, time, 1, 160, 160, {});
+  return [...canvas.getContext('2d').getImageData(80, 80, 1, 1).data];
+}
+const keyframedLightColor = renderLightColorScene({ type: 'point', position: { x: 0, y: 2, z: 4 }, intensity: 2,
+  range: 24, decay: 0, color: '#FF0000', animations: [{ duration: 1, keyframes: [
+    { time: 0, properties: { colorR: 255, colorG: 0, colorB: 0 } },
+    { time: 1, properties: { colorR: 0, colorG: 0, colorB: 255 } },
+  ] }] });
+assert.deepEqual(keyframedLightColor, renderLightColorScene({ type: 'point', position: { x: 0, y: 2, z: 4 },
+  intensity: 2, range: 24, decay: 0, color: '#0000FF' }),
+'3D light RGB keyframes change the actual rendered illumination color');
+const expressedLightColor = renderLightColorScene({ type: 'point', position: { x: 0, y: 2, z: 4 }, intensity: 2,
+  range: 24, decay: 0, color: '#FF0000', expressions: { colorR: '0', colorB: '255' } });
+assert.deepEqual(expressedLightColor, renderLightColorScene({ type: 'point', position: { x: 0, y: 2, z: 4 },
+  intensity: 2, range: 24, decay: 0, color: '#0000FF' }),
+'3D light RGB expressions change the actual rendered illumination color');
 
 function frameForAnimatedLight(time, animated = true) {
   const canvas = Canvas.createCanvas(160, 160);
@@ -948,7 +1207,7 @@ function frameForAnimatedLight(time, animated = true) {
 assert.deepEqual(frameForAnimatedLight(0), frameForAnimatedLight(0, false), '3D light animation preserves its base values before its start time');
 assert.notDeepEqual(frameForAnimatedLight(2), frameForAnimatedLight(0, false), '3D light intensity and position keyframes affect rendered scene frames');
 
-assert.deepEqual(Object.keys(SCENE3D_PRIMITIVES), ['box', 'sphere', 'cylinder', 'cone', 'torus', 'plane', 'image', 'video', 'text', 'mesh']);
+assert.deepEqual(Object.keys(SCENE3D_PRIMITIVES), ['box', 'sphere', 'capsule', 'cylinder', 'cone', 'torus', 'plane', 'image', 'video', 'text', 'mesh']);
 assert.deepEqual(SCENE3D_CAMERA_DEFAULTS, {
   x: 0, y: 0, z: 7, yaw: 0, pitch: 0, roll: 0, fov: 780, orthoScale: 180, near: 0.05, far: 1000,
 }, '3D camera defaults include every animatable camera channel and match renderer fallbacks');
@@ -961,6 +1220,12 @@ assert.doesNotThrow(() => drawScene3D(malformedMeshCanvas.getContext('2d'), {
 }, 0, 1, 120, 120), 'malformed custom mesh indices are discarded before polygon triangulation');
 assert.equal(remapSceneObjectTime({ speed: 1, duration: 2, mode: 'ping-pong' }, 2.5, 4), 1.5);
 assert.equal(remapSceneObjectTime({ speed: -1, duration: 3 }, 0.5, 3), 2.5);
+assert.equal(remapSceneObjectTime({ speed: -1, duration: null, offset: null }, 0.5, 3), 2.5,
+  'null remap duration and offset inherit the composition span and reverse-playback start');
+assert.equal(remapSceneObjectTime({ speed: null, duration: 3 }, 0.5, 3), 0.5,
+  'a null remap speed uses the default playback rate instead of becoming zero');
+assert.equal(remapSceneObjectTime({ speed: 1, duration: '', mode: 'ping-pong' }, 4.5, 4), 3.5,
+  'an empty remap duration inherits the composition duration for ping-pong playback');
 assert.equal(remapSceneObjectTime({ speed: 2, duration: 3, offset: 1, mode: 'loop' }, 2, 3), 2);
 const reverseLoopStart = remapSceneObjectTime({ speed: -1, duration: 3, mode: 'loop' }, 0, 3);
 assert.ok(reverseLoopStart < 3 && reverseLoopStart > 2.999,
@@ -1068,11 +1333,11 @@ const excessiveHierarchy = normalizeScene3D({ objects: Array.from({ length: 132 
 assert.ok(excessiveHierarchy.issues.some(issue => issue.includes('parent chain exceeds 128 levels')),
   'pathological 3D nesting is explicitly reported when the safety limit repairs it');
 
-function renderPrimitive(type, radius, size = { x: 1, y: 1, z: 1 }) {
+function renderPrimitive(type, radius, size = { x: 1, y: 1, z: 1 }, height = 1.5) {
   const canvas = Canvas.createCanvas(96, 96);
   drawScene3D(canvas.getContext('2d'), {
     camera: { z: 7 }, ambient: 0.8, shadows: { enabled: false },
-    objects: [{ id: 'cached-primitive', type, radius, size, castsShadow: false }],
+    objects: [{ id: 'cached-primitive', type, radius, height, size, castsShadow: false }],
   }, 0, 1, 96, 96);
   return canvas.toBuffer('image/png');
 }
@@ -1082,6 +1347,26 @@ assert.notDeepEqual(renderPrimitive('sphere', 0.35), renderPrimitive('sphere', 0
   'primitive cache keys include geometry dimensions so edits never reuse stale meshes');
 assert.notDeepEqual(renderPrimitive('box', 0.65, { x: 0.5, y: 1, z: 1 }), renderPrimitive('box', 0.65, { x: 1.5, y: 1, z: 1 }),
   'primitive cache keys include box dimensions');
+const capsuleGeometry = normalizeSceneMesh({ type: 'capsule', radius: 0.4, height: 2 });
+assert.equal(capsuleGeometry.vertices.length, 24 * 18, 'capsule geometry uses bounded, evenly sampled rings');
+assert.equal(Math.max(...capsuleGeometry.vertices.map(point => point.y)), 1, 'capsule reaches the authored top bound');
+assert.equal(Math.min(...capsuleGeometry.vertices.map(point => point.y)), -1, 'capsule reaches the authored bottom bound');
+assert.ok(Math.abs(Math.max(...capsuleGeometry.vertices.map(point => point.x)) - 0.4) < 1e-9,
+  'capsule keeps the authored radius at its waist');
+assert.notDeepEqual(renderPrimitive('capsule', 0.4, { x: 1, y: 1, z: 1 }, 2), renderPrimitive('cylinder', 0.4, { x: 1, y: 1, z: 1 }, 2),
+  'capsule renders rounded ends instead of falling back to cylindrical geometry');
+assert.ok(!getScene3DCompatibilityWarnings({ objects: [{ id: 'supported-capsule', type: 'capsule' }] })
+  .some(warning => warning.objectId === 'supported-capsule'), 'capsule is recognized as a supported scene primitive');
+assert.equal(SCENE3D_PRIMITIVES.capsule, 'capsule', 'capsule is exposed through the public primitive catalog');
+const sphericalCapsule = normalizeSceneMesh({ type: 'capsule', radius: 1, height: 2 });
+assert.equal(sphericalCapsule.vertices.length, 24 * 17,
+  'a capsule with a zero-length waist joins its hemispheres without a duplicate equator ring');
+for (let ring = 0; ring < sphericalCapsule.vertices.length / 24 - 1; ring++) {
+  const upper = sphericalCapsule.vertices[ring * 24];
+  const lower = sphericalCapsule.vertices[(ring + 1) * 24];
+  assert.ok(Math.hypot(upper.x - lower.x, upper.y - lower.y, upper.z - lower.z) > 0,
+    `zero-waist capsule rings ${ring} and ${ring + 1} remain distinct`);
+}
 
 function renderConcaveMesh() {
   const canvas = Canvas.createCanvas(240, 240);
@@ -1317,6 +1602,16 @@ try {
   }));
   assert.notDeepEqual(audioPixels[0], audioPixels[1],
     'audio-reactive waveform data changes actual exported 3D frame pixels');
+  const audioGeometryScene = {
+    ...audioScene,
+    objects: [{ id: 'export-audio-radius', type: 'sphere', radius: 0.35, color: '#3578FF', castsShadow: false,
+      audioReactive: { assetId: 'music', target: 'radius', amount: 0.5 } }],
+  };
+  const audioGeometrySequence = await renderTemplateFrames({ kind: '3d-scene', params: { scene: audioGeometryScene } }, {
+    durationSec: 1, fps: 2, widthPx: 240, tmpDir: videoFixtureDir, name: 'audio-reactive-geometry-export',
+  });
+  assert.notDeepEqual(fs.readFileSync(audioGeometrySequence.files[0]), fs.readFileSync(audioGeometrySequence.files[1]),
+    'audio-reactive geometry changes actual exported 3D frame pixels');
 } finally {
   fs.rmSync(videoFixtureDir, { recursive: true, force: true });
 }
@@ -1358,6 +1653,26 @@ for (const [width, height] of [[96, 96], [128, 96], [96, 128], [160, 96], [96, 1
   }
   assert.equal(focusedPlaneChanges, 0, 'depth of field leaves the configured focus plane sharp');
   assert.ok(farPlaneChanges > 0, 'depth of field visibly softens geometry outside the focus range');
+  function renderAnimatedFocus(time) {
+    const canvas = Canvas.createCanvas(240, 160);
+    drawScene3D(canvas.getContext('2d'), {
+      camera: { z: 10, fov: 780, depthOfField: { enabled: true, focusDistance: 8, focusRange: 0.2, maxBlur: 8 },
+        animations: [{ startTime: 0, duration: 1, easing: 'linear', keyframes: [
+          { time: 0, properties: { dofFocusDistance: 8 } },
+          { time: 1, properties: { dofFocusDistance: 12 } },
+        ] }] },
+      ambient: 1, shadows: { enabled: false }, lights: [], objects,
+    }, time, 1, 240, 160);
+    return canvas.getContext('2d').getImageData(0, 0, 240, 160).data;
+  }
+  const nearFocused = renderAnimatedFocus(0), farFocused = renderAnimatedFocus(1);
+  let animatedFocusChanges = 0;
+  for (let y = 0; y < 160; y++) for (let x = 120; x < 240; x++) {
+    const i = (y * 240 + x) * 4;
+    if (nearFocused[i] !== farFocused[i] || nearFocused[i + 1] !== farFocused[i + 1]
+      || nearFocused[i + 2] !== farFocused[i + 2] || nearFocused[i + 3] !== farFocused[i + 3]) animatedFocusChanges++;
+  }
+  assert.ok(animatedFocusChanges > 100, 'camera focus-distance keyframes visibly shift the 3D depth-of-field plane');
   const renderDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scene3d-depth-of-field-'));
   try {
     const exportScene = dof => ({ camera: { z: 10, fov: 780, depthOfField: dof }, ambient: 1,
@@ -1370,6 +1685,16 @@ for (const [width, height] of [[96, 96], [128, 96], [96, 128], [160, 96], [96, 1
     });
     assert.notDeepEqual(fs.readFileSync(plainExport.files[0]), fs.readFileSync(defocusedExport.files[0]),
       'the server frame renderer exports the same depth-of-field treatment as preview');
+    const animatedFocusExport = await renderTemplateFrames({ kind: '3d-scene', params: { scene: {
+      camera: { z: 10, fov: 780, depthOfField: { enabled: true, focusDistance: 8, focusRange: 0.2, maxBlur: 8 },
+        animations: [{ startTime: 0, duration: 1, easing: 'linear', keyframes: [
+          { time: 0, properties: { dofFocusDistance: 8 } },
+          { time: 1, properties: { dofFocusDistance: 12 } },
+        ] }] },
+      ambient: 1, shadows: { enabled: false }, lights: [], objects,
+    } } }, { durationSec: 2, fps: 1, widthPx: 240, tmpDir: renderDir, name: 'animated-focus' });
+    assert.notDeepEqual(fs.readFileSync(animatedFocusExport.files[0]), fs.readFileSync(animatedFocusExport.files[1]),
+      'animated camera focus distance changes actual exported 3D frame pixels');
   } finally {
     fs.rmSync(renderDir, { recursive: true, force: true });
   }

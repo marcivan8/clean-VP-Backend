@@ -83,11 +83,7 @@ export async function runAutopilot(request, opts = {}) {
             prompt: videoOnly ? 'Create a video from the uploaded video clips only' : 'Create a video from the uploaded images and event footage',
         }, ...steps];
     }
-    // Mobile creation uses the chosen playbook to produce a coherent first
-    // cut, then applies the user's extra direction (for example, music or a
-    // softer pace). A typed direction must not replace the whole playbook.
     const userDirection = String(opts.userDirection || '').trim();
-    if (userDirection) steps.push({ key: 'request', prompt: userDirection });
 
     // ── Make the playbook state-aware (EditPolicy) ───────────────────────────
     //
@@ -117,6 +113,9 @@ export async function runAutopilot(request, opts = {}) {
             goals: steps.map(step => step.prompt),
             state: useTimelineStore.getState(),
             skipSatisfied: true,
+            // The playbook is already the selected style's concrete defaults.
+            // Do not apply a second style veto to it; direct user requests are
+            // also preserved by EditPolicy's default respectStyle=false.
             respectStyle: false,
         });
 
@@ -146,6 +145,11 @@ export async function runAutopilot(request, opts = {}) {
     }
 
     if (steps.length === 0) steps = originalSteps;
+
+    // Mobile creation applies the user's additional direction after the
+    // style-default plan so the user's explicit instruction remains a separate
+    // operation and cannot be mistaken for a style default.
+    if (userDirection) steps.push({ key: 'request', prompt: userDirection });
 
     try {
         opts.onPlan?.(steps.map((step, index) => ({

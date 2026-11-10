@@ -14,6 +14,26 @@ import { TEMPLATE_KINDS } from '../motion/TemplateGraphics.js';
 import { iconFromText } from '../motion/IconLibrary.js';
 import { applyPresetToClip } from '../motion/ClipAdapter.js';
 import { describeToolCapabilities, validateToolInvocation } from './ToolCapabilityCatalog.js';
+import { effectRegistry } from '../effects/EffectRegistry.js';
+import { isGpuClipEffect } from '../effects/ClipEffectAdapter.js';
+import { PARAM_TYPES } from '../effects/EffectNode.js';
+import { COMPONENT_IDS } from '../motion/ComponentLibrary.js';
+
+const ROKA_FOOTAGE_EFFECT_TYPES = Object.freeze([
+    'blur_gaussian', 'blur_radial', 'blur_motion', 'glow', 'vignette', 'rgb_split',
+    'film_grain', 'glitch', 'color_grade', 'fade_in', 'fade_out',
+]);
+const ROKA_FOOTAGE_EFFECT_SET = new Set(ROKA_FOOTAGE_EFFECT_TYPES);
+const ROKA_FOOTAGE_EFFECT_GUIDE = ROKA_FOOTAGE_EFFECT_TYPES.map(type => {
+    const definition = effectRegistry.get(type);
+    const params = Object.entries(definition?.params || {}).map(([key, param]) => {
+        const range = Number.isFinite(Number(param.min)) && Number.isFinite(Number(param.max))
+            ? ` ${param.min}–${param.max}` : '';
+        const options = Array.isArray(param.options) ? ` (${param.options.join('|')})` : '';
+        return `${key}${range}${options}`;
+    }).join(', ');
+    return `${type}: ${definition?.name || type}${params ? ` [${params}]` : ''}`;
+}).join('; ');
 
 /**
  * VideoEditorTools
@@ -462,7 +482,48 @@ export const TOOL_DEFINITIONS = [
     { name: 'create_video_from_assets', description: 'Create a montage from uploaded source footage and images in the media bin. Reference assets are excluded.', parameters: { type: 'object', properties: { includeImages: { type: 'boolean' }, style: { type: 'string' } } } },
     { name: 'layout_split_screen', description: 'Arrange the selected speaker and visual asset in a split-screen composition.', parameters: { type: 'object', properties: { clipId: { type: 'string' }, assetId: { type: 'string' }, ratio: { type: 'number' } } } },
     { name: 'layout_picture_in_picture', description: 'Place the selected visual asset in a picture-in-picture frame.', parameters: { type: 'object', properties: { clipId: { type: 'string' }, assetId: { type: 'string' }, position: { type: 'string' }, scale: { type: 'number' } } } },
-    { name: 'layout_fullscreen', description: 'Show the selected visual asset full-frame for the requested range.', parameters: { type: 'object', properties: { clipId: { type: 'string' }, assetId: { type: 'string' }, start: { type: 'number' }, duration: { type: 'number' } } } }
+    { name: 'layout_fullscreen', description: 'Show the selected visual asset full-frame for the requested range.', parameters: { type: 'object', properties: { clipId: { type: 'string' }, assetId: { type: 'string' }, start: { type: 'number' }, duration: { type: 'number' } } } },
+    {
+        name: 'design_scene',
+        description: 'Design and place an editable multi-layer motion graphics sequence from the user brief. The scene designer chooses the sequence beats, adapts colors and placement to footage when available, and checks layout before placement.',
+        parameters: { type: 'object', properties: { brief: { type: 'string', description: 'What the sequence should communicate and its intended tone.' } }, required: ['brief'] },
+    },
+    {
+        name: 'add_motion_component',
+        description: 'Add an editable After Effects class motion graphics component to the timeline, such as a title sequence, kinetic title, lower third, stat callout, quote card, or CTA. Include the actual copy and timing in params.',
+        parameters: {
+            type: 'object',
+            properties: {
+                component: { type: 'string', enum: COMPONENT_IDS },
+                preset: { type: 'string', description: 'A visual preset supported by the chosen component; omit to use its default.' },
+                params: { type: 'object', description: 'Component content and layout values such as title, subtitle, label, stat, start, duration, x, and y.' },
+            },
+            required: ['component'],
+        },
+    },
+    {
+        name: 'compose_motion',
+        description: 'Write custom keyframe animation for existing titles, captions, stickers, shapes, images, or graphics from the user description. Honors selected targets and uses the motion composer with a validated library fallback.',
+        parameters: { type: 'object', properties: { brief: { type: 'string', description: 'Describe the motion, target, and desired feel.' } }, required: ['brief'] },
+    },
+    {
+        name: 'apply_motion_effect_stack',
+        description: `Apply an ordered stack of supported footage effects to selected video or video under the playhead. Choose effects that serve the user's intent; don't add effects by default. Existing effects are preserved unless replaceExisting is true. Supported types and registry parameters: ${ROKA_FOOTAGE_EFFECT_GUIDE}.`,
+        parameters: {
+            type: 'object',
+            properties: {
+                clipId: { type: 'string', description: 'Optional exact timeline video clip ID. Otherwise targets selected video clips, then the video under the playhead.' },
+                effects: { type: 'array', minItems: 1, items: { type: 'object', properties: {
+                    type: { type: 'string', enum: [...ROKA_FOOTAGE_EFFECT_TYPES] },
+                    params: { type: 'object', description: 'Effect parameters as plain values. Use the registry defaults when omitted.' },
+                    startTime: { type: 'number', description: 'Optional project time in seconds when this effect starts.' },
+                    endTime: { type: 'number', description: 'Optional project time in seconds when this effect ends.' },
+                }, required: ['type'] } },
+                replaceExisting: { type: 'boolean', description: 'Replace the current effect stack on target clips. Defaults to false.' },
+            },
+            required: ['effects'],
+        },
+    }
 ];
 
 export const TOOL_CAPABILITIES = describeToolCapabilities(TOOL_DEFINITIONS);
@@ -947,7 +1008,7 @@ export function matchTranscriptToBroll(words, candidates, chapterBoundaries = []
  * R126 - pick a layout preset (R88 LAYOUT_PRESETS) for an automatically
  * placed b-roll cutaway, based on signals already available at placement
  * time (the clip's duration, whether the speaker footage it covers has
- * face-tracking data). Pure function, independently testable without
+ * a person segmentation track). Pure function, independently testable without
  * standing up the store.
  *
  * Returns null (no layout - the existing implicit default: the overlay
@@ -958,23 +1019,23 @@ export function matchTranscriptToBroll(words, candidates, chapterBoundaries = []
  * ask is pointing at, not a 1-2s cutaway.
  *
  * 'split' is only chosen when the covering base clip actually has
- * face-tracking data (`layerMask.bboxTrack`). applyLayout's own fallback
- * for 'split' without that data is centre-framed and not face-aware - fine
+ * a subject track (`layerMask.bboxTrack`). applyLayout's own fallback
+ * for 'split' without that data is centre-framed and not subject-aware - fine
  * for a user who clicked a button and can see/undo the result, too big a
- * visual gamble to apply silently inside an automatic plan. Without face
- * data, 'pip' is the safer automatic choice: it keeps the speaker visible
- * without depending on any face detection at all.
+ * visual gamble to apply silently inside an automatic plan. Without a subject
+ * track, 'pip' is the safer automatic choice: it keeps the speaker visible
+ * without depending on segmentation.
  *
  * @param {number} duration - the overlay clip's placed duration, seconds
- * @param {boolean} hasFaceTracking - true when the covering base clip has layerMask.bboxTrack data
+ * @param {boolean} hasSubjectTrack - true when the covering base clip has layerMask.bboxTrack data
  * @returns {string|null} one of LAYOUT_PRESETS ('split'|'pip'), or null for "no layout"
  */
 export const AUTO_LAYOUT_MIN_DURATION_S = 3.5;
 
-export function decideAutoLayout(duration, hasFaceTracking) {
+export function decideAutoLayout(duration, hasSubjectTrack) {
     const d = Number(duration) || 0;
     if (d < AUTO_LAYOUT_MIN_DURATION_S) return null;
-    return hasFaceTracking ? 'split' : 'pip';
+    return hasSubjectTrack ? 'split' : 'pip';
 }
 
 export class VideoEditorTools {
@@ -1103,6 +1164,10 @@ export class VideoEditorTools {
             case 'layout_split_screen':       return this.applyLayoutPreset('split', action.args);
             case 'layout_picture_in_picture': return this.applyLayoutPreset('pip', action.args);
             case 'layout_fullscreen':         return this.applyLayoutPreset('fullscreen', action.args);
+            case 'design_scene': return await this.executeMotionEngineAction('design_scene', action.args, action.signal || null);
+            case 'compose_motion': return await this.executeMotionEngineAction('compose_motion', action.args, action.signal || null);
+            case 'add_motion_component': return this.addMotionComponent(action.args);
+            case 'apply_motion_effect_stack': return this.applyMotionEffectStack(action.args);
             case 'clear_keywords':     return this.clearKeywords(action.args);
             case 'add_sfx':           return this.addSFX(action.args);
             case 'apply_preset':      return await this.applyPreset(action.args);
@@ -1117,6 +1182,123 @@ export class VideoEditorTools {
     }
 
     // --- Tool Implementations ---
+
+    async executeMotionEngineAction(action, args = {}, signal = null) {
+        const { MediaExecutionEngine } = await import('./MediaExecutionEngine.js');
+        const engine = new MediaExecutionEngine();
+        return engine.executeStoreAction({ action, args }, signal ? { signal } : null);
+    }
+
+    addMotionComponent({ component, preset, params = {} } = {}) {
+        if (!COMPONENT_IDS.includes(component)) {
+            return { success: false, message: `Choose a supported motion component: ${COMPONENT_IDS.join(', ')}.` };
+        }
+        const state = useTimelineStore.getState();
+        const previousIds = new Set((state.tracks || []).flatMap(track => (track.clips || []).map(clip => clip.id)));
+        const result = state.addMotionComponent?.(component, preset, params);
+        if (!result?.success) return { success: false, message: result?.error || 'The motion component could not be created.' };
+        const fresh = useTimelineStore.getState();
+        const scenePresent = result.sceneId ? !!fresh.scenes?.[result.sceneId] : false;
+        const addedClipIds = (fresh.tracks || []).flatMap(track => track.clips || []).filter(clip => !previousIds.has(clip.id)).map(clip => clip.id);
+        const addedClipCount = addedClipIds.length;
+        if (!scenePresent || addedClipCount < Number(result.clipCount || 0) || !(result.clipCount > 0)) {
+            return { success: false, message: 'The component builder returned success, but no scene or timeline layers were found afterward.' };
+        }
+        return {
+            success: true,
+            message: `Added an editable ${component} motion composition${preset ? ` using the ${preset} look` : ''} with ${result.clipCount || 0} layer${result.clipCount === 1 ? '' : 's'}.`,
+            details: { sceneId: result.sceneId || null, groupId: result.groupId || null, clipCount: result.clipCount || 0, clipIds: addedClipIds, verified: true },
+        };
+    }
+
+    applyMotionEffectStack({ clipId, effects, replaceExisting = false } = {}) {
+        const requested = Array.isArray(effects) ? effects : [];
+        if (!requested.length) return { success: false, message: 'Choose at least one footage effect to apply.' };
+
+        const normalized = [];
+        for (const [index, item] of requested.entries()) {
+            const type = String(item?.type || '');
+            const definition = effectRegistry.get(type);
+            if (!ROKA_FOOTAGE_EFFECT_SET.has(type) || !definition || (!isGpuClipEffect(type) && !['fade_in', 'fade_out'].includes(type))) {
+                return { success: false, message: `The motion engine cannot apply “${type || `effect ${index + 1}`}” to footage in preview and export.` };
+            }
+            const supplied = item.params && typeof item.params === 'object' && !Array.isArray(item.params) ? item.params : {};
+            for (const [key, value] of Object.entries(supplied)) {
+                const schema = definition.params?.[key];
+                if (!schema) return { success: false, message: `“${key}” is not a parameter of ${definition.name}.` };
+                if ([PARAM_TYPES.FLOAT, PARAM_TYPES.INT, PARAM_TYPES.ANGLE].includes(schema.type)
+                    && (typeof value !== 'number' || !Number.isFinite(value) || (schema.type === PARAM_TYPES.INT && !Number.isInteger(value)))) {
+                    return { success: false, message: `“${key}” must be a valid ${schema.type} value for ${definition.name}.` };
+                }
+                if (schema.type === PARAM_TYPES.BOOL && typeof value !== 'boolean') {
+                    return { success: false, message: `“${key}” must be true or false for ${definition.name}.` };
+                }
+                if (schema.type === PARAM_TYPES.SELECT && !schema.options?.includes(value)) {
+                    return { success: false, message: `“${key}” must be one of ${schema.options?.join(', ') || 'the supported options'} for ${definition.name}.` };
+                }
+                if (schema.type === PARAM_TYPES.COLOR && !(typeof value === 'string' || (Array.isArray(value) && [3, 4].includes(value.length) && value.every(channel => Number.isFinite(channel))))) {
+                    return { success: false, message: `“${key}” must be a color for ${definition.name}.` };
+                }
+                if (typeof value === 'number' && (!Number.isFinite(value)
+                    || (Number.isFinite(Number(schema.min)) && value < Number(schema.min))
+                    || (Number.isFinite(Number(schema.max)) && value > Number(schema.max)))) {
+                    return { success: false, message: `“${key}” is outside the supported range for ${definition.name}.` };
+                }
+            }
+            if (item.startTime != null && (!Number.isFinite(Number(item.startTime)) || Number(item.startTime) < 0)) {
+                return { success: false, message: `Effect ${definition.name} has an invalid start time.` };
+            }
+            if (item.endTime != null && (!Number.isFinite(Number(item.endTime)) || Number(item.endTime) <= Number(item.startTime ?? 0))) {
+                return { success: false, message: `Effect ${definition.name} has an invalid end time.` };
+            }
+            normalized.push(effectRegistry.createConfig(type, {
+                id: `roka-fx-${Date.now().toString(36)}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+                params: supplied,
+                ...(item.startTime != null ? { startTime: Number(item.startTime) } : {}),
+                ...(item.endTime != null ? { endTime: Number(item.endTime) } : {}),
+                enabled: true,
+                order: index,
+            }));
+        }
+
+        const state = useTimelineStore.getState();
+        const videoTracks = (state.tracks || []).filter(track => track.type === 'video');
+        const found = clipId
+            ? videoTracks.flatMap(track => (track.clips || []).map(clip => ({ track, clip }))).filter(entry => entry.clip.id === clipId)
+            : [];
+        if (clipId && !found.length) return { success: false, message: 'That video clip is no longer on the timeline.' };
+        let targets = found;
+        if (!clipId) {
+            const selected = new Set(state.selectedClipIds || []);
+            targets = videoTracks.flatMap(track => (track.clips || []).map(clip => ({ track, clip })))
+                .filter(entry => selected.has(entry.clip.id));
+            if (!targets.length) {
+                const time = Number(state.currentTime) || 0;
+                targets = videoTracks.flatMap(track => (track.clips || []).map(clip => ({ track, clip })))
+                    .filter(({ clip }) => time >= (Number(clip.start) || 0) && time < (Number(clip.start) || 0) + (Number(clip.duration) || 0));
+            }
+        }
+        if (!targets.length) return { success: false, message: 'Select a video clip or move the playhead over one before applying footage effects.' };
+
+        state._saveHistory?.();
+        const targetIds = targets.map(({ track, clip }) => ({ trackId: track.id, clipId: clip.id }));
+        for (const { track, clip } of targets) {
+            const nextEffects = replaceExisting ? [...normalized] : [...(clip.effects || []), ...normalized];
+            state.updateClip(track.id, clip.id, { effects: nextEffects }, { skipHistory: true });
+        }
+        const refreshed = useTimelineStore.getState();
+        const verified = targetIds.every(({ trackId, clipId: targetClipId }) => {
+            const track = refreshed.tracks.find(candidate => candidate.id === trackId && candidate.type === 'video');
+            const clip = track?.clips?.find(candidate => candidate.id === targetClipId);
+            return !!clip && normalized.every(applied => (clip.effects || []).some(effect => effect.id === applied.id));
+        });
+        if (!verified) return { success: false, message: 'The effect stack did not persist on every target clip. The timeline may need a refresh.' };
+        return {
+            success: true,
+            message: `Applied ${normalized.map(effect => effect.name).join(', ')} to ${targets.length} video clip${targets.length === 1 ? '' : 's'}. The effects are on the footage effect stack and can be adjusted or undone.`,
+            details: { clipIds: targetIds.map(target => target.clipId), effects: normalized.map(({ id, type, name }) => ({ id, type, name })), verified: true },
+        };
+    }
 
     cutClip({ clipId, time, trackId }) {
         let track = this.store.tracks.find(t => t.id === trackId);
@@ -1866,14 +2048,14 @@ export class VideoEditorTools {
             // illustrates; `events` favours reveal/punchline/emphasis moments;
             // `layout` ('fullscreen' | 'split' | 'pip') frames it (R88 presets).
             // R126: `autoLayout` instead decides a layout PER MATCH via
-            // decideAutoLayout() (duration + face-tracking availability) —
+            // decideAutoLayout() (duration + subject-track availability) —
             // used instead of `layout` when the caller wants automatic
             // variety rather than one fixed preset applied to every cutaway.
             // `layout` wins if both are set, so existing callers are unaffected.
             const baseTrackForLayout = args.autoLayout
                 ? (state.tracks || []).find(t => t.type === 'video' && (t.clips || []).length > 0)
                 : null;
-            const hasFaceTrackingAt = (t) => {
+            const hasSubjectTrackAt = (t) => {
                 if (!baseTrackForLayout) return false;
                 const covering = (baseTrackForLayout.clips || []).find(c => {
                     const s = Number(c.start) || 0;
@@ -1915,7 +2097,7 @@ export class VideoEditorTools {
                     scale: 4,
                 });
                 const layoutToApply = args.layout
-                    || (args.autoLayout ? decideAutoLayout(duration, hasFaceTrackingAt(match.timelineTime)) : null);
+                    || (args.autoLayout ? decideAutoLayout(duration, hasSubjectTrackAt(match.timelineTime)) : null);
                 if (layoutToApply && trackId) {
                     const placed = (useTimelineStore.getState().tracks.find(t => t.id === trackId)?.clips || [])
                         .find(c => c.assetId === asset.id && Math.abs((Number(c.start) || 0) - match.timelineTime) < 0.01);
@@ -2971,10 +3153,10 @@ export class VideoEditorTools {
             const r = state.applyLayout(target.track.id, target.clip.id, preset);
             if (!r?.success) return { success: false, message: r?.error || 'Layout could not be applied.' };
             const names = { split: 'Split screen', pip: 'Picture in picture', fullscreen: 'Full-screen cutaway' };
-            const face = preset === 'split'
-                ? (r.faceAware ? ' The speaker is framed from the speaker detection.' : ' The speaker is framed from the centre; run "separate speaker" first for face-aware framing.')
+            const subject = preset === 'split'
+                ? (r.subjectAware ? ' The speaker is framed from the detected subject.' : ' The speaker is framed from the centre; run "separate speaker" first for subject-aware framing.')
                 : '';
-            return { success: true, message: `${names[preset]} applied to "${target.clip.name || 'the clip'}".${face}` };
+            return { success: true, message: `${names[preset]} applied to "${target.clip.name || 'the clip'}".${subject}` };
         } catch (error) {
             console.error('[VideoEditorTools] applyLayoutPreset error:', error);
             return { success: false, message: `Could not apply the layout: ${error.message}` };
