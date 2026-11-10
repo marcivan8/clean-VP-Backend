@@ -5,11 +5,12 @@ import { EffectPipeline } from '../client/src/effects/EffectPipeline.js';
 import { EffectRenderer } from '../client/src/effects/EffectRenderer.js';
 import { EffectNode } from '../client/src/effects/EffectNode.js';
 import { EffectGraph } from '../client/src/effects/EffectGraph.js';
+import { createGpuClipEffectConfigs } from '../client/src/effects/ClipEffectAdapter.js';
 import { resolveTimelineEffectTransform } from '../client/src/motion/TimelineVisualEffects.js';
 
 const require = createRequire(import.meta.url);
 const ffmpeg = require('ffmpeg-static');
-const { buildSmoothZoomFilter, compileTimelineVisualEffects, collectTimelineEffectWarnings } = require('../jobs/exportProcessor.js');
+const { buildSmoothZoomFilter, compileTimelineVisualEffects, compileTimelineVisualEffectGraph, collectTimelineEffectWarnings } = require('../jobs/exportProcessor.js');
 assert.deepEqual(compileTimelineVisualEffects([{ kind: 'imaginary-effect', enabled: true, params: {} }]), [],
     'unsupported footage effects do not create pretend render filters');
 assert.match(collectTimelineEffectWarnings([{ name: 'Primary', start: 0, duration: 2,
@@ -153,28 +154,55 @@ try {
     assert.deepEqual(orderedJob.timeline.tracks[0].clips[0].effects.map(effect => [effect.id, effect.order]), [
         ['effect-a', 0], ['effect-b', 1]
     ], 'export serializes connected graph order, even when authored order fields disagree');
+    orderedPipeline.moveEffectDown('effect-a');
+    assert.deepEqual(orderedPipeline.getGraphForTarget('clip-order').getExecutionOrder().map(node => node.id),
+        ['effect-b', 'effect-a'], 'moving a connected effect down rebuilds executable graph links');
+    assert.equal(orderedPipeline.reorderEffects('clip-order', ['effect-a']), false,
+        'a partial reorder is rejected instead of disconnecting effects');
+    const reorderedJob = await orderedPipeline.buildRenderJob({
+        tracks: [{ id: 'video-track', clips: [{ id: 'clip-order', duration: 2 }] }],
+        assets: []
+    });
+    assert.deepEqual(reorderedJob.timeline.tracks[0].clips[0].effects.map(effect => effect.id),
+        ['effect-b', 'effect-a'], 'preview graph order and exported effect order stay aligned after a reorder');
+    const restoredOrderedPipeline = EffectPipeline.deserialize(orderedPipeline.serialize());
+    assert.deepEqual(restoredOrderedPipeline.getGraphForTarget('clip-order').getExecutionOrder().map(node => node.id),
+        ['effect-b', 'effect-a'], 'the reordered connected chain survives project serialization and reload');
+    const restoredOrderedJob = await restoredOrderedPipeline.buildRenderJob({
+        tracks: [{ id: 'video-track', clips: [{ id: 'clip-order', duration: 2 }] }],
+        assets: []
+    });
+    assert.deepEqual(restoredOrderedJob.timeline.tracks[0].clips[0].effects.map(effect => effect.id),
+        ['effect-b', 'effect-a'], 'a reloaded stack keeps the same rendered effect order');
 
     const mergedPipeline = new EffectPipeline();
-    mergedPipeline.addEffect({ id: 'graph-first', type: 'contrast', engine: 'cpu', targetId: 'clip-merged', params: { amount: 1.2 } });
-    mergedPipeline.addEffect({ id: 'graph-second', type: 'brightness', engine: 'cpu', targetId: 'clip-merged', params: { amount: 1.3 } });
+    mergedPipeline.addEffect({ id: 'graph-first', type: 'vignette', engine: 'gpu', targetId: 'clip-merged', params: { intensity: 0.2 } });
+    mergedPipeline.addEffect({ id: 'graph-second', type: 'color_grade', engine: 'gpu', targetId: 'clip-merged', params: { saturation: 110 } });
     mergedPipeline.effectsByTarget.get('clip-merged').connect('graph-first', 'graph-second');
+    const mergedClipEffects = [
+        { id: 'native-blur', kind: 'blur_gaussian', enabled: true, order: 4, params: { intensity: 0.2, radius: 4 } },
+        { id: 'native-grain', kind: 'film_grain', enabled: true, order: 1, params: { intensity: 0.1, seed: 17 } }
+    ];
+    // Mirror VideoPlayer.setClipEffects: it adds shader-backed timeline
+    // effects to the existing target graph after the graph nodes are present.
+    const previewMergedPipeline = new EffectPipeline();
+    previewMergedPipeline.addEffect({ id: 'graph-first', type: 'vignette', engine: 'gpu', targetId: 'clip-merged', params: { intensity: 0.2 } });
+    previewMergedPipeline.addEffect({ id: 'graph-second', type: 'color_grade', engine: 'gpu', targetId: 'clip-merged', params: { saturation: 110 } });
+    previewMergedPipeline.effectsByTarget.get('clip-merged').connect('graph-first', 'graph-second');
+    createGpuClipEffectConfigs('clip-merged', mergedClipEffects).forEach(config => previewMergedPipeline.addEffect(config));
+    const previewMergedOrder = previewMergedPipeline.getGraphForTarget('clip-merged').getExecutionOrder().map(effect => effect.type);
     const mergedJob = await mergedPipeline.buildRenderJob({
-        tracks: [{ id: 'video-track', clips: [{ id: 'clip-merged', duration: 2, effects: [
-            { id: 'native-saturation', kind: 'saturation', enabled: true, order: 4, params: { amount: 1.1 } },
-            { id: 'native-hue', kind: 'hue', enabled: true, order: 1, params: { degrees: 12 } }
-        ] }] }],
+        tracks: [{ id: 'video-track', clips: [{ id: 'clip-merged', duration: 2, effects: mergedClipEffects }] }],
         assets: []
     });
     assert.deepEqual(mergedJob.timeline.tracks[0].clips[0].effects.map(effect => [effect.id, effect.order]), [
-        ['native-hue', 0], ['native-saturation', 1], ['graph-first', 2], ['graph-second', 3]
-    ], 'native clip effects and connected graph effects merge with a deterministic unique order');
-    assert.deepEqual(mergedJob.timeline.tracks[0].clips[0].effects.map(effect => effect.kind), [
-        'hue', 'saturation', 'contrast', 'brightness'
-    ], 'the canonical export payload preserves merged effect execution order');
-    const mergedFilters = compileTimelineVisualEffects(mergedJob.timeline.tracks[0].clips[0].effects).join(',');
-    assert.ok(mergedFilters.indexOf('hue=') < mergedFilters.indexOf('eq=saturation='), 'native hue runs before native saturation in the rendered chain');
-    assert.ok(mergedFilters.indexOf('eq=saturation=') < mergedFilters.indexOf('eq=contrast='), 'native clip effects run before the appended effect graph');
-    assert.ok(mergedFilters.indexOf('eq=contrast=') < mergedFilters.indexOf('colorchannelmixer='), 'the graph itself keeps its connected execution order through FFmpeg compilation');
+        ['graph-first', 0], ['graph-second', 1], ['native-grain', 2], ['native-blur', 3]
+    ], 'export preserves the connected preview graph before clip effects added to that graph');
+    const exportMergedOrder = mergedJob.timeline.tracks[0].clips[0].effects.map(effect => effect.kind);
+    assert.deepEqual(exportMergedOrder, previewMergedOrder,
+        'the connected effect graph and clip effects execute in the same order in preview and export');
+    assert.ok(compileTimelineVisualEffects(mergedJob.timeline.tracks[0].clips[0].effects).length > 0,
+        'the unified GPU preview order also compiles to real FFmpeg export filters');
 
     const analyzedPipeline = new EffectPipeline({
         aiEngine: {
@@ -294,18 +322,22 @@ try {
     const beatShakeFilters = compileTimelineVisualEffects(beatShakeClip.effects, {
         width: 320, height: 180, duration: 3, clipStart: 5
     });
-    assert.ok(beatShakeFilters.some(filter => filter.includes('sin(t*16*2*PI') && filter.includes('if(lt(t,0.580000)'))
-        && beatShakeFilters.some(filter => filter.includes('rotate=a=') && filter.includes('if(lt(t,0.580000)')),
+    assert.ok(beatShakeFilters.some(filter => String(filter).startsWith('__VIBED_SHAKE__')),
+        'primary-footage shake is routed through its isolated compositor pass');
+    const beatShakeGraph = compileTimelineVisualEffectGraph(beatShakeFilters, { input: '0:v', output: 'beat_shake' }).join(';');
+    assert.match(beatShakeGraph, /sin\(\(t\*[0-9.]+\*2\*PI\)\*1\.17/,
+        'primary-footage shake x position uses the deterministic preview motion path');
+    assert.match(beatShakeGraph, /rotate=a='sin\(\(t\*[0-9.]+\*2\*PI\)\*0\.83/,
         'primary-footage shake position and rotation use the generated per-frame beat envelope');
     const beatShakeRender = spawnSync(ffmpeg, [
         '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24:duration=3',
-        '-vf', beatShakeFilters.join(','), '-f', 'null', '-'
+        '-filter_complex', beatShakeGraph, '-map', '[beat_shake]', '-f', 'null', '-'
     ], { encoding: 'utf8', timeout: 20000 });
     assert.equal(beatShakeRender.status, 0,
         `FFmpeg renders beat-driven shake keyframes: ${beatShakeRender.stderr || beatShakeRender.error?.message || ''}`);
     const beatShakePixels = spawnSync(ffmpeg, [
         '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24:duration=1',
-        '-vf', beatShakeFilters.join(','), '-frames:v', '24', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'
+        '-filter_complex', beatShakeGraph, '-map', '[beat_shake]', '-frames:v', '24', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'
     ], { encoding: null, timeout: 20000, maxBuffer: 8 * 1024 * 1024 });
     assert.equal(beatShakePixels.status, 0,
         `FFmpeg renders beat shake frames for pixel comparison: ${beatShakePixels.stderr?.toString() || beatShakePixels.error?.message || ''}`);

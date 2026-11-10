@@ -35,7 +35,7 @@ import { drawRichTextFrame } from '../../motion/RichTextEngine.js';
 import { drawLayerWithEffects } from '../../motion/LayerEffects.js';
 import { drawTemporalMotionBlur, relativeMotionTransform } from '../../motion/TemporalMotionBlur.js';
 import { resolveMotionAt } from '../../motion/MotionResolver.js';
-import { remapSceneObjectTime } from '../../motion/Scene3D.js';
+import { resolveSceneVideoSourceTime } from '../../motion/Scene3D.js';
 import useTimelineStore from '../../store/useTimelineStore.js';
 import WaveformEngine from '../../services/WaveformEngine.js';
 
@@ -74,7 +74,8 @@ const TemplateCanvas = ({ clip, currentTime, style, motionBlurMotion = null }) =
     const assetCatalog = useTimelineStore(state => state.assets || []);
     const assetById = new Map(assetCatalog.filter(asset => asset?.id).map(asset => [asset.id, asset]));
     const primaryImageAsset = params?.imageAssetId ? assetById.get(params.imageAssetId) : null;
-    const resolvedPrimaryImageUrl = params?.imageUrl || primaryImageAsset?.sourceUrl || primaryImageAsset?.proxyUrl || primaryImageAsset?.url || null;
+    const resolvedPrimaryImageUrl = (typeof params?.imageUrl === 'string' && !/^blob:/i.test(params.imageUrl) ? params.imageUrl : null)
+        || primaryImageAsset?.sourceUrl || primaryImageAsset?.proxyUrl || primaryImageAsset?.url || params?.imageUrl || null;
     const reactiveIds = kind === '3d-scene' ? resolveSceneAudioReactiveAssetIds(params?.scene) : [];
     const reactiveIdsKey = reactiveIds.join('|');
     const sceneVideoTextures = kind === '3d-scene'
@@ -164,9 +165,7 @@ const TemplateCanvas = ({ clip, currentTime, style, motionBlurMotion = null }) =
             // flight. Omitting the texture until currentTime catches up makes
             // 3D video planes flash transparent at every playhead update.
             images[textureKey] = video;
-            const speed = Math.max(0.05, Number(object.videoSpeed) || 1);
-            const mappedTime = remapSceneObjectTime(object.timeRemap, localT, Number(clip.duration) || 1);
-            const sourceTime = Math.max(0, Number(object.videoStart) || 0) + mappedTime * speed;
+            const sourceTime = resolveSceneVideoSourceTime(object, localT, Number(clip.duration) || 1);
             const targetTime = object.videoLoop !== false && video.duration > 0
                 ? sourceTime % video.duration
                 : Math.min(sourceTime, Math.max(0, (video.duration || sourceTime) - 0.04));
@@ -182,9 +181,13 @@ const TemplateCanvas = ({ clip, currentTime, style, motionBlurMotion = null }) =
                 ...(resolvedPrimaryImageUrl ? { imageUrl: resolvedPrimaryImageUrl } : {}),
                 ...(kind === '3d-scene' ? { scene: {
                     ...params.scene,
-                    objects: (params.scene?.objects || []).map(object => object?.imageUrl || object?.textureUrl
-                        ? object
-                        : imageUrlById.has(object?.id) ? { ...object, imageUrl: imageUrlById.get(object.id) } : object),
+                    objects: (params.scene?.objects || []).map(object => {
+                        const resolvedUrl = imageUrlById.get(object?.id);
+                        if (resolvedUrl && object?.imageUrl !== resolvedUrl) {
+                            return { ...object, imageUrl: resolvedUrl };
+                        }
+                        return object;
+                    }),
                     ...(reactiveIds.length ? { audioWaveformsByAsset: Object.fromEntries(reactiveIds.map(id => [id, waveformCache[id]]).filter(([, value]) => value?.peaks?.length)) } : {}),
                 } } : {}),
             };

@@ -27,8 +27,16 @@ assert.match(overlayImageSource, /effect\.params\?\.opacity\?\.value/,
   'image overlay gradient opacity unwraps registry parameter values');
 assert.match(overlayImageSource, /resolveEffectAtTime\(effect, currentTime, effectContext\)/,
   'image overlay gradient fills sample animated parameters and authored time windows at preview time');
+assert.match(overlayPreviewSource.slice(overlayPreviewSource.indexOf('function cssGradient'), overlayPreviewSource.indexOf('function effectColorCss')),
+  /Array\.isArray\(rawColor\)[\s\S]*effectColorCss\(rawColor\)/,
+  'video and image CSS gradient previews accept normalized RGB array color stops');
 assert.match(overlayPreviewSource, /<OverlayImage clip=\{clip\} src=\{src\} style=\{mediaStyle\} currentTime=\{currentTime\}(?: motionContext=\{transformBlurContext\})? \/>/,
   'unframed image overlay passes the live playhead and optional temporal-blur context into its effect renderer');
+const overlayVideoSource = overlayPreviewSource.slice(overlayPreviewSource.indexOf('const OverlayVideo ='), overlayPreviewSource.indexOf('function cssGradient'));
+assert.match(overlayVideoSource, /const gradients = .*clip\.effects[\s\S]*resolveEffectAtTime\(effect, currentTime, effectContext\)/,
+  'video overlay gradient fills sample animated parameters and authored time windows at preview time');
+assert.match(overlayVideoSource, /if \(!gradients\.length\) return video;[\s\S]*gradients\.map\(\(effect, index\)/,
+  'video overlay preview composites each active gradient above the footage');
 assert.match(overlayPreviewSource, /function resolveShakeTransform[\s\S]*rotationAmount[\s\S]*transform: shakeTransform/,
   'Camera Shake is sampled into the live preview transform for media and template layers');
 

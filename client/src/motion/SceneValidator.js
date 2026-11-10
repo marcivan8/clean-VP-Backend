@@ -26,7 +26,7 @@ import { contrastRatio, luminance } from './ColorTheory.js';
 import { interpolateSvgPaths, validateSvgPathData } from './VectorGraphics.js';
 import { TEMPLATE_KINDS, SHAPE_KINDS } from './TemplateGraphics.js';
 import { auditScene as auditTextCraft, ruleById as craftRuleById } from './TextCraft.js';
-import { MAX_MESH_TRIANGLES, MAX_SCENE_TRIANGLES } from './Scene3D.js';
+import { getScene3DRenderLimitWarnings, getScene3DCompatibilityWarnings, SCENE3D_TEXTURE_MASK_SHAPES } from './Scene3D.js';
 import { GRAPHIC_EFFECT_KINDS } from './LayerEffects.js';
 import {
     NODE_TYPES,
@@ -66,6 +66,7 @@ export const ISSUE_CODES = {
     STARTS_AFTER_SCENE:   'starts_after_scene',
     LOW_CONTRAST:         'low_contrast',
     SCENE_RENDER_LIMIT:   'scene_render_limit',
+    SCENE_COMPATIBILITY:  'scene_compatibility',
     ANIMATION_RENDER_LIMIT: 'animation_render_limit',
     // R107 - the text-craft rules whose symptom is visible before render.
     READ_HOLD:            'read_hold',
@@ -397,14 +398,11 @@ function checkEffects(entry, issues, leaves = []) {
         const kind = effect.kind || effect.type;
         const supportedForLayer = (mediaOverlay ? MEDIA_EFFECT_KINDS : GRAPHIC_EFFECT_KIND_SET).has(kind);
         const mediaUnsupported = mediaOverlay && (
-            (kind === 'stroke' && node.type === NODE_TYPES.VIDEO)
-            || (node.type === NODE_TYPES.VIDEO && kind === 'gradient-fill')
+            kind === 'stroke' && node.type === NODE_TYPES.VIDEO
         );
         if (!EFFECT_KINDS.includes(kind) || !supportedForLayer || mediaUnsupported) {
             const layerLabel = node.type === NODE_TYPES.VIDEO ? 'video layers' : mediaOverlay ? 'raster media layers' : 'this layer';
-            const message = node.type === NODE_TYPES.VIDEO && kind === 'gradient-fill'
-                ? 'Gradient fill cannot be previewed consistently on video layers; use an image layer for this effect.'
-                : `The "${kind}" effect is not supported on ${layerLabel}, so it will be ignored when exporting.`;
+            const message = `The "${kind}" effect is not supported on ${layerLabel}, so it will be ignored when exporting.`;
             issues.push(issue(ISSUE_CODES.UNSUPPORTED_EFFECT, SEVERITY.WARN, node,
                 message,
                 { kind, nodeType: node.type }));
@@ -491,33 +489,22 @@ function check3DRenderLimits(entry, issues) {
     if (node?.template?.kind !== '3d-scene') return;
     const scene = node.template?.params?.scene || {};
     const objects = Array.isArray(scene.objects) ? scene.objects : [];
-    const lights = Array.isArray(scene.lights) ? scene.lights : [];
-    const addLimit = (label, actual, limit, detail = {}) => {
-        if (actual <= limit) return;
-        issues.push(issue(ISSUE_CODES.SCENE_RENDER_LIMIT, SEVERITY.WARN, node,
-            `This 3D scene has ${actual} ${label}; the renderer supports ${limit}, so the extra content will not appear.`,
-            { label, actual, limit, ...detail }));
-    };
-    addLimit('objects', objects.length, 80);
-    addLimit('lights', lights.length, 8);
-    addLimit('particles', Math.max(0, Number(scene.particles?.count) || 0), 500);
-    let sceneTriangles = 0;
-    for (const object of objects.slice(0, 80)) {
-        if (object?.type !== 'mesh') continue;
-        const vertices = Array.isArray(object.vertices) ? object.vertices.length : 0;
-        const sourceFaces = Array.isArray(object.faces) ? object.faces.slice(0, 5000) : [];
-        const faces = Array.isArray(object.faces) ? object.faces.length : 0;
-        const triangles = sourceFaces.reduce((total, face) => total + (
-            Array.isArray(face) && face.length >= 3 && face.length <= 64
-            && face.every(index => Number.isInteger(index) && index >= 0 && index < Math.min(vertices, 5000))
-                ? face.length - 2 : 0
-        ), 0);
-        addLimit(`vertices on mesh “${object.name || object.id || 'unnamed'}”`, vertices, 5000, { objectId: object.id || null });
-        addLimit(`faces on mesh “${object.name || object.id || 'unnamed'}”`, faces, 5000, { objectId: object.id || null });
-        addLimit(`triangles on mesh “${object.name || object.id || 'unnamed'}”`, triangles, MAX_MESH_TRIANGLES, { objectId: object.id || null });
-        sceneTriangles += Math.min(triangles, MAX_MESH_TRIANGLES);
+    for (const limit of getScene3DRenderLimitWarnings(scene)) {
+        issues.push(issue(ISSUE_CODES.SCENE_RENDER_LIMIT, SEVERITY.WARN, node, limit.message,
+            { label: limit.label, actual: limit.actual, limit: limit.limit }));
     }
-    addLimit('triangles in the 3D scene', sceneTriangles, MAX_SCENE_TRIANGLES);
+    for (const compatibility of getScene3DCompatibilityWarnings(scene)) {
+        issues.push(issue(ISSUE_CODES.SCENE_COMPATIBILITY, SEVERITY.WARN, node, compatibility.message,
+            { objectId: compatibility.objectId || null, lightIndex: compatibility.lightIndex ?? null }));
+    }
+    const supportedPlaneMasks = new Set(SCENE3D_TEXTURE_MASK_SHAPES);
+    objects.forEach(object => {
+        if (!['plane', 'image', 'video'].includes(object?.type) || !object.maskShape
+            || supportedPlaneMasks.has(object.maskShape)) return;
+        issues.push(issue(ISSUE_CODES.UNSUPPORTED_MASK, SEVERITY.WARN, node,
+            `The 3D ${object.type} “${object.name || object.id || 'unnamed'}” uses the “${object.maskShape}” mask, which the 3D renderer cannot draw. The mask will be ignored.`,
+            { objectId: object.id || null, shape: object.maskShape, supported: [...supportedPlaneMasks] }));
+    });
 }
 
 /** Animation sanitization caps work defensively; report authored tracks that
@@ -803,8 +790,7 @@ export function autoFixScene(scene, opts = {}) {
                 const effects = (node.effects || []).filter(e => {
                     const kind = e.kind || e.type;
                     return EFFECT_KINDS.includes(kind) && supportedKinds.has(kind) && !(mediaOverlay && (
-                        (kind === 'stroke' && node.type === NODE_TYPES.VIDEO)
-                        || (node.type === NODE_TYPES.VIDEO && kind === 'gradient-fill')
+                        kind === 'stroke' && node.type === NODE_TYPES.VIDEO
                     ));
                 });
                 applied = { patch: { effects }, message: `An unsupported effect was removed from "${node.name}".` };

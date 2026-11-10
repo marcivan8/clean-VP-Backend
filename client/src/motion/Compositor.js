@@ -80,6 +80,12 @@ const hasNumericValue = value => value !== null && value !== undefined && value 
 // the identical rate — one sampling cadence, not two that could drift.
 export const GEOMETRY_SAMPLE_STEP = 1 / 15;
 
+/** Keep procedural samples at least twice as dense as the output frame clock. */
+export function sampleStepForFps(fps) {
+    const outputFps = Math.max(1, Math.min(120, Number(fps) || 30));
+    return Math.min(GEOMETRY_SAMPLE_STEP, 1 / (outputFps * 2));
+}
+
 /**
  * Track types that participate in visual compositing.
  * Text is excluded on purpose: captions are burned in by their own drawtext
@@ -231,8 +237,8 @@ export function timelineToOutputTime(timeMap, timelineTime) {
  * The conversion happens here, once. Dropping that centring term is exactly
  * what once pushed captions off the frame edge, worse the wider the element.
  */
-function resolveGeometry(layer, timelineTime, frame) {
-    const m = resolveMotionAt(layer, timelineTime);
+function resolveGeometry(layer, timelineTime, frame, audioWaveformsByAsset) {
+    const m = resolveMotionAt(layer, timelineTime, { audioWaveformsByAsset });
 
     // Frame aspect (w/h) — needed to derive a height fraction from a width
     // fraction, since the two axes are normalised independently.
@@ -326,30 +332,31 @@ function sameGeometry(a, b) {
  * the exporter's scale-keyframe zoom (buildSmoothZoomFilter), deliberately: it is a
  * proven pattern in this pipeline rather than a new one.
  */
-function sampleGeometry(layer, frame, timeMap) {
+function sampleGeometry(layer, frame, timeMap, fps = 30, audioWaveformsByAsset) {
     const start = Number(layer.startTime) || 0;
     const duration = Number(layer.duration) || 0;
     const end = start + duration;
 
     const samples = [];
     const push = (tTimeline) => {
-        const geom = roundGeometry(resolveGeometry(layer, tTimeline, frame));
+        const geom = roundGeometry(resolveGeometry(layer, tTimeline, frame, audioWaveformsByAsset));
         const tOut = timelineToOutputTime(timeMap, tTimeline);
         const prev = samples[samples.length - 1];
         if (prev && sameGeometry(prev, geom)) return;
         samples.push({ t: Number(tOut.toFixed(4)), ...geom });
     };
 
+    const sampleStep = sampleStepForFps(fps);
     push(start);
     if (duration > 0) {
-        for (let t = start + GEOMETRY_SAMPLE_STEP; t < end; t += GEOMETRY_SAMPLE_STEP) push(t);
+        for (let t = start + sampleStep; t < end; t += sampleStep) push(t);
         push(end);
     }
 
     return simplifySamples(samples);
 }
 
-function sampleCompositionOpacity(group, timeMap) {
+function sampleCompositionOpacity(group, timeMap, fps = 30) {
     const animations = Array.isArray(group?.opacityAnimations) ? group.opacityAnimations : [];
     const expression = typeof group?.opacityExpression === 'string' ? group.opacityExpression : null;
     if (!animations.length && !expression) return null;
@@ -357,11 +364,12 @@ function sampleCompositionOpacity(group, timeMap) {
     const duration = Math.max(0, Number(group.duration) || 0);
     const layer = { startTime: start, duration, opacity: 1, animations, expressions: expression ? { opacity: expression } : {} };
     const timelineSamples = new Set();
+    const sampleStep = sampleStepForFps(fps);
     const segments = timeMap?.segments || [];
     for (const segment of segments) {
         const from = Number(segment.timelineStart) || 0;
         const to = Number(segment.timelineEnd) || from;
-        for (let t = from; t < to; t += GEOMETRY_SAMPLE_STEP) timelineSamples.add(Number(t.toFixed(6)));
+        for (let t = from; t < to; t += sampleStep) timelineSamples.add(Number(t.toFixed(6)));
         timelineSamples.add(to);
         for (const animation of animations) {
             const animStart = animation.anchor === 'out'
@@ -630,7 +638,7 @@ export function buildCompositionPlan(tracks, opts = {}) {
             // while still costing a full pass.
             if (!(endOut > startOut)) continue;
 
-            let geometry = sampleGeometry(layer, frame, timeMap);
+            let geometry = sampleGeometry(layer, frame, timeMap, fps, opts.audioWaveformsByAsset);
 
             // R88 layout presets: the clip sits in a fixed box (frame
             // fractions) and its media COVERS it, cropped around the focus
@@ -659,7 +667,7 @@ export function buildCompositionPlan(tracks, opts = {}) {
                     ? { compositionStack: clip.compositionStack.map(group => {
                         let opacitySamples = compositionOpacityCache.get(group.id);
                         if (opacitySamples === undefined) {
-                            opacitySamples = sampleCompositionOpacity(group, timeMap);
+                            opacitySamples = sampleCompositionOpacity(group, timeMap, fps);
                             compositionOpacityCache.set(group.id, opacitySamples);
                         }
                         const { opacityAnimations: _opacityAnimations, opacityExpression: _opacityExpression, ...serializableGroup } = group;
@@ -841,12 +849,12 @@ function validClientIsolatedGroupEffect(effect) {
                 !effectWindow || !hasNumericValue(effectWindow.start) || !hasNumericValue(effectWindow.end) || Number(effectWindow.start) < 0 || Number(effectWindow.end) <= Number(effectWindow.start))));
     }
     if (kind === 'color_grade') {
-        const keys = ['brightness', 'contrast', 'saturation'];
+        const limits = { brightness: [0, 200], contrast: [0, 200], saturation: [0, 200], temperature: [-100, 100], tint: [-100, 100] };
         const samples = effect.samples;
-        return !!samples && Object.keys(samples).length > 0 && !Object.keys(samples).some(sampleKey => !keys.includes(sampleKey))
-            && Object.entries(samples).every(([_key, points]) => Array.isArray(points) && points.length > 0 && points.length <= 60
+        return !!samples && Object.keys(samples).length > 0 && !Object.keys(samples).some(sampleKey => !limits[sampleKey])
+            && Object.entries(samples).every(([key, points]) => Array.isArray(points) && points.length > 0 && points.length <= 60
                 && !points.some((point, pointIndex) => !point || !hasNumericValue(point.t) || Number(point.t) < 0
-                    || !hasNumericValue(point.value) || Number(point.value) < 0 || Number(point.value) > 200
+                    || !hasNumericValue(point.value) || Number(point.value) < limits[key][0] || Number(point.value) > limits[key][1]
                     || (pointIndex > 0 && Number(point.t) <= Number(points[pointIndex - 1]?.t))))
             && (effect.outputWindows == null || (Array.isArray(effect.outputWindows) && !effect.outputWindows.some(effectWindow =>
                 !effectWindow || !hasNumericValue(effectWindow.start) || !hasNumericValue(effectWindow.end) || Number(effectWindow.start) < 0 || Number(effectWindow.end) <= Number(effectWindow.start))));
@@ -997,7 +1005,9 @@ export function resolveCompositionAt(plan, outputTime) {
 
     const out = [];
     for (const ov of plan.overlays) {
-        if (t < ov.outputStart || t > ov.outputEnd) continue;
+        // Timeline clips use half-open windows throughout the editor. Keep the
+        // preview boundary identical so a layer cannot flash on the cut frame.
+        if (t < ov.outputStart || t >= ov.outputEnd) continue;
         out.push({ ...ov, geometry: interpolateGeometry(ov.geometry, t) });
     }
     return out.sort((a, b) => a.zIndex - b.zIndex);
@@ -1017,13 +1027,17 @@ export function interpolateGeometry(samples, t) {
         if (t >= a.t && t <= b.t) {
             const span = b.t - a.t;
             const p = span > 0 ? (t - a.t) / span : 0;
-            const lerp = (k) => a[k] + (b[k] - a[k]) * p;
+            // Geometry is normalized to the frame (0..1), so integer rounding
+            // collapses most positions and sizes to zero. Keep subpixel frame
+            // fractions through preview interpolation; pixel rounding belongs
+            // in the final renderer after multiplying by output dimensions.
+            const lerp = (k) => Number((a[k] + (b[k] - a[k]) * p).toFixed(6));
             return {
                 t,
-                x: Math.round(lerp('x')),
-                y: Math.round(lerp('y')),
-                w: Math.round(lerp('w')),
-                h: Math.round(lerp('h')),
+                x: lerp('x'),
+                y: lerp('y'),
+                w: lerp('w'),
+                h: lerp('h'),
                 rotation: lerp('rotation'),
                 opacity: lerp('opacity'),
                 blur: lerp('blur'),

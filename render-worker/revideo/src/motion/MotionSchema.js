@@ -1,20 +1,4 @@
 /**
- * render-worker/revideo/src/motion/MotionSchema.js
- *
- * SYNCED COPY of client/src/motion/MotionSchema.js — verbatim below the header divider.
- * This file has ZERO dependencies beyond its siblings in this directory, so
- * it is safe to duplicate rather than import: the render-worker Docker build
- * context is render-worker/ only (see render-worker/Dockerfile's `COPY . .`),
- * so `client/src/motion/` is unreachable at build time regardless.
- *
- * KEEP IN SYNC BY HAND. If you change the original, copy the change here too —
- * scripts/test_revideo_render_path.js checks the two bodies match (ignoring
- * this header) and fails loudly if they drift, so a missed sync is caught in
- * CI/local test runs rather than silently rendering exports wrong.
- * ─────────────────────────────────────────────────────────────────────────
- */
-
-/**
  * client/src/motion/MotionSchema.js
  *
  * The MotionLayer / Animation / Keyframe model — PHASE 1 + PHASE 2.
@@ -189,6 +173,9 @@ export function createMotionLayer(overrides = {}) {
         opacity:  Number.isFinite(Number(overrides.opacity)) ? clamp(overrides.opacity, 0, 1) : 1,
 
         animations: Array.isArray(overrides.animations) ? overrides.animations : [],
+        /** Asset-keyed amplitude modulation sampled by the shared resolver. */
+        audioReactive: overrides.audioReactive && typeof overrides.audioReactive === 'object' && !Array.isArray(overrides.audioReactive)
+            ? { ...overrides.audioReactive } : null,
         /** Layer-local motion path in frame-percent offsets from base x/y. */
         motionPath: overrides.motionPath && Array.isArray(overrides.motionPath.points)
             ? { ...overrides.motionPath, points: overrides.motionPath.points.map(point => Array.isArray(point) ? [...point] : point && typeof point === 'object' ? { ...point } : point) }

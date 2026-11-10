@@ -33,6 +33,7 @@ const SS = await import('../client/src/motion/SceneSchema.js');
 const SV = await import('../client/src/motion/SceneValidator.js');
 const CM = await import('../client/src/motion/Compositor.js');
 const CL = await import('../client/src/motion/ComponentLibrary.js');
+const { SCENE3D_TEXTURE_MASK_SHAPES } = await import('../client/src/motion/Scene3D.js');
 const PP = await import('../client/src/agent/PlatformProfiles.js');
 
 const { NODE_TYPES } = SS;
@@ -363,14 +364,15 @@ await check('a well-made scene reports nothing that matters', () => {
     assert.equal(report.counts.warn, 0, report.issues.filter(i => i.severity === 'warn').map(i => i.code).join(','));
 });
 
-await check('3D scenes warn before renderer object, light, particle and mesh limits silently omit content', () => {
+await check('3D scenes warn before renderer object, receiver, light, particle and mesh limits silently omit content', () => {
     const mesh = { id: 'oversized-mesh', name: 'Oversized mesh', type: 'mesh', vertices: Array(5001).fill({ x: 0, y: 0, z: 0 }), faces: Array(5001).fill([0, 0, 0]) };
     const scene = SS.normalizeScene(SS.createScene({
         duration: 2,
         nodes: [SS.createNode(NODE_TYPES.SHAPE, {
             id: 'scene-3d', duration: 2,
             template: { kind: '3d-scene', params: { scene: {
-                objects: [...Array(79)].map((_, index) => ({ id: `object-${index}`, type: 'box' })).concat(mesh, { id: 'object-overflow', type: 'box' }),
+                objects: [...Array(17)].map((_, index) => ({ id: `receiver-${index}`, type: 'plane', receivesShadow: true }))
+                    .concat([...Array(62)].map((_, index) => ({ id: `object-${index}`, type: 'box' })), mesh, { id: 'object-overflow', type: 'box' }),
                 lights: Array(9).fill({ type: 'point' }),
                 particles: { count: 501 },
             } } },
@@ -378,7 +380,7 @@ await check('3D scenes warn before renderer object, light, particle and mesh lim
     }));
     const limits = SV.validateScene(scene).issues.filter(issue => issue.code === SV.ISSUE_CODES.SCENE_RENDER_LIMIT);
     assert.deepEqual(limits.map(issue => issue.detail.label), [
-        'objects', 'lights', 'particles',
+        'objects', 'lights', 'shadow receiver planes', 'particles',
         'vertices on mesh “Oversized mesh”', 'faces on mesh “Oversized mesh”',
     ]);
     assert.ok(limits.every(issue => issue.severity === 'warn'));
@@ -398,6 +400,46 @@ await check('3D mesh validation reports expanded polygon work before the rendere
     const issues = SV.validateScene(scene).issues.filter(issue => issue.code === SV.ISSUE_CODES.SCENE_RENDER_LIMIT);
     assert.ok(issues.some(issue => issue.detail.label === 'triangles on mesh “Polygon heavy”' && issue.detail.actual === 12400),
         'the report counts n-gon expansion, rather than treating 200 authored faces as cheap');
+});
+
+await check('unsupported masks on 3D media planes are reported instead of silently ignored', () => {
+    const scene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [SS.createNode(NODE_TYPES.SHAPE, {
+        id: 'scene-with-unsupported-mask', duration: 2,
+        template: { kind: '3d-scene', params: { scene: { objects: [
+            { id: 'masked-image-plane', name: 'Reference frame', type: 'image', maskShape: 'heart', imageUrl: 'ref.png' },
+        ] } } },
+    })] }));
+    const warning = SV.validateScene(scene).issues.find(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_MASK);
+    assert.equal(warning?.detail?.objectId, 'masked-image-plane');
+    assert.equal(warning?.detail?.shape, 'heart');
+    assert.match(warning?.message || '', /mask will be ignored/);
+    for (const shape of SCENE3D_TEXTURE_MASK_SHAPES) {
+        const supported = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [SS.createNode(NODE_TYPES.SHAPE, {
+            id: `scene-with-${shape}-mask`, duration: 2,
+            template: { kind: '3d-scene', params: { scene: { objects: [
+                { id: 'masked-image-plane', type: 'image', maskShape: shape, imageUrl: 'ref.png' },
+            ] } } },
+        })] }));
+        assert.ok(!SV.validateScene(supported).issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_MASK),
+            `renderer-supported mask “${shape}” is accepted by validation`);
+    }
+});
+
+await check('3D renderer fallbacks for unsupported authored values are reported', () => {
+    const scene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [SS.createNode(NODE_TYPES.SHAPE, {
+        id: 'scene-with-unsupported-values', duration: 2,
+        template: { kind: '3d-scene', params: { scene: {
+            objects: [{ id: 'custom-primitive', type: 'star-poly', material: { side: 'both' }, blendMode: 'linear-dodge' }],
+            lights: [{ type: 'area' }],
+        } } },
+    })] }));
+    const issues = SV.validateScene(scene).issues.filter(item => item.code === SV.ISSUE_CODES.SCENE_COMPATIBILITY);
+    assert.equal(issues.length, 4);
+    assert.ok(issues.every(item => item.severity === 'warn'));
+    assert.match(issues[0].message, /render as a box/);
+    assert.match(issues[1].message, /front-sided/);
+    assert.match(issues[2].message, /source-over/);
+    assert.match(issues[3].message, /point light/);
 });
 
 await check('animation tracks and keyframes above renderer caps are reported before flattening', () => {
@@ -722,11 +764,11 @@ await check('media overlays report and remove effects unsupported by their rende
     }));
     const report = SV.validateScene(s);
     assert.ok(!report.issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_EFFECT && issue.nodeId === 'media-effects'), 'image stroke and inner shadow are supported');
-    assert.ok(report.issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_EFFECT && issue.nodeId === 'video-gradient' && issue.detail?.kind === 'gradient-fill'));
+    assert.ok(!report.issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_EFFECT && issue.nodeId === 'video-gradient' && issue.detail?.kind === 'gradient-fill'), 'gradient fill is supported on video layers now that preview and export both render it');
     assert.ok(report.issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_EFFECT && issue.nodeId === 'video-gradient' && issue.detail?.kind === 'stroke'));
     const fixed = SV.autoFixScene(s);
     assert.deepEqual(SS.findNode(fixed.scene, 'media-effects').node.effects.map(effect => effect.kind), ['shadow', 'glow', 'gradient-fill', 'stroke', 'inner-shadow', 'contrast']);
-    assert.deepEqual(SS.findNode(fixed.scene, 'video-gradient').node.effects.map(effect => effect.kind), ['shadow', 'glow', 'inner-shadow']);
+    assert.deepEqual(SS.findNode(fixed.scene, 'video-gradient').node.effects.map(effect => effect.kind), ['shadow', 'glow', 'gradient-fill', 'inner-shadow']);
 });
 
 await check('disabled effects stay in the stack without render warnings', () => {

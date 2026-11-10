@@ -56,7 +56,7 @@ const {
 function loadClientModules() {
     // TextCraft before CaptionCompiler: the compiler imports its highlight-ramp
     // rules, and this loader resolves imports by concatenation order.
-    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'MotionPresets', 'TextCraft', 'CaptionModel', 'ClipAdapter', 'Compositor', 'CaptionCompiler'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'SpatialMotion', 'AudioReactive', 'MotionResolver', 'MotionPresets', 'TextCraft', 'CaptionModel', 'ClipAdapter', 'Compositor', 'CaptionCompiler'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);
@@ -82,7 +82,12 @@ function ffmpegBin() {
     try { return require('ffmpeg-static'); } catch { return null; }
 }
 const FFMPEG = ffmpegBin();
-const FONT = ['/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf']
+const FONT = [
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+    path.join(ROOT, 'render-worker/revideo/src/fonts/Inter-Regular.ttf'),
+    path.join(ROOT, 'client/public/fonts/Inter-Regular.ttf'),
+]
     .find(p => fs.existsSync(p)) || null;
 
 const W = 640, H = 360;
@@ -108,6 +113,17 @@ section('2 · R92 parity: plain captions go through the program too (drawn like 
     check('captionProgramIsNoOp() is false for it', CLIENT.captionProgramIsNoOp(program) === false);
     const empty = textTrack([{ id: 'c0', type: 'text', content: '', start: 0, duration: 2 }]);
     check('a project with only empty text is still a no-op', CLIENT.captionProgramIsNoOp(CLIENT.buildCaptionProgram([baseTrack(3), empty], baseTrack(3).clips)) === true);
+}
+
+section('2b · Audio-reactive caption motion samples exported geometry');
+{
+    const reactive = textTrack([{ id: 'audio-caption', type: 'text', content: 'Pulse', start: 0, duration: 2,
+        audioReactive: { assetId: 'music', target: 'scale', amount: 0.5 } }]);
+    const program = CLIENT.buildCaptionProgram([baseTrack(3), reactive], baseTrack(3).clips, {
+        audioWaveformsByAsset: { music: { peaks: [0, 1, 0], duration: 2 } },
+    });
+    const midpoint = program.entries[0]?.geometry.find(sample => Math.abs(sample.t - 1) < 0.001);
+    check('caption export geometry carries the audio-driven scale peak', !!midpoint && Math.abs(midpoint.scale - 1.5) < 0.01);
 }
 
 section('3 · Anything animated, shadowed, or uppercased DOES produce an entry');
@@ -182,7 +198,7 @@ section('6 · Segment building (word reveal → prefix layers)');
 
 if (!FFMPEG || !FONT) {
     section('7-10 · Real FFmpeg rendering');
-    skip('all real-render sections', !FFMPEG ? 'no ffmpeg binary' : 'no DejaVu font on this machine');
+    skip('all real-render sections', !FFMPEG ? 'no ffmpeg binary' : 'no usable test font on this machine');
 } else {
 
 function makeBase(dir, dur = 3) {
@@ -344,6 +360,33 @@ section('10 · Shadow and glow layers are visibly distinct from plain text');
         '-vf', `crop=6:6:${Math.round(W / 2 + 20)}:${Math.round(H / 2 + 20)}`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
         { timeout: 30_000, encoding: 'buffer' });
     check('the shadow render ran and produced pixel data', r.status === 0 && r.stdout && r.stdout.length >= 3);
+}
+
+section('10a · Audio-reactive glow intensity changes in rendered captions');
+{
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-audio-glow-'));
+    const base = makeBase(dir, 2);
+    const clip = { id: 'audio-glow', type: 'text', content: 'Pulse', start: 0, duration: 2,
+        fontSize: 60, color: '#00ffff', x: 50, y: 50,
+        audioReactive: { assetId: 'music', target: 'glow', amount: 8 } };
+    const program = CLIENT.buildCaptionProgram([baseTrack(2), textTrack([clip])], baseTrack(2).clips, {
+        audioWaveformsByAsset: { music: { peaks: [0, 1, 0], duration: 2 } },
+    });
+    check('the caption program carries the changing audio-driven glow channel',
+        program.entries[0]?.geometry?.some(sample => sample.glow > 0.5)
+            && program.entries[0]?.geometry?.some(sample => sample.glow < 0.1));
+    const compiled = compileCaptionProgram(program, { tmpDir: dir, fallbackFontPath: FONT, resolveFont: () => FONT, escapePath: p => p });
+    check('the glow filter alpha is driven by sampled glow geometry',
+        compiled.filters.some(filter => /borderw=.*:bordercolor=.*:x=.*:y=.*:alpha='[\s\S]*clip\(\(if\(lt\(t,/.test(filter)));
+    const { r, out } = runVf(dir, compiled.filters.join(','), base, 'audio-glow.mp4');
+    check('the audio-reactive glow filter graph renders', r.status === 0, (r.stderr || '').split('\n').slice(-4).join(' | '));
+    const crop = { w: 280, h: 120, x: (W - 280) / 2, y: (H - 120) / 2 };
+    const quiet = regionStats(out, 0.2, crop);
+    const loud = regionStats(out, 1, crop);
+    check('the rendered caption glow grows with the audio envelope',
+        !!quiet && !!loud && loud.bright > quiet.bright,
+        `quiet bright=${quiet?.bright}; loud bright=${loud?.bright}`);
+    fs.rmSync(dir, { recursive: true, force: true });
 }
 
 }

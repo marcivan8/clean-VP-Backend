@@ -53,6 +53,10 @@ check('zoom steps preserve all canonical jump positions',
     && zoomEaseExpr('steps(4, jump-end)', 'u').includes('floor(u*4)+0')
     && zoomEaseExpr('steps(4, jump-both)', 'u').includes('/5')
     && zoomEaseExpr('steps(4, jump-none)', 'u').includes('/3'));
+check('stepStart and stepEnd camelCase aliases preserve their discrete export behavior',
+    zoomEaseExpr('stepStart', 'u') === 'if(gte(u,1),1,1)'
+    && zoomEaseExpr('stepEnd', 'u') === 'if(gte(u,1),1,0)');
+check('the named default spring exports its physical easing curve', zoomEaseExpr('spring', 'u').includes('exp('));
 check('custom Bézier zoom easing clamps time controls but retains vertical overshoot',
     zoomEaseExpr('cubic-bezier(2,0,-1,1)', 'u') === zoomEaseExpr('cubic-bezier(1,0,0,1)', 'u')
     && zoomEaseExpr('cubic-bezier(0.2,1.4,0.8,-0.4)', 'u') !== zoomEaseExpr('cubic-bezier(0.2,0.4,0.8,0.4)', 'u'));

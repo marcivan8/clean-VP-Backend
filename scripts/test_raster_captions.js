@@ -38,7 +38,7 @@ const read = (rel) => {
 function loadClientModules() {
     // TextCraft before CaptionCompiler: the compiler imports its highlight-ramp
     // rules, and this loader resolves imports by concatenation order.
-    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'MotionPresets', 'TextCraft', 'CaptionModel', 'ClipAdapter', 'Compositor', 'CaptionCompiler'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionExpression', 'SpatialMotion', 'AudioReactive', 'MotionResolver', 'MotionPresets', 'TextCraft', 'CaptionModel', 'ClipAdapter', 'Compositor', 'CaptionCompiler'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);
@@ -59,7 +59,7 @@ const R = require(path.join(ROOT, 'server/compositor/RasterCaptionCompiler.js'))
 
 const baseTrack = (dur) => ({ id: 'v1', type: 'video', order: 0, clips: [{ id: 'base', start: 0, duration: dur, speed: 1 }] });
 const textTrack = (clips) => ({ id: 't1', type: 'text', order: -1, clips });
-const program = (clips, dur = 4) => CLIENT.buildCaptionProgram([baseTrack(dur), textTrack(clips)], baseTrack(dur).clips);
+const program = (clips, dur = 4, fps = 30) => CLIENT.buildCaptionProgram([baseTrack(dur), textTrack(clips)], baseTrack(dur).clips, { fps });
 const words = (text, start, step) => text.split(' ').map((w, i) => ({ text: w, start: start + i * step, end: start + (i + 1) * step - 0.02 }));
 
 section('1 · R92 parity: every text clip is drawn as an image, like the preview box');
@@ -86,6 +86,13 @@ section('1 · R92 parity: every text clip is drawn as an image, like the preview
 
 section('2 · The client flags rotation / highlight / emphasis as raster');
 {
+    const procedural = [{ id: 'fps-motion', content: 'sample me', start: 0, duration: 1,
+        expressions: { x: '50 + 20 * sin(2 * pi * 12 * t)' } }];
+    const at30 = program(procedural, 2, 30).entries[0]?.geometry || [];
+    const at60 = program(procedural, 2, 60).entries[0]?.geometry || [];
+    check('procedural caption geometry samples more densely for a 60fps export', at60.length > at30.length,
+        `30fps samples=${at30.length}, 60fps samples=${at60.length}`);
+
     const rot = program([{ id: 'r1', content: 'N°1', start: 0, duration: 2, rotation: -12 }]);
     const e = rot.entries[0];
     check('a rotated caption produces an entry', !!e);
@@ -151,6 +158,17 @@ section('4 · Server helpers');
     const dummyGraph = R.compileRasterOverlays(dummyPrep, { frameWidth: 1080, frameHeight: 1920, fps: 30 });
     check('compileRasterOverlays specifies fps=30 explicitly to prevent fps:default auto-insertion', dummyGraph.filterComplex.includes('[1:v]fps=30,setpts='));
     check('compileRasterOverlays specifies eof_action=pass on overlay', dummyGraph.filterComplex.includes('eof_action=pass:enable='));
+    const animatedOpacityGraph = R.compileRasterOverlays([{
+        ...dummyPrep[0], geometry: [
+            { t: 0, x: 50, y: 50, scale: 1, rotation: 0, opacity: 0 },
+            { t: 0.5, x: 50, y: 50, scale: 1, rotation: 0, opacity: 1 },
+            { t: 1, x: 50, y: 50, scale: 1, rotation: 0, opacity: 0.25 },
+            { t: 1.5, x: 50, y: 50, scale: 1, rotation: 0, opacity: 1 },
+        ],
+    }], { frameWidth: 1080, frameHeight: 1920, fps: 30 });
+    check('raster caption export evaluates the full opacity curve, including interior dips',
+        /geq=r='r\(X,Y\)':g='g\(X,Y\)':b='b\(X,Y\)':a='clip\(alpha\(X,Y\)\*/.test(animatedOpacityGraph.filterComplex)
+            && !animatedOpacityGraph.filterComplex.includes('fade=t=in:st=0'));
 }
 
 section('5 · Real render through ffmpeg (decoded pixels)');

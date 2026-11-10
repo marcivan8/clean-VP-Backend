@@ -46,7 +46,7 @@ const read = (rel) => {
 // approach as test_motion_engine.js. Exercises the REAL source; a hand-copied
 // duplicate would pass while the shipped file was broken.
 function loadModules() {
-    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'MotionPresets', 'MotionExpression', 'EffectTiming', 'CaptionModel', 'ClipAdapter', 'Compositor'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionExpression', 'SpatialMotion', 'AudioReactive', 'MotionResolver', 'MotionPresets', 'EffectTiming', 'CaptionModel', 'ClipAdapter', 'Compositor'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);
@@ -136,6 +136,9 @@ section('2 · A second video track DOES composite, bottom-to-top');
     const visible = M.resolveCompositionAt(plan, 3);
     check('BOTH overlays are visible at the same instant', visible.length === 2,
         'this is the capability the flattened export array structurally cannot express');
+    check('composition visibility includes the start and excludes the end frame',
+        M.resolveCompositionAt(plan, plan.overlays[0].outputStart).some(ov => ov.id === plan.overlays[0].id)
+            && !M.resolveCompositionAt(plan, plan.overlays[0].outputEnd).some(ov => ov.id === plan.overlays[0].id));
     check('resolved overlays come back back-to-front',
         visible[0].zIndex < visible[1].zIndex);
 }
@@ -296,7 +299,49 @@ section('5 · Animated overlays sample into piecewise-linear geometry');
         M.interpolateGeometry(ov.geometry, 1e6).t === ov.geometry[ov.geometry.length - 1].t);
 }
 
-section('5b · Effect keyframes stay on project timeline time');
+section('5b · Procedural geometry sampling follows the output frame rate');
+{
+    const tracks = [
+        { id: 'v1', type: 'video', order: 0, clips: [vclip({ id: 'base', start: 0, duration: 2 })] },
+        { id: 'v2', type: 'video', order: 1, clips: [
+            vclip({ id: 'procedural', start: 0, duration: 1, w: 200, h: 200, extra: {
+                x: 50, y: 50, expressions: { x: '50 + 20 * sin(2 * pi * 12 * t)' },
+            } }),
+        ] },
+    ];
+    const plan = M.buildCompositionPlan(tracks, { ...FRAME, fps: 30 });
+    const geometry = plan.overlays[0].geometry;
+    const frameTime = 1 / 30;
+    const frameSample = geometry.find(sample => near(sample.t, frameTime, 1e-4));
+    const expectedCenterX = (50 + 20 * Math.sin(2 * Math.PI * 12 * frameTime)) / 100;
+    check('30fps output retains a sample at the first output-frame time', !!frameSample,
+        'procedural animation must use an output-rate-aware sampling clock');
+    check('fast procedural position matches its evaluated value at that frame',
+        !!frameSample && near(frameSample.x + frameSample.w / 2, expectedCenterX, 0.002));
+}
+
+section('5c · Asset-keyed audio motion reaches the export geometry plan');
+{
+    const fractional = M.interpolateGeometry([
+        { t: 0, x: 0.1, y: 0.2, w: 0.25, h: 0.5, rotation: 0, opacity: 1, blur: 0 },
+        { t: 1, x: 0.3, y: 0.4, w: 0.35, h: 0.7, rotation: 0, opacity: 1, blur: 0 },
+    ], 0.5);
+    check('normalized geometry interpolation preserves frame fractions', near(fractional.x, 0.2) && near(fractional.w, 0.3));
+    const tracks = [
+        { id: 'v1', type: 'video', order: 0, clips: [vclip({ id: 'base', start: 0, duration: 1 })] },
+        { id: 'v2', type: 'video', order: 1, clips: [vclip({ id: 'reactive', start: 0, duration: 1, extra: {
+            audioReactive: { assetId: 'music', target: 'scale', amount: 0.5 },
+        } })] },
+    ];
+    const plan = M.buildCompositionPlan(tracks, {
+        ...FRAME, audioWaveformsByAsset: { music: { peaks: [0, 1], duration: 1 } },
+    });
+    const middle = M.interpolateGeometry(plan.overlays[0]?.geometry || [], 0.5);
+    check('2D layer audio reactivity is sampled into export geometry', !!middle && near(middle.w, 0.3125, 0.002),
+        `midpoint geometry: ${JSON.stringify(middle)}; samples=${plan.overlays[0]?.geometry?.length}`);
+}
+
+section('5d · Effect keyframes stay on project timeline time');
 {
     const tracks = [
         { id: 'v1', type: 'video', order: 0, clips: [vclip({ id: 'base', start: 0, duration: 8 })] },

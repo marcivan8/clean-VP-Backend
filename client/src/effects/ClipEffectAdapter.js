@@ -18,6 +18,8 @@ const GPU_CLIP_EFFECT_TYPES = Object.freeze({
     grain: 'film_grain',
     glitch: 'glitch',
     color_grade: 'color_grade',
+    fade_in: 'fade_in',
+    fade_out: 'fade_out',
 });
 
 // The old footage `motion-blur` control represented a small pixel radius.
@@ -34,9 +36,13 @@ function rawParam(params, key) {
 
 export function createGpuClipEffectConfigs(clipId, effects = [], placement = {}) {
     if (!clipId || !Array.isArray(effects)) return [];
+    // Fade transitions are rendered by VideoPlayer/GraphicOverlay as a color
+    // wash (and layer alpha for transparent media). Running their color-mix
+    // shader here as well would apply the transition twice in the preview.
     return effects.flatMap((effect, index) => {
         if (!effect || effect.enabled === false) return [];
         const kind = effect.kind || effect.type;
+        if (kind === 'fade_in' || kind === 'fade_out') return [];
         const type = GPU_CLIP_EFFECT_TYPES[kind];
         if (!type) return [];
         // Footage effect keyframes are authored at the project playhead (the
@@ -121,4 +127,9 @@ export function createGpuClipEffectConfigs(clipId, effects = [], placement = {})
 
 export function isGpuClipEffect(kind) {
     return Object.prototype.hasOwnProperty.call(GPU_CLIP_EFFECT_TYPES, kind);
+}
+
+/** Resolve the concrete shader type used for a timeline footage effect. */
+export function resolveGpuClipEffectType(kind) {
+    return GPU_CLIP_EFFECT_TYPES[kind] || null;
 }

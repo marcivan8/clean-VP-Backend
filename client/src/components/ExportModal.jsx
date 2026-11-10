@@ -410,15 +410,17 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                             borderRadius: 'var(--r-sm)',
                                             padding: 3,
                                         }}>
-                                            {[['mp4', 'MP4'], ['webm', 'WEBM'], ['png-sequence', 'PNG sequence'], ['transparent-png-sequence', 'Alpha graphics']].map(([fmt, label]) => (
+                                            {[['mp4', 'MP4'], ['webm', 'WEBM'], ['png-sequence', 'PNG sequence'], ['transparent-png-sequence', 'Alpha PNG'], ['transparent-mov', 'Alpha MOV']].map(([fmt, label]) => (
                                                 <button key={fmt} onClick={() => setSettings(s => ({ ...s, format: fmt }))} style={pill(settings.format === fmt)}>
                                                     {label}
                                                 </button>
                                             ))}
                                         </div>
-                                        {settings.format === 'transparent-png-sequence' && (
+                                        {['transparent-png-sequence', 'transparent-mov'].includes(settings.format) && (
                                             <p style={{ margin: 0, fontSize: 10, lineHeight: 1.4, color: 'var(--fg-3)' }}>
-                                                Exports overlay layers as transparent PNG frames. The footage base, audio, and captions are excluded.
+                                                {settings.format === 'transparent-mov'
+                                                    ? 'Exports overlay layers as transparent ProRes 4444 video. The footage base, audio, and captions are excluded.'
+                                                    : 'Exports overlay layers as transparent PNG frames. The footage base, audio, and captions are excluded.'}
                                             </p>
                                         )}
                                     </div>
@@ -437,7 +439,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                     }}
                                 >
                                     <Download size={14} />
-                                    {settings.format === 'transparent-png-sequence' ? 'Export graphics' : selectedPlatform ? t('exportModal.exportFor', { platform: selectedPlatform.label }) : t('exportModal.exportVideo')}
+                                    {['transparent-png-sequence', 'transparent-mov'].includes(settings.format) ? 'Export graphics' : selectedPlatform ? t('exportModal.exportFor', { platform: selectedPlatform.label }) : t('exportModal.exportVideo')}
                                     <ArrowRight size={13} style={{ opacity: 0.6 }} />
                                 </button>
                             </div>
@@ -578,7 +580,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                     revideoWarning means captions are missing entirely;
                                     the others mean "rendered, but degraded" — worded
                                     accordingly rather than lumped together. */}
-                                {(exportResult.revideoWarning || exportResult.captionWarning || exportResult.compositorWarning || exportResult.transitionWarning || exportResult.captionProgramWarning || exportResult.clipWarning || exportResult.effectWarning) && (
+                                {(exportResult.revideoWarning || exportResult.captionWarning || exportResult.compositorWarning || exportResult.transitionWarning || exportResult.captionProgramWarning || exportResult.cameraMotionWarning || exportResult.clipWarning || exportResult.effectWarning) && (
                                     <div style={{
                                         width: '100%',
                                         background: 'color-mix(in srgb, #f5a623 10%, transparent)',
@@ -593,6 +595,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                             exportResult.compositorWarning && { text: exportResult.compositorWarning },
                                             exportResult.transitionWarning && { text: exportResult.transitionWarning },
                                             exportResult.captionProgramWarning && { text: exportResult.captionProgramWarning },
+                                            exportResult.cameraMotionWarning && { text: exportResult.cameraMotionWarning },
                                             exportResult.clipWarning && { text: exportResult.clipWarning },
                                             exportResult.effectWarning && { text: exportResult.effectWarning },
                                         ].filter(Boolean).map((w, i) => (

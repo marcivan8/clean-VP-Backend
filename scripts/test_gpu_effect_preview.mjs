@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { GPUEffectEngine, GPU_SHADER_TYPES } from '../client/src/effects/engines/GPUEffects.js';
+import { GPUEffectEngine, GPU_SHADER_TYPES, resolveFadeProgress } from '../client/src/effects/engines/GPUEffects.js';
 import { EFFECT_DEFINITIONS } from '../client/src/effects/EffectRegistry.js';
 import { EffectRenderer } from '../client/src/effects/EffectRenderer.js';
 import { EffectPipeline } from '../client/src/effects/EffectPipeline.js';
+import { EffectGraph } from '../client/src/effects/EffectGraph.js';
 import { initEffectsEngine } from '../client/src/effects/index.js';
+import { handleWebGLContextLost, handleWebGLContextRestored } from '../client/src/engine/webglContextLifecycle.js';
 import { createGpuClipEffectConfigs, isGpuClipEffect } from '../client/src/effects/ClipEffectAdapter.js';
-import { resolveTimelineEffectFilter, resolveTimelineVignetteStyle } from '../client/src/motion/TimelineVisualEffects.js';
+import { resolveTimelineEffectFilter, resolveTimelineSvgEffectInstances, resolveTimelineSvgEffectParams, resolveTimelineVignetteStyle } from '../client/src/motion/TimelineVisualEffects.js';
 import exportProcessor from '../jobs/exportProcessor.js';
 
 const shaderDeletes = [], shaderDetaches = [], programDeletes = [], bufferDeletes = [], textureDeletes = [], framebufferDeletes = [];
@@ -32,9 +34,24 @@ const attachedPipeline = { setGPUEngine: engine => { rendererGpu = engine; } };
 const rendererBootstrap = new EffectRenderer({ pipeline: attachedPipeline });
 rendererBootstrap.init(bootstrapGl);
 assert.ok(rendererGpu instanceof GPUEffectEngine, 'renderer.init attaches a GPU engine from native ES modules');
-rendererBootstrap.setPipeline({ setGPUEngine: engine => { rendererGpu = engine; } });
+const reinitializedRendererGpu = rendererGpu;
+rendererBootstrap.init(bootstrapGl);
+assert.equal(reinitializedRendererGpu.initialized, false, 'reinitializing the renderer releases its previous GPU engine');
+const replacedRendererGpu = rendererGpu;
+const replacementPipeline = { gpuEngine: null, setGPUEngine(engine) { this.gpuEngine = engine; rendererGpu = engine; } };
+rendererBootstrap.setPipeline(replacementPipeline);
 assert.ok(rendererGpu instanceof GPUEffectEngine, 'renderer.setPipeline reattaches the GPU engine from native ES modules');
-rendererGpu.destroy();
+assert.equal(replacedRendererGpu.initialized, false, 'replacing a pipeline releases the renderer-owned GPU engine');
+const contextReleasedGpu = rendererGpu;
+rendererBootstrap.init(null);
+assert.equal(contextReleasedGpu.initialized, false, 'initializing without a WebGL context releases the previous GPU engine');
+assert.equal(replacementPipeline.gpuEngine, null, 'a pipeline no longer retains a destroyed GPU engine');
+contextReleasedGpu.destroy();
+let externallyOwnedDestroyCalls = 0;
+const externallyOwnedGpu = { destroy: () => { externallyOwnedDestroyCalls += 1; } };
+const externallyOwnedRenderer = new EffectRenderer({ pipeline: { gpuEngine: externallyOwnedGpu } });
+externallyOwnedRenderer.destroy();
+assert.equal(externallyOwnedDestroyCalls, 0, 'destroy only releases GPU engines created and owned by this renderer');
 initializedEffects.renderer.destroy();
 const lifecycleGL = {
   VERTEX_SHADER: 1, FRAGMENT_SHADER: 2, COMPILE_STATUS: 3, LINK_STATUS: 4,
@@ -64,6 +81,50 @@ assert.equal(lifecycleEngine.framebuffers.length, 0, 'destroy drops references t
 assert.equal(lifecycleEngine.targetWidth, 0, 'destroy clears cached render target dimensions');
 
 const source = fs.readFileSync(new URL('../client/src/engine/PlaybackEngine.js', import.meta.url), 'utf8');
+const gradingMethodStart = source.indexOf('    setGrading(params) {');
+const gradingMethodEnd = source.indexOf('    // Deprecated but compatible', gradingMethodStart);
+const gradingMethodSource = source.slice(gradingMethodStart, gradingMethodEnd).trim();
+const setGrading = new Function(`return ({ ${gradingMethodSource} }).setGrading`)();
+const gradingProbe = { gradingParams: { selectiveHue: [], selectiveSat: [], selectiveLum: [] } };
+setGrading.call(gradingProbe, { brightness: 0, contrast: 0, saturate: 0, hueRotate: 0,
+  selective: { reds: { hue: 0, sat: 0, lum: 0 }, blues: { hue: 180, sat: -50, lum: 25 } } });
+assert.deepEqual([
+  gradingProbe.gradingParams.brightness,
+  gradingProbe.gradingParams.contrast,
+  gradingProbe.gradingParams.saturation,
+  gradingProbe.gradingParams.hueRotate,
+], [0, 0, 0, 0], 'explicit zero color controls remain zero in the live preview shader uniforms');
+assert.deepEqual([
+  gradingProbe.gradingParams.selectiveHue[0], gradingProbe.gradingParams.selectiveSat[0], gradingProbe.gradingParams.selectiveLum[0],
+  gradingProbe.gradingParams.selectiveHue[4], gradingProbe.gradingParams.selectiveSat[4], gradingProbe.gradingParams.selectiveLum[4],
+], [0, 0, 0, 0.5, -0.5, 0.25], 'selective HSL controls preserve explicit zeros and normalize authored values');
+const saturationAliasProbe = { gradingParams: { selectiveHue: [], selectiveSat: [], selectiveLum: [] } };
+setGrading.call(saturationAliasProbe, { brightness: null, contrast: undefined, saturation: 0 });
+assert.deepEqual([
+  saturationAliasProbe.gradingParams.brightness,
+  saturationAliasProbe.gradingParams.contrast,
+  saturationAliasProbe.gradingParams.saturation,
+], [1, 1, 0], 'null controls use neutral defaults while saturation alias honors zero');
+const gradingBoundsProbe = { gradingParams: { selectiveHue: [], selectiveSat: [], selectiveLum: [] } };
+setGrading.call(gradingBoundsProbe, { brightness: 500, contrast: -50, saturation: 350, hueRotate: -720 });
+assert.deepEqual([
+  gradingBoundsProbe.gradingParams.brightness,
+  gradingBoundsProbe.gradingParams.contrast,
+  gradingBoundsProbe.gradingParams.saturation,
+  gradingBoundsProbe.gradingParams.hueRotate,
+], [2, 0, 2, -180], 'preview grading limits match the export compiler for out-of-range controls');
+const previewGradeStart = source.indexOf('// Fragment Shader (Color Grading)');
+const previewGradeEnd = source.indexOf('        // Compile', previewGradeStart);
+const previewGradeShader = source.slice(previewGradeStart, previewGradeEnd);
+assert.match(previewGradeShader, /rgb\s*\*=\s*u_brightness;\s*rgb\s*=\s*clamp\(rgb,\s*0\.0,\s*1\.0\);[\s\S]*rgb\s*=\s*\(rgb\s*-\s*0\.5\)\s*\*\s*u_contrast\s*\+\s*0\.5;\s*rgb\s*=\s*clamp\(rgb,\s*0\.0,\s*1\.0\)/,
+  'PlaybackEngine clamps brightness and contrast between stages to match the export color-grade pipeline');
+assert.match(previewGradeShader, /uniform\s+float\s+u_hueRotate\s*;/,
+  'the preview grading shader declares the global hue rotation control');
+assert.match(previewGradeShader, /h\s*=\s*mod\(h\s*\+\s*dH\s*\+\s*u_hueRotate\s*\/\s*360\.0,\s*1\.0\)/,
+  'global and selective hue shifts are applied together and wrapped into the hue range');
+assert.match(source, /gl\.uniform1f\(this\.loc\.hueRotate,\s*this\.gradingParams\.hueRotate\)/,
+  'the preview uploads the clip hue rotation to the shader');
+const contextLifecycleSource = fs.readFileSync(new URL('../client/src/engine/webglContextLifecycle.js', import.meta.url), 'utf8');
 const renderStart = source.indexOf('    render(frameItem) {');
 const renderEnd = source.indexOf('\n    }', renderStart);
 const renderSource = source.slice(renderStart, renderEnd);
@@ -73,6 +134,10 @@ assert.match(renderSource, /gl\.bindTexture\(gl\.TEXTURE_2D,\s*renderTexture\)/,
   'the visible frame shader samples the GPU effects output');
 assert.match(renderSource, /renderTexture\s*=\s*this\.texture/,
   'effect failures fall back to the original source texture');
+assert.match(renderSource, /type:\s*'gpu_effect_preview_failed'[\s\S]*?recoverable:\s*true/,
+  'effect-render exceptions produce a recoverable player warning while preserving source playback');
+assert.match(renderSource, /type:\s*'gpu_effect_preview_recovered'/,
+  'the warning clears after effect preview rendering succeeds again');
 assert.match(renderSource, /sourceClipId:\s*this\.effectSourceClipId/,
   'the decoded source clip identity reaches the effect renderer');
 assert.match(source, /setEffectSourceClipId\(clipId\)/,
@@ -81,6 +146,104 @@ assert.match(source, /setClipEffects\(clipId, effects = \[\], placement = \{\}\)
   'PlaybackEngine adapts direct clip effects into the shared GPU effect graph');
 assert.match(source, /previewPlacements\.push\(this\.clipEffectPlacement\)/,
   'direct clip effects render even when no legacy timeline placement has been hydrated');
+assert.match(source, /addEventListener\?\.\('webglcontextlost',\s*this\._handleWebGLContextLost/,
+  'PlaybackEngine listens for GPU context loss on its preview canvas');
+assert.match(source, /addEventListener\?\.\('webglcontextrestored',\s*this\._handleWebGLContextRestored/,
+  'PlaybackEngine listens for GPU context restoration on its preview canvas');
+assert.match(contextLifecycleSource, /event\?\.preventDefault\?\.\(\)/,
+  'context loss is marked recoverable so browser restoration remains possible');
+assert.match(contextLifecycleSource, /type:\s*'webgl_context_lost'[\s\S]*?recoverable:\s*true/,
+  'context loss reports a recoverable preview error');
+assert.match(source, /async restoreWebGLContext\(\)[\s\S]*?this\.initGL\(\)[\s\S]*?this\.effectsPipeline\.setGPUEngine\(this\.gpuEffectEngine\)/,
+  'restoration rebuilds base GPU resources and reconnects the existing effects pipeline');
+const restoreMethodStart = source.indexOf('    async restoreWebGLContext() {');
+const restoreMethodEnd = source.indexOf('\n    }', restoreMethodStart) + '\n    }'.length;
+assert.ok(restoreMethodStart >= 0 && restoreMethodEnd > restoreMethodStart,
+  'PlaybackEngine exposes its context restoration method');
+const restoreWebGLContext = new Function(`return ({ ${source.slice(restoreMethodStart, restoreMethodEnd).trim()} }).restoreWebGLContext`)();
+const replacementGl = { context: 'restored' };
+let baseResourcesRebuilt = 0;
+const recoveryProbe = {
+  canvas: { getContext: name => name === 'webgl2' ? replacementGl : null },
+  effectsEnabled: false,
+  effectsPipeline: null,
+  isDestroyed: false,
+  initGL() { baseResourcesRebuilt += 1; },
+};
+await restoreWebGLContext.call(recoveryProbe);
+assert.equal(recoveryProbe.gl, replacementGl, 'restoration installs the browser-provided context');
+assert.equal(baseResourcesRebuilt, 1, 'restoration rebuilds base playback shader and geometry resources');
+const noContextProbe = {
+  canvas: { getContext: () => null },
+  isDestroyed: false,
+};
+await assert.rejects(restoreWebGLContext.call(noContextProbe), /did not restore a WebGL context/,
+  'restoration fails clearly if the browser still cannot provide a WebGL context');
+const destroyedProbe = { canvas: null, isDestroyed: true };
+await assert.rejects(restoreWebGLContext.call(destroyedProbe), /no longer available/,
+  'restoration does not touch a destroyed playback canvas');
+assert.match(renderSource, /this\._webglContextLost/,
+  'the render loop stops issuing GPU draw calls after context loss');
+assert.match(source, /removeEventListener\?\.\('webglcontextlost',\s*this\._handleWebGLContextLost/,
+  'destroy removes the context-loss listener before releasing the context');
+assert.match(source, /removeEventListener\?\.\('webglcontextrestored',\s*this\._handleWebGLContextRestored/,
+  'destroy removes the context-restored listener before releasing the context');
+const contextLossErrors = [];
+let contextLossLoopStops = 0;
+let contextLossState = null;
+const contextLossEngine = {
+  _webglContextLost: false,
+  _webglContextErrorReported: false,
+  isDestroyed: false,
+  stopLoop: () => { contextLossLoopStops += 1; },
+  setState: next => { contextLossState = next; },
+  onError: error => contextLossErrors.push(error),
+};
+let preventedLossEvents = 0;
+const lossEvent = { preventDefault: () => { preventedLossEvents += 1; } };
+handleWebGLContextLost(contextLossEngine, lossEvent);
+handleWebGLContextLost(contextLossEngine, lossEvent);
+assert.equal(preventedLossEvents, 2, 'every loss event allows browser context restoration');
+assert.equal(contextLossLoopStops, 1, 'context loss stops playback exactly once');
+assert.equal(contextLossState, 'ERROR', 'context loss enters the playback error state');
+assert.equal(contextLossErrors.length, 1, 'the player fallback receives one error notification');
+assert.equal(contextLossErrors[0].type, 'webgl_context_lost', 'the notification identifies GPU context loss');
+assert.equal(contextLossErrors[0].recoverable, true, 'context loss is reported as recoverable');
+let restored = 0;
+let recovered = 0;
+let restoredLoopStarts = 0;
+const restoreEngine = {
+  _webglContextLost: true,
+  _webglResumeState: 'PLAYING',
+  _webglResumeTime: 12.5,
+  _webglContextErrorReported: true,
+  isDestroyed: false,
+  state: 'ERROR',
+  clock: { play: async time => { assert.equal(time, 12.5); } },
+  restoreWebGLContext: async () => { restored += 1; },
+  setState: next => { contextLossState = next; },
+  startLoop: () => { restoredLoopStarts += 1; },
+  onRecovered: () => { recovered += 1; },
+};
+assert.equal(await handleWebGLContextRestored(restoreEngine), true, 'a restored context rebuilds and resumes playback');
+assert.equal(restored, 1, 'GPU resources are rebuilt once');
+assert.equal(recovered, 1, 'the player is notified to clear its fallback state');
+assert.equal(contextLossState, 'PLAYING', 'playback returns to its previous state');
+assert.equal(restoredLoopStarts, 1, 'the render loop restarts after restoration');
+assert.equal(restoreEngine._webglContextLost, false, 'rendering is re-enabled after successful restoration');
+let preservedError = false;
+const previouslyFailedEngine = {
+  ...restoreEngine,
+  _webglContextLost: true,
+  _webglResumeState: 'ERROR',
+  onRecovered: ({ preservePlaybackError } = {}) => { preservedError = preservePlaybackError; },
+};
+assert.equal(await handleWebGLContextRestored(previouslyFailedEngine), true, 'GPU resources can recover while playback remains failed');
+assert.equal(contextLossState, 'ERROR', 'restoration preserves an error state that predated context loss');
+assert.equal(preservedError, true, 'the player is told not to clear an earlier playback error');
+const destroyedContextEngine = { ...contextLossEngine, _webglContextLost: false, isDestroyed: true };
+handleWebGLContextLost(destroyedContextEngine, lossEvent);
+assert.equal(contextLossLoopStops, 1, 'a late context-loss event after destroy is ignored');
 const playerSource = fs.readFileSync(new URL('../client/src/components/Player/VideoPlayer.jsx', import.meta.url), 'utf8');
 assert.match(playerSource, /setEffectSourceClipId\?\.\(activeClip\?\.id\)/,
   'VideoPlayer tells the effect renderer which clip its decoded frame represents');
@@ -88,6 +251,19 @@ assert.match(playerSource, /setClipEffects\?\.\(activeClip\?\.id, activeClip\?\.
   'VideoPlayer routes direct footage effects to the decoded clip shader graph');
 
 const calls = [];
+const fadePlacement = { startTime: 4, duration: 2 };
+assert.equal(resolveFadeProgress({ type: 'fade_in' }, 4, fadePlacement, { duration: 0.5 }), 0,
+  'fade-in begins at the clip start when no authored start is set');
+assert.equal(resolveFadeProgress({ type: 'fade_in' }, 4.25, fadePlacement, { duration: 0.5 }), 0.5,
+  'fade-in progresses smoothly over its configured duration');
+assert.equal(resolveFadeProgress({ type: 'fade_out' }, 5.5, fadePlacement, { duration: 0.5 }), 1,
+  'fade-out stays fully visible before the default clip-end fade window');
+assert.equal(resolveFadeProgress({ type: 'fade_out' }, 5.75, fadePlacement, { duration: 0.5 }), 0.5,
+  'fade-out reaches its midpoint within the default clip-end fade window');
+assert.equal(resolveFadeProgress({ type: 'fade_out', endTime: null }, 6, fadePlacement, { duration: 0.5 }), 0,
+  'a null fade-out end defaults to the clip end rather than time zero');
+assert.equal(resolveFadeProgress({ type: 'fade_out', endTime: 5.8 }, 5.8, fadePlacement, { duration: 0.5 }), 0,
+  'an authored fade-out end is honored relative to the clip start');
 const gl = {
   getUniformLocation: (_program, name) => name,
   uniform1f: (name, value) => calls.push([name, value]),
@@ -173,6 +349,10 @@ assert.deepEqual(calls.filter(([name]) => ['u_intensity', 'u_center', 'u_samples
   ['u_intensity', 0], ['u_center', 0.5, 1], ['u_samples', 1],
 ], 'radial blur always has a finite center and at least one sample');
 calls.length = 0;
+engine._setEffectUniforms(gl, {}, 'glow', { intensity: 2 });
+assert.deepEqual(calls.filter(([name]) => name === 'u_intensity'), [['u_intensity', 2]],
+  'GPU glow preserves the advertised 0–3 intensity range');
+calls.length = 0;
 engine._setEffectUniforms(gl, {}, 'glow', { threshold: Number.NaN, intensity: 10, radius: 0, color: [Number.NaN, 2, -1] });
 assert.ok(calls.every(call => call.slice(1).every(Number.isFinite)), 'malformed GPU effect values never reach uniforms as NaN');
 calls.length = 0;
@@ -198,6 +378,8 @@ assert.match(glowShader, /clamp\(\(sampleLuminance\s*-\s*u_threshold\)\s*\/\s*th
   'GPU glow uses the same soft highlight threshold ramp as SVG and export');
 assert.match(glowShader, /mix\(original\.rgb,\s*u_color,\s*glowAlpha\)/,
   'GPU glow composites its tint over the source rather than adding and clipping RGB');
+assert.match(glowShader, /clamp\(bloom\s*\*\s*clamp\(u_intensity,\s*0\.0,\s*3\.0\)\s*\*\s*0\.7,\s*0\.0,\s*1\.0\)/,
+  'GPU glow intensity above 1 increases bloom opacity until the composite reaches full opacity');
 assert.match(glowShader, /original\.a\s*\+\s*glowAlpha\s*\*\s*\(1\.0\s*-\s*original\.a\)/,
   'GPU glow preserves bloom alpha outside translucent source pixels');
 assert.match(vignetteShader, /smoothstep\(u_radius\s*-\s*max\(u_softness,\s*0\.0001\),\s*u_radius,\s*dist\)/,
@@ -222,13 +404,14 @@ const framebufferA = { texture: textureA }, framebufferB = { texture: textureB }
 const drawRecords = [];
 const radiusUniforms = [];
 const qualityUniforms = [];
+const grainSeedUniforms = [];
 let targetAllocations = 0;
 let boundFramebuffer = null;
 let boundTexture = null;
 let currentDirection;
 let currentProgram;
 let uniformLocationLookups = 0;
-const blurProgram = {}, vignetteProgram = {};
+const blurProgram = {}, vignetteProgram = {}, grainProgram = {};
 const mockGL = {
   FRAMEBUFFER: 1, TEXTURE_2D: 2, COLOR_ATTACHMENT0: 3, TEXTURE0: 4,
   RGBA: 5, UNSIGNED_BYTE: 6, ARRAY_BUFFER: 7, FLOAT: 8, TRIANGLES: 9,
@@ -239,7 +422,10 @@ const mockGL = {
   viewport: () => {}, useProgram: program => { currentProgram = program; }, enableVertexAttribArray: () => {},
   bindBuffer: () => {}, vertexAttribPointer: () => {}, activeTexture: () => {},
   uniform1i: (name, value) => { if (name === 'u_quality' && currentProgram === blurProgram) qualityUniforms.push(value); },
-  uniform1f: (name, value) => { if (name === 'u_radius' && currentProgram === blurProgram) radiusUniforms.push(value); }, uniform3f: () => {},
+  uniform1f: (name, value) => {
+    if (name === 'u_radius' && currentProgram === blurProgram) radiusUniforms.push(value);
+    if (name === 'u_seed' && currentProgram === grainProgram) grainSeedUniforms.push(value);
+  }, uniform3f: () => {},
   uniform2f: (name, x, y) => { if (name === 'u_direction') currentDirection = [x, y]; },
   getUniformLocation: (_program, name) => { uniformLocationLookups++; return name; },
   drawArrays: () => {
@@ -252,7 +438,8 @@ Object.assign(gpu, {
   gl: mockGL, initialized: true, framebuffers: [framebufferA, framebufferB],
   textures: [textureA, textureB], positionBuffer: {}, texCoordBuffer: {},
   programs: new Map([['blur_gaussian', { program: blurProgram, attributes: { position: 0, texCoord: 1 } }],
-    ['vignette', { program: vignetteProgram, attributes: { position: 0, texCoord: 1 } }]]),
+    ['vignette', { program: vignetteProgram, attributes: { position: 0, texCoord: 1 } }],
+    ['film_grain', { program: grainProgram, attributes: { position: 0, texCoord: 1 } }]]),
 });
 const chain = [
   { type: 'blur_gaussian', engine: 'gpu', enabled: true, getParamsAt: () => ({ radius: { value: 4 }, quality: { value: 20 } }), isActiveAt: () => true },
@@ -262,6 +449,10 @@ const chainOutput = gpu.processChain(chain, sourceTexture, 0.5, { width: 320, he
 assert.equal(chainOutput, textureA, 'effects after a multipass blur continue through the ping-pong chain');
 assert.deepEqual(drawRecords.map(({ direction }) => direction), [[1, 0], [0, 1], undefined],
   'Gaussian blur renders horizontal and vertical passes before the next effect');
+gpu.processChain([{ type: 'film_grain', engine: 'gpu', enabled: true,
+  getParamsAt: () => ({ intensity: 0.2, size: 2, animated: true, seed: 17 }), isActiveAt: () => true }],
+sourceTexture, 0.5, { width: 320, height: 180 });
+assert.deepEqual(grainSeedUniforms, [17], 'the GPU preview receives the authored deterministic film-grain seed');
 assert.deepEqual(radiusUniforms, [4, 4], 'both Gaussian blur passes use the same radius');
 assert.deepEqual(qualityUniforms, [20, 20], 'the authored Gaussian quality controls the tap count in both passes');
 assert.ok(drawRecords.every(({ input, output }) => input !== output),
@@ -308,13 +499,26 @@ for (const [type, definition] of Object.entries(EFFECT_DEFINITIONS)) {
     const config = createGpuClipEffectConfigs('catalogue-clip', [{ kind: type, params: Object.fromEntries(
       Object.entries(definition.params || {}).map(([key, control]) => [key, control.value]),
     ) }])[0];
-    assert.ok(config && config.type === definition.shader,
-      `${type} footage control resolves to its declared ${definition.shader} shader`);
+    if (type === 'fade_in' || type === 'fade_out') {
+      assert.equal(config, undefined, `${type} uses the dedicated fade overlay once, without a duplicate GPU pass`);
+    } else {
+      assert.ok(config && config.type === definition.shader,
+        `${type} footage control resolves to its declared ${definition.shader} shader`);
+    }
   }
   const params = Object.fromEntries(Object.entries(definition.params || {}).map(([key, value]) => [key, value.value]));
   assert.ok(exportProcessor.compileTimelineVisualEffects([{ kind: type, params }], { width: 1080, height: 1920 }).length > 0,
     `${type} has an export filter implementation`);
 }
+assert.equal(EFFECT_DEFINITIONS.film_grain.params.seed.value, 941,
+  'film grain exposes the same deterministic default seed in its editable controls and export renderer');
+assert.match(fs.readFileSync(new URL('../client/src/effects/engines/GPUEffects.js', import.meta.url), 'utf8'),
+  /u_seed.*?hash.*?grainCoord\.x/s,
+  'the GPU film grain shader uses the authored seed in the same coordinate hash family as export');
+assert.deepEqual(createGpuClipEffectConfigs('fade-test', [
+  { kind: 'fade_in' }, { kind: 'fade_out' }, { kind: 'vignette' },
+]).map(effect => effect.type), ['vignette'],
+  'dedicated color/alpha fade overlays do not also enter the base clip GPU effect chain');
 assert.equal(isGpuClipEffect('shake'), false,
   'camera shake stays on the timeline transform path instead of being double-applied as a pixel shader');
 const previewableEffects = Object.keys(EFFECT_DEFINITIONS).filter(type => type !== 'shake' && isGpuClipEffect(type));
@@ -322,9 +526,81 @@ assert.equal(resolveTimelineEffectFilter(previewableEffects.map(kind => ({ kind 
   'the WebGL preview does not stack duplicate CSS approximations on shader-backed footage effects');
 assert.equal(resolveTimelineVignetteStyle([{ kind: 'vignette' }], 0, { gpuPreview: true }), null,
   'the WebGL vignette shader does not stack the CSS vignette overlay');
+const grainFallback = [{ kind: 'film_grain', params: { intensity: 0.4, seed: 23 } }];
+const fallbackContext = { gpuPreview: true, gpuSupportedEffectTypes: ['color_grade'] };
+assert.match(resolveTimelineEffectFilter(grainFallback, 0, fallbackContext), /vibed-film-grain/,
+  'an effect whose shader failed compilation remains visible through the SVG fallback');
+assert.equal(resolveTimelineSvgEffectInstances(grainFallback, 0, fallbackContext).length, 1,
+  'unsupported GPU effects keep their parameterized SVG filter definition');
+assert.equal(resolveTimelineSvgEffectInstances(grainFallback, 0, {
+  gpuPreview: true, gpuSupportedEffectTypes: ['film_grain'],
+}).length, 0, 'a working shader suppresses the duplicate SVG filter');
+assert.ok(resolveTimelineVignetteStyle([{ kind: 'vignette' }], 0, fallbackContext),
+  'an unavailable GPU vignette falls back to the CSS edge tint');
+assert.equal(resolveTimelineVignetteStyle([{ kind: 'vignette' }], 0, {
+  gpuPreview: true, gpuSupportedEffectTypes: ['vignette'],
+}), null, 'a working vignette shader suppresses its CSS overlay');
+assert.equal(resolveTimelineSvgEffectParams(grainFallback, 0, {
+  gpuPreview: true, gpuSupportedEffectTypes: ['film_grain'],
+}).grain.intensity, 0.15,
+  'SVG parameter resolution ignores effects that the GPU has already rendered');
 
 const routingPipeline = new EffectPipeline();
 routingPipeline.hasActiveEffectsAt = () => false;
+const missingRendererWarnings = [];
+const missingRendererPipeline = new EffectPipeline({ onPreviewWarning: warning => missingRendererWarnings.push(warning) });
+missingRendererPipeline.getActiveEffects = () => [{ id: 'gpu-effect-without-renderer', engine: 'gpu' }];
+const unprocessedPreviewTexture = { id: 'original-preview-texture' };
+assert.equal(missingRendererPipeline.processPreview(unprocessedPreviewTexture, 'missing-renderer-target', 0), unprocessedPreviewTexture,
+  'a missing GPU renderer keeps the source texture available for preview');
+assert.equal(missingRendererPipeline.processPreview(unprocessedPreviewTexture, 'missing-renderer-target', 1), unprocessedPreviewTexture,
+  'a missing GPU renderer does not interrupt later preview frames');
+assert.equal(missingRendererWarnings.length, 1,
+  'a missing GPU renderer emits one deduplicated preview warning for the active effect stack');
+assert.equal(missingRendererWarnings[0].type, 'gpu_effect_preview_unavailable');
+const unsupportedGpuWarnings = [];
+let processedGpuEffects = [];
+const supportAwarePipeline = new EffectPipeline({
+  gpuEngine: {
+    supportsEffect: type => type === 'glow',
+    processChain: effects => { processedGpuEffects = effects; return { id: 'processed-preview' }; },
+  },
+  onPreviewWarning: warning => unsupportedGpuWarnings.push(warning),
+});
+supportAwarePipeline.getActiveEffects = () => [
+  { id: 'supported-glow', name: 'Glow', type: 'glow', engine: 'gpu' },
+  { id: 'unsupported-shader', name: 'Missing shader', type: 'future-effect', engine: 'gpu' },
+];
+const supportedAndUnsupportedPreview = supportAwarePipeline.processPreview(unprocessedPreviewTexture, 'mixed-target', 0);
+assert.equal(supportedAndUnsupportedPreview.id, 'processed-preview',
+  'a missing shader does not prevent supported effects in the same chain from rendering');
+assert.deepEqual(processedGpuEffects.map(effect => effect.id), ['supported-glow'],
+  'only effects with an available GPU shader enter the preview render chain');
+assert.equal(unsupportedGpuWarnings.length, 1);
+assert.equal(unsupportedGpuWarnings[0].type, 'gpu_effect_unsupported',
+  'an effect without a GPU shader is surfaced through the preview warning channel');
+supportAwarePipeline.processPreview(unprocessedPreviewTexture, 'mixed-target', 1);
+assert.equal(unsupportedGpuWarnings.length, 1, 'unsupported shader warnings are deduplicated across playback frames');
+const invalidGraphWarnings = [];
+const invalidGraphPipeline = new EffectPipeline({ onPreviewWarning: warning => invalidGraphWarnings.push(warning) });
+const invalidPreviewGraph = new EffectGraph();
+for (const id of ['branch-root', 'branch-left', 'branch-right']) {
+  invalidPreviewGraph.addNode({ id, type: 'glow', engine: 'gpu' });
+}
+invalidPreviewGraph.connect('branch-root', 'branch-left').connect('branch-root', 'branch-right');
+invalidGraphPipeline.effectsByTarget.set('branch-target', invalidPreviewGraph);
+assert.equal(invalidGraphPipeline.processPreview(unprocessedPreviewTexture, 'branch-target', 0), unprocessedPreviewTexture,
+  'an invalid effect graph leaves the source frame visible instead of crashing playback');
+assert.equal(invalidGraphPipeline.processPreview(unprocessedPreviewTexture, 'branch-target', 1), unprocessedPreviewTexture,
+  'subsequent frames remain playable while the graph is invalid');
+assert.equal(invalidGraphWarnings.length, 1, 'invalid graph warnings are deduplicated per target and cause');
+assert.equal(invalidGraphWarnings[0].type, 'effect_graph_preview_unavailable');
+assert.match(invalidGraphWarnings[0].message, /branching/);
+missingRendererPipeline.getActiveEffects = () => [];
+assert.equal(missingRendererPipeline.processPreview(unprocessedPreviewTexture, 'no-effects-target', 2), unprocessedPreviewTexture);
+assert.equal(missingRendererWarnings.length, 1, 'no warning is emitted when the target has no active GPU effects');
+missingRendererPipeline.setGPUEngine({});
+assert.equal(missingRendererPipeline._previewWarnings.size, 0, 'restoring a GPU renderer clears stale preview warnings');
 class WebGLTextureFixture {}
 const sharedWebGLTexture = new WebGLTextureFixture();
 const routedPlacements = [{ id: 'base-layer' }, { id: 'overlay-layer' }];

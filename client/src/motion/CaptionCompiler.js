@@ -47,7 +47,7 @@ import { clipToMotionLayer } from './ClipAdapter.js';
 import { resolveMotionAt, sampleKeyframeTrack } from './MotionResolver.js';
 import { revealedWordCount, activeWordIndex, resolveEmphasis } from './CaptionModel.js';
 import { highlightBreakpoints, highlightMixAt } from './TextCraft.js';
-import { buildTimeMap, timelineToOutputTime, simplifySamples, GEOMETRY_SAMPLE_STEP } from './Compositor.js';
+import { buildTimeMap, timelineToOutputTime, simplifySamples, sampleStepForFps } from './Compositor.js';
 
 export const CAPTION_PROGRAM_VERSION = 1;
 
@@ -146,13 +146,14 @@ function activeHighlight(clip) {
  *
  * @returns {Array<{from:number,to:number,shown:number,active:number,mix:number}>}
  */
-export function buildWordStates(clip, layer, timeMap, tokenCount, highlight) {
+export function buildWordStates(clip, layer, timeMap, tokenCount, highlight, fps = 30, audioWaveformsByAsset = {}) {
     const start = Number(layer.startTime) || 0;
     const end = start + (Number(layer.duration) || 0);
     const words = Array.isArray(clip.words) && clip.words.length > 0 ? clip.words : null;
 
     const times = new Set([start]);
-    for (let t = start + GEOMETRY_SAMPLE_STEP; t < end; t += GEOMETRY_SAMPLE_STEP) times.add(Number(t.toFixed(4)));
+    const sampleStep = sampleStepForFps(fps);
+    for (let t = start + sampleStep; t < end; t += sampleStep) times.add(Number(t.toFixed(4)));
     if (words) {
         for (const w of words) {
             for (const edge of [w?.start, w?.end]) {
@@ -179,7 +180,7 @@ export function buildWordStates(clip, layer, timeMap, tokenCount, highlight) {
     const sorted = [...times].sort((a, b) => a - b);
     const runs = [];
     for (const t of sorted) {
-        const m = resolveMotionAt(layer, t);
+        const m = resolveMotionAt(layer, t, { audioWaveformsByAsset });
         // Same rule as CaptionWords: emphasis alone shows the whole caption.
         const revealing = m.reveal < 1 || (!!highlight && !!words);
         const shown = revealing ? revealedWordCount(words, t, m.reveal, tokenCount) : tokenCount;
@@ -211,14 +212,14 @@ export function buildWordStates(clip, layer, timeMap, tokenCount, highlight) {
  * SAME Douglas-Peucker reduction the compositor uses for overlay geometry
  * (`Compositor.simplifySamples`) — not a second, potentially-diverging copy.
  */
-function sampleChannel(layer, timeMap, keys) {
+function sampleChannel(layer, timeMap, keys, fps = 30, audioWaveformsByAsset = {}) {
     const start = Number(layer.startTime) || 0;
     const duration = Number(layer.duration) || 0;
     const end = start + duration;
 
     const samples = [];
     const push = (tTimeline) => {
-        const m = resolveMotionAt(layer, tTimeline);
+        const m = resolveMotionAt(layer, tTimeline, { audioWaveformsByAsset });
         const tOut = timelineToOutputTime(timeMap, tTimeline);
         const point = { t: Number(tOut.toFixed(4)) };
         for (const k of keys) point[k] = Number.isFinite(m[k]) ? m[k] : 0;
@@ -227,9 +228,10 @@ function sampleChannel(layer, timeMap, keys) {
         samples.push(point);
     };
 
+    const sampleStep = sampleStepForFps(fps);
     push(start);
     if (duration > 0) {
-        for (let t = start + GEOMETRY_SAMPLE_STEP; t < end; t += GEOMETRY_SAMPLE_STEP) push(t);
+        for (let t = start + sampleStep; t < end; t += sampleStep) push(t);
         push(end);
     }
 
@@ -247,7 +249,7 @@ function sampleChannel(layer, timeMap, keys) {
  *
  * @returns {Array<{prefixCount:number, fromOutput:number, toOutput:number}>}
  */
-function buildRevealSteps(clip, layer, timeMap, tokens) {
+function buildRevealSteps(clip, layer, timeMap, tokens, fps = 30) {
     const start = Number(layer.startTime) || 0;
     const duration = Number(layer.duration) || 0;
     const end = start + duration;
@@ -265,7 +267,7 @@ function buildRevealSteps(clip, layer, timeMap, tokens) {
     } else {
         // No real word data — sample the `reveal` channel and record every
         // point where the derived prefix count increases.
-        const samples = sampleChannel(layer, timeMap, ['reveal']);
+        const samples = sampleChannel(layer, timeMap, ['reveal'], fps);
         let lastCount = -1;
         for (const s of samples) {
             const count = revealedWordCount(null, undefined, s.reveal, tokens.length);
@@ -307,7 +309,8 @@ function buildRevealSteps(clip, layer, timeMap, tokens) {
  * @returns {object} a serialisable program; `entries` is empty when nothing
  *                    needs anything beyond the existing static drawtext path.
  */
-export function buildCaptionProgram(tracks, baseClips) {
+export function buildCaptionProgram(tracks, baseClips, opts = {}) {
+    const fps = Number(opts.fps) > 0 ? Number(opts.fps) : 30;
     const timeMap = buildTimeMap(baseClips || []);
     const textTracks = (Array.isArray(tracks) ? tracks : []).filter(t => t && t.type === 'text' && Array.isArray(t.clips));
 
@@ -328,7 +331,7 @@ export function buildCaptionProgram(tracks, baseClips) {
             const text = clip.captionStyle?.uppercase ? rawText.toUpperCase() : rawText;
             const tokens = text.split(' ').filter(Boolean);
 
-            const geometry = sampleChannel(layer, timeMap, ['x', 'y', 'scale', 'opacity', 'glow', 'rotation']);
+            const geometry = sampleChannel(layer, timeMap, ['x', 'y', 'scale', 'opacity', 'glow', 'rotation'], fps, opts.audioWaveformsByAsset);
 
             // Effect keyframes are authored in clip-local time. Ship sampled
             // values in output time so export follows the same time map as the
@@ -379,7 +382,7 @@ export function buildCaptionProgram(tracks, baseClips) {
             const needsReveal = Array.isArray(layer.animations) && layer.animations.some(a =>
                 Array.isArray(a.keyframes) && a.keyframes.some(k => k.properties && 'reveal' in k.properties));
 
-            const revealSteps = needsReveal ? buildRevealSteps(clip, layer, timeMap, tokens) : null;
+            const revealSteps = needsReveal ? buildRevealSteps(clip, layer, timeMap, tokens, fps) : null;
 
             // ── Raster entries (A2/A3) ─────────────────────────────────────
             // Rotation, the active-word highlight and keyword emphasis all need
@@ -439,7 +442,7 @@ export function buildCaptionProgram(tracks, baseClips) {
                         effects: effectSamples,
                         highlight: highlight || null,
                         emphasis: emphasis || null,
-                        wordStates: wordRender ? buildWordStates(clip, layer, timeMap, tokens.length, highlight) : null,
+                        wordStates: wordRender ? buildWordStates(clip, layer, timeMap, tokens.length, highlight, fps, opts.audioWaveformsByAsset) : null,
                     },
                 } : {}),
             });

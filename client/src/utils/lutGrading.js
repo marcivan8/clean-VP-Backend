@@ -2,8 +2,8 @@
  * client/src/utils/lutGrading.js
  *
  * Converts a LUT asset's warmth/contrast/saturation/highlights/shadows
- * columns into the `grading` shape VideoPlayer reads every frame (and the
- * FFmpeg export filter, per R55b) — the live, proven grading path.
+ * columns into the `grading` shape VideoPlayer reads every frame and the
+ * FFmpeg exporter compiles into the per-clip color_grade filter.
  *
  * FIX (R75): This formula used to live only inline in AssetPanel.jsx's
  * handleLUTApply, so the ONLY way to get a LUT's real per-clip grade was to
@@ -14,9 +14,10 @@
  * formula instead of two implementations drifting apart.
  *
  * setGrading()-consuming code takes PERCENTAGES (it divides by 100); the LUT
- * columns are on a -3..+3 scale. The 1 + x/10 mapping matches the CSS preview
- * and the FFmpeg export filter by construction — do not change one without
- * the other two.
+ * columns are on a -3..+3 scale. The 1 + x/10 mapping creates the editable
+ * grade used by the GPU preview, native-video CSS fallback, and FFmpeg clip
+ * grading. A clip carrying this LUT's id uses this grade instead of stacking
+ * the project LUT filter a second time.
  */
 
 /**

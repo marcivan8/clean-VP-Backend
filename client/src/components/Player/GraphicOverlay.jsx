@@ -29,6 +29,7 @@ import { drawMaskedGradient, drawTemporalMotionBlur, relativeMotionTransform } f
 // R92 round C: alignment guides while dragging
 import { computeSnap, measureOthers } from '../../motion/SnapGuides.js';
 import { useSnapGuides } from './SnapGuidesLayer.jsx';
+import WaveformEngine from '../../services/WaveformEngine.js';
 
 function renderGroupedOverlayEntries(clips, elements, timeKey, currentTime, depth = 0) {
     const entries = clips.map((item, index) => ({ clip: item.clip, element: elements[index] }));
@@ -378,6 +379,10 @@ const OverlayVideo = ({ clip, src, currentTime, isPlaying, style, motionContext 
     const ref = React.useRef(null);
     const speed = Number(clip.speed) > 0 ? Number(clip.speed) : 1;
     const target = (Number(clip.offset) || 0) + Math.max(0, currentTime - (Number(clip.start) || 0)) * speed;
+    const effectContext = { clipStart: Number(clip.start ?? clip.startTime) || 0, clipDuration: Number(clip.duration) || 0 };
+    const gradients = (Array.isArray(clip.effects) ? clip.effects : [])
+        .map(effect => resolveEffectAtTime(effect, currentTime, effectContext))
+        .filter(effect => (effect?.kind || effect?.type) === 'gradient-fill' && effect.enabled !== false);
 
     React.useEffect(() => {
         const v = ref.current;
@@ -399,17 +404,30 @@ const OverlayVideo = ({ clip, src, currentTime, isPlaying, style, motionContext 
 
     const radial = radialBlurAtTime(clip, currentTime);
     if (motionContext) return <MotionBlurVideoCanvas clip={clip} src={src} currentTime={currentTime} isPlaying={isPlaying} style={style} motionContext={motionContext} />;
-    if (radial) return <RadialBlurVideoCanvas clip={clip} src={src} target={target} isPlaying={isPlaying} speed={speed} style={style} radial={radial} />;
-    return (
-        <video
+    if (radial && !gradients.length) return <RadialBlurVideoCanvas clip={clip} src={src} target={target} isPlaying={isPlaying} speed={speed} style={style} radial={radial} />;
+    const video = radial
+        ? <RadialBlurVideoCanvas clip={clip} src={src} target={target} isPlaying={isPlaying} speed={speed}
+            style={{ display: 'block', width: '100%', height: 'auto', objectFit: 'cover', pointerEvents: 'none' }} radial={radial} />
+        : <video
             ref={ref}
             src={src}
             muted
             playsInline
             preload="auto"
-            style={style}
-        />
-    );
+            style={{ display: 'block', width: '100%', height: 'auto', pointerEvents: 'none' }}
+        />;
+    if (!gradients.length) return video;
+    return <div style={{ ...style, position: 'relative', display: 'block' }}>
+        {video}
+        {gradients.map((effect, index) => (
+            <div key={`${clip.id}-video-gradient-${index}`} aria-hidden="true" style={{
+                position: 'absolute', inset: 0,
+                background: cssGradient(effect),
+                opacity: Math.max(0, Math.min(1, Number(effect.params?.opacity?.value ?? effect.params?.opacity ?? 1))),
+                pointerEvents: 'none',
+            }} />
+        ))}
+    </div>;
 };
 
 function cssGradient(effect) {
@@ -418,7 +436,8 @@ function cssGradient(effect) {
     const colorEntries = read(p.colors, null);
     const entries = Array.isArray(colorEntries) && colorEntries.length ? colorEntries : [read(p.from, read(p.color, '#FFFFFF')), read(p.to, read(p.color, '#000000'))];
     const stops = entries.map((entry, index) => {
-        const color = typeof entry === 'string' ? entry : entry?.color || '#FFFFFF';
+        const rawColor = typeof entry === 'string' || Array.isArray(entry) ? entry : entry?.color;
+        const color = Array.isArray(rawColor) ? effectColorCss(rawColor) : (rawColor || '#FFFFFF');
         const offset = Number.isFinite(Number(entry?.offset)) ? `${Math.max(0, Math.min(1, Number(entry.offset))) * 100}%` : `${index / Math.max(1, entries.length - 1) * 100}%`;
         return `${color} ${offset}`;
     });
@@ -979,17 +998,30 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
     const gestureRef = React.useRef({});
     const clipElRefs = React.useRef({});
 
-    const { currentTime, tracks, assets, activeClipId, updateClip, setActiveClip, saveToHistory, isPlaying, aspectRatio } = useTimelineStore(useShallow(state => ({
+    const { currentTime, tracks, assets, waveformsByAsset, activeClipId, updateClip, setActiveClip, saveToHistory, isPlaying, aspectRatio } = useTimelineStore(useShallow(state => ({
         currentTime:   state.currentTime,
         isPlaying:     state.isPlaying,
         tracks:        state.tracks,
         assets:        state.assets,
+        waveformsByAsset: state.waveformsByAsset || {},
         activeClipId:  state.activeClipId,
         updateClip:    state.updateClip,
         setActiveClip: state.setActiveClip,
         saveToHistory: state.saveToHistory,
         aspectRatio:   state.aspectRatio,
     })));
+
+    const reactiveAssetIds = React.useMemo(() => [...new Set(tracks.flatMap(track => track.clips || [])
+        .map(clip => clip.audioReactive?.assetId).filter(Boolean))], [tracks]);
+    React.useEffect(() => {
+        for (const assetId of reactiveAssetIds) {
+            if (waveformsByAsset[assetId]?.peaks?.length) continue;
+            const asset = assets.find(item => item.id === assetId);
+            if (!asset) continue;
+            WaveformEngine.getPeaks(assetId, { gcsPath: asset.gcsPath || asset.storagePath || null, proxyUrl: asset.proxyUrl || asset.url || null })
+                .catch(error => console.warn('[GraphicOverlay] audio envelope unavailable:', error?.message));
+        }
+    }, [reactiveAssetIds.join('|'), assets, waveformsByAsset]);
 
     // Every hook must run on EVERY render, so this one stays ABOVE the early
     // return below. It used to sit under it: a project with no overlay track
@@ -1198,7 +1230,7 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
 
                 const layer = clipToMotionLayer(clip, { id: trackId, type: 'overlay' });
                 const resolvedMotion = layer
-                    ? resolveMotionAt(layer, currentTime)
+                    ? resolveMotionAt(layer, currentTime, { audioWaveformsByAsset: waveformsByAsset })
                     : { x: clip.x ?? 78, y: clip.y ?? 18, scale: clip.scale || 1, rotation: 0, opacity: clip.opacity ?? 1, blur: 0 };
                 const groupOpacity = (clip.compositionStack || []).reduce((product, item) => product * Math.max(0, Math.min(1, Number(item.opacity ?? 1))), 1);
                 const motion = { ...resolvedMotion, opacity: groupOpacity > 1e-6 ? resolvedMotion.opacity / groupOpacity : resolvedMotion.opacity };

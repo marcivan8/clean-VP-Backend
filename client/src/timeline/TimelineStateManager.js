@@ -968,6 +968,7 @@ export class TimelineStateManager {
                         // vanishes on project reload, which is exactly what was
                         // happening to `animation` before R58.
                         animations: clip.animations,
+                        audioReactive: clip.audioReactive ?? null,
                         expressions: clip.expressions,
                         motionPath: clip.motionPath,
                         // Nested scene composition metadata drives isolated
@@ -1112,6 +1113,7 @@ export class TimelineStateManager {
                                 // projection in toLegacyTracks above. Keep the
                                 // two lists in sync.
                                 animations: legacyClip.animations,
+                                audioReactive: legacyClip.audioReactive ?? null,
                                 expressions: legacyClip.expressions,
                                 motionPath: legacyClip.motionPath,
                                 compositionStack: legacyClip.compositionStack ?? null,

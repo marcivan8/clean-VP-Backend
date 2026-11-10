@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderTemplateFrames } from '../server/compositor/TemplateRenderer.js';
-import { drawScene3D, remapSceneObjectTime, maxSceneObjectSourceTime, sampleAudioEnvelope, composeSceneRotation, composeSceneTransform, normalizeScene3D, normalizeSceneMesh, MAX_MESH_TRIANGLES, MAX_SCENE_TRIANGLES, resolveParticleSeed, SCENE3D_CAMERA_DEFAULTS, SCENE3D_PRIMITIVES, SCENE3D_BLEND_MODES } from '../client/src/motion/Scene3D.js';
+import { drawScene3D, remapSceneObjectTime, resolveSceneVideoSourceTime, maxSceneObjectSourceTime, getSceneShutterSampleTimes, sampleAudioEnvelope, composeSceneRotation, composeSceneTransform, normalizeScene3D, normalizeSceneMesh, MAX_MESH_TRIANGLES, MAX_SCENE_TRIANGLES, getScene3DRenderLimitWarnings, getScene3DCompatibilityWarnings, resolveParticleSeed, SCENE3D_CAMERA_DEFAULTS, SCENE3D_PRIMITIVES, SCENE3D_BLEND_MODES } from '../client/src/motion/Scene3D.js';
 import { evaluateMotionExpression } from '../client/src/motion/MotionExpression.js';
 import { sampleProceduralParticle, sampleProceduralParticles } from '../client/src/motion/ProceduralParticles.js';
 
@@ -60,6 +60,48 @@ const oversizedPolygonMesh = normalizeSceneMesh({
 assert.ok(oversizedPolygonMesh.faces.reduce((sum, face) => sum + face.length - 2, 0) <= MAX_MESH_TRIANGLES,
   'polygon meshes are capped by triangulated work, not only authored face count');
 assert.equal(MAX_SCENE_TRIANGLES, 50_000, 'the scene rasterizer has a finite aggregate triangle budget');
+assert.deepEqual(getScene3DRenderLimitWarnings({
+  objects: Array.from({ length: 81 }, (_, id) => ({ id, type: 'box' })),
+  lights: Array.from({ length: 9 }, () => ({ type: 'point' })),
+  particles: { count: 501 },
+}), [
+  { label: 'objects', actual: 81, limit: 80, message: 'This 3D scene has 81 objects; the renderer supports 80, so the extra content will not appear.' },
+  { label: 'lights', actual: 9, limit: 8, message: 'This 3D scene has 9 lights; the renderer supports 8, so the extra content will not appear.' },
+  { label: 'particles', actual: 501, limit: 500, message: 'This 3D scene has 501 particles; the renderer supports 500, so the extra content will not appear.' },
+], 'export preflight warnings match the renderer truncation limits');
+assert.deepEqual(getScene3DRenderLimitWarnings({ particles: { count: 500.4 } }), [],
+  'particle validation rounds with the same rule as the renderer before deciding if content will be dropped');
+assert.deepEqual(getScene3DCompatibilityWarnings({
+  objects: [{ id: 'bad-primitive', name: 'Authored shape', type: 'star-poly', material: { side: 'both' }, blendMode: 'linear-dodge' }],
+  lights: [{ type: 'area' }],
+}).map(warning => warning.message), [
+  '3D object “Authored shape” uses unsupported type “star-poly”; it will render as a box.',
+  '3D object “Authored shape” uses unsupported material side “both”; it will render as front-sided.',
+  '3D object “Authored shape” uses unsupported blend mode “linear-dodge”; it will render as source-over.',
+  '3D light 1 uses unsupported type “area”; it will render as a point light.',
+], '3D compatibility checks disclose renderer substitutions');
+assert.deepEqual(getScene3DCompatibilityWarnings({ objects: [{ type: 'box', material: { side: 'double' }, blendMode: 'multiply' }], lights: [{ type: 'spot' }] }), [],
+  'supported 3D authored values do not produce compatibility warnings');
+assert.equal(getScene3DCompatibilityWarnings({
+  objects: [{ type: '', material: { side: null }, blendMode: '' }], lights: [{ type: null }],
+}).length, 4, 'explicit empty and null 3D values are warned while omitted properties retain defaults');
+const clampedSceneWarnings = getScene3DCompatibilityWarnings({
+  objects: [{ id: 'out-of-range-material', type: 'sphere', material: { opacity: 1.5, roughness: 'bad', metalness: -0.2, emissiveIntensity: 12 } }],
+  lights: [{ type: 'point', intensity: 5, range: 0, decay: 9, angle: 180 }],
+});
+assert.equal(clampedSceneWarnings.length, 8, 'all clamped material and light controls are surfaced to validation and export');
+assert.ok(clampedSceneWarnings.some(warning => /Material roughness.*invalid.*use 0\.62/.test(warning.message)));
+assert.ok(clampedSceneWarnings.some(warning => /Intensity.*outside the supported range 0–4.*clamp/.test(warning.message)));
+const denseMesh = {
+  id: 'dense-mesh', type: 'mesh',
+  vertices: Array.from({ length: 64 }, (_, index) => ({ x: index, y: 0, z: 0 })),
+  faces: Array.from({ length: 5000 }, () => Array.from({ length: 64 }, (_, index) => index)),
+};
+const meshLimitWarnings = getScene3DRenderLimitWarnings({ objects: Array.from({ length: 6 }, () => denseMesh) });
+assert.ok(meshLimitWarnings.some(warning => warning.label === 'triangles on mesh “dense-mesh”' && warning.actual === 310_000 && warning.limit === MAX_MESH_TRIANGLES),
+  'export preflight reports actual triangulated work when a single mesh exceeds its triangle budget');
+assert.ok(meshLimitWarnings.some(warning => warning.label === 'triangles in the 3D scene' && warning.actual === 60_000 && warning.limit === MAX_SCENE_TRIANGLES),
+  'export preflight reports aggregate mesh triangle truncation across the scene');
 assert.equal(countGroundShadowPixels(true, false, [{ ...spotLight, target: { x: -6, y: 10, z: 8 } }]), 0,
   'a spotlight aimed away from the caster does not produce a ground shadow');
 assert.equal(countGroundShadowPixels(true, true, [{ ...spotLight, target: { x: -6, y: 10, z: 8 } }]), 0,
@@ -72,6 +114,105 @@ assert.equal(countGroundShadowPixels(true, false, [
   { type: 'point', position: { x: -3, y: 5, z: 4 }, intensity: 1, castsShadow: false, color: '#FFFFFF', range: 50, decay: 0.1 },
   { type: 'point', position: { x: 3, y: 5, z: 4 }, intensity: 1, castsShadow: false, color: '#FFFFFF', range: 50, decay: 0.1 },
 ]), 0, 'lights marked not to cast shadows contribute no ground shadow');
+
+function countReceiverPlaneShadowPixels(enabled, receiverPlane, forcePainterFallback = false, light = {
+  type: 'point', position: { x: 0, y: 0, z: 3 }, intensity: 1,
+  color: '#FFFFFF', range: 50, decay: 0,
+}, receiverSize = 8, casterX = 0, receiverRotation = {}) {
+  const canvas = Canvas.createCanvas(320, 320);
+  const ctx = canvas.getContext('2d');
+  const targetContext = forcePainterFallback ? new Proxy(ctx, {
+    get(target, property) {
+      if (property === 'getImageData' || property === 'putImageData') return undefined;
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+    set(target, property, value) { return Reflect.set(target, property, value, target); },
+  }) : ctx;
+  drawScene3D(targetContext, {
+    camera: { z: 7, fov: 780 }, ambient: 1,
+    shadows: { enabled, receiverPlane, opacity: 0.8, blur: 1, color: '#000000' },
+    lights: [light],
+    objects: [
+      { id: 'wall-catcher', type: 'plane', position: { x: 0, y: 0, z: -1.5 },
+        size: { x: receiverSize, y: receiverSize }, color: '#FFFFFF', material: { side: 'double' }, castsShadow: false,
+        rotation: receiverRotation,
+        ...(receiverPlane ? {} : { receivesShadow: true }) },
+      { id: 'wall-shadow-caster', type: 'box', position: { x: casterX, y: 0, z: 0 },
+        size: { x: 1, y: 1, z: 1 }, color: '#FF0000', castsShadow: true },
+    ],
+  }, 0, 1, 320, 320, {});
+  const data = ctx.getImageData(0, 0, 320, 320).data;
+  let darkPixels = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] > 240 && data[i] < 235 && data[i + 1] < 235 && data[i + 2] < 235) darkPixels++;
+  }
+  return darkPixels;
+}
+function countMarkedFloorAndWallShadows(forcePainterFallback = false) {
+  const canvas = Canvas.createCanvas(320, 320);
+  const ctx = canvas.getContext('2d');
+  const targetContext = forcePainterFallback ? new Proxy(ctx, {
+    get(target, property) {
+      if (property === 'getImageData' || property === 'putImageData') return undefined;
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+    set(target, property, value) { return Reflect.set(target, property, value, target); },
+  }) : ctx;
+  drawScene3D(targetContext, {
+    camera: { z: 7, pitch: 8, fov: 780 }, ambient: 1,
+    shadows: { enabled: true, opacity: 0.8, blur: 1, color: '#000000' },
+    lights: [{ type: 'point', position: { x: -3, y: 4, z: 3 }, intensity: 1, color: '#FFFFFF', range: 50, decay: 0 }],
+    objects: [
+      { id: 'wall-catcher', type: 'plane', position: { x: 0, y: 0, z: -1.5 }, size: { x: 8, y: 8 },
+        color: '#FFFFFF', material: { side: 'double' }, castsShadow: false, receivesShadow: true },
+      { id: 'floor-catcher', type: 'plane', position: { x: 0, y: -1.5, z: 0 }, rotation: { x: -90 }, size: { x: 8, y: 8 },
+        color: '#FFFFFF', material: { side: 'double' }, castsShadow: false, receivesShadow: true },
+      { id: 'two-surface-caster', type: 'box', position: { x: 0, y: 0, z: 0 }, size: { x: 1, y: 1, z: 1 }, color: '#FF0000' },
+    ],
+  }, 0, 1, 320, 320, {});
+  const { data } = ctx.getImageData(0, 0, 320, 320);
+  const count = (x0, y0, x1, y1) => {
+    let pixels = 0;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      const offset = (y * 320 + x) * 4;
+      if (data[offset + 3] > 240 && data[offset] < 235 && data[offset + 1] < 235 && data[offset + 2] < 235) pixels++;
+    }
+    return pixels;
+  };
+  return { wall: count(0, 0, 320, 180), floor: count(140, 180, 320, 260) };
+}
+const wallReceiver = { point: { x: 0, y: 0, z: -1.5 }, normal: { x: 0, y: 0, z: 1 } };
+assert.equal(countReceiverPlaneShadowPixels(false, wallReceiver), 0,
+  'an arbitrary receiver plane stays unshadowed when the scene shadow switch is off');
+assert.ok(countReceiverPlaneShadowPixels(true, wallReceiver) > 100,
+  'point-light shadows project onto a vertical receiver plane as well as the default ground');
+assert.ok(countReceiverPlaneShadowPixels(true, wallReceiver, true) > 100,
+  'the painter fallback also draws cast shadows onto vertical receiver planes');
+assert.ok(countReceiverPlaneShadowPixels(true, wallReceiver, false, {
+  type: 'directional', direction: { x: -0.4, y: 0, z: -1 }, intensity: 1, color: '#FFFFFF', castsShadow: true,
+}) > 100, 'directional lights also project shadows onto vertical receiver planes');
+assert.ok(countReceiverPlaneShadowPixels(true, null) > 100,
+  'a scene plane marked receivesShadow derives its own world position and normal');
+const broadReceiverShadow = countReceiverPlaneShadowPixels(true, null, false, undefined, 8, 0.8);
+const finiteReceiverShadow = countReceiverPlaneShadowPixels(true, null, false, undefined, 0.8, 0.8);
+assert.ok(finiteReceiverShadow < broadReceiverShadow,
+  'a marked plane clips cast shadows to its finite bounds instead of drawing beyond its edges');
+const broadRotatedReceiverShadow = countReceiverPlaneShadowPixels(true, null, false, undefined, 8, 0.8, { y: 32, x: 18 });
+const finiteRotatedReceiverShadow = countReceiverPlaneShadowPixels(true, null, false, undefined, 0.8, 0.8, { y: 32, x: 18 });
+assert.ok(finiteRotatedReceiverShadow < broadRotatedReceiverShadow,
+  'finite receiver clipping also follows the transformed bounds of a rotated plane');
+const broadPainterReceiverShadow = countReceiverPlaneShadowPixels(true, null, true, undefined, 8, 0.8);
+const finitePainterReceiverShadow = countReceiverPlaneShadowPixels(true, null, true, undefined, 0.8, 0.8);
+assert.ok(finitePainterReceiverShadow < broadPainterReceiverShadow,
+  'finite receiver clipping is preserved by the painter fallback without depth-buffer readback');
+const multipleReceiverShadows = countMarkedFloorAndWallShadows();
+assert.ok(multipleReceiverShadows.wall > 100 && multipleReceiverShadows.floor > 100,
+  `multiple marked planes receive shadows in their respective orientations (wall ${multipleReceiverShadows.wall}, floor ${multipleReceiverShadows.floor})`);
+const painterMultipleReceiverShadows = countMarkedFloorAndWallShadows(true);
+assert.ok(painterMultipleReceiverShadows.wall > 100 && painterMultipleReceiverShadows.floor > 100,
+  `the painter fallback casts shadows onto multiple receiver planes (wall ${painterMultipleReceiverShadows.wall}, floor ${painterMultipleReceiverShadows.floor})`);
 
 function concaveShadowScene(enabled) {
   return {
@@ -491,21 +632,43 @@ assert.ok(ballisticLater.position.y < ballisticStart.position.y,
 const burst = { count: 4, seed: 4, lifetime: 1, loop: false, emitter: { shape: 'point', mode: 'burst' } };
 assert.equal(sampleProceduralParticles(burst, 0.5).length, 4, 'a one-shot burst remains alive inside its lifetime');
 assert.equal(sampleProceduralParticles(burst, 1).length, 0, 'a one-shot burst expires after its lifetime');
+const loopingBurst = { ...burst, loop: true };
+assert.equal(sampleProceduralParticles(loopingBurst, 1.25).length, 4,
+  'a looping burst emits a new batch after each lifetime');
+assert.deepEqual(sampleProceduralParticles(loopingBurst, 1.25), sampleProceduralParticles(loopingBurst, 1.25),
+  'looping burst cycles remain deterministic when scrubbing and rendering');
+assert.ok(sampleProceduralParticles(loopingBurst, 1.25).every(particle => particle.age === 0.25),
+  'looping burst particles restart their lifecycle age at each emission cycle');
+const continuousOneShot = { count: 1, seed: 21, lifetime: 2, loop: false, fadeIn: 0.5,
+  emitter: { shape: 'point', mode: 'continuous' }, velocity: { x: 1 }, gravity: {}, turbulence: 0 };
+const continuousAtStart = sampleProceduralParticle(continuousOneShot, 0, 0);
+const continuousLater = sampleProceduralParticle(continuousOneShot, 0, 0.1);
+assert.ok(continuousAtStart.age > 0 && continuousAtStart.age < continuousOneShot.lifetime,
+  'continuous one-shot particles retain their deterministic initial age');
+assert.equal(Number((continuousLater.age - continuousAtStart.age).toFixed(6)), 0.1,
+  'continuous one-shot particle age advances from its seeded phase');
+assert.ok(continuousLater.position.x > continuousAtStart.position.x,
+  'continuous one-shot particle travel uses the same seeded lifecycle clock');
 const ringSamples = sampleProceduralParticles({ ...proceduralConfig, count: 32, emitter: { shape: 'ring', size: { x: 2, z: 2 }, innerRatio: 0.8 }, velocity: {}, gravity: {}, turbulence: 0 }, 0);
 assert.ok(ringSamples.every(particle => Math.hypot(particle.position.x, particle.position.z) >= 1.55),
   'ring emitters preserve their authored inner radius');
-function renderedProceduralParticleFrame(time) {
+function renderedProceduralParticleFrame(time, loop = true) {
   const canvas = Canvas.createCanvas(240, 240);
   drawScene3D(canvas.getContext('2d'), {
     camera: { z: 7, fov: 780 }, shadows: { enabled: false },
     particles: { count: 1, seed: 12, size: 0.06, speed: 1, lifetime: 2, fadeIn: 0, fadeOut: 0,
-      emitter: { shape: 'point', mode: 'burst' }, velocity: { x: 1, y: 0.5, z: 0 } },
+      loop, emitter: { shape: 'point', mode: 'burst' }, velocity: { x: 1, y: 0.5, z: 0 } },
     objects: [],
   }, time, 2, 240, 240, {});
   return canvas.getContext('2d').getImageData(0, 0, 240, 240).data;
 }
 assert.notDeepEqual(renderedProceduralParticleFrame(0.25), renderedProceduralParticleFrame(0.75),
   'procedural emitter motion changes the rendered scene pixels over time');
+assert.deepEqual(renderedProceduralParticleFrame(0.25), renderedProceduralParticleFrame(2.25),
+  'a looping burst remains visible and repeats its trajectory after a full particle lifetime');
+const expiredOneShotFrame = renderedProceduralParticleFrame(2.25, false);
+assert.ok(!expiredOneShotFrame.some((channel, index) => index % 4 === 3 && channel > 0),
+  'a one-shot burst remains expired after its authored lifetime in the scene renderer');
 
 function audioReactiveFrame(envelope) {
   const canvas = Canvas.createCanvas(240, 240);
@@ -602,6 +765,48 @@ const translucentTextureCenter = translucentTextureCtx2D.getImageData(120, 120, 
 assert.ok(translucentTextureCenter[0] >= 120 && translucentTextureCenter[0] <= 136
   && translucentTextureCenter[1] >= 120 && translucentTextureCenter[1] <= 136,
 'partially transparent 3D texture pixels composite once over the existing background');
+
+function renderPlaneMask(maskShape, forcePainterFallback = false, maskInvert = false) {
+  const texture = Canvas.createCanvas(8, 8);
+  const textureCtx = texture.getContext('2d');
+  textureCtx.fillStyle = '#00FF00';
+  textureCtx.fillRect(0, 0, 8, 8);
+  const canvas = Canvas.createCanvas(240, 240);
+  const ctx = canvas.getContext('2d');
+  const target = forcePainterFallback ? new Proxy(ctx, {
+    get(object, property) {
+      if (property === 'getImageData' || property === 'putImageData') return undefined;
+      const value = Reflect.get(object, property, object);
+      return typeof value === 'function' ? value.bind(object) : value;
+    },
+    set(object, property, value) { return Reflect.set(object, property, value, object); },
+  }) : ctx;
+  drawScene3D(target, { camera: { z: 7, fov: 780 }, ambient: 1, shadows: { enabled: false }, objects: [
+    { id: `mask-${maskShape}`, type: 'image', imageUrl: 'mask-texture', maskShape, maskInvert,
+      position: { x: 0, y: 0, z: 0 }, size: { x: 2, y: 2 }, castsShadow: false },
+  ] }, 0, 1, 240, 240, { 'mask-texture': texture });
+  return ctx.getImageData(0, 0, 240, 240).data;
+}
+const unmaskedPlanePixels = renderPlaneMask('none');
+const unmaskedPlaneAlpha = Array.from({ length: 240 * 240 }, (_, index) => unmaskedPlanePixels[index * 4 + 3]).reduce((sum, alpha) => sum + alpha, 0);
+for (const shape of ['ellipse', 'circle', 'rounded-rectangle', 'rectangle', 'capsule', 'polygon', 'star', 'arrow']) {
+  const pixels = renderPlaneMask(shape);
+  const alpha = Array.from({ length: 240 * 240 }, (_, index) => pixels[index * 4 + 3]).reduce((sum, value) => sum + value, 0);
+  assert.ok(pixels[(120 * 240 + 120) * 4 + 3] > 0, `${shape} keeps the image plane center visible`);
+  if (shape !== 'rectangle') assert.ok(alpha < unmaskedPlaneAlpha * 0.995, `${shape} clips the textured plane (${alpha} vs ${unmaskedPlaneAlpha})`);
+  if (shape !== 'rectangle') {
+    const fallbackPixels = renderPlaneMask(shape, true);
+    const fallbackAlpha = Array.from({ length: 240 * 240 }, (_, index) => fallbackPixels[index * 4 + 3]).reduce((sum, value) => sum + value, 0);
+    assert.ok(fallbackAlpha < unmaskedPlaneAlpha * 0.995, `${shape} is also clipped when pixel-readback rendering is unavailable`);
+
+    for (const fallback of [false, true]) {
+      const inversePixels = renderPlaneMask(shape, fallback, true);
+      const inverseAlpha = Array.from({ length: 240 * 240 }, (_, index) => inversePixels[index * 4 + 3]).reduce((sum, value) => sum + value, 0);
+      assert.equal(inversePixels[(120 * 240 + 120) * 4 + 3], 0, `${shape} inverse removes the center in ${fallback ? 'painter' : 'depth'} rendering`);
+      assert.ok(inverseAlpha > 1000, `${shape} inverse reveals the outside area in ${fallback ? 'painter' : 'depth'} rendering`);
+    }
+  }
+}
 
 const meshTexture = Canvas.createCanvas(8, 4);
 const meshTextureCtx = meshTexture.getContext('2d');
@@ -773,6 +978,12 @@ assert.equal(remapSceneObjectTime({ duration: 4, keyframes: [{ time: 0, value: 9
 assert.equal(remapSceneObjectTime({ duration: 10, speed: 4, offset: 7, keyframes: [
   { time: 0, value: 2 }, { time: 1, value: 4 },
 ] }, 0.5, 10), 3, 'an authored source-time curve takes precedence over speed and offset values');
+assert.equal(resolveSceneVideoSourceTime({ videoStart: 1.25, videoSpeed: 2, timeRemap: { duration: 4, speed: 0.5 } }, 2, 4), 3.25,
+  '3D video playback applies remapping, then source offset, then playback speed consistently');
+assert.equal(resolveSceneVideoSourceTime({ videoStart: -2, videoSpeed: 0, timeRemap: { duration: 4, keyframes: [{ time: 0, value: 1 }] } }, 0, 4), 1,
+  '3D video source time clamps invalid offsets and preserves normal speed for zero-valued defaults');
+assert.equal(resolveSceneVideoSourceTime({ videoStart: 0, videoSpeed: -2, timeRemap: { duration: 4, keyframes: [{ time: 0, value: 1 }] } }, 0, 4), 0.05,
+  'negative 3D video playback speed is clamped to the supported minimum');
 const easedRemap = { duration: 4, keyframes: [
   { time: 0, value: 0 }, { time: 1, value: 2, easing: 'backOut' },
 ] };
@@ -780,6 +991,19 @@ assert.ok(maxSceneObjectSourceTime(easedRemap, 1, 20) > 2,
   'source extraction range includes eased remap overshoot between keyframe endpoints');
 assert.equal(maxSceneObjectSourceTime({ duration: 4, speed: 1, mode: 'loop' }, 1, 20), 4,
   'looping remaps extract a full source span even when output duration is shorter');
+const linearRemap = { duration: 10, keyframes: [{ time: 0, value: 0 }, { time: 2, value: 10 }] };
+assert.equal(maxSceneObjectSourceTime(linearRemap, 1, 1), 5,
+  'the regular source bound follows rendered frame times');
+assert.equal(maxSceneObjectSourceTime(linearRemap, 1, 1, [1.4]), 7,
+  'extra shutter timestamps extend source extraction through motion-blur samples');
+assert.deepEqual(getSceneShutterSampleTimes(2, 1, 2, { enabled: false }), [1],
+  'a scene without motion blur samples only the regular output frame time');
+assert.deepEqual(getSceneShutterSampleTimes(2, 1, 2, { enabled: true, samples: 3, frameRate: 30, shutterAngle: 180 }), [
+  1 - 1 / 180, 1, 1 + 1 / 180,
+], 'preview and export share deterministic shutter sample timestamps');
+assert.deepEqual(getSceneShutterSampleTimes(2, 1, 2, { enabled: true, samples: null, frameRate: 0, shutterAngle: null }), [
+  1 - 1 / 180, 1, 1 + 1 / 180,
+], 'missing shutter values retain the renderer defaults');
 
 const malformedHierarchy = { objects: [
   { id: 'cycle-a', parentId: 'cycle-b', position: { x: 2 } },
@@ -1038,6 +1262,18 @@ try {
   remappedCtx.drawImage(remappedFirst, 0, 0);
   const remappedCenter = remappedCtx.getImageData(Math.floor(remappedFirst.width / 2), Math.floor(remappedFirst.height / 2), 1, 1).data;
   assert.ok(remappedCenter[0] > 220 && remappedCenter[2] < 40, 'exported 3D video textures follow authored time-remap keyframes');
+  const speedScene = { ...scene, objects: [{ ...scene.objects[0], videoStart: 0, videoSpeed: 2, videoLoop: false }] };
+  const speedSequence = await renderTemplateFrames({ kind: '3d-scene', params: { scene: speedScene } }, {
+    durationSec: 2, fps: 1, widthPx: 108, tmpDir: videoFixtureDir, name: 'video-playback-speed',
+    videoFrameFiles: { 'texture-video': [videoFrame('#0000FF'), videoFrame('#00FF00'), videoFrame('#FF0000')] },
+  });
+  const speedFrame = await Canvas.loadImage(fs.readFileSync(speedSequence.files[1]));
+  const speedCanvas = Canvas.createCanvas(speedFrame.width, speedFrame.height);
+  const speedCtx = speedCanvas.getContext('2d');
+  speedCtx.drawImage(speedFrame, 0, 0);
+  const speedCenter = speedCtx.getImageData(Math.floor(speedFrame.width / 2), Math.floor(speedFrame.height / 2), 1, 1).data;
+  assert.ok(speedCenter[0] > 220 && speedCenter[1] < 40,
+    'exported 3D video textures advance according to the authored playback speed');
   const animatedLightScene = {
     camera: { z: 7, fov: 780 }, ambient: 0.02, shadows: { enabled: false },
     lights: [{ type: 'point', position: { x: -2, y: 2, z: 4 }, intensity: 0.1,

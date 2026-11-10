@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { resolveEffectAtTime } from '../client/src/motion/EffectTiming.js';
 import { resolveTimelineEffectFilter } from '../client/src/motion/TimelineVisualEffects.js';
 import { evaluateMotionExpression } from '../client/src/motion/MotionExpression.js';
+import { evaluateMotionExpression as evaluateWorkerMotionExpression } from '../render-worker/revideo/src/motion/MotionExpression.js';
 import { resolveMotionAt } from '../client/src/motion/MotionResolver.js';
 import { validateMotionExpression } from '../client/src/motion/MotionExpression.js';
 import { resolveMotionAt as resolveWorkerMotionAt } from '../render-worker/revideo/src/motion/MotionResolver.js';
@@ -27,6 +28,14 @@ assert.match(resolveTimelineEffectFilter([clipProgressEffect], 12, { clipStart: 
 assert.equal(evaluateMotionExpression('wiggle(2, 0.5)', { t: 1 }), evaluateMotionExpression('wiggle(2, 0.5)', { t: 1 }));
 assert.equal(validateMotionExpression('value + wiggle(2, 3)').valid, true,
     'motion expression authoring accepts the current property value used by procedural offsets');
+for (const expression of ['sin(1, 2)', 'clamp(0.5, 0)', 'noise(1, 2, 3)', 'wiggle(2)']) {
+    assert.equal(evaluateMotionExpression(expression), null, `client rejects invalid function arity: ${expression}`);
+    assert.equal(evaluateWorkerMotionExpression(expression), null, `worker rejects invalid function arity: ${expression}`);
+}
+for (const expression of ['sin(1)', 'clamp(0, 1, 0.5)', 'noise(1, 2)', 'wiggle(2, 0.5, 4)']) {
+    assert.equal(evaluateWorkerMotionExpression(expression), evaluateMotionExpression(expression),
+        `client and worker agree on expression output: ${expression}`);
+}
 const valueExpressionLayer = { x: 24, startTime: 0, duration: 4, expressions: { x: 'value + 10' } };
 assert.equal(resolveMotionAt(valueExpressionLayer, 2).x, 34,
     'motion expressions can build on the resolved keyframed/base property instead of replacing it blindly');

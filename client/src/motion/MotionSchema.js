@@ -173,6 +173,9 @@ export function createMotionLayer(overrides = {}) {
         opacity:  Number.isFinite(Number(overrides.opacity)) ? clamp(overrides.opacity, 0, 1) : 1,
 
         animations: Array.isArray(overrides.animations) ? overrides.animations : [],
+        /** Asset-keyed amplitude modulation sampled by the shared resolver. */
+        audioReactive: overrides.audioReactive && typeof overrides.audioReactive === 'object' && !Array.isArray(overrides.audioReactive)
+            ? { ...overrides.audioReactive } : null,
         /** Layer-local motion path in frame-percent offsets from base x/y. */
         motionPath: overrides.motionPath && Array.isArray(overrides.motionPath.points)
             ? { ...overrides.motionPath, points: overrides.motionPath.points.map(point => Array.isArray(point) ? [...point] : point && typeof point === 'object' ? { ...point } : point) }

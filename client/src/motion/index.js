@@ -97,6 +97,7 @@ export {
 export {
     COMPOSITION_PLAN_VERSION,
     GEOMETRY_SAMPLE_STEP,
+    sampleStepForFps,
     buildTimeMap,
     timelineToOutputTime,
     buildCompositionPlan,
@@ -228,7 +229,8 @@ export {
     computeMotionBlur,
 } from './SpatialMotion.js';
 
-export { drawScene3D, normalizeScene3D, remapSceneObjectTime, maxSceneObjectSourceTime, sampleAudioEnvelope, SCENE3D_PRIMITIVES } from './Scene3D.js';
+export { drawScene3D, normalizeScene3D, remapSceneObjectTime, maxSceneObjectSourceTime, sampleAudioEnvelope, SCENE3D_PRIMITIVES, getScene3DRenderLimitWarnings, getScene3DCompatibilityWarnings } from './Scene3D.js';
+export { applyAudioReactiveMotion } from './AudioReactive.js';
 export { sampleProceduralParticle, sampleProceduralParticles } from './ProceduralParticles.js';
 export { evaluateMotionExpression, validateMotionExpression } from './MotionExpression.js';
 

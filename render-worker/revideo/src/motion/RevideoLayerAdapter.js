@@ -90,6 +90,7 @@ export function clipToLayer(clip, track) {
         rotation:  Number.isFinite(Number(clip.rotation)) ? Number(clip.rotation) : 0,
         opacity:   Number.isFinite(Number(clip.opacity)) ? Number(clip.opacity) : 1,
         animations: resolveAnimations(clip),
+        audioReactive: clip.audioReactive && typeof clip.audioReactive === 'object' ? clip.audioReactive : null,
         motionPath: clip.motionPath && Array.isArray(clip.motionPath.points) ? clip.motionPath : null,
         expressions: clip.expressions && typeof clip.expressions === 'object' ? clip.expressions : {},
         words:     Array.isArray(clip.words) ? clip.words : null,

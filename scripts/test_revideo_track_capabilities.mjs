@@ -66,5 +66,24 @@ assert.equal(isRevideoTrackSupported({ type: 'overlay', clips: [{ id: 'logo', ty
   'unrendered motion channels stay on the compositor path');
 assert.equal(isRevideoTrackSupported({ type: 'overlay', clips: [{ id: 'logo', type: 'image', url: '/logo.png', expressions: { x: '50+sin(t)' } }] }), true,
   'supported procedural transform expressions survive worker export');
+const audioReactiveTrack = { type: 'text', clips: [{ id: 'title', type: 'text', content: 'Beat', start: 0, duration: 2,
+  audioReactive: { assetId: 'music-1', parameter: 'scale' } }] };
+assert.equal(isRevideoTrackSupported(audioReactiveTrack), false,
+  'audio reactive layers without analyzed waveform data stay on a renderer that can resolve the missing signal');
+assert.equal(isRevideoTrackSupported(audioReactiveTrack, { 'music-1': { peaks: [0.1, 0.5, 0.2], duration: 2 } }), true,
+  'audio reactive layers use Revideo when the required waveform samples are available');
+assert.equal(isRevideoTrackSupported(audioReactiveTrack, { 'music-1': [0.1, 0.5, 0.2] }), true,
+  'audio reactive layers accept the supported raw peak-array waveform representation');
+const reactiveGlowTrack = { type: 'text', clips: [{ id: 'title-glow', type: 'text', content: 'Beat glow', start: 0, duration: 2,
+  audioReactive: { assetId: 'music-1', target: 'glow', amount: 8 } }] };
+assert.equal(isRevideoTrackSupported(reactiveGlowTrack, { 'music-1': { peaks: [0.1, 0.5, 0.2], duration: 2 } }), false,
+  'audio-reactive glow stays on the complete renderer because Revideo does not apply the resolved glow channel');
+const reactiveBlurTrack = { type: 'overlay', clips: [{ id: 'logo-blur', type: 'image', url: '/logo.png', start: 0, duration: 2,
+  audioReactive: { assetId: 'music-1', target: 'blur', amount: 8 } }] };
+assert.equal(isRevideoTrackSupported(reactiveBlurTrack, { 'music-1': { peaks: [0.1, 0.5, 0.2], duration: 2 } }), false,
+  'audio-reactive blur stays on the compositor path because Revideo does not apply the resolved blur channel');
+assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title-opacity', type: 'text', content: 'Beat', start: 0, duration: 2,
+  audioReactive: { assetId: 'music-1', target: 'opacity', amount: -0.4 } }] }, { 'music-1': { peaks: [0.1, 0.5, 0.2], duration: 2 } }), true,
+  'audio-reactive opacity remains eligible because Revideo consumes the resolved opacity channel');
 
 console.log('Revideo track capability checks passed: unsupported visual features retain the complete compositor path.');

@@ -185,6 +185,7 @@ const VideoPlayer = () => {
     // option defaulted to a no-op — a failed decode/config had nowhere to go
     // and the canvas just stayed black with fully-working-looking controls.
     const [playbackError, setPlaybackError] = useState(null);
+    const [playbackWarning, setPlaybackWarning] = useState(null);
     // ─── Native <video> fallback (mobile WebCodecs reliability fix) ──────────
     // The primary pipeline (PlaybackEngine → VideoWorker → WebCodecs
     // VideoDecoder/AudioDecoder, composited to a WebGL canvas) has no
@@ -213,6 +214,7 @@ const VideoPlayer = () => {
     // doesn't needlessly downgrade every other clip that would decode fine.
     const [enginePermanentlyBroken, setEnginePermanentlyBroken] = useState(false);
     const [failedUrls, setFailedUrls] = useState(() => new Set());
+    const [webglFallbackUrl, setWebglFallbackUrl] = useState(null);
     const fallbackVideoRef = useRef(null);
     const fallbackSrcRef = useRef(null); // last URL actually assigned to the fallback <video>.src
     // True only if the fallback <video> ITSELF also failed (vs. still loading,
@@ -295,6 +297,17 @@ const VideoPlayer = () => {
         [activeClip?.id, activeClip?.start, activeClip?.duration, activeClip?.offset, activeClip?.speed, activeClip?.effects]
     );
     const serializedRetimeMap = React.useMemo(() => serializeTimelineRetimeMap(retimeMap), [retimeMap]);
+    useEffect(() => {
+        setPlaybackWarning(previous => {
+            if (retimeMap?.precisionWarning) {
+                return {
+                    type: 'retime_precision_approximation',
+                    message: retimeMap.precisionWarning,
+                };
+            }
+            return previous?.type === 'retime_precision_approximation' ? null : previous;
+        });
+    }, [retimeMap?.precisionWarning]);
 
     // Resolve the best available URL for the active clip. Extracted from the
     // play/pause effect below into a memo so BOTH the primary engine path and
@@ -330,7 +343,7 @@ const VideoPlayer = () => {
     // True when the primary pipeline has already provably failed — either for
     // this specific file, or altogether on this device. Drives which element
     // (canvas vs. fallback <video>) actually renders below.
-    const useFallbackPlayer = !!mediaUrl && (enginePermanentlyBroken || failedUrls.has(mediaUrl));
+    const useFallbackPlayer = !!mediaUrl && (enginePermanentlyBroken || failedUrls.has(mediaUrl) || webglFallbackUrl === mediaUrl);
 
     // Initialize Engine
     useEffect(() => {
@@ -391,6 +404,10 @@ const VideoPlayer = () => {
                 // A frame actually arrived — whatever error was showing (e.g. from
                 // a prior clip / prior URL) no longer applies.
                 setPlaybackError(null);
+                setPlaybackWarning(null);
+            },
+            onWarning: (warning) => {
+                setPlaybackWarning(warning?.type === 'gpu_effect_preview_recovered' ? null : warning);
             },
             onError: (err) => {
                 console.error('[VideoPlayer] Playback error:', err);
@@ -401,9 +418,17 @@ const VideoPlayer = () => {
                 // callback) — this is exactly the source the engine was
                 // trying, and failing, to play.
                 const failedUrl = engineRef.current?.currentUrl;
-                if (failedUrl) {
+                if (err?.type === 'webgl_context_lost' && failedUrl) {
+                    setWebglFallbackUrl(failedUrl);
+                } else if (failedUrl) {
                     setFailedUrls(prev => (prev.has(failedUrl) ? prev : new Set(prev).add(failedUrl)));
                 }
+            },
+            onRecovered: ({ preservePlaybackError = false } = {}) => {
+                if (!preservePlaybackError) setPlaybackError(null);
+                setPlaybackWarning(null);
+                const restoredUrl = engineRef.current?.currentUrl;
+                setWebglFallbackUrl(current => current === restoredUrl ? null : current);
             },
             });
         } catch (e) {
@@ -929,21 +954,47 @@ const VideoPlayer = () => {
     const effectContext = { clipStart: Number(activeClip?.start ?? activeClip?.startTime) || 0, clipDuration: Number(activeClip?.duration) || 0 };
     const effectFilter = resolveTimelineEffectFilter(activeClip?.effects, currentTime, effectContext);
     const gpuClipEffectPreview = Boolean(!useFallbackPlayer && engineRef.current?.supportsClipEffectPreview?.());
+    const gpuSupportedEffectTypes = gpuClipEffectPreview
+        ? engineRef.current?.getSupportedClipEffectTypes?.() ?? []
+        : null;
     const canvasEffectFilter = resolveTimelineEffectFilter(activeClip?.effects, currentTime, {
         ...effectContext,
         gpuPreview: gpuClipEffectPreview,
+        gpuSupportedEffectTypes,
     });
-    const svgEffectParams = resolveTimelineSvgEffectParams(activeClip?.effects, currentTime, effectContext);
-    const svgEffectInstances = resolveTimelineSvgEffectInstances(activeClip?.effects, currentTime, effectContext);
+    const previewEffectContext = { ...effectContext, gpuPreview: gpuClipEffectPreview, gpuSupportedEffectTypes };
+    const svgEffectParams = resolveTimelineSvgEffectParams(activeClip?.effects, currentTime, previewEffectContext);
+    const svgEffectInstances = resolveTimelineSvgEffectInstances(activeClip?.effects, currentTime, previewEffectContext);
     const vignetteStyle = resolveTimelineVignetteStyle(activeClip?.effects, currentTime, {
         ...effectContext,
         gpuPreview: gpuClipEffectPreview,
+        gpuSupportedEffectTypes,
     });
     const fadeOverlays = resolveTimelineFadeOverlays(activeClip?.effects, currentTime, effectContext);
     const frameWidthPx = containerRef.current?.clientWidth || 0;
+    // Applying a LUT stores both its project id and an editable per-clip grade.
+    // If this clip's grade came from that same LUT, the shader already renders
+    // the LUT-derived look; applying its CSS approximation again would double
+    // grade the preview. Clips with independent/manual grading still receive
+    // the project LUT, matching the export filter order.
+    const clipUsesSelectedLut = Boolean(projectLUTId && activeClip?.grading?._lutId
+        && String(activeClip.grading._lutId) === String(projectLUTId));
+    const previewProjectLutFilter = clipUsesSelectedLut ? 'none' : projectLUTFilter;
+    const fallbackClipGradeFilter = activeClip?.grading
+        ? `brightness(${Number(activeClip.grading.brightness ?? 100)}%) contrast(${Number(activeClip.grading.contrast ?? 100)}%) saturate(${Number(activeClip.grading.saturate ?? 100)}%) hue-rotate(${Number(activeClip.grading.hueRotate ?? 0)}deg)`
+        : '';
     // Phones get the cheap transition blur — see transitionFilter().
-    const baseFilter = combinePreviewFilters(transitionFilter(tfx, projectLUTFilter, { cheap: isMobileViewport, frameWidth: frameWidthPx }), effectFilter);
-    const canvasFilter = combinePreviewFilters(transitionFilter(tfx, projectLUTFilter, { cheap: isMobileViewport, frameWidth: frameWidthPx }), canvasEffectFilter);
+    // Native-video fallback has no WebGL grading shader, so mirror clip.grade
+    // with CSS there. The normal canvas path receives grading via setGrading().
+    const baseFilter = combinePreviewFilters(
+        transitionFilter(tfx, previewProjectLutFilter, { cheap: isMobileViewport, frameWidth: frameWidthPx }),
+        effectFilter,
+        useFallbackPlayer ? fallbackClipGradeFilter : '',
+    );
+    const canvasFilter = combinePreviewFilters(
+        transitionFilter(tfx, previewProjectLutFilter, { cheap: isMobileViewport, frameWidth: frameWidthPx }),
+        canvasEffectFilter,
+    );
 
     // Show overlay when user presses play but no proxy exists yet.
     // Computed here (not in the effect) so it stays reactive to the store subscription.
@@ -1151,6 +1202,31 @@ const VideoPlayer = () => {
                     </svg>
                     <div>{t('player.playbackError', 'Preview couldn\'t play this file')}</div>
                     <div style={{ fontSize: 11, opacity: 0.7 }}>{playbackError.message}</div>
+                </div>
+            )}
+            {!proxyGenerating && playbackWarning && !playbackError && (
+                <div
+                    role="status"
+                    aria-live="polite"
+                    data-preview-warning={playbackWarning.type || 'preview-warning'}
+                    style={{
+                        position: 'absolute',
+                        top: 12,
+                        left: 12,
+                        maxWidth: 'min(420px, calc(100% - 24px))',
+                        padding: '8px 11px',
+                        borderRadius: 8,
+                        background: 'rgba(18, 20, 24, 0.88)',
+                        border: '1px solid rgba(255, 190, 100, 0.35)',
+                        color: '#f4d7ae',
+                        fontSize: 12,
+                        lineHeight: 1.4,
+                        fontFamily: 'var(--f-sans, system-ui)',
+                        pointerEvents: 'none',
+                        zIndex: 5,
+                    }}
+                >
+                    {playbackWarning.message || t('player.previewWarning', 'Some effects may not appear in this preview.')}
                 </div>
             )}
         </div>

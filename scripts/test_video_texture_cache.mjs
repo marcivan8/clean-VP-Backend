@@ -33,10 +33,16 @@ assert.equal(resolveSceneVideoTextures([{ type: 'video', videoAssetId: 'asset' }
 assert.equal(resolveSceneVideoTextures([{ type: 'video', videoAssetId: 'asset' }], [
   { id: 'asset', url: '/asset.mp4' },
 ])[0].url, '/asset.mp4', 'preview falls back to the asset URL when neither source nor proxy exists');
+assert.equal(resolveSceneVideoTextures([{ type: 'video', videoAssetId: 'asset', videoUrl: 'blob:https://app.example/expired' }], [
+  { id: 'asset', sourceUrl: '/durable.mp4' },
+])[0].url, '/durable.mp4', 'durable manifest video URL wins over an expired scene blob URL');
+assert.equal(resolveSceneVideoTextures([{ type: 'video', videoUrl: 'blob:https://app.example/current' }], [])[0].url,
+  'blob:https://app.example/current', 'unsaved direct blob video remains previewable in the current browser session');
 assert.deepEqual(resolveSceneImageTextures([
   { id: 'image-plane', type: 'image', imageAssetId: 'still' },
   { id: 'textured-mesh', type: 'mesh', imageAssetId: 'mesh-texture' },
   { id: 'direct-image', type: 'image', imageUrl: '/direct.png' },
+  { id: 'blob-image', type: 'image', imageAssetId: 'still', imageUrl: 'blob:https://app.example/expired-image' },
 ], [
   { id: 'still', sourceUrl: '/original.png', proxyUrl: '/proxy.png' },
   { id: 'mesh-texture', proxyUrl: '/mesh.png' },
@@ -44,6 +50,7 @@ assert.deepEqual(resolveSceneImageTextures([
   { object: { id: 'image-plane', type: 'image', imageAssetId: 'still' }, url: '/original.png' },
   { object: { id: 'textured-mesh', type: 'mesh', imageAssetId: 'mesh-texture' }, url: '/mesh.png' },
   { object: { id: 'direct-image', type: 'image', imageUrl: '/direct.png' }, url: '/direct.png' },
+  { object: { id: 'blob-image', type: 'image', imageAssetId: 'still', imageUrl: 'blob:https://app.example/expired-image' }, url: '/original.png' },
 ], '3D preview resolves image-plane and mesh textures from asset IDs, matching export fallbacks');
 let firstFrames = 0, secondFrames = 0;
 const releaseFirst = cache.subscribe('/a.mp4', () => firstFrames++);

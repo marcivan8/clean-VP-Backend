@@ -231,6 +231,8 @@ export class EffectPipeline {
 
         // Event handlers
         this.onEffectChange = options.onEffectChange || null;
+        this.onPreviewWarning = options.onPreviewWarning || null;
+        this._previewWarnings = new Set();
     }
 
     // ========================================================================
@@ -382,8 +384,28 @@ export class EffectPipeline {
     getActiveEffects(targetId, time, placement = null) {
         const graph = this.effectsByTarget.get(targetId);
         if (!graph) return [];
-
-        return graph.getActiveEffectsAt(time, placement);
+        try {
+            return graph.getActiveEffectsAt(time, placement);
+        } catch (error) {
+            // Invalid authored graphs (for example unsupported branches) must
+            // not tear down playback. Keep the source frame visible and tell
+            // the editor why this target's effects were skipped. Export stays
+            // strict and rejects the graph before rendering.
+            const reason = error instanceof Error ? error.message : String(error || 'invalid effect graph');
+            const key = `invalid-effect-graph:${targetId}:${reason}`;
+            if (!this._previewWarnings.has(key)) {
+                this._previewWarnings.add(key);
+                const warning = {
+                    type: 'effect_graph_preview_unavailable',
+                    targetId,
+                    message: `This effect graph cannot be previewed, so its effects were skipped: ${reason}`,
+                    recoverable: true,
+                };
+                console.warn('[EffectPipeline]', warning.message, warning);
+                this.onPreviewWarning?.(warning);
+            }
+            return [];
+        }
     }
 
     /**
@@ -413,11 +435,6 @@ export class EffectPipeline {
      * @returns {WebGLTexture} Processed texture
      */
     processPreview(texture, targetId, time, context = {}) {
-        if (!this.gpuEngine) {
-            console.warn('[EffectPipeline] No GPU engine available for preview');
-            return texture;
-        }
-
         // Get active GPU effects for this target
         const activeEffects = this.getActiveEffects(targetId, time, context.placement)
             .filter(e => e.engine === ENGINE_TYPES.GPU);
@@ -426,8 +443,50 @@ export class EffectPipeline {
             return texture;
         }
 
+        if (!this.gpuEngine) {
+            const key = `${targetId}:${activeEffects.map(effect => effect.id).join(',')}`;
+            if (!this._previewWarnings.has(key)) {
+                this._previewWarnings.add(key);
+                const warning = {
+                    type: 'gpu_effect_preview_unavailable',
+                    targetId,
+                    effectIds: activeEffects.map(effect => effect.id),
+                    message: 'GPU effects are active, but this preview has no GPU effect renderer.',
+                    recoverable: true,
+                };
+                console.warn('[EffectPipeline]', warning.message, warning);
+                this.onPreviewWarning?.(warning);
+            }
+            return texture;
+        }
+
+        const unsupportedEffects = typeof this.gpuEngine.supportsEffect === 'function'
+            ? activeEffects.filter(effect => !this.gpuEngine.supportsEffect(effect.type))
+            : [];
+        if (unsupportedEffects.length) {
+            const effectIds = unsupportedEffects.map(effect => effect.id);
+            const key = `unsupported-gpu-effects:${targetId}:${effectIds.join(',')}`;
+            if (!this._previewWarnings.has(key)) {
+                this._previewWarnings.add(key);
+                const names = unsupportedEffects.map(effect => effect.name || effect.type).join(', ');
+                const warning = {
+                    type: 'gpu_effect_unsupported',
+                    targetId,
+                    effectIds,
+                    message: `These effects have no GPU preview renderer and were skipped: ${names}.`,
+                    recoverable: true,
+                };
+                console.warn('[EffectPipeline]', warning.message, warning);
+                this.onPreviewWarning?.(warning);
+            }
+        }
+        const renderableEffects = unsupportedEffects.length
+            ? activeEffects.filter(effect => !unsupportedEffects.includes(effect))
+            : activeEffects;
+        if (!renderableEffects.length) return texture;
+
         // Process through GPU engine
-        return this.gpuEngine.processChain(activeEffects, texture, time, context);
+        return this.gpuEngine.processChain(renderableEffects, texture, time, context);
     }
 
     /**
@@ -616,14 +675,14 @@ export class EffectPipeline {
                     metadata: { ...effect.metadata, aiData: this.aiAnalysisCache.get(effect.id) }
                 }));
                 const graphEffectIds = new Set(compiledEffects.map(effect => effect.id));
-                // Keep existing clip effects in their authored order, then
-                // append the graph stack in its connected execution order.
-                // Unique order values prevent export's stable sort from
-                // accidentally interleaving two independent order domains.
-                const mergedEffects = clip.effects
-                    .filter(effect => !graphEffectIds.has(effect?.id))
-                    .sort((a, b) => (Number(a?.order) || 0) - (Number(b?.order) || 0))
-                    .map(effect => ({ ...effect }));
+                // PlaybackEngine routes clip effects into the target graph
+                // after the graph's existing nodes. With a connected stack,
+                // newly added nodes are inserted by authored order; equal or
+                // larger orders land after the existing chain. Export must
+                // keep that same order or the editor preview and rendered
+                // pixels disagree. Preserve the connected graph first, then
+                // append clip effects in their stable authored order.
+                const mergedEffects = [];
                 for (const effect of compiledEffects.map(effect => ({
                     ...effect,
                     params: { ...effect.params },
@@ -631,6 +690,10 @@ export class EffectPipeline {
                 }))) {
                     mergedEffects.push(effect);
                 }
+                mergedEffects.push(...clip.effects
+                    .filter(effect => !graphEffectIds.has(effect?.id))
+                    .sort((a, b) => (Number(a?.order) || 0) - (Number(b?.order) || 0))
+                    .map(effect => ({ ...effect })));
                 clip.effects = mergedEffects.map((effect, order) => ({ ...effect, order }));
             }
         }
@@ -647,16 +710,36 @@ export class EffectPipeline {
      */
     reorderEffects(targetId, effectIds) {
         const graph = this.effectsByTarget.get(targetId);
-        if (!graph) return;
+        if (!graph || !Array.isArray(effectIds)) return false;
 
-        effectIds.forEach((id, index) => {
-            const effect = graph.getNode(id);
-            if (effect) {
-                effect.order = index;
-            }
-        });
+        let current;
+        try {
+            current = graph.getExecutionOrder();
+        } catch {
+            // An invalid branching/disconnected graph cannot be reordered as
+            // one stack; leave its authored connections intact for repair.
+            return false;
+        }
+        const currentIds = current.map(effect => effect.id);
+        const requested = effectIds.map(id => String(id));
+        if (requested.length !== currentIds.length
+            || new Set(requested).size !== requested.length
+            || requested.some(id => !graph.nodes.has(id))) return false;
+
+        const reordered = requested.map(id => graph.nodes.get(id));
+        reordered.forEach((effect, index) => { effect.order = index; });
+        if (graph.connections.length) {
+            graph.connections = reordered.slice(1).map((effect, index) => ({
+                from: reordered[index].id,
+                to: effect.id,
+                port: 'default',
+            }));
+            graph._orderDirty = true;
+            graph._processingOrder = null;
+        }
 
         this._notifyChange('reorder', { targetId, effectIds });
+        return true;
     }
 
     /**
@@ -666,17 +749,13 @@ export class EffectPipeline {
         const effect = this.allEffects.get(effectId);
         if (!effect || !effect.targetId) return;
 
-        const effects = this.getEffectsForTarget(effect.targetId)
-            .sort((a, b) => a.order - b.order);
+        const effects = this.effectsByTarget.get(effect.targetId)?.getExecutionOrder() || [];
 
         const index = effects.findIndex(e => e.id === effectId);
         if (index > 0) {
-            const prev = effects[index - 1];
-            const tempOrder = effect.order;
-            effect.order = prev.order;
-            prev.order = tempOrder;
-
-            this._notifyChange('reorder', { effectId });
+            const reordered = effects.map(item => item.id);
+            [reordered[index - 1], reordered[index]] = [reordered[index], reordered[index - 1]];
+            this.reorderEffects(effect.targetId, reordered);
         }
     }
 
@@ -687,17 +766,13 @@ export class EffectPipeline {
         const effect = this.allEffects.get(effectId);
         if (!effect || !effect.targetId) return;
 
-        const effects = this.getEffectsForTarget(effect.targetId)
-            .sort((a, b) => a.order - b.order);
+        const effects = this.effectsByTarget.get(effect.targetId)?.getExecutionOrder() || [];
 
         const index = effects.findIndex(e => e.id === effectId);
         if (index < effects.length - 1) {
-            const next = effects[index + 1];
-            const tempOrder = effect.order;
-            effect.order = next.order;
-            next.order = tempOrder;
-
-            this._notifyChange('reorder', { effectId });
+            const reordered = effects.map(item => item.id);
+            [reordered[index], reordered[index + 1]] = [reordered[index + 1], reordered[index]];
+            this.reorderEffects(effect.targetId, reordered);
         }
     }
 
@@ -804,6 +879,7 @@ export class EffectPipeline {
      */
     setGPUEngine(engine) {
         this.gpuEngine = engine;
+        if (engine) this._previewWarnings.clear();
     }
 
     /**

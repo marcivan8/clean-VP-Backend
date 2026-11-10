@@ -313,6 +313,14 @@ export const EFFECT_DEFINITIONS = {
                 value: true,
                 type: PARAM_TYPES.BOOL,
                 label: 'Animated'
+            },
+            seed: {
+                value: 941,
+                min: 0,
+                max: 1000000,
+                step: 1,
+                type: PARAM_TYPES.INT,
+                label: 'Seed'
             }
         },
         shader: 'film_grain'
@@ -414,7 +422,9 @@ export const EFFECT_DEFINITIONS = {
 
     fade_in: {
         name: 'Fade In',
-        engine: ENGINE_TYPES.CPU,
+        // GPU preview and FFmpeg export share the same clip-relative window.
+        // Keep ffmpegFilter for the legacy standalone CPU pipeline.
+        engine: ENGINE_TYPES.GPU,
         category: EFFECT_CATEGORIES.TRANSITION,
         description: 'Fade from black/color',
         icon: 'sunrise',
@@ -434,12 +444,13 @@ export const EFFECT_DEFINITIONS = {
             }
         },
         ffmpegFilter: (params, context) =>
-            `fade=t=in:st=${context.startTime}:d=${params.duration}`
+            `fade=t=in:st=${context.startTime}:d=${params.duration}`,
+        shader: 'fade_in'
     },
 
     fade_out: {
         name: 'Fade Out',
-        engine: ENGINE_TYPES.CPU,
+        engine: ENGINE_TYPES.GPU,
         category: EFFECT_CATEGORIES.TRANSITION,
         description: 'Fade to black/color',
         icon: 'sunset',
@@ -459,7 +470,8 @@ export const EFFECT_DEFINITIONS = {
             }
         },
         ffmpegFilter: (params, context) =>
-            `fade=t=out:st=${context.endTime - params.duration}:d=${params.duration}`
+            `fade=t=out:st=${context.endTime - params.duration}:d=${params.duration}`,
+        shader: 'fade_out'
     },
 
     speed_change: {

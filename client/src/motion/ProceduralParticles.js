@@ -38,7 +38,9 @@ export function sampleProceduralParticle(config = {}, index = 0, time = 0) {
     if (!burst && config.loop === false && ageProgress >= lifetime) return null;
     if (burst && config.loop === false && elapsed >= lifetime) return null;
     const cycle = Math.floor(ageProgress / lifetime);
-    const age = burst || config.loop === false ? elapsed : ageProgress % lifetime;
+    // A looping burst emits a fresh deterministic batch each lifetime. Only
+    // one-shot emitters keep unwrapped elapsed time so their particles expire.
+    const age = config.loop === false ? ageProgress : ageProgress % lifetime;
     const cycleIndex = config.loop === false ? index : index + cycle * 997;
 
     let offset;

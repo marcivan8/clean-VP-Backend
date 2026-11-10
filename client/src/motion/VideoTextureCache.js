@@ -80,6 +80,9 @@ export function createBrowserVideoTextureCache(limit = 12) {
     );
 }
 
+const isBlobUrl = value => typeof value === 'string' && /^blob:/i.test(value);
+const firstDurableUrl = (...values) => values.find(value => typeof value === 'string' && value && !isBlobUrl(value)) || null;
+
 /** Resolve scene video texture sources the same way export resolves asset IDs. */
 export function resolveSceneVideoTextures(objects = [], assets = []) {
     const byId = new Map((Array.isArray(assets) ? assets : [])
@@ -89,9 +92,11 @@ export function resolveSceneVideoTextures(objects = [], assets = []) {
         .filter(object => object?.type === 'video')
         .map(object => {
             const asset = object.videoAssetId ? byId.get(object.videoAssetId) : null;
-            // Keep precedence identical to exportProcessor's assetMap lookup:
-            // explicit scene URL, then original source, proxy, and public URL.
-            const url = object.videoUrl || asset?.sourceUrl || asset?.proxyUrl || asset?.url || null;
+            // A template may have been authored from a browser File whose blob
+            // URL expires on reload. Prefer a durable manifest URL whenever an
+            // asset ID exists, retaining blob URLs only for unsaved live previews.
+            const url = firstDurableUrl(object.videoUrl, asset?.sourceUrl, asset?.proxyUrl, asset?.url)
+                || (isBlobUrl(object.videoUrl) ? object.videoUrl : null);
             return { object, url, textureKey: object.videoTextureKey || object.id || url };
         })
         .filter(texture => texture.url && texture.textureKey);
@@ -106,7 +111,11 @@ export function resolveSceneImageTextures(objects = [], assets = []) {
         .filter(object => ['image', 'mesh'].includes(object?.type))
         .map(object => {
             const asset = object.imageAssetId ? byId.get(object.imageAssetId) : null;
-            const url = object.imageUrl || object.textureUrl || asset?.sourceUrl || asset?.proxyUrl || asset?.url || null;
+            const explicitUrl = firstDurableUrl(object.imageUrl, object.textureUrl);
+            const url = explicitUrl
+                || firstDurableUrl(asset?.sourceUrl, asset?.proxyUrl, asset?.url)
+                || [object.imageUrl, object.textureUrl].find(isBlobUrl)
+                || null;
             return { object, url };
         })
         .filter(texture => texture.url);

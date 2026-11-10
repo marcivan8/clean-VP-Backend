@@ -822,6 +822,7 @@
     "stripFailed": "échec de l'envoi",
     "play": "Lire",
     "pause": "Pause",
+    "expand": "Ouvrir le chat en plein écran",
     "collapse": "Retour à l'éditeur"
   },
   "mobileCaptions": {
@@ -897,6 +898,7 @@
     "preparingFile": "Préparation du fichier…",
     "preparingFilePercent": "Préparation du fichier… {{percent}} %",
     "shareUnsupported": "Ce navigateur ne permet pas de partager des fichiers. Utilisez Enregistrer sur le téléphone.",
+    "savedInsteadOfShare": "Enregistré dans vos fichiers. Le menu de partage exige que le fichier soit prêt, ouvrez-le depuis là.",
     "shareFailed": "Impossible d'ouvrir le menu de partage. Essayez Enregistrer sur le téléphone.",
     "exportAgain": "Exporter une autre version",
     "failed": "L'export n'a pas abouti",
@@ -1044,6 +1046,8 @@
       "meshGeometryHelp": "Saisissez les sommets, les faces indexées et les UV facultatives par sommet. Limite : 5 000 sommets et faces.",
       "meshGeometryInvalid": "Géométrie invalide. Vérifiez les coordonnées, les indices des faces et le nombre d’UV.",
       "parent": "Parent",
+      "castShadows": "Projeter des ombres",
+      "receiveShadows": "Recevoir les ombres portées",
       "root": "Racine de la scène",
       "size": "Taille {{axis}}",
       "radius": "Rayon",
@@ -1122,11 +1126,17 @@
         "luminosity": "Luminosité"
       },
       "mask": "Masque du plan",
+      "maskInvert": "Inverser le masque",
       "masks": {
         "none": "Aucun",
         "ellipse": "Ellipse",
         "circle": "Cercle",
-        "rounded-rectangle": "Rectangle arrondi"
+        "rounded-rectangle": "Rectangle arrondi",
+        "rectangle": "Rectangle",
+        "capsule": "Capsule",
+        "polygon": "Polygone",
+        "star": "Étoile",
+        "arrow": "Flèche"
       },
       "keyframes": "Pistes d’animation",
       "property": "Propriété animée",

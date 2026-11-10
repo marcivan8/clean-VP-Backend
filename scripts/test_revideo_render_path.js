@@ -44,7 +44,7 @@ function stripSyncHeader(src) {
 
 section('1 · synced motion files match client/src/motion/ (drift detection)');
 {
-    for (const f of ['Easing.js', 'MotionSchema.js', 'MotionResolver.js', 'MotionExpression.js', 'MotionPresetExpansion.js', 'MotionPresets.js', 'CaptionModel.js']) {
+    for (const f of ['Easing.js', 'MotionSchema.js', 'SpatialMotion.js', 'AudioReactive.js', 'MotionResolver.js', 'MotionExpression.js', 'MotionPresetExpansion.js', 'MotionPresets.js', 'CaptionModel.js']) {
         const original = read(`client/src/motion/${f}`);
         const copy = stripSyncHeader(read(`render-worker/revideo/src/motion/${f}`));
         check(`${f}: worker copy body matches the original verbatim`, original.trim() === copy.trim(),
@@ -100,6 +100,8 @@ section('2 · RevideoLayerAdapter.js — resolution priority (CJS-strip-eval, re
 
     const layerNone = mod.clipToLayer({ id: 'c4', type: 'text', start: 0, duration: 2 }, { type: 'text' });
     check('no animation source → empty array, not a throw', Array.isArray(layerNone.animations) && layerNone.animations.length === 0);
+    const layerReactive = mod.clipToLayer({ id: 'c5', type: 'text', audioReactive: { assetId: 'music-1', target: 'scale', amount: 0.5 } }, { type: 'text' });
+    check('clip audio reactive settings survive worker adaptation', layerReactive.audioReactive?.assetId === 'music-1');
 
     check('inferKind: caption when words present', mod.inferKind({ type: 'text', words: [{ text: 'hi', start: 0, end: 1 }] }, 'text') === 'caption');
     check('inferKind: plain text otherwise', mod.inferKind({ type: 'text' }, 'text') === 'text');
@@ -116,6 +118,9 @@ section('3 · new scene (render-worker/revideo/src/scenes/timeline.tsx) — stru
     const effectParameters = read('render-worker/revideo/src/motion/EffectParameters.js');
     check('imports the ported RevideoLayerAdapter', /from '\.\.\/motion\/RevideoLayerAdapter\.js'/.test(scene));
     check('imports resolveMotionAt from the ported MotionResolver', /resolveMotionAt.*from '\.\.\/motion\/MotionResolver\.js'/.test(scene));
+    check('passes asset-keyed waveform data into shared motion resolution', scene.includes("useVar<Record<string, any>>(vars, 'audioWaveformsByAsset', {})")
+        && scene.includes('resolveMotionAt(layer, playback.time, { audioWaveformsByAsset })'));
+    check('worker clip adapter preserves audio reactive configuration', read('render-worker/revideo/src/motion/RevideoLayerAdapter.js').includes('audioReactive: clip.audioReactive'));
     check('procedural expressions are passed into the export motion layer', read('render-worker/revideo/src/motion/RevideoLayerAdapter.js').includes('expressions: clip.expressions'));
     check('imports revealedWordCount from the ported CaptionModel', /revealedWordCount.*from '\.\.\/motion\/CaptionModel\.js'/.test(scene));
     check('Revideo scene imports and applies the per-clip effect adapter to text and image nodes',
@@ -236,7 +241,7 @@ section('4 · render-worker/server.js — updated contract');
     const server = read('render-worker/server.js');
     check('requires baseVideoUrl, rejects a request without one', /baseVideoUrl/.test(server) && /400/.test(server));
     check('still requires WORKER_SECRET-gated auth on non-health routes', /WORKER_SECRET/.test(server) && /\/health/.test(server));
-    check('passes baseVideoUrl through to renderVideo variables', /variables:\s*\{\s*baseVideoUrl/.test(server));
+    check('passes baseVideoUrl and waveform data through to renderVideo variables', /variables:\s*\{\s*baseVideoUrl[^}]*audioWaveformsByAsset/.test(server));
 
     // R69 FOLLOW-UP — a real end-to-end render (in a throwaway sandboxed test
     // rig, not just node --check) surfaced that `renderVideo()`'s actual
@@ -249,6 +254,8 @@ section('4 · render-worker/server.js — updated contract');
     // Dockerfile installs instead.
     check('uses the REAL settings.puppeteer shape, not the old (silently ignored) puppeteerLaunchArgs key', /puppeteer:\s*\{[\s\S]*?executablePath/.test(server) && !/^\s*puppeteerLaunchArgs\s*:/m.test(server));
     check('pins ffmpeg/ffprobe to the system binaries installed in the Dockerfile', /ffmpeg:\s*\{[\s\S]*?ffmpegPath:\s*'\/usr\/bin\/ffmpeg'[\s\S]*?ffprobePath:\s*'\/usr\/bin\/ffprobe'/.test(server));
+    check('sets the modern-Chrome Vite target in renderVideo settings (vite.config.ts is bypassed)',
+        /viteConfig:\s*\{\s*build:\s*\{\s*target:\s*'esnext'/.test(server));
 }
 
 section('4b · render-worker/Dockerfile — real codec support');
@@ -271,6 +278,8 @@ section('5 · jobs/exportProcessor.js — opt-in wiring, mutual exclusion, fails
 {
     const exp = read('jobs/exportProcessor.js');
     check('defines renderViaRevideoWorker', /async function renderViaRevideoWorker/.test(exp));
+    check('serializes waveform data in worker requests', /JSON\.stringify\(\{ baseVideoUrl, tracks, duration, aspectRatio, fps, backendUrl, audioWaveformsByAsset \}\)/.test(exp)
+        && /audioWaveformsByAsset:\s*timeline\.audioWaveformsByAsset \|\| \{\}/.test(exp));
     check('defines resolvePublicBackendUrl (reused, not re-derived)', /function resolvePublicBackendUrl/.test(exp));
     check('useRevideo is opt-in via REVIDEO_RENDER_ENABLED', /REVIDEO_RENDER_ENABLED.*===\s*'1'/.test(exp));
     check('useRevideo requires RENDER_WORKER_URL to be configured', /!!process\.env\.RENDER_WORKER_URL/.test(exp));

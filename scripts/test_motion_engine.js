@@ -55,7 +55,7 @@ const read = (rel) => {
 // hand-rewritten copy would pass while the shipped file was broken.
 function loadModules() {
     const sandbox = { console, Math, Number, Date, Array, Object, JSON, String, Boolean, isNaN, parseInt, parseFloat };
-    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'MotionPresets', 'AnimationSynthesizer', 'CaptionModel', 'ClipAdapter', 'KeyframeBridge'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'SpatialMotion', 'AudioReactive', 'MotionResolver', 'MotionPresets', 'AnimationSynthesizer', 'CaptionModel', 'ClipAdapter', 'KeyframeBridge'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);
@@ -68,7 +68,7 @@ function loadModules() {
     }
     combined += '\nreturn { resolveEasing, listEasingNames, EASING_FUNCTIONS, clamp,'
              + ' LAYER_KINDS, ANIMATION_TYPES, createKeyframe, createAnimation, createMotionLayer, validateMotionLayer,'
-             + ' sampleAnimation, resolveMotionAt,'
+             + ' sampleAnimation, resolveMotionAt, sampleAudioEnvelope, applyAudioReactiveMotion,'
              + ' MOTION_PRESETS, buildPreset, presetsForKind, LEGACY_ANIMATION_MAP,'
              + ' groupWordsIntoSegments, activeWordIndex, revealedWordCount, CAPTION_STYLE_PACKS, stylePackToClipFields,'
              + ' clipToMotionLayer, motionLayerToClipUpdates, applyPresetToClip,'
@@ -236,6 +236,26 @@ section('3 · Layer resolution composes animations correctly');
     const r = M.resolveMotionAt(junk, 0.5);
     check('every resolved value is finite', [r.x, r.y, r.scale, r.rotation, r.opacity, r.blur, r.glow, r.reveal].every(Number.isFinite));
     check('opacity is clamped to 0..1', r.opacity >= 0 && r.opacity <= 1);
+    const audioReactive = M.createMotionLayer({ startTime: 0, duration: 1, scale: 1,
+        audioReactive: { assetId: 'music', target: 'scale', amount: 0.5 } });
+    const reactiveScale = M.resolveMotionAt(audioReactive, 0.5, {
+        audioWaveformsByAsset: { music: { peaks: [0, 1], duration: 1 } },
+    });
+    check('asset waveform deterministically modulates 2D scale', near(reactiveScale.scale, 1.25));
+    check('shared envelope sampler agrees for array and asset-cache waveform forms',
+        near(M.sampleAudioEnvelope([0, 1], 0.5, 1), M.sampleAudioEnvelope({ peaks: [0, 1], duration: 1 }, 0.5, 1)));
+    const reactiveMirror = M.resolveMotionAt(M.createMotionLayer({ startTime: 0, duration: 1, scale: -1,
+        audioReactive: { assetId: 'music', target: 'scale', amount: 0.5 } }), 0.5, {
+        audioWaveformsByAsset: { music: { peaks: [0, 1], duration: 1 } },
+    });
+    check('audio scale modulation preserves intentional negative-scale mirroring', near(reactiveMirror.scale, -1.25));
+    const reactivePosition = M.resolveMotionAt(M.createMotionLayer({ startTime: 0, duration: 1,
+        audioReactive: { assetId: 'music', target: 'positionX', amount: 10 } }), 0.5, {
+        audioWaveformsByAsset: { music: { peaks: [0, 1], duration: 1 } },
+    });
+    check('3D positionX target maps to the equivalent 2D x channel', near(reactivePosition.x, 55));
+    check('missing waveforms preserve the authored motion state',
+        M.resolveMotionAt(audioReactive, 0.5).scale === 1);
     const mirrored = M.resolveMotionAt({ ...junk, scale: -1.25, scaleX: -0.5 }, 0.5);
     check('signed base scales survive motion resolution for intentional mirroring', mirrored.scale === -1.25 && mirrored.scaleX === -0.5);
     const animatedMirror = M.resolveMotionAt({ ...junk, animations: [M.createAnimation({ type: 'scale', duration: 1,
@@ -387,6 +407,9 @@ section('6 · The adapter keeps existing clips working (backwards compatibility)
     check('writing back does NOT emit endTime',
         updates.endTime === undefined,
         'the timeline is start+duration everywhere; writing both invites them to disagree');
+    const reactiveClip = M.clipToMotionLayer({ id: 'reactive', start: 0, duration: 1,
+        audioReactive: { assetId: 'music', target: 'scale', amount: 0.5 } });
+    check('clip adaptation preserves its audio-reactive descriptor', reactiveClip.audioReactive?.assetId === 'music');
 
     const applied = M.applyPresetToClip({ id: 'c5', duration: 1 }, 'slide-up');
     check('applying a preset clears the legacy animation string',
@@ -404,7 +427,7 @@ section('7 · The engine is actually WIRED (not instance nine of the dead-code p
 
     check('TextOverlay imports the resolver',
         /from '\.\.\/\.\.\/motion\/MotionResolver\.js'/.test(overlay)
-        && /resolveMotionAt\(layer, currentTime\)/.test(overlay),
+        && /resolveMotionAt\(layer, currentTime(?:,\s*\{ audioWaveformsByAsset: waveformsByAsset \})?\)/.test(overlay),
         'TextOverlay is the ONLY mounted text renderer — if it does not call the engine, nothing does');
     check('TextOverlay imports the clip adapter',
         /clipToMotionLayer/.test(overlay));
@@ -412,6 +435,8 @@ section('7 · The engine is actually WIRED (not instance nine of the dead-code p
         /motionPath: clip\.motionPath/.test(tsm) && /motionPath: legacyClip\.motionPath/.test(tsm)
         && /motionPath: clip\.motionPath/.test(workerAdapter),
         'a path must persist on the timeline and reach the same resolver during export');
+    check('audio-reactive config survives timeline save/load projection',
+        /audioReactive: clip\.audioReactive/.test(tsm) && /audioReactive: legacyClip\.audioReactive/.test(tsm));
     check('TextOverlay renders per-word when word timings exist',
         /CaptionWords/.test(overlay) && /clip\.words/.test(overlay));
     check('the superseded CSS keyframe path was REMOVED, not left dormant',

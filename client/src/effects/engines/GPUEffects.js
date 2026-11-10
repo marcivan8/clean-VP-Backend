@@ -15,6 +15,23 @@ const unwrapEffectParam = (params, key, fallback) => {
     return value ?? fallback;
 };
 
+export function resolveFadeProgress(effect, time, placement = {}, params = {}) {
+    const clipStart = Number(placement.startTime ?? placement.start ?? 0) || 0;
+    const clipDuration = Math.max(0, Number(placement.duration) || 0);
+    const edgeValue = effect.type === 'fade_in' ? effect.startTime : effect.endTime;
+    const authoredEdge = edgeValue == null || edgeValue === '' ? NaN : Number(edgeValue);
+    const edge = Number.isFinite(authoredEdge)
+        ? Math.max(0, authoredEdge - clipStart)
+        : (effect.type === 'fade_in' ? 0 : clipDuration);
+    const rawDuration = Number(unwrapEffectParam(params, 'duration', 0.5));
+    const fadeDuration = Math.max(0.05, Math.min(clipDuration || 60,
+        Number.isFinite(rawDuration) ? rawDuration : 0.5));
+    const localTime = Math.max(0, (Number(time) || 0) - clipStart);
+    return effect.type === 'fade_in'
+        ? Math.max(0, Math.min(1, (localTime - edge) / fadeDuration))
+        : 1 - Math.max(0, Math.min(1, (localTime - (edge - fadeDuration)) / fadeDuration));
+}
+
 // ============================================================================
 // SHADER SOURCE CODE
 // ============================================================================
@@ -30,6 +47,30 @@ void main() {
 }`;
 
 const SHADERS = {
+    fade_in: `#version 300 es
+precision mediump float;
+in vec2 v_texCoord;
+uniform sampler2D u_image;
+uniform float u_fadeProgress;
+uniform vec3 u_color;
+out vec4 outColor;
+void main() {
+    vec4 source = texture(u_image, v_texCoord);
+    outColor = vec4(mix(u_color, source.rgb, clamp(u_fadeProgress, 0.0, 1.0)), source.a);
+}`,
+
+    fade_out: `#version 300 es
+precision mediump float;
+in vec2 v_texCoord;
+uniform sampler2D u_image;
+uniform float u_fadeProgress;
+uniform vec3 u_color;
+out vec4 outColor;
+void main() {
+    vec4 source = texture(u_image, v_texCoord);
+    outColor = vec4(mix(u_color, source.rgb, clamp(u_fadeProgress, 0.0, 1.0)), source.a);
+}`,
+
     // === Gaussian Blur (Two-pass) ===
     blur_gaussian: `#version 300 es
 precision mediump float;
@@ -169,7 +210,9 @@ void main() {
 
     // feMerge composites the flood colour over SourceGraphic; it does not
     // add RGB energy to the original, which would clip and look harsher.
-    float glowAlpha = bloom * clamp(u_intensity, 0.0, 1.0) * 0.7;
+    // Registry and controls expose a 0–3 intensity range. Clamp the resulting
+    // opacity, not the intensity, so values above 1 remain visibly stronger.
+    float glowAlpha = clamp(bloom * clamp(u_intensity, 0.0, 3.0) * 0.7, 0.0, 1.0);
     outColor = vec4(mix(original.rgb, u_color, glowAlpha),
         original.a + glowAlpha * (1.0 - original.a));
 }`,
@@ -283,7 +326,7 @@ void main() {
 
     // === Film Grain ===
     film_grain: `#version 300 es
-precision mediump float;
+precision highp float;
 
 in vec2 v_texCoord;
 uniform sampler2D u_image;
@@ -291,21 +334,21 @@ uniform float u_intensity;
 uniform float u_size;
 uniform float u_time;
 uniform bool u_animated;
+uniform float u_seed;
 uniform vec2 u_resolution;
 
 out vec4 outColor;
-
-float random(vec2 st) {
-    return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
-}
 
 void main() {
     vec4 color = texture(u_image, v_texCoord);
     
     // Generate grain
     float frame = u_animated ? floor(u_time * 30.0) : 0.0;
-    vec2 grainCoord = floor(v_texCoord * u_resolution / max(u_size, 0.01)) + vec2(frame);
-    float grain = random(grainCoord) * 2.0 - 1.0;
+    vec2 grainCoord = floor(v_texCoord * u_resolution / max(u_size, 0.01));
+    float seed = floor(u_seed);
+    float hash = sin((grainCoord.x + seed * 7.1) * 12.9898
+        + (grainCoord.y + seed * 3.17) * 78.233 + frame * 37.719) * 43758.5453;
+    float grain = (fract(hash) - 0.5) * 2.0;
     
     // Apply grain
     color.rgb += grain * u_intensity;
@@ -473,6 +516,10 @@ export class GPUEffectEngine {
         if (gl) {
             this._init();
         }
+    }
+
+    supportsEffect(type) {
+        return this.programs.has(String(type || ''));
     }
 
     // ========================================================================
@@ -688,6 +735,17 @@ export class GPUEffectEngine {
 
         // Set effect-specific uniforms
         this._setEffectUniforms(gl, program, effect.type, params, time);
+        if (effect.type === 'fade_in' || effect.type === 'fade_out') {
+            const progress = resolveFadeProgress(effect, time, {
+                startTime: context.clipStart ?? placement.startTime ?? placement.start,
+                duration: context.clipDuration ?? placement.duration,
+            }, params);
+            gl.uniform1f(this._uniformLocation(gl, program, 'u_fadeProgress'), progress);
+            const rawColor = unwrapEffectParam(params, 'color', [0, 0, 0]);
+            const color = Array.isArray(rawColor) ? rawColor : [0, 0, 0];
+            gl.uniform3f(this._uniformLocation(gl, program, 'u_color'),
+                ...[0, 1, 2].map(index => Number.isFinite(Number(color[index])) ? Math.max(0, Math.min(1, Number(color[index]))) : 0));
+        }
 
         // Draw
         gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -794,6 +852,7 @@ export class GPUEffectEngine {
                 gl.uniform1f(this._uniformLocation(gl, program, 'u_size'), number('size', 1.5, 0.5, 5));
                 gl.uniform1i(this._uniformLocation(gl, program, 'u_animated'), boolean('animated', true) ? 1 : 0);
                 gl.uniform1f(this._uniformLocation(gl, program, 'u_time'), boolean('animated', true) ? (Number(time) || 0) : 0);
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_seed'), number('seed', 941, 0, 1000000));
                 break;
 
             case 'glitch':

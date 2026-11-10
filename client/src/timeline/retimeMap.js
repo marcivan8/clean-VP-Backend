@@ -3,7 +3,23 @@ import { resolveEasing } from '../motion/Easing.js';
 const MIN_RATE = 0.1;
 const MAX_RATE = 4;
 const RETIME_SAMPLES_PER_SECOND = 8;
+const MAX_EXACT_STEP_BOUNDARIES = 240;
 const clampRate = value => Math.max(MIN_RATE, Math.min(MAX_RATE, Number.isFinite(Number(value)) ? Number(value) : 1));
+
+function stepCurveBoundaries(easing) {
+    const match = /^steps\s*\(\s*(\d+)\s*(?:,\s*(jump-start|jump-end|jump-none|jump-both|start|end)\s*)?\)$/i.exec(String(easing || ''));
+    if (!match) return [];
+    const count = Number(match[1]);
+    const mode = (match[2] || 'end').toLowerCase();
+    if (!Number.isSafeInteger(count) || count <= 0 || (mode === 'jump-none' && count <= 1)) return [];
+    if (count > MAX_EXACT_STEP_BOUNDARIES) return null;
+    const boundaries = [];
+    for (let index = 1; index <= count; index++) {
+        const fraction = index / count;
+        if (fraction > 0 && fraction < 1) boundaries.push(fraction);
+    }
+    return boundaries;
+}
 
 function findTimelineSegment(segments, localTime) {
     let low = 0, high = segments.length - 1;
@@ -76,7 +92,8 @@ export function createTimelineRetimeMap(clip = {}) {
         }
         points.push({ time: effectStart, value: sampleTrack(effectStart), easing: 'linear' });
         points.push(...authoredTrack.filter(frame => frame.time > effectStart && frame.time < effectEnd));
-        points.push({ time: effectEnd, value: sampleTrack(effectEnd), easing: 'linear' });
+        const endKeyframe = authoredTrack.find(frame => frame.time === effectEnd);
+        points.push({ time: effectEnd, value: sampleTrack(effectEnd), easing: endKeyframe?.easing || 'linear' });
         if (effectEnd < timelineStart + duration) {
             const epsilon = Math.min(1e-5, (timelineStart + duration - effectEnd) / 2, (effectEnd - effectStart) / 2);
             points.push({ time: effectEnd + epsilon, value: 1, easing: 'linear' });
@@ -99,19 +116,30 @@ export function createTimelineRetimeMap(clip = {}) {
         uniquePoints.push({ time: timelineStart + duration, value: uniquePoints.at(-1)?.value ?? baseRate, easing: 'linear' });
     }
     const segments = [];
+    let approximatedDenseSteps = false;
     let sourceTime = sourceOffset;
     for (let i = 0; i < uniquePoints.length - 1; i++) {
         const from = uniquePoints[i], to = uniquePoints[i + 1];
         const span = to.time - from.time;
         if (span <= 0) continue;
         const count = Math.max(1, Math.ceil(span * RETIME_SAMPLES_PER_SECOND));
-        for (let j = 0; j < count; j++) {
-            const p0 = j / count, p1 = (j + 1) / count;
+        const fractions = new Set(Array.from({ length: count + 1 }, (_, index) => index / count));
+        const stepBoundaries = stepCurveBoundaries(to.easing);
+        if (stepBoundaries === null) approximatedDenseSteps = true;
+        else for (const fraction of stepBoundaries) fractions.add(fraction);
+        const orderedFractions = [...fractions].sort((a, b) => a - b);
+        const easing = resolveEasing(to.easing);
+        const stepCurve = stepBoundaries !== undefined && stepBoundaries !== null
+            && stepBoundaries.length > 0;
+        for (let j = 0; j < orderedFractions.length - 1; j++) {
+            const p0 = orderedFractions[j], p1 = orderedFractions[j + 1];
             const eased0 = resolveEasing(to.easing)(p0);
             const eased1 = resolveEasing(to.easing)(p1);
             const speed0 = clampRate(from.value + (to.value - from.value) * eased0);
             const speed1 = clampRate(from.value + (to.value - from.value) * eased1);
-            const rate = (speed0 + speed1) / 2;
+            const rate = stepCurve
+                ? clampRate(from.value + (to.value - from.value) * easing((p0 + p1) / 2))
+                : (speed0 + speed1) / 2;
             const start = from.time - timelineStart + span * p0;
             const end = from.time - timelineStart + span * p1;
             const sourceEnd = sourceTime + (end - start) * rate;
@@ -138,7 +166,12 @@ export function createTimelineRetimeMap(clip = {}) {
         const segment = segments[low];
         return timelineStart + segment.start + (source - segment.sourceStart) / segment.rate;
     };
-    return { timelineStart, duration, sourceOffset, sourceDuration: sourceTime - sourceOffset, maintainPitch, segments, timelineToSource, sourceToTimeline };
+    return {
+        timelineStart, duration, sourceOffset, sourceDuration: sourceTime - sourceOffset, maintainPitch,
+        segments,
+        ...(approximatedDenseSteps ? { precisionWarning: 'Dense step easing is sampled at the preview retime resolution.' } : {}),
+        timelineToSource, sourceToTimeline,
+    };
 }
 
 /** Serialize a map for the playback engine; functions stay on the UI thread. */
@@ -149,6 +182,7 @@ export function serializeTimelineRetimeMap(map) {
         sourceOffset: map.sourceOffset,
         maintainPitch: map.maintainPitch,
         segments: map.segments,
+        ...(map.precisionWarning ? { precisionWarning: map.precisionWarning } : {}),
     } : null;
 }
 

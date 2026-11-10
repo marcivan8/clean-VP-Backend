@@ -37,6 +37,8 @@
 import { resolveEasing, clamp } from './Easing.js';
 import { ANIMATABLE_PROPS, COMPOSITION_RULES, IDENTITY } from './MotionSchema.js';
 import { evaluateMotionExpression } from './MotionExpression.js';
+import { pointsToBezierSpline } from './SpatialMotion.js';
+import { applyAudioReactiveMotion } from './AudioReactive.js';
 
 const isTrackValue = value => Number.isFinite(value)
     || (Array.isArray(value) && value.length > 0 && value.every(Number.isFinite));
@@ -156,6 +158,18 @@ export function sampleAnimation(animation, localTime) {
     return out;
 }
 
+const motionPathSplineCache = new WeakMap();
+
+function cachedMotionPathSpline(path, points) {
+    if (!path || typeof path !== 'object') return pointsToBezierSpline(points, false);
+    const signature = JSON.stringify([points, path.closed === true]);
+    const cached = motionPathSplineCache.get(path);
+    if (cached?.signature === signature) return cached.spline;
+    const spline = pointsToBezierSpline(points, path.closed === true);
+    motionPathSplineCache.set(path, { signature, spline });
+    return spline;
+}
+
 function sampleMotionPath(path, localTime, layerDuration) {
     const points = (Array.isArray(path?.points) ? path.points : [])
         .map(point => Array.isArray(point) ? [Number(point[0]), Number(point[1])] : [Number(point?.x), Number(point?.y)])
@@ -181,32 +195,14 @@ function sampleMotionPath(path, localTime, layerDuration) {
     // option on clip MotionLayers, using a bounded lookup table so evaluation
     // remains deterministic and cheap on every preview/export frame.
     const useArcLength = path.arcLength === true || path.mode === 'bezier';
-    let distanceLut = null;
-    if (useArcLength) {
-        const steps = Math.min(512, Math.max(32, (points.length - 1) * 32));
-        distanceLut = [{ progress: 0, point: sampleAt(0), distance: 0 }];
-        let distance = 0;
-        for (let i = 1; i <= steps; i++) {
-            const progress = i / steps;
-            const point = sampleAt(progress);
-            const previous = distanceLut[i - 1].point;
-            distance += Math.hypot(point[0] - previous[0], point[1] - previous[1]);
-            distanceLut.push({ progress, point, distance });
-        }
-    }
+    // The scene animator and clip resolver must evaluate the same Catmull-Rom
+    // to cubic-Bezier spline. Cache the bounded arc-length LUT per authored
+    // path object so a preview frame does not rebuild it on every tick.
+    const spline = useArcLength ? cachedMotionPathSpline(path, points) : null;
     const samplePath = progress => {
-        if (!distanceLut || distanceLut.length < 2) return sampleAt(progress);
-        const target = clamp(progress, 0, 1) * distanceLut.at(-1).distance;
-        let low = 1, high = distanceLut.length - 1;
-        while (low < high) {
-            const middle = (low + high) >> 1;
-            if (distanceLut[middle].distance < target) low = middle + 1;
-            else high = middle;
-        }
-        const before = distanceLut[low - 1], after = distanceLut[low];
-        const span = after.distance - before.distance;
-        const fraction = span > 1e-8 ? (target - before.distance) / span : 0;
-        return sampleAt(before.progress + (after.progress - before.progress) * fraction);
+        if (!spline) return sampleAt(progress);
+        const point = spline.sampleAtNormalizedDistance(progress);
+        return [point.x, point.y];
     };
     const [x, y] = samplePath(eased);
     let rotation = (Number(path.spin) || 0) * eased;
@@ -226,7 +222,7 @@ function sampleMotionPath(path, localTime, layerDuration) {
  * @returns {{visible: boolean, x:number, y:number, scale:number, scaleX:number, scaleY:number, rotation:number,
  *            opacity:number, blur:number, glow:number, reveal:number}}
  */
-export function resolveMotionAt(layer, absoluteTime) {
+export function resolveMotionAt(layer, absoluteTime, context = {}) {
     const base = {
         x:        Number.isFinite(layer?.x) ? layer.x : 50,
         y:        Number.isFinite(layer?.y) ? layer.y : 50,
@@ -251,7 +247,7 @@ export function resolveMotionAt(layer, absoluteTime) {
     const layerLocal = absoluteTime - start;
     const expressions = layer.expressions && typeof layer.expressions === 'object' ? layer.expressions : {};
     const expressionLayers = Array.isArray(layer.expressionLayers) ? layer.expressionLayers : [];
-    if (animations.length === 0 && !Object.keys(expressions).length && !layer.motionPath && expressionLayers.length === 0) return { ...base, visible };
+    if (animations.length === 0 && !Object.keys(expressions).length && !layer.motionPath && expressionLayers.length === 0 && !layer.audioReactive) return { ...base, visible };
 
     // Accumulate per-property deltas according to COMPOSITION_RULES.
     const acc = {};
@@ -411,7 +407,7 @@ export function resolveMotionAt(layer, absoluteTime) {
     if (!Number.isFinite(out.y)) out.y = base.y;
     if (!Number.isFinite(out.rotation)) out.rotation = 0;
 
-    return out;
+    return applyAudioReactiveMotion(out, layer.audioReactive, layerLocal, duration, context?.audioWaveformsByAsset);
 }
 
 /**

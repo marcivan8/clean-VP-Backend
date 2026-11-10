@@ -45,7 +45,7 @@ const read = (rel) => {
 // strip-to-CJS technique every other regression suite in this repo uses —
 // this exercises the true client-side code, not a re-implementation of it.
 function loadClientModules() {
-    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'MotionPresets', 'AnimationSynthesizer', 'CaptionModel', 'ClipAdapter', 'Compositor', 'CameraMotionCompiler'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'AudioReactive', 'MotionResolver', 'MotionPresets', 'AnimationSynthesizer', 'CaptionModel', 'ClipAdapter', 'Compositor', 'CameraMotionCompiler'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);
@@ -302,6 +302,14 @@ section('8 · Wired into the export request (client) and the live preview (Revid
         /timeline: \{ tracks: tracksForExport/.test(client));
     check('a derivation failure can never block an export (fail-open)',
         /could not derive base-track camera motion/.test(client) && /tracksForExport = tracks;/.test(client));
+    check('a derivation failure is included in the returned export diagnostics',
+        /cameraMotionWarning = `Camera motion could not be prepared/.test(client)
+        && /cameraMotionWarning,/.test(client)
+        && /cameraMotionWarning: result\.cameraMotionWarning/.test(client));
+
+    const exportModal = read('client/src/components/ExportModal.jsx');
+    check('the export result modal displays camera-motion omissions',
+        /exportResult\.cameraMotionWarning/.test(exportModal));
 
     const preview = read('client/src/revideo/project.tsx');
     check('the Revideo scene imports the real motion engine (not a re-implementation)',

@@ -124,6 +124,9 @@ function compileCaptionEntry(entry, ctx) {
     // (`textShadow: 0 0 Npx currentColor`) — it is not a separately
     // configurable colour in the preview, so the export must not invent one.
     const glowAmt = Math.max(0, ...samples.map(s => Number(s.glow) || 0));
+    const glowOpacityExpr = glowAmt > 0.5
+        ? `clip((${buildPiecewiseExpr(samples, 'glow')})/${glowAmt.toFixed(4)},0,1)`
+        : null;
 
     const filters = [];
     const tempFiles = [];
@@ -160,19 +163,20 @@ function compileCaptionEntry(entry, ctx) {
         //    This is not a true Gaussian blur (drawtext has none); it reads
         //    as a glow at caption sizes, which is the honest bar to clear —
         //    see the module header's scope note.
-        if (glowAmt > 0.5) {
+        if (glowOpacityExpr) {
             const glowColor = mainColor.hex;
+            const glowAlphaExpr = `(${alphaExpr})*(${glowOpacityExpr})`;
             filters.push(
                 `drawtext=fontfile='${escapedFont}':textfile='${escapedText}'` +
                 `:fontsize='${scaleExpr}':fontcolor=${glowColor}@0.0` +
                 `:borderw=${Math.round(glowAmt)}:bordercolor=${glowColor}@0.18` +
-                `:x='${xExpr}':y='${yExpr}':alpha='${alphaExpr}':enable='${enable}'`
+                `:x='${xExpr}':y='${yExpr}':alpha='${glowAlphaExpr}':enable='${enable}'`
             );
             filters.push(
                 `drawtext=fontfile='${escapedFont}':textfile='${escapedText}'` +
                 `:fontsize='${scaleExpr}':fontcolor=${glowColor}@0.0` +
                 `:borderw=${Math.max(1, Math.round(glowAmt * 0.5))}:bordercolor=${glowColor}@0.32` +
-                `:x='${xExpr}':y='${yExpr}':alpha='${alphaExpr}':enable='${enable}'`
+                `:x='${xExpr}':y='${yExpr}':alpha='${glowAlphaExpr}':enable='${enable}'`
             );
         }
 

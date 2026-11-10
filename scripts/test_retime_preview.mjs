@@ -90,6 +90,55 @@ const animated = createTimelineRetimeMap({
 });
 assert.ok(mapTimelineTimeToRate(animated, 3.5) > 1.8 && mapTimelineTimeToRate(animated, 3.5) < 2.2,
     'speed keyframe easing determines the local playback rate');
+const stepped = createTimelineRetimeMap({
+    start: 0, duration: 2,
+    effects: [{ kind: 'speed_change', params: { speed: 0.1 }, keyframes: { speed: [
+        { time: 0, value: 0.1 }, { time: 2, value: 4, easing: 'steps(2, end)' },
+    ] } }],
+});
+assert.ok(Math.abs(stepped.sourceDuration - 2.15) < 1e-8,
+    'step-eased speed curves hold each discrete rate instead of being integrated as ramps');
+assert.deepEqual([...new Set(stepped.segments.map(segment => Number(segment.rate.toFixed(6))))], [0.1, 2.05],
+    'step boundaries split preview retiming at the exact authored rate changes');
+assert.equal(mapTimelineTimeToRate(stepped, 0.75), 0.1);
+assert.equal(mapTimelineTimeToRate(stepped, 1.25), 2.05);
+for (const easing of ['steps(4, start)', 'steps(4, end)', 'steps(4, jump-none)', 'steps(4, jump-both)']) {
+    const preview = createTimelineRetimeMap({
+        start: 0, duration: 2,
+        effects: [{ kind: 'speed_change', params: { speed: 0.1 }, keyframes: { speed: [
+            { time: 0, value: 0.1 }, { time: 2, value: 4, easing },
+        ] } }],
+    });
+    const exported = buildSpeedRetimePlan(2, [
+        { time: 0, value: 0.1 }, { time: 2, value: 4, easing },
+    ]);
+    assert.ok(exported, `${easing} is representable in export`);
+    for (const time of [0.13, 0.38, 0.63, 0.88, 1.13, 1.38, 1.63, 1.88]) {
+        const exportSegment = exported.intervals.find(segment => time >= segment.start && time < segment.end);
+        assert.ok(Math.abs(mapTimelineTimeToRate(preview, time) - exportSegment.speed) < 1e-8,
+            `${easing} preview and export agree at ${time}s`);
+    }
+    assert.ok(Math.abs(preview.sourceDuration - exported.sourceDuration) < 1e-8,
+        `${easing} preview and export integrate the same source duration`);
+}
+assert.equal(buildSpeedRetimePlan(2, [
+    { time: 0, value: 0.1 }, { time: 2, value: 4, easing: 'steps(1000, end)' },
+]), null, 'unrepresentable dense step curves are refused instead of silently truncated');
+const densePreview = createTimelineRetimeMap({
+    start: 0, duration: 2,
+    effects: [{ kind: 'speed_change', params: { speed: 0.1 }, keyframes: { speed: [
+        { time: 0, value: 0.1 }, { time: 2, value: 4, easing: 'steps(1000000, end)' },
+    ] } }],
+});
+assert.ok(densePreview.segments.length < 300, 'dense preview easing does not allocate one segment per step');
+assert.ok(densePreview.precisionWarning, 'the retime map reports when dense step easing is sampled approximately');
+assert.equal(serializeTimelineRetimeMap(densePreview).precisionWarning, densePreview.precisionWarning,
+    'dense-step precision warnings survive serialization to the player');
+assert.ok(Math.abs(densePreview.sourceDuration - 4.1) < 0.03,
+    'bounded dense-step preview remains close to the analytically integrated source duration');
+const playerSource = await readFile(new URL('../client/src/components/Player/VideoPlayer.jsx', import.meta.url), 'utf8');
+assert.match(playerSource, /retimeMap\?\.precisionWarning[\s\S]*retime_precision_approximation/,
+    'the player surfaces dense-step preview approximations through its accessible warning banner');
 for (let t = 2; t <= 5; t += 0.1) {
     const recovered = mapSourceTimeToTimeline(animated, mapTimelineTimeToSource(animated, t));
     assert.ok(Math.abs(recovered - t) < 0.002, `retime map round-trips at ${t.toFixed(1)}s`);

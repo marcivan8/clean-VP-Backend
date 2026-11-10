@@ -22,6 +22,7 @@ const fs   = require('fs');
 const os   = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { compileTimelineVisualEffects, buildSelectiveGradeCube, hasSelectiveGrade, compileClipColorGradeFilters } = require('../jobs/exportProcessor.js');
 
 let passed = 0, failed = 0, skipped = 0;
 const check = (n, c, d) => {
@@ -55,8 +56,8 @@ section('1 · The export job resolves and applies the LUT');
     check('it reads projectLUTId from settings or timeline',
         /settings\.projectLUTId \|\| timeline\?\.projectLUTId/.test(exportSrc));
 
-    check('the filter is pushed into the per-clip chain',
-        /if \(lutFilter\) vFilters\.push\(lutFilter\);/.test(exportSrc));
+    check('a project LUT is not applied twice to clips carrying its derived grade',
+        /if \(lutFilter && String\(clip\.grading\?\._lutId \|\| ''\) !== String\(projectLUTId \|\| ''\)\)\s*\{\s*vFilters\.push\(lutFilter\);/.test(exportSrc));
 
     // Order matters: grading before scale/pad would grade the padding bars too.
     // R100 added a branch choosing HOW vFilters is applied (plain videoFilters,
@@ -65,9 +66,10 @@ section('1 · The export job resolves and applies the LUT');
     // vFilters.join(','), so the real invariant is just "nothing pushes
     // into vFilters again after the LUT", checked directly rather than by a
     // brittle character-count gap to one specific consumption point.
-    const pushIdx = exportSrc.indexOf('if (lutFilter) vFilters.push(lutFilter);');
+    const pushIdx = exportSrc.indexOf('if (lutFilter && String(clip.grading?._lutId || \'\') !== String(projectLUTId || \'\'))');
     const joinIdx = exportSrc.indexOf('vFilters.join(\',\')', pushIdx);
-    const between = pushIdx !== -1 && joinIdx !== -1 ? exportSrc.slice(pushIdx + 'if (lutFilter) vFilters.push(lutFilter);'.length, joinIdx) : '';
+    const afterProjectLut = pushIdx === -1 ? -1 : exportSrc.indexOf('}', pushIdx) + 1;
+    const between = afterProjectLut > 0 && joinIdx !== -1 ? exportSrc.slice(afterProjectLut, joinIdx) : '';
     check('the LUT is appended LAST, just before the chain is applied',
         pushIdx !== -1 && joinIdx !== -1 && pushIdx < joinIdx && !/vFilters\.push\(/.test(between),
         'grading before scale/pad would tint the letterbox bars, or something pushed into vFilters after the LUT');
@@ -172,16 +174,17 @@ section('6 · The PREVIEW is graded too, not just the export');
     check('the player subscribes to it',
         /useTimelineStore\(state => state\.projectLUTFilter\)/.test(player),
         'getState() would not re-render on apply — the immediacy is the point');
-    // The selected project id gates the subscribed CSS preview filter; the
-    // canvas receives that LUT composed with transitions and clip effects.
+    // A matching LUT-derived clip grade is rendered by the shader. The CSS LUT
+    // remains the fallback for clips with independent grading state.
     const tlayer = read('client/src/components/Player/transitionStyle.js');
-    check('the canvas actually applies it',
+    check('the canvas applies the LUT when the active clip has no matching derived grade',
         (/const projectLUTId = useTimelineStore\(state => state\.projectLUTId\)/.test(player)
             && /const storedProjectLUTFilter = useTimelineStore\(state => state\.projectLUTFilter\)/.test(player)
             && /const projectLUTFilter = projectLUTId \? storedProjectLUTFilter : 'none';/.test(player)
-            && /const baseFilter = combinePreviewFilters\(transitionFilter\(tfx, projectLUTFilter, \{[^)]*\}\), effectFilter\)/.test(player)
-            && /filter: baseFilter/.test(player)),
-        'the filter was stored and never used — clicking a LUT changed nothing visible');
+            && /clipUsesSelectedLut = Boolean\(projectLUTId && activeClip\?\.grading\?\._lutId/.test(player)
+            && /previewProjectLutFilter = clipUsesSelectedLut \? 'none' : projectLUTFilter/.test(player)
+            && /const canvasFilter = combinePreviewFilters\([\s\S]*?filter: canvasFilter/.test(player)),
+        'LUT-derived clip grading and project CSS fallback are mutually exclusive');
     check('the ungraded path stays neutral',
         /\|\| 'none'/.test(player) || /parts\.length \? parts\.join\(' '\) : 'none'/.test(tlayer),
         "'none' is a valid CSS filter and costs nothing");
@@ -252,6 +255,54 @@ section('7 · Built-in (parameter-based) LUTs still grade the export');
     }
 }
 
+section('8 · Selective HSL grading reaches the export');
+{
+    const selective = { reds: { hue: 120, sat: 0, lum: 0 } };
+    const cubeText = buildSelectiveGradeCube(selective, 0, 17);
+    check('nonzero selective controls are detected', hasSelectiveGrade(selective));
+    check('neutral selective controls avoid generating an unnecessary LUT', !hasSelectiveGrade({ reds: { hue: 0, sat: 0, lum: 0 } }));
+    check('the generated cube has valid dimensions and all entries',
+        cubeText.includes('LUT_3D_SIZE 17') && cubeText.trim().split('\n').length === 17 ** 3 + 4,
+        `line count: ${cubeText.trim().split('\n').length}`);
+    check('the exporter attaches the generated selective LUT before global clip grading',
+        /clip\._selectiveGradeFilter = filter/.test(exportSrc)
+            && /compileClipColorGradeFilters\(clip\.grading,\s*\{[\s\S]*?selectiveFilter:\s*clip\._selectiveGradeFilter/.test(exportSrc));
+
+    const cubePathMarker = "/tmp/selective-grade.cube";
+    const compiledChain = compileClipColorGradeFilters({
+        brightness: 100, contrast: 100, saturation: 100, hueRotate: 0,
+        selective: { reds: { hue: 120 } },
+    }, { selectiveFilter: `lut3d='${cubePathMarker}'` });
+    check('the actual clip-grade compiler puts selective remapping before global controls',
+        compiledChain[0] === `lut3d='${cubePathMarker}'`
+            && compiledChain.some(filter => String(filter).startsWith('colorchannelmixer=') || String(filter).startsWith('format=rgba,geq='))
+            && compiledChain.some(filter => String(filter).startsWith('eq=contrast=')));
+
+    if (!FFMPEG) {
+        skip('selective LUT changes rendered pixels', 'no ffmpeg binary available');
+    } else {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'selective-grade-test-'));
+        const cube = path.join(dir, 'selective.cube');
+        fs.writeFileSync(cube, cubeText);
+        const source = path.join(dir, 'source.rgb');
+        const graded = path.join(dir, 'graded.rgb');
+        const input = ['-f', 'lavfi', '-i', 'color=c=red:size=16x16:duration=0.1:rate=1', '-frames:v', '1'];
+        const plainResult = spawnSync(FFMPEG, [...input, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-y', source], { encoding: 'utf8', timeout: 30_000 });
+        const lutPath = cube.replace(/:/g, '\\:').replace(/'/g, "\\'");
+        const integratedFilters = compileClipColorGradeFilters({
+            brightness: 100, contrast: 100, saturation: 100, hueRotate: 0,
+            selective: { reds: { hue: 120 } },
+        }, { selectiveFilter: `lut3d='${lutPath}'` });
+        const gradeResult = spawnSync(FFMPEG, [...input, '-vf', integratedFilters.join(','), '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-y', graded], { encoding: 'utf8', timeout: 30_000 });
+        const sourcePixels = fs.existsSync(source) ? fs.readFileSync(source) : null;
+        const gradedPixels = fs.existsSync(graded) ? fs.readFileSync(graded) : null;
+        check('FFmpeg renders the complete clip selective and global grade chain and changes source pixels',
+            plainResult.status === 0 && gradeResult.status === 0 && !!sourcePixels && !!gradedPixels && !sourcePixels.equals(gradedPixels),
+            (gradeResult.stderr || '').split('\n').slice(-3).join(' | '));
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+}
+
 // ── 8 · The LUT lands on the CLIPS, via the engine's real grading path ──────
 // The canvas CSS filter alone was not enough. Nothing in the app had ever
 // written `clip.grading`, yet VideoPlayer reads it every frame and pushes it
@@ -280,6 +331,14 @@ section('8 · Applying a LUT grades the clips themselves');
     check('the project id is still set for the export',
         /await applyLUT\(lut\.id\)/.test(panel),
         'the export reads projectLUTId (R55/R55b)');
+    check('clip grading is compiled into the FFmpeg chain',
+        /kind:\s*'color_grade',[\s\S]*?params:\s*globalGrade/.test(exportSrc));
+    check('matching LUT-derived clip grades skip the project LUT filter',
+        /String\(clip\.grading\?\._lutId \|\| ''\) !== String\(projectLUTId \|\| ''\)/.test(exportSrc));
+    check('the preview avoids double-applying the project CSS LUT to a matching clip grade',
+        /clipUsesSelectedLut[\s\S]*?previewProjectLutFilter\s*=\s*clipUsesSelectedLut\s*\?\s*'none'/.test(player));
+    check('the native-video fallback mirrors clip grading with CSS',
+        /fallbackClipGradeFilter[\s\S]*?useFallbackPlayer \? fallbackClipGradeFilter/.test(player));
 
     // The consuming half must stay intact or the grade goes nowhere.
     check('VideoPlayer still forwards clip.grading to the engine',
@@ -329,6 +388,35 @@ section('9 · The Colour panel can edit a LUT grade per clip, safely');
     const frLocale = JSON.parse(read('client/src/locales/fr/editor.json'));
     check('the "based on LUT" string exists in both shipped locales',
         !!enLocale?.ideLayout?.colorGrading?.basedOnLut && !!frLocale?.ideLayout?.colorGrading?.basedOnLut);
+}
+
+// ── 10 · LUT-derived clip grading reaches the actual FFmpeg filter compiler ──
+section('10 · LUT-derived clip grades render without double application');
+{
+    const grade = { brightness: 110, contrast: 120, saturate: 80, hueRotate: -9, _lutId: 'lut-a' };
+    const filters = compileTimelineVisualEffects([{ kind: 'color_grade', params: grade }], {
+        width: 320, height: 180, duration: 1, clipStart: 0,
+    });
+    const chain = filters.join(',');
+    check('the FFmpeg grade consumes the same brightness, contrast, saturation, and hue values as preview',
+        /colorchannelmixer=rr=1\.1000:gg=1\.1000:bb=1\.1000/.test(chain)
+        && /eq=contrast=1\.2:saturation=0\.8:eval=frame/.test(chain)
+        && /hue=h=-9/.test(chain), chain);
+
+    if (FFMPEG) {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lut-clip-grade-'));
+        const original = path.join(dir, 'original.png');
+        const graded = path.join(dir, 'graded.png');
+        const makeInput = spawnSync(FFMPEG, ['-f', 'lavfi', '-i', 'color=c=0x804060:size=64x64:duration=0.1:rate=1', '-frames:v', '1', '-y', original], { encoding: 'utf8', timeout: 30_000 });
+        const renderGrade = spawnSync(FFMPEG, ['-i', original, '-vf', chain, '-frames:v', '1', '-y', graded], { encoding: 'utf8', timeout: 30_000 });
+        check('FFmpeg renders LUT-derived clip grading', makeInput.status === 0 && renderGrade.status === 0,
+            (renderGrade.stderr || '').split('\n').slice(-4).join(' | '));
+        check('LUT-derived clip grading changes rendered pixels',
+            fs.existsSync(original) && fs.existsSync(graded) && !fs.readFileSync(original).equals(fs.readFileSync(graded)));
+        fs.rmSync(dir, { recursive: true, force: true });
+    } else {
+        skip('LUT-derived clip grade renders in FFmpeg', 'no ffmpeg binary');
+    }
 }
 
 console.log(`\n${'─'.repeat(60)}`);

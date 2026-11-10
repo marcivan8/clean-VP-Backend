@@ -8,7 +8,7 @@ import { VECTOR_ILLUSTRATIONS, VECTOR_ILLUSTRATION_BACKGROUNDS } from '../motion
 import { evaluateMotionCompatibility } from '../agent/AnimationCompatibilityEvaluator.js';
 import { sampleAnimation } from '../motion/MotionResolver.js';
 import { remapSceneObjectTime } from '../motion/TimeRemap.js';
-import { SCENE3D_BLEND_MODES, SCENE3D_CAMERA_DEFAULTS } from '../motion/Scene3D.js';
+import { SCENE3D_BLEND_MODES, SCENE3D_CAMERA_DEFAULTS, SCENE3D_TEXTURE_MASK_SHAPES } from '../motion/Scene3D.js';
 import { validateMotionExpression } from '../motion/MotionExpression.js';
 
 /**
@@ -176,6 +176,7 @@ const TemplateEditor = ({ trackId, clip }) => {
     const update3DParticles = (particlePatch) => update3DScene({ particles: { ...particles3d, ...particlePatch } });
     const update3DEmitter = (emitterPatch) => update3DParticles({ emitter: { ...emitter3d, ...emitterPatch } });
     const update3DObject = (objectPatch) => update3DScene({ objects: objects3d.map((object, index) => index === selected3DObject ? { ...object, ...objectPatch } : object) });
+    const update3DShadowReceiver = enabled => update3DObject({ receivesShadow: enabled });
     const keyframeProperties3D = {
         positionX: { key: 'x', base: Number(object3d.position?.x) || 0, kind: 'add' },
         positionY: { key: 'y', base: Number(object3d.position?.y) || 0, kind: 'add' },
@@ -437,6 +438,14 @@ const TemplateEditor = ({ trackId, clip }) => {
                         {objects3d.map((object, index) => object.id && index !== selected3DObject && !descendantIds3d.has(object.id) ? <option key={object.id} value={object.id}>{object.name || `${object.type || 'object'} ${index + 1}`}</option> : null)}
                     </select>
                 </label>
+                {object3d.type === 'plane' && <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input type="checkbox" checked={object3d.receivesShadow === true} onChange={e => update3DShadowReceiver(e.target.checked)} />
+                    {t('templates.scene3d.receiveShadows')}
+                </label>}
+                {object3d.type !== 'plane' && <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input type="checkbox" checked={object3d.castsShadow !== false} onChange={e => update3DObject({ castsShadow: e.target.checked })} />
+                    {t('templates.scene3d.castShadows')}
+                </label>}
                 {['box', 'image', 'video', 'plane'].includes(object3d.type) && <div className="grid grid-cols-3 gap-2">
                     {['x', 'y', 'z'].map(axis => number3D(t('templates.scene3d.size', { axis: axis.toUpperCase() }), object3d.size?.[axis] ?? 1, value => update3DObject({ size: { ...(object3d.size || {}), [axis]: Math.max(0.02, value) } })))}
                 </div>}
@@ -464,9 +473,11 @@ const TemplateEditor = ({ trackId, clip }) => {
                 </label>
                 {['plane', 'image', 'video'].includes(object3d.type) && <label className="block space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.mask')}</span>
                     <select className={field} value={object3d.maskShape || 'none'} onChange={e => update3DObject({ maskShape: e.target.value })}>
-                        {['none', 'ellipse', 'circle', 'rounded-rectangle'].map(shape => <option key={shape} value={shape}>{t(`templates.scene3d.masks.${shape}`)}</option>)}
+                        {SCENE3D_TEXTURE_MASK_SHAPES.map(shape => <option key={shape} value={shape}>{t(`templates.scene3d.masks.${shape}`)}</option>)}
                     </select>
                 </label>}
+                {['plane', 'image', 'video'].includes(object3d.type) && object3d.maskShape && object3d.maskShape !== 'none' &&
+                    <label className="flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={!!object3d.maskInvert} onChange={e => update3DObject({ maskInvert: e.target.checked })} />{t('templates.scene3d.maskInvert')}</label>}
                 {object3d.type === 'text' && <>
                     <label className="block space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">3D text</span>
                         <input className={field} value={text3DDraft} onChange={e => setText3DDraft(e.target.value)} onBlur={() => update3DObject({ content: text3DDraft })} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} />

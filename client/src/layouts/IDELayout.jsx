@@ -25,6 +25,7 @@ import BlurZoneOverlay from '../components/Player/BlurZoneOverlay'; // R99 — f
 import BaseClipOverlay from '../components/Player/BaseClipOverlay'; // R100 — move/resize handles for base video/image clips
 import { getPlayerDimensions } from '../utils/playerDimensions';
 import { TRANSITION_DEFAULT_DURATION } from '../motion/TransitionFX.js';
+import { findMissingAudioReactiveWaveforms } from '../motion/AudioReactiveValidation.js';
 import MobileToolbar from '../components/MobileToolbar';
 import MobileAIBar from '../components/MobileAIBar';
 import useDeviceType from '../hooks/useDeviceType';
@@ -1849,6 +1850,14 @@ const IDELayout = ({ mode = 'editor' }) => {
             });
             audioWaveformsByAsset[id] = { peaks: sampled, duration: Number(waveformCache[id].duration) || 0 };
         }
+        const missingReactiveAudioIds = findMissingAudioReactiveWaveforms(tracks, audioWaveformsByAsset);
+        if (missingReactiveAudioIds.length) {
+            const names = missingReactiveAudioIds.map(id => {
+                const asset = (assets || live.assets || []).find(item => String(item.id) === id);
+                return asset?.name || id;
+            });
+            throw new Error(`Cannot export audio-reactive motion because waveform analysis is unavailable for: ${names.join(', ')}. Retry after the audio asset finishes analyzing.`);
+        }
         const planAspectRatio = override?.aspectRatio || live.aspectRatio || aspectRatio;
         let autoQaReport = null;
         if (!override) {
@@ -1893,6 +1902,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                 width:  Math.round(nominalHeight * ratio),
                 height: nominalHeight,
                 fps:    settings.fps || 30,
+                audioWaveformsByAsset,
             });
             // Omit plans with neither overlays nor procedural base-footage
             // effect samples. Base expressions need the plan even without layers.
@@ -1918,14 +1928,17 @@ const IDELayout = ({ mode = 'editor' }) => {
         try {
             const { buildCaptionProgram, captionProgramIsNoOp } = await import('../motion/CaptionCompiler.js');
             const baseTrack = tracks.find(t => t.id === plan?.base?.trackId);
-            const program = buildCaptionProgram(tracks, baseTrack?.clips || []);
+            const program = buildCaptionProgram(tracks, baseTrack?.clips || [], {
+                fps: settings.fps || 30,
+                audioWaveformsByAsset,
+            });
             captionProgram = captionProgramIsNoOp(program) ? null : program;
             if (captionProgram) {
                 console.log(`[Export] caption program: ${captionProgram.entries.length} animated caption clip(s)`);
             }
         } catch (progErr) {
-            // Same fail-open rule as the composition plan and the LUT lookup —
-            // a caption program we cannot build must never block an export.
+            // The worker has a static-caption fallback for entries without a
+            // program. Keep exports available and surface the fallback reason.
             console.warn('[Export] could not build caption program (exporting with static captions):', progErr.message);
             captionProgram = null;
         }
@@ -1937,13 +1950,15 @@ const IDELayout = ({ mode = 'editor' }) => {
         // keyframe array and ships it on a cloned tracks array, reusing the
         // existing zoompan path unchanged. See CameraMotionCompiler.js header.
         let tracksForExport = tracks;
+        let cameraMotionWarning = null;
         try {
             const { applyCameraMotionToBaseTrack } = await import('../motion/CameraMotionCompiler.js');
             tracksForExport = applyCameraMotionToBaseTrack(tracks, plan?.base?.trackId || null);
         } catch (camErr) {
-            // Same fail-open rule as the plan/program passes above — never
-            // block an export over a derived-motion failure.
-            console.warn('[Export] could not derive base-track camera motion (exporting without it):', camErr.message);
+            // Keep the export available, but carry the omitted operation to the
+            // result so the UI can report that the camera move did not render.
+            cameraMotionWarning = `Camera motion could not be prepared and was omitted from this export: ${camErr.message}`;
+            console.warn('[Export] could not derive base-track camera motion:', camErr.message);
             tracksForExport = tracks;
         }
 
@@ -2033,6 +2048,7 @@ const IDELayout = ({ mode = 'editor' }) => {
             transitionWarning: result.transitionWarning,
             captionProgramWarning: result.captionProgramWarning,
             revideoWarning: result.revideoWarning,
+            cameraMotionWarning,
             clipWarning: result.clipWarning,
             effectWarning: result.effectWarning,
             autoQaReport,
@@ -2105,6 +2121,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                 compositorWarning: result.compositorWarning,
                 captionProgramWarning: result.captionProgramWarning,
                 revideoWarning: result.revideoWarning,
+                cameraMotionWarning: result.cameraMotionWarning,
                 clipWarning: result.clipWarning,
                 effectWarning: result.effectWarning,
                 autoQaReport: result.autoQaReport || null,
@@ -2135,6 +2152,7 @@ const IDELayout = ({ mode = 'editor' }) => {
             // double-counted as a user-facing warning.
             [['caption', result.captionWarning], ['compositor', result.compositorWarning],
              ['caption_program', result.captionProgramWarning], ['revideo', result.revideoWarning],
+             ['camera_motion', result.cameraMotionWarning],
              ['clip', result.clipWarning], ['effect', result.effectWarning]]
                 .forEach(([kind, warning]) => { if (warning) countMetric('export.warning', { ...exportAttrs, kind }); });
         } catch (err) {
@@ -2932,7 +2950,10 @@ const IDELayout = ({ mode = 'editor' }) => {
                                 background: "radial-gradient(60% 80% at 50% 40%, #1c1f24 0%, #0c0d10 100%)",
                                 // Explicit height in viewport units gives the canvas a definite parent height.
                                 // 16:9 → 56.25vw (= 100vw × 9/16, fills phone width exactly, no wasted space)
-                                // 9:16 / 1:1 → 45vh (portrait/square capped to avoid overflowing timeline)
+                                // 9:16 / 1:1 → 45vh (portrait/square capped so the
+                                //   chat below it keeps a usable height; R160 removed
+                                //   the mobile timeline, and the room it had is the
+                                //   chat's now, not the preview's)
                                 // Using vh (not svh) for universal iOS/Android support
                                 ...(isMobile && {
                                     height: mobileShortPreviewMode ? '100dvh' : ((aspectRatio === '9:16' || aspectRatio === '1:1') ? '45vh' : '56.25vw'),
@@ -3038,20 +3059,19 @@ const IDELayout = ({ mode = 'editor' }) => {
                         {/* Mobile playback row: undo/redo, prev/play/next, time, More */}
                         {isMobile && !mobileShortPreviewMode && <MobileTransportBar />}
 
-                        {/* Mobile timeline stays in the center column; the
-                            desktop timeline is mounted as a full-width overlay. */}
-                        {mode === 'editor' && isMobile && !mobileShortPreviewMode && (
-                            <div
-                                data-tour="timeline"
-                                data-hint="timeline-strip"
-                                className="border-t flex flex-col overflow-hidden shrink-0 h-36"
-                                style={{ background: "var(--bg-2)", borderColor: "var(--line-soft)" }}
-                            >
-                                <Timeline />
-                            </div>
-                        )}
+                        {/* R160 — no timeline on phones. Editing here is the
+                            chat: a 144px strip of clips you cannot usefully
+                            drag or trim with a thumb was taking the room the
+                            conversation needed, and every edit arrives through
+                            Roka anyway. The desktop timeline (full-width
+                            overlay, further down) is untouched, and it still
+                            carries the timeline-strip hint anchor, so the
+                            clip hints keep working where a timeline exists.
 
-                        {/* Compact AI bar — always visible on mobile, between timeline and toolbar */}
+                            MobileAIBar is flex-1, so the space this used to
+                            take is now the chat's. */}
+
+                        {/* The chat — the editing surface on phones. */}
                         {isMobile && (!mobileFlowActive || mobileFlowStep === 'outcome') && (
                             <MobileAIBar
                                 expanded={mobileFlowActive ? mobileFlowChatOpen : mobileSheet === 'ai'}

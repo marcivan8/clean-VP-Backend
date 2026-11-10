@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import Canvas from '@napi-rs/canvas';
 import { createNode, createScene, flattenScene, NODE_TYPES } from '../client/src/motion/SceneSchema.js';
-import { drawVectorFrame, drawVectorGraphic, estimateSvgPathLength, interpolateSvgPaths, parseSvgPath, validateSvgPathData, MAX_VECTOR_PATH_CHARS, vectorMatteDataUrl } from '../client/src/motion/VectorGraphics.js';
+import { drawVectorFrame, drawVectorGraphic, drawSvgPath, estimateSvgPathLength, interpolateSvgPaths, parseSvgPath, validateSvgPathData, MAX_VECTOR_PATH_CHARS, vectorMatteDataUrl } from '../client/src/motion/VectorGraphics.js';
 import { renderVectorFrames } from '../server/compositor/TemplateRenderer.js';
 import { validateScene, ISSUE_CODES } from '../client/src/motion/SceneValidator.js';
 const vectorPreviewSource = fs.readFileSync(new URL('../client/src/components/Player/TemplateCanvas.jsx', import.meta.url), 'utf8');
@@ -38,6 +38,13 @@ assert.equal(validateSvgPathData(`M0 0 ${' '.repeat(MAX_VECTOR_PATH_CHARS)}`).re
   'path strings above the input budget are rejected before tokenization');
 assert.equal(validateSvgPathData('M0 0 L10').valid, false,
   'malformed SVG remains invalid for scene validation and rendering');
+const arcFallbackLines = [];
+drawSvgPath({
+  beginPath() {}, moveTo() {}, lineTo(x, y) { arcFallbackLines.push([x, y]); }, closePath() {},
+}, 'M 0 0 A 10 10 0 0 1 10 10');
+assert.ok(arcFallbackLines.length > 2, 'SVG arcs stay curved when the Canvas runtime has no ellipse() method');
+assert.ok(Math.abs(arcFallbackLines.at(-1)[0] - 10) < 1e-6 && Math.abs(arcFallbackLines.at(-1)[1] - 10) < 1e-6,
+  'the sampled arc fallback lands exactly on the authored endpoint');
 assert.deepEqual(parseSvgPath('M0 0 L10'), [{ type: 'M', args: [0, 0] }],
   'the recovery parser retains valid geometry for repair or inspection');
 const normalizedMorph = interpolateSvgPaths('M 0 0 L 10 0 L 10 10 Z', 'M 0 0 C 0 10 10 10 10 0 Z', 0.5);

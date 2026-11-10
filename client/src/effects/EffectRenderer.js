@@ -31,6 +31,11 @@ export class EffectRenderer {
 
         // Effect pipeline
         this.pipeline = options.pipeline || new EffectPipeline();
+        // GPU resources created by this renderer. Keep ownership explicit so
+        // reinitializing or swapping pipelines cannot leak WebGL allocations
+        // or accidentally destroy a GPU engine supplied by another owner.
+        this._ownedGpuEngine = null;
+        this._ownedGpuPipeline = null;
 
         // Current mode
         this.mode = options.mode || RENDER_MODE.PREVIEW;
@@ -64,11 +69,14 @@ export class EffectRenderer {
      * Initialize with WebGL context
      */
     init(gl) {
+        this._releaseOwnedGpuEngine();
         this.gl = gl;
 
         // Initialize GPU engine in pipeline
         if (this.pipeline && gl) {
-            this.pipeline.setGPUEngine(new GPUEffectEngine(gl));
+            this._ownedGpuEngine = new GPUEffectEngine(gl);
+            this._ownedGpuPipeline = this.pipeline;
+            this.pipeline.setGPUEngine(this._ownedGpuEngine);
         }
     }
 
@@ -76,12 +84,25 @@ export class EffectRenderer {
      * Set the effect pipeline
      */
     setPipeline(pipeline) {
+        this._releaseOwnedGpuEngine();
         this.pipeline = pipeline;
 
         // Initialize GPU engine if we have GL context
         if (this.gl && pipeline) {
-            pipeline.setGPUEngine(new GPUEffectEngine(this.gl));
+            this._ownedGpuEngine = new GPUEffectEngine(this.gl);
+            this._ownedGpuPipeline = pipeline;
+            pipeline.setGPUEngine(this._ownedGpuEngine);
         }
+    }
+
+    _releaseOwnedGpuEngine() {
+        if (!this._ownedGpuEngine) return;
+        const engine = this._ownedGpuEngine;
+        const pipeline = this._ownedGpuPipeline;
+        this._ownedGpuEngine = null;
+        this._ownedGpuPipeline = null;
+        engine.destroy();
+        if (pipeline?.gpuEngine === engine) pipeline.setGPUEngine(null);
     }
 
     // ========================================================================
@@ -471,9 +492,7 @@ export class EffectRenderer {
         this.cancelRender();
         this.clearQueue();
 
-        if (this.pipeline?.gpuEngine) {
-            this.pipeline.gpuEngine.destroy();
-        }
+        this._releaseOwnedGpuEngine();
 
         this.pipeline = null;
         this.gl = null;

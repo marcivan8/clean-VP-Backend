@@ -36,8 +36,8 @@
  *
  * ─── SCOPE ─────────────────────────────────────────────────────────────────
  * Glow is drawn at its PEAK value for the caption's whole life (the R63
- * drawtext path does the same). Animated opacity is reproduced as fade-in /
- * fade-out (CompositorCompiler.findFade), static opacity exactly.
+ * drawtext path does the same). Animated opacity uses its full sampled curve,
+ * including interior keyframes, static opacity exactly.
  * R92: bold and italic are SYNTHESISED (a fill-colour outline for bold, a
  * 12-degree slant for italic), the same thing a browser does when the font
  * has no bold or italic face, so the export matches the preview.
@@ -48,7 +48,7 @@
 const fs = require('fs');
 const path = require('path');
 const {
-    buildPiecewiseExpr, decimate, isAnimated, findFade, MAX_GEOMETRY_SAMPLES,
+    buildPiecewiseExpr, decimate, isAnimated, MAX_GEOMETRY_SAMPLES,
 } = require('./CompositorCompiler.js');
 
 const n4 = (v) => {
@@ -830,10 +830,10 @@ function compileRasterOverlays(items, opts) {
         }
 
         if (opacityAnimated) {
-            const fadeIn = findFade(samples, 'in');
-            const fadeOut = findFade(samples, 'out');
-            if (fadeIn)  parts.push(`fade=t=in:st=${n4(fadeIn.start)}:d=${n4(fadeIn.duration)}:alpha=1`);
-            if (fadeOut) parts.push(`fade=t=out:st=${n4(fadeOut.start)}:d=${n4(fadeOut.duration)}:alpha=1`);
+            const opacityExpr = buildPiecewiseExpr(samples, 'opacity')
+                .replace(/\bt\b/g, 'T')
+                .replace(/,/g, '\\,');
+            parts.push(`geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='clip(alpha(X,Y)*(${opacityExpr}),0,255)'`);
         } else if ((Number(s0.opacity) ?? 1) < 0.999) {
             parts.push(`colorchannelmixer=aa=${n4(Math.max(0, Math.min(1, Number(s0.opacity))))}`);
         }

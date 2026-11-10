@@ -1,5 +1,5 @@
 import { resolveEffectParameter } from './EffectTiming.js';
-import { isGpuClipEffect } from '../effects/ClipEffectAdapter.js';
+import { isGpuClipEffect, resolveGpuClipEffectType } from '../effects/ClipEffectAdapter.js';
 
 /** Small CSS effects that work on both the editor preview and the web export. */
 export const TIMELINE_EFFECTS = Object.freeze([
@@ -52,6 +52,19 @@ function isEffectActiveAtTime(effect, time) {
     const start = effect?.startTime == null || effect.startTime === '' ? -Infinity : Number(effect.startTime);
     const end = effect?.endTime == null || effect.endTime === '' ? Infinity : Number(effect.endTime);
     return !(Number.isFinite(start) && time < start) && !(Number.isFinite(end) && time >= end);
+}
+
+function isEffectHandledByGpuPreview(effect, context = {}) {
+    if (!context.gpuPreview) return false;
+    const kind = effect?.kind || effect?.type;
+    if (!isGpuClipEffect(kind)) return false;
+    // Older callers may indicate that all mapped effects are handled. The
+    // editor supplies the compiled shader list so missing shaders retain
+    // their SVG/CSS fallback instead of disappearing from preview.
+    const supported = context.gpuSupportedEffectTypes;
+    if (supported == null) return true;
+    const types = supported instanceof Set ? supported : new Set(supported);
+    return types.has(resolveGpuClipEffectType(kind));
 }
 
 function fadeColor(value) {
@@ -139,7 +152,7 @@ export function resolveTimelineEffectFilter(effects = [], time = 0, context = {}
         .sort((a, b) => (Number(a.effect?.order) || 0) - (Number(b.effect?.order) || 0) || a.index - b.index)
         .map(({ effect }) => effect)
         .filter(effect => effect && effect.enabled !== false && isEffectActiveAtTime(effect, time)
-            && !(context.gpuPreview && isGpuClipEffect(effect.kind || effect.type)));
+            && !isEffectHandledByGpuPreview(effect, context));
     const filterNames = {
         color_grade: 'color-grade', grain: 'film-grain', film_grain: 'film-grain', 'film-grain': 'film-grain',
         rgb_split: 'chromatic-aberration', 'chromatic-aberration': 'chromatic-aberration',
@@ -199,7 +212,7 @@ export function resolveTimelineSvgEffectInstances(effects = [], time = 0, contex
         .sort((a, b) => (Number(a.effect?.order) || 0) - (Number(b.effect?.order) || 0) || a.index - b.index)
         .map(({ effect }) => effect)
         .filter(effect => effect && effect.enabled !== false && isEffectActiveAtTime(effect, time)
-            && !(context.gpuPreview && isGpuClipEffect(effect.kind || effect.type)))
+            && !isEffectHandledByGpuPreview(effect, context))
         .map((effect, index) => {
             const kind = effect.kind || effect.type || effect.id;
             const filterName = definitions[kind];
@@ -228,7 +241,8 @@ export function resolveTimelineSvgEffectParams(effects = [], time = 0, context =
         return Number.isFinite(value) ? value : fallback;
     };
     for (const effect of Array.isArray(effects) ? effects : []) {
-        if (!effect || effect.enabled === false || !isEffectActiveAtTime(effect, time)) continue;
+        if (!effect || effect.enabled === false || !isEffectActiveAtTime(effect, time)
+            || isEffectHandledByGpuPreview(effect, context)) continue;
         if (effect.filter && !effect.params) continue;
         const kind = effect.kind || effect.type || effect.id;
         const p = effect.params || {};
@@ -300,9 +314,9 @@ export function resolveTimelineEffectTransform(effects = [], time = 0, frameWidt
 
 /** A frame-edge tint overlay for the registry's vignette footage effect. */
 export function resolveTimelineVignetteStyle(effects = [], time = 0, context = {}) {
-    if (context.gpuPreview) return null;
     const vignette = (Array.isArray(effects) ? effects : [])
-        .filter(effect => effect?.enabled !== false && isEffectActiveAtTime(effect, time) && (effect?.kind || effect?.type) === 'vignette')
+        .filter(effect => effect?.enabled !== false && isEffectActiveAtTime(effect, time)
+            && (effect?.kind || effect?.type) === 'vignette' && !isEffectHandledByGpuPreview(effect, context))
         .at(-1);
     if (!vignette) return null;
     const p = vignette.params || {};

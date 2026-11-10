@@ -4,6 +4,7 @@ import { EffectPipeline, EffectRenderer, GPUEffectEngine } from '../effects';
 import { createGpuClipEffectConfigs } from '../effects/ClipEffectAdapter.js';
 import { mapSourceIntervalToTimelineSegments, mapSourceTimeToTimeline, mapTimelineTimeToRate, mapTimelineTimeToSource } from '../timeline/retimeMap.js';
 import { resampleMonoPcm } from './audioResample.js';
+import { handleWebGLContextLost, handleWebGLContextRestored } from './webglContextLifecycle.js';
 
 /**
  * Playback State Machine
@@ -115,8 +116,17 @@ class PlaybackEngine {
         this.onAudioLevels = options.onAudioLevels || (() => { }); // Volume Metering
         this.onWaveformUpdate = options.onWaveformUpdate || (() => { }); // Waveform Data
         this.onError = options.onError || (() => { }); // Error callback
+        this.onWarning = options.onWarning || (() => { });
+        this.onRecovered = options.onRecovered || (() => { });
         this.onMetadata = options.onMetadata || (() => { }); // Video dimensions callback
         this._metadataEmitted = false; // Fire onMetadata only once per media load
+        this._effectPreviewFailed = false;
+        this._webglContextLost = false;
+        this._webglContextErrorReported = false;
+        this._handleWebGLContextLost = this.handleWebGLContextLost.bind(this);
+        this._handleWebGLContextRestored = this.handleWebGLContextRestored.bind(this);
+        this.canvas?.addEventListener?.('webglcontextlost', this._handleWebGLContextLost, false);
+        this.canvas?.addEventListener?.('webglcontextrestored', this._handleWebGLContextRestored, false);
 
         // Loop State
         this.rafId = null;
@@ -218,6 +228,7 @@ class PlaybackEngine {
             // Create effect pipeline
             this.effectsPipeline = new EffectPipeline({
                 gpuEngine: this.gpuEffectEngine,
+                onPreviewWarning: warning => this.onWarning(warning),
                 onEffectChange: (change) => {
                     console.log('[PlaybackEngine] Effect changed:', change.type);
                 }
@@ -236,6 +247,12 @@ class PlaybackEngine {
         } catch (e) {
             console.error('[PlaybackEngine] Failed to initialize effects engine:', e);
             this.effectsEnabled = false;
+            this.onWarning({
+                type: 'gpu_effect_engine_init_failed',
+                message: 'GPU effects are unavailable in this preview. Video playback will continue without them.',
+                detail: e?.message || String(e),
+                recoverable: true,
+            });
         }
     }
 
@@ -354,7 +371,7 @@ class PlaybackEngine {
             float dS = wR*u_selSat[0] + wY*u_selSat[1] + wG*u_selSat[2] + wC*u_selSat[3] + wB*u_selSat[4] + wM*u_selSat[5];
             float dL = wR*u_selLum[0] + wY*u_selLum[1] + wG*u_selLum[2] + wC*u_selLum[3] + wB*u_selLum[4] + wM*u_selLum[5];
 
-            h = mod(h + dH, 1.0);
+            h = mod(h + dH + u_hueRotate / 360.0, 1.0);
             s = clamp(s + dS, 0.0, 1.0);
             l = clamp(l + dL, 0.0, 1.0);
             
@@ -363,16 +380,13 @@ class PlaybackEngine {
 
             // 3. Global Adjustments
             
-            // Hue Rotate (Global)
-            // Cheap approximation or recalc HSL. Let's assume user uses one or other. 
-            // Or rotate H above. Let's do Standard RGB matrix for Hue Rotate if needed, or simple H shift.
-            // Let's use RGB ops.
-            
             // Brightness
             rgb *= u_brightness;
+            rgb = clamp(rgb, 0.0, 1.0);
 
             // Contrast
             rgb = (rgb - 0.5) * u_contrast + 0.5;
+            rgb = clamp(rgb, 0.0, 1.0);
 
             // Saturation (Luma based)
             float gray = dot(rgb, vec3(0.299, 0.587, 0.114));
@@ -726,11 +740,21 @@ class PlaybackEngine {
         // params: { brightness, contrast, saturate, hueRotate, selective: { reds: {h,s,l}, ... } }
         if (!params) return;
 
+        const readValue = (value, fallback) => {
+            if (value == null || value === '') return fallback;
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? parsed : fallback;
+        };
+        const readPercent = value => Math.max(0, Math.min(200, readValue(value, 100)));
+
         // Global
-        this.gradingParams.brightness = (params.brightness || 100) / 100.0;
-        this.gradingParams.contrast = (params.contrast || 100) / 100.0;
-        this.gradingParams.saturation = (params.saturate || 100) / 100.0;
-        this.gradingParams.hueRotate = params.hueRotate || 0;
+        // Zero is a valid authored value (black, no contrast, or grayscale),
+        // so use nullish/finite defaults rather than `value || default`.
+        // Keep preview limits identical to color_grade's export compiler.
+        this.gradingParams.brightness = readPercent(params.brightness) / 100.0;
+        this.gradingParams.contrast = readPercent(params.contrast) / 100.0;
+        this.gradingParams.saturation = readPercent(params.saturate ?? params.saturation) / 100.0;
+        this.gradingParams.hueRotate = Math.max(-180, Math.min(180, readValue(params.hueRotate, 0)));
 
         // Selective
         // Map keys to index: Red:0, Yellow:1, Green:2, Cyan:3, Blue:4, Magenta:5
@@ -747,10 +771,9 @@ class PlaybackEngine {
             ranges.forEach((key, idx) => {
                 const p = params.selective[key];
                 if (p) {
-                    selHue[idx] = (p.hue || 0) / 360.0; // Normalized shift
-                    selSat[idx] = (p.sat || 0) / 100.0; // +/- 1.0 (100% = +1.0 sat ?) UI depends. 
-                    // Let's assume input is +/- 100. So /100 = +/-1.0
-                    selLum[idx] = (p.lum || 0) / 100.0;
+                    selHue[idx] = readValue(p.hue ?? p.h, 0) / 360.0;
+                    selSat[idx] = readValue(p.sat ?? p.s, 0) / 100.0;
+                    selLum[idx] = readValue(p.lum ?? p.l, 0) / 100.0;
                 }
             });
         }
@@ -916,11 +939,19 @@ class PlaybackEngine {
         return Boolean(this.effectsEnabled && this.effectsPipeline && this.effectsRenderer);
     }
 
+    getSupportedClipEffectTypes() {
+        return this.gpuEffectEngine?.getSupportedEffects?.() || [];
+    }
+
     /**
      * Enable/disable effects processing
      */
     setEffectsEnabled(enabled) {
         this.effectsEnabled = enabled;
+        if (!enabled && this._effectPreviewFailed) {
+            this._effectPreviewFailed = false;
+            this.onWarning({ type: 'gpu_effect_preview_recovered', recoverable: true });
+        }
         if (enabled && !this.effectsPipeline) {
             this.initEffectsEngine();
         }
@@ -1448,8 +1479,34 @@ class PlaybackEngine {
         }
     }
 
+    handleWebGLContextLost(event) {
+        handleWebGLContextLost(this, event);
+    }
+
+    handleWebGLContextRestored() {
+        void handleWebGLContextRestored(this);
+    }
+
+    async restoreWebGLContext() {
+        if (!this.canvas || this.isDestroyed) throw new Error('Preview canvas is no longer available.');
+        this.gl = this.canvas.getContext('webgl2', { alpha: false, preserveDrawingBuffer: true })
+            || this.canvas.getContext('experimental-webgl', { alpha: false, preserveDrawingBuffer: true });
+        if (!this.gl) throw new Error('The browser did not restore a WebGL context.');
+
+        // All handles from the lost context are invalid. Recreate the base
+        // compositor resources and replace only the GPU backend so effect
+        // definitions and their current placements remain intact.
+        this.initGL();
+        if (this.effectsEnabled && this.effectsPipeline) {
+            this.effectsPipeline.setGPUEngine(null);
+            this.gpuEffectEngine = new GPUEffectEngine(this.gl);
+            this.effectsPipeline.setGPUEngine(this.gpuEffectEngine);
+            if (this.effectsRenderer) this.effectsRenderer.gl = this.gl;
+        }
+    }
+
     render(frameItem) {
-        if (!this.gl || !frameItem.data) return;
+        if (!this.gl || this._webglContextLost || !frameItem.data) return;
 
         const gl = this.gl;
 
@@ -1506,8 +1563,22 @@ class PlaybackEngine {
                         sourceClipId: this.effectSourceClipId,
                     },
                 ) || this.texture;
+                if (this._effectPreviewFailed) {
+                    this._effectPreviewFailed = false;
+                    this.onWarning({ type: 'gpu_effect_preview_recovered', recoverable: true });
+                }
             } catch (e) {
-                console.error('[PlaybackEngine] Effects render error:', e);
+                if (!this._effectPreviewFailed) {
+                    this._effectPreviewFailed = true;
+                    console.error('[PlaybackEngine] Effects render error:', e);
+                    this.onWarning({
+                        type: 'gpu_effect_preview_failed',
+                        targetId: this.effectSourceClipId,
+                        message: 'An effect could not be rendered in preview. Original footage is still playing.',
+                        detail: e?.message || String(e),
+                        recoverable: true,
+                    });
+                }
                 renderTexture = this.texture;
             }
         }
@@ -1519,7 +1590,7 @@ class PlaybackEngine {
         gl.uniform1f(this.loc.brightness, this.gradingParams.brightness);
         gl.uniform1f(this.loc.contrast, this.gradingParams.contrast);
         gl.uniform1f(this.loc.saturation, this.gradingParams.saturation);
-        // gl.uniform1f(this.loc.hueRotate, this.gradingParams.hueRotate); // Not used in shader yet, using global Hue later if needed.
+        gl.uniform1f(this.loc.hueRotate, this.gradingParams.hueRotate);
 
         // Selective
         gl.uniform1fv(this.loc.selHue, this.gradingParams.selectiveHue);
@@ -1548,6 +1619,8 @@ class PlaybackEngine {
     destroy() {
         this.isDestroyed = true;
         this.stopLoop();
+        this.canvas?.removeEventListener?.('webglcontextlost', this._handleWebGLContextLost, false);
+        this.canvas?.removeEventListener?.('webglcontextrestored', this._handleWebGLContextRestored, false);
         this.worker.terminate();
         this.clock.destroy();
         this.buffer.clear((f) => f.data?.close && f.data.close());

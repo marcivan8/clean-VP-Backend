@@ -57,6 +57,20 @@ const isMobileViewport = () =>
 // Module-level debounce timer — lives outside React so it survives re-renders
 let _autosaveTimer = null;
 
+// Blob URLs are scoped to the current browser session. Scene templates can
+// contain nested image/video URLs, so sanitize them recursively while keeping
+// durable asset IDs that can resolve again after a project reload.
+function stripEphemeralBlobUrls(value) {
+    if (typeof value === 'string') return /^blob:/i.test(value) ? undefined : value;
+    if (Array.isArray(value)) {
+        return value.map(stripEphemeralBlobUrls).filter(item => item !== undefined);
+    }
+    if (!value || typeof value !== 'object') return value;
+    return Object.fromEntries(Object.entries(value)
+        .map(([key, nested]) => [key, stripEphemeralBlobUrls(nested)])
+        .filter(([, nested]) => nested !== undefined));
+}
+
 // ── Synchronous pre-restore ────────────────────────────────────────────────
 // Populate timelineManager BEFORE React renders so the Revideo scene
 // compiles with the correct tracks on first mount (not empty "NO MEDIA").
@@ -3898,9 +3912,9 @@ const useTimelineStore = create(
                 const sanitizedTracks = (state.tracks || []).map(track => ({
                     ...track,
                     clips: track.clips.map(clip => ({
-                        ...clip,
-                        url: clip.url?.startsWith('blob:') ? '' : clip.url,
-                        sourceUrl: clip.sourceUrl?.startsWith('blob:') ? '' : clip.sourceUrl
+                        ...stripEphemeralBlobUrls(clip),
+                        url: /^blob:/i.test(clip.url || '') ? '' : clip.url,
+                        sourceUrl: /^blob:/i.test(clip.sourceUrl || '') ? '' : clip.sourceUrl
                     }))
                 }));
                 const projectData = {

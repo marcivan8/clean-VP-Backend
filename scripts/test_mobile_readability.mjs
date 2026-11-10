@@ -134,9 +134,18 @@ check('the flow store knows which face the change step wears', () => {
         'describe mode is entered from the first screen, so Back has to go there');
 });
 
-check('the first screen asks for describe mode', () => {
-    assert.match(flow, /onClick=\{\(\) => toChange\('describe'\)\}/);
+check('the first screen asks in a field, not behind a panel of cards', () => {
+    // Marc's ask was that "Something else" open the chat bar rather than the
+    // full "Change something" panel. R156 did that with changeMode:'describe';
+    // a later round went further and put the prompt field on the first screen
+    // itself, so the card is gone and there is nothing to open. The describe
+    // branch below is still here and still correct, but nothing reaches it —
+    // flagged rather than deleted.
+    assert.match(flow, /id="mobile-short-request"/, 'the inline prompt field IS the chat bar on the first screen');
+    assert.match(flow, /mobileFlow\.promptPlaceholder/);
     assert.match(flow, /const describeOnly = useMobileFlowStore\(s => s\.changeMode\) === 'describe';/);
+    const entries = (flow.match(/toChange\('describe'\)/g) || []).length;
+    assert.equal(entries, 0, 'if describe mode is wired up again, say so here');
 });
 
 check('describe mode drops the six change cards', () => {

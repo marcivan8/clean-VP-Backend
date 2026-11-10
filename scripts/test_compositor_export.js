@@ -49,11 +49,12 @@ const {
     decimate,
     SUPPORTED_PLAN_VERSION,
 } = require(path.join(ROOT, 'server/compositor/CompositorCompiler.js'));
+const { compileTimelineVisualEffects } = require(path.join(ROOT, 'jobs/exportProcessor.js'));
 
 // Build plans with the REAL client Compositor, so this exercises the true
 // client→worker path rather than a hand-written plan that could drift from it.
 function loadCompositor() {
-    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'MotionPresets', 'MotionExpression', 'EffectTiming', 'CaptionModel', 'ClipAdapter', 'Compositor'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionExpression', 'SpatialMotion', 'AudioReactive', 'MotionResolver', 'MotionPresets', 'EffectTiming', 'CaptionModel', 'ClipAdapter', 'Compositor'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);
@@ -128,6 +129,11 @@ section('1 · The client and worker agree on the plan version');
 section('2 · The worker refuses plans it must not execute');
 {
     const good = planFor([vclip({ id: 'ov', start: 0.5, duration: 2 })]);
+    const goodGraph = compileCompositionPlan(good, [{ overlayId: good.overlays[0].id, inputIndex: 1 }]);
+    check('export overlay gates use the same half-open window as preview',
+        goodGraph.filterComplex.includes(`enable='(gte(t,${good.overlays[0].outputStart})*lt(t,${good.overlays[0].outputEnd}))'`)
+            && !goodGraph.filterComplex.includes(`between(t,${good.overlays[0].outputStart},${good.overlays[0].outputEnd})`),
+        goodGraph.filterComplex);
     check('a well-formed plan is accepted', validateCompositionPlanShape(good, W, H).length === 0,
         validateCompositionPlanShape(good, W, H).join('; '));
 
@@ -214,7 +220,7 @@ section('3 · Compilation produces a sane filter graph');
     check('it ends at the documented output label', compiled.outputLabel === 'vout'
         && compiled.filterComplex.includes('[vout]'));
     check('the overlay is time-gated with enable=',
-        /enable='between\(t,/.test(compiled.filterComplex),
+        /enable='\(gte\(t,[^)]+\)\*lt\(t,[^)]+\)\)'/.test(compiled.filterComplex),
         'without it the overlay\'s last frame sticks for the rest of the video');
     check('the overlay stream is shifted onto output time with setpts',
         /setpts=PTS-STARTPTS\+/.test(compiled.filterComplex));
@@ -715,6 +721,28 @@ if (!FFMPEG) {
     check('animated group blur visibly increases as sampled radius advances', !!sharpEdge && !!softEdge && colorDist(sharpEdge, softEdge) > 5,
         `expected an edge change, got ${sharpEdge} -> ${softEdge}`);
 
+    const animatedLayerBlurPlan = planFor([vclip({ id: 'animated-layer-blur', start: 0, duration: 3, extra: {
+        x: 50, y: 50,
+        animations: [{ type: 'blur', duration: 2, keyframes: [
+            { time: 0, properties: { blur: 0 } }, { time: 2, properties: { blur: 20 } },
+        ] }],
+    } })]);
+    const animatedLayerBlurGraph = compileCompositionPlan(animatedLayerBlurPlan,
+        [{ overlayId: animatedLayerBlurPlan.overlays[0].id, inputIndex: 1 }]);
+    const animatedLayerBlurOut = path.join(dir, 'animated-layer-blur.mp4');
+    const animatedLayerBlurRender = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+        '-i', path.join(dir, 'base.mp4'), '-i', blurSource,
+        '-filter_complex', animatedLayerBlurGraph.filterComplex, '-map', `[${animatedLayerBlurGraph.outputLabel}]`,
+        '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', animatedLayerBlurOut,
+    ], { encoding: 'utf8', timeout: 120_000 });
+    check('animated layer blur renders with FFmpeg runtime commands', animatedLayerBlurRender.status === 0,
+        (animatedLayerBlurRender.stderr || '').split('\n').slice(-5).join(' | '));
+    const layerBlurEarly = regionColor(animatedLayerBlurOut, 0.2, { x: 338, y: 178, w: 6, h: 6 });
+    const layerBlurLate = regionColor(animatedLayerBlurOut, 2.5, { x: 338, y: 178, w: 6, h: 6 });
+    check('animated layer blur visibly increases instead of freezing at its first sample',
+        !!layerBlurEarly && !!layerBlurLate && colorDist(layerBlurEarly, layerBlurLate) > 5,
+        `expected a softened edge, got ${layerBlurEarly} -> ${layerBlurLate}`);
+
     const animatedStack = [{ id: 'fade-comp', type: 'composition', opacity: 1, blendMode: 'source-over', effects: [],
         start: 0, duration: 3, opacitySamples: [{ t: 0, value: 0 }, { t: 3, value: 1 }] }];
     const animatedPlan = planFor([vclip({ id: 'fade-child', start: 0, duration: 3,
@@ -791,6 +819,8 @@ if (!FFMPEG) {
             brightness: [{ time: 0, value: 50 }, { time: 3, value: 150 }],
             contrast: [{ time: 0, value: 80 }, { time: 3, value: 120 }],
             saturation: [{ time: 0, value: 70 }, { time: 3, value: 130 }],
+            temperature: [{ time: 0, value: -60 }, { time: 3, value: 60 }],
+            tint: [{ time: 0, value: -40 }, { time: 3, value: 40 }],
         } }] }];
     const animatedEffectPlan = planFor([vclip({ id: 'grade-child', start: 0, duration: 3,
         extra: { x: 50, y: 50, compositionStack: animatedEffectStack } })]);
@@ -801,6 +831,10 @@ if (!FFMPEG) {
     check('the isolated group graph evaluates sampled brightness, contrast, and saturation per frame',
         animatedEffectGraph.filterComplex.includes('eq=brightness=') && animatedEffectGraph.filterComplex.includes(':eval=frame')
         && animatedEffectGraph.filterComplex.includes(':contrast=') && animatedEffectGraph.filterComplex.includes(':saturation='));
+    check('the isolated group graph preserves animated temperature and tint with preview-matched RGB offsets',
+        animatedEffectGraph.filterComplex.includes("geq=r='clip(r(X,Y)+(")
+        && animatedEffectGraph.filterComplex.includes("g='clip(g(X,Y)+(")
+        && animatedEffectGraph.filterComplex.includes("b='clip(b(X,Y)-("));
     const animatedEffectOutput = path.join(dir, 'isolated-effect-animated.mp4');
     const animatedEffectRender = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',
         '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
@@ -845,6 +879,7 @@ if (!FFMPEG) {
     const GREY = '808080';
     const before = regionColor(out, 0.2, crop);
     const during = regionColor(out, 1.5, crop);
+    const atEnd = regionColor(out, 2.0, crop);
     const after  = regionColor(out, 2.8, crop);
 
     check('BEFORE the window the region is the untouched base colour',
@@ -853,6 +888,9 @@ if (!FFMPEG) {
     check('INSIDE the window the overlay is actually drawn there',
         colorDist(during, GREY) > 60,
         `got ${during} — the overlay should dominate this region`);
+    check('AT the end boundary the overlay is already absent',
+        colorDist(atEnd, GREY) < 12,
+        `got ${atEnd} — the end frame belongs to the next timeline interval`);
     check('AFTER the window the region returns to the base colour',
         colorDist(after, GREY) < 12,
         `got ${after} — without enable= the overlay's last frame sticks for the rest of the video, which looks fine in a thumbnail and is wrong everywhere else`);
@@ -890,6 +928,42 @@ if (!FFMPEG) {
     fs.rmSync(dir, { recursive: true, force: true });
 }
 
+section('6a · Arbitrary overlay opacity keyframes survive export');
+{
+    const plan = planFor([vclip({ id: 'opacity-curve', start: 0.5, duration: 2, extra: { x: 50, y: 50 } })]);
+    const overlay = plan.overlays[0];
+    const geometry = overlay.geometry[0];
+    overlay.geometry = [
+        { ...geometry, t: 0.5, opacity: 0 },
+        { ...geometry, t: 1, opacity: 1 },
+        { ...geometry, t: 1.5, opacity: 0.25 },
+        { ...geometry, t: 2, opacity: 1 },
+        { ...geometry, t: 2.5, opacity: 0.25 },
+    ];
+    const compiled = compileCompositionPlan(plan, [{ overlayId: overlay.id, inputIndex: 1 }]);
+    check('animated opacity compiles the full sampled curve through alpha',
+        /geq=r='r\(X,Y\)':g='g\(X,Y\)':b='b\(X,Y\)':a='clip\(alpha\(X,Y\)\*/.test(compiled.filterComplex)
+            && !compiled.filterComplex.includes('fade=t=in:st=0.5'));
+
+    if (!FFMPEG) {
+        skip('animated opacity curve pixels', 'no ffmpeg binary available');
+    } else {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'comp-opacity-curve-'));
+        makeSources(dir);
+        const { r, out } = runGraph(dir, compiled, 'opacity-curve.mp4');
+        check('FFmpeg renders arbitrary opacity keyframes', r.status === 0,
+            (r.stderr || '').split('\n').slice(-4).join(' | '));
+        const full = regionColor(out, 1, { x: 275, y: 155, w: 90, h: 50 });
+        const quarter = regionColor(out, 1.5, { x: 275, y: 155, w: 90, h: 50 });
+        const fullAgain = regionColor(out, 2, { x: 275, y: 155, w: 90, h: 50 });
+        check('opacity rises, dips, then rises again at authored keyframes',
+            colorDist(full, quarter) > 70 && colorDist(fullAgain, quarter) > 70
+                && colorDist(full, fullAgain) < 25,
+            `full=${full} quarter=${quarter} fullAgain=${fullAgain}`);
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+}
+
 section('6b · Animated effect parameters reach the overlay render');
 if (!FFMPEG) {
     skip('animated overlay brightness', 'no ffmpeg binary available');
@@ -910,6 +984,30 @@ if (!FFMPEG) {
     const late = regionColor(out, 2.1, { x: 275, y: 155, w: 90, h: 50 });
     check('the overlay visibly changes as its brightness keyframes advance', colorDist(early, late) > 35,
         `early=${early} late=${late}`);
+    fs.rmSync(dir, { recursive: true, force: true });
+}
+
+section('6b.1 · Gradient fill renders over video overlays');
+if (!FFMPEG) {
+    skip('video gradient fill pixels', 'no ffmpeg binary available');
+} else {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'comp-video-gradient-'));
+    makeSources(dir);
+    const plan = planFor([vclip({ id: 'video-gradient', start: 0.5, duration: 2, extra: {
+        x: 50, y: 50,
+        effects: [{ kind: 'gradient-fill', params: { colors: ['#FF0000', '#0000FF'], angle: 0, opacity: 1 } }],
+    } })]);
+    const compiled = compileCompositionPlan(plan, [{ overlayId: plan.overlays[0].id, inputIndex: 1 }]);
+    check('the video gradient effect compiles to a color-channel transform', /geq=r=/.test(compiled.filterComplex));
+    const { r, out } = runGraph(dir, compiled, 'video-gradient.mp4');
+    check('FFmpeg renders a video gradient overlay', r.status === 0,
+        (r.stderr || '').split('\n').slice(-4).join(' | '));
+    const left = regionColor(out, 1, { x: 230, y: 155, w: 30, h: 50 });
+    const right = regionColor(out, 1, { x: 390, y: 155, w: 30, h: 50 });
+    const channels = hex => hex ? hex.match(/../g).map(value => parseInt(value, 16)) : null;
+    const leftRgb = channels(left), rightRgb = channels(right);
+    check('the exported video gradient visibly changes across the layer', !!leftRgb && !!rightRgb && leftRgb[0] > leftRgb[2] + 60 && rightRgb[2] > rightRgb[0] + 60,
+        `left=${left} right=${right}`);
     fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -1020,7 +1118,7 @@ if (!FFMPEG) {
         effects: [{ kind: 'shake', startTime: 0.7, endTime: 1.4, params: { intensity: 40, frequency: 2, randomSeed: 0, rotationAmount: 8 } }],
     } })]);
     const compiled = compileCompositionPlan(plan, [{ overlayId: plan.overlays[0].id, inputIndex: 1 }]);
-    check('shake adds deterministic per-frame x, y, and rotation', /sin\(2\*PI\*t\*2/.test(compiled.filterComplex) && /cos\(2\*PI\*t\*1\.66/.test(compiled.filterComplex) && /rotate=a='if\(between\(t,0\.7,1\.4\),sin\(2\*PI\*t\*1\.66/.test(compiled.filterComplex));
+    check('shake adds deterministic per-frame x, y, and rotation', /sin\(2\*PI\*t\*2/.test(compiled.filterComplex) && /cos\(2\*PI\*t\*1\.66/.test(compiled.filterComplex) && /rotate=a='if\(\(gte\(t,0\.7\)\*lt\(t,1\.4\)\),sin\(2\*PI\*t\*1\.66/.test(compiled.filterComplex));
     const { r, out } = runGraph(dir, compiled, 'overlay-shake.mp4');
     check('FFmpeg renders the shake effect', r.status === 0, (r.stderr || '').split('\n').slice(-4).join(' | '));
     const shifted = framePixels(out, 0.75);
@@ -1118,6 +1216,70 @@ if (!FFMPEG) {
     const plainFrame = framePixels(plain.out, 1.0);
     check('unmodified and glowing footage have different pixels', plain.r.status === 0 && glowFrame && plainFrame && !glowFrame.equals(plainFrame),
         `glow=${glowFrame?.length} plain=${plainFrame?.length} equal=${glowFrame?.equals(plainFrame)} graph=${compiled.filterComplex}`);
+    const animatedPlan = planFor([vclip({ id: 'footage-glow-animated', start: 0, duration: 3, extra: {
+        x: 50, y: 50,
+        effects: [{ kind: 'glow', params: { threshold: 0.7, intensity: 0, radius: 2, color: [0, 1, 1] }, samples: {
+            threshold: [{ t: 0, value: 0.1 }, { t: 2, value: 0.9 }],
+            intensity: [{ t: 0, value: 0 }, { t: 2, value: 1.4 }],
+            radius: [{ t: 0, value: 2 }, { t: 2, value: 24 }],
+        } }],
+    } })]);
+    const animatedGraph = compileCompositionPlan(animatedPlan,
+        [{ overlayId: animatedPlan.overlays[0].id, inputIndex: 1 }]);
+    check('animated footage glow compiles sampled threshold, intensity and radius controls',
+        animatedGraph.filterComplex.includes('_radius sigma')
+            && animatedGraph.filterComplex.includes('gte(max(max(r(X,Y),g(X,Y)),b(X,Y)),(if(lt(T')
+            && animatedGraph.filterComplex.includes("alpha(X,Y)*(clip((if(lt(T"), animatedGraph.filterComplex);
+    const animatedOut = runGraph(dir, animatedGraph, 'footage-glow-animated.mp4');
+    check('FFmpeg renders animated footage glow controls', animatedOut.r.status === 0,
+        (animatedOut.r.stderr || '').split('\n').slice(-4).join(' | '));
+    const quietGlowFrame = framePixels(animatedOut.out, 0.2);
+    const brightGlowFrame = framePixels(animatedOut.out, 2.5);
+    check('sampled footage glow controls visibly change the halo over time',
+        !!quietGlowFrame && !!brightGlowFrame && !quietGlowFrame.equals(brightGlowFrame),
+        `frames=${quietGlowFrame?.length} -> ${brightGlowFrame?.length}`);
+    const animatedShadowPlan = planFor([vclip({ id: 'animated-image-shadow', type: 'image', start: 0, duration: 3, extra: {
+        x: 50, y: 50,
+        effects: [{ kind: 'shadow', params: { blur: 2, opacity: 0.1, color: '#ff0000', x: -24, y: 0 }, samples: {
+            blur: [{ t: 0, value: 2 }, { t: 2, value: 24 }],
+            opacity: [{ t: 0, value: 0.1 }, { t: 2, value: 1 }],
+            x: [{ t: 0, value: -24 }, { t: 2, value: 24 }],
+        } }],
+    } })]);
+    const animatedShadowGraph = compileCompositionPlan(animatedShadowPlan,
+        [{ overlayId: animatedShadowPlan.overlays[0].id, inputIndex: 1 }]);
+    check('animated image shadow compiles sampled blur and opacity',
+        animatedShadowGraph.filterComplex.includes('_radius sigma')
+            && animatedShadowGraph.filterComplex.includes('alpha(X,Y)*(if(lt(T')
+            && animatedShadowGraph.filterComplex.includes("+(if(lt(t,2),-14.2222+(28.4444)*(t-0)/2,14.2222))"), animatedShadowGraph.filterComplex);
+    const wideShadowPlan = planFor([vclip({ id: 'wide-animated-image-shadow', type: 'image', start: 0, duration: 3, extra: {
+        effects: [{ kind: 'shadow', params: { blur: 2, opacity: 0.5, x: -150, y: 150 }, samples: {
+            x: [{ t: 0, value: -150 }, { t: 2, value: 150 }],
+            y: [{ t: 0, value: 150 }, { t: 2, value: -150 }],
+        } }],
+    } })]);
+    const wideShadowGraph = compileCompositionPlan(wideShadowPlan,
+        [{ overlayId: wideShadowPlan.overlays[0].id, inputIndex: 1 }]);
+    check('animated image shadow keeps the preview-supported ±200px offset range in export',
+        wideShadowGraph.filterComplex.includes('-88.8889') && wideShadowGraph.filterComplex.includes('88.8889'),
+        wideShadowGraph.filterComplex);
+    const animatedShadowOut = runGraph(dir, animatedShadowGraph, 'footage-shadow-animated.mp4');
+    check('FFmpeg renders animated image shadow controls', animatedShadowOut.r.status === 0,
+        (animatedShadowOut.r.stderr || '').split('\n').slice(-4).join(' | '));
+    const faintShadow = framePixels(animatedShadowOut.out, 0.2);
+    const strongShadow = framePixels(animatedShadowOut.out, 2.5);
+    check('sampled image shadow controls visibly change the rendered composite',
+        !!faintShadow && !!strongShadow && !faintShadow.equals(strongShadow),
+        `frames=${faintShadow?.length} -> ${strongShadow?.length}`);
+    const leftShadowEarly = regionColor(animatedShadowOut.out, 0.2, { x: 230, y: 180, w: 6, h: 6 });
+    const leftShadowLate = regionColor(animatedShadowOut.out, 2.5, { x: 230, y: 180, w: 6, h: 6 });
+    const rightShadowEarly = regionColor(animatedShadowOut.out, 0.2, { x: 410, y: 180, w: 6, h: 6 });
+    const rightShadowLate = regionColor(animatedShadowOut.out, 2.5, { x: 410, y: 180, w: 6, h: 6 });
+    check('animated image shadow offset moves from the left edge to the right edge',
+        !!leftShadowEarly && !!leftShadowLate && !!rightShadowEarly && !!rightShadowLate
+            && colorDist(leftShadowEarly, leftShadowLate) > 5
+            && colorDist(rightShadowEarly, rightShadowLate) > 5,
+        `${leftShadowEarly} -> ${leftShadowLate}; ${rightShadowEarly} -> ${rightShadowLate}`);
     fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -1191,6 +1353,54 @@ if (!FFMPEG) {
     fs.rmSync(dir, { recursive: true, force: true });
 }
 
+section('6i.2 · RGB split keyframes and glitch controls survive export');
+if (!FFMPEG) {
+    skip('animated RGB split and glitch export', 'no ffmpeg binary available');
+} else {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'comp-glitch-controls-'));
+    makeSources(dir);
+    const pattern = path.join(dir, 'glitch-pattern.mp4');
+    const sourceResult = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i',
+        'testsrc2=size=200x200:duration=3:rate=15', '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', pattern],
+    { encoding: 'utf8', timeout: 60_000 });
+    check('glitch pattern source is generated', sourceResult.status === 0, sourceResult.stderr);
+    const render = (name, effect) => {
+        const filters = compileTimelineVisualEffects([effect], { width: 200, height: 200, duration: 3, clipStart: 0 });
+        const filter = filters.join(',');
+        const output = path.join(dir, `${name}.mp4`);
+        const rendered = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-i', pattern,
+            '-vf', filter, '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', output],
+        { encoding: 'utf8', timeout: 120_000 });
+        return { filter, filters, output, rendered };
+    };
+    const stylized = render('glitch-stylized', { kind: 'glitch', enabled: true,
+        params: { intensity: 0.9, blockSize: 8, colorShift: true, scanlines: true } });
+    const restrained = render('glitch-restrained', { kind: 'glitch', enabled: true,
+        params: { intensity: 0.9, blockSize: 128, colorShift: false, scanlines: false },
+        keyframes: { intensity: [{ time: 0, value: 0.2, easing: 'linear' }, { time: 3, value: 0.9, easing: 'linear' }] } });
+    check('glitch export uses authored block size, color separation and scanlines',
+        /floor\(X\/8\.0000\)/.test(stylized.filter)
+            && /sin\(Y\*PI\)/.test(stylized.filter)
+            && /floor\(X\/128\.0000\)/.test(restrained.filter)
+            && !/sin\(Y\*PI\)/.test(restrained.filter)
+            && stylized.filter !== restrained.filter);
+    const animatedRgb = compileTimelineVisualEffects([{ kind: 'rgb_split', enabled: true,
+        params: { amount: 8, angle: 0, centerX: 0.5, centerY: 0.5 },
+        keyframes: { amount: [{ time: 0, value: 8 }, { time: 3, value: 35 }], angle: [{ time: 0, value: 0 }, { time: 3, value: 90 }] },
+    }], { width: 200, height: 200, duration: 3, clipStart: 0 }).join(',');
+    check('animated RGB split intensity and angle are compiled as frame expressions', /cos\(\(mod\(\(if\(lt\(T/.test(animatedRgb)
+        && /sin\(\(mod\(\(if\(lt\(T/.test(animatedRgb));
+    check('both glitch variants render in FFmpeg', stylized.rendered.status === 0 && restrained.rendered.status === 0,
+        `${stylized.rendered.stderr || ''} ${restrained.rendered.stderr || ''}`.trim().slice(-600));
+    const stylizedFrame = framePixels(stylized.output, 1), restrainedFrame = framePixels(restrained.output, 1);
+    const difference = stylizedFrame && restrainedFrame && stylizedFrame.length === restrainedFrame.length
+        ? stylizedFrame.reduce((sum, channel, index) => sum + Math.abs(channel - restrainedFrame[index]), 0)
+        : 0;
+    check('glitch control choices produce visibly different exported pixels', difference > 1000,
+        `summed frame-channel difference=${difference}`);
+    fs.rmSync(dir, { recursive: true, force: true });
+}
+
 section('6j · Blend modes change the actual exported composite');
 if (!FFMPEG) {
     skip('exported blend modes', 'no ffmpeg binary available');
@@ -1256,6 +1466,11 @@ section('7 · The export job wires it in and reports missing overlays');
         && /partialOverlayWarnings\.push\(`3D video texture/.test(src)
         && /const detail = `\$\{shown\.join\('; '\)\}/.test(src)
         && /compositorWarning = \[compositorWarning, detail\]\.filter\(Boolean\)\.join\(' '\)/.test(src));
+    check('3D renderer truncation limits are reported on otherwise successful exports',
+        /getScene3DRenderLimitWarnings\(templateParams\.scene\)/.test(src)
+        && /getScene3DCompatibilityWarnings\(templateParams\.scene\)/.test(src)
+        && /sceneLimitWarnings\.push\(`3D scene layer/.test(src)
+        && /sceneLimitWarnings\.length/.test(src));
     check('when all overlay inputs fail, the export warning retains the layer-specific cause',
         /no drawable overlay layers after source resolution\$\{detail \? `: \$\{detail\}/.test(src));
     check('it FAILS OPEN — a compositor error does not fail the export',

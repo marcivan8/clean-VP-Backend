@@ -640,6 +640,54 @@ await check('nested composition transforms and effects survive timeline save/loa
     assert.deepEqual(projected[0].clips[0].compositionStack, compositionStack,
         'parent expression, isolated effects, and their composition boundary survive project persistence');
 });
+await check('3D scene camera, mesh, particles, and audio-reactive settings survive project save and reload', () => {
+    const scene3d = {
+        camera: { projection: 'perspective', z: 8, yaw: 12, keyframes: { yaw: [
+            { time: 0, value: 12, easing: 'easeInOut' }, { time: 2, value: 38, easing: 'linear' },
+        ] } },
+        objects: [{
+            id: 'custom-mesh', type: 'mesh', position: { x: 0, y: 0, z: 0 },
+            vertices: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }],
+            faces: [[0, 1, 2]], uvs: [[0, 0], [1, 0], [0, 1]],
+            material: { color: '#D04A35', opacity: 0.82, metalness: 0.35 },
+            audioReactive: { assetId: 'music-asset', target: 'scale', amount: 0.45 },
+        },
+        { id: 'image-texture', type: 'image', imageAssetId: 'still-asset', imageUrl: 'blob:https://app.example/expired-image' },
+        { id: 'video-texture', type: 'video', videoAssetId: 'video-asset', videoUrl: 'blob:https://app.example/expired-video' }],
+        particles: {
+            count: 24, seed: 39, loop: false,
+            emitter: { mode: 'burst', shape: 'ring', position: { x: 0, y: 1, z: 0 }, innerRatio: 0.7 },
+            velocity: { x: 0, y: 0.5, z: 0 }, gravity: { x: 0, y: -0.2, z: 0 },
+            audioReactive: { assetId: 'music-asset', target: 'size', amount: 0.3 },
+        },
+    };
+    const source = [{ id: 'track-3d-scene', type: 'overlay', clips: [{
+        id: 'clip-3d-scene', clipId: 'entity-3d-scene', assetId: 'music-asset',
+        url: 'blob:https://app.example/clip-source', sourceUrl: 'BLOB:https://app.example/clip-source-upper',
+        name: '3D Scene', type: 'overlay', start: 3, duration: 6, offset: 0, speed: 1,
+        template: { kind: '3d-scene', params: { scene: scene3d } },
+    }] }];
+
+    tm.fromLegacyTracks(source);
+    const projected = tm.toLegacyTracks();
+    assert.deepEqual(projected[0].clips[0].template.params.scene, scene3d,
+        'timeline normalization keeps the authored 3D scene model');
+    S.setState({ tracks: projected, duration: 20, aspectRatio: '16:9', assets: [{ id: 'music-asset' },
+        { id: 'still-asset', sourceUrl: '/media/still.png' }, { id: 'video-asset', sourceUrl: '/media/video.mp4' }],
+        past: [], future: [], scenes: {}, captions: [] });
+    const saved = S.getState().saveProject();
+    const savedScene = saved.tracks[0].clips[0].template.params.scene;
+    assert.equal(savedScene.objects[1].imageAssetId, 'still-asset');
+    assert.equal(savedScene.objects[1].imageUrl, undefined, 'ephemeral nested image URL is stripped from project payload');
+    assert.equal(savedScene.objects[2].videoAssetId, 'video-asset');
+    assert.equal(savedScene.objects[2].videoUrl, undefined, 'ephemeral nested video URL is stripped from project payload');
+    assert.equal(saved.tracks[0].clips[0].url, '', 'top-level clip blob URL is cleared case-insensitively');
+    assert.equal(saved.tracks[0].clips[0].sourceUrl, '', 'top-level source blob URL is cleared case-insensitively');
+    S.getState().loadProject(saved);
+    const restored = S.getState().tracks[0].clips[0].template.params.scene;
+    assert.deepEqual(restored, savedScene,
+        'cloud/local project reload restores camera animation, mesh, particles, audio links and durable texture references');
+});
 function loadProject(aspectRatio = '16:9') {
     tm.fromLegacyTracks([{ id: 'track-default-video', type: 'video', name: 'V', clips: [{ id: 'v1', clipId: 'ev1', assetId: 'a', type: 'video', start: 0, duration: 60, offset: 0, speed: 1 }] }]);
     S.setState({ tracks: tm.toLegacyTracks(), duration: 60, aspectRatio, currentTime: 5, assets: [{ id: 'a' }], past: [], future: [], scenes: {}, captions: [] });
@@ -917,6 +965,23 @@ await check('3D camera animation uses the renderer defaults for clipping-plane k
     assert.match(panel, /const cameraDefaults3D = SCENE3D_CAMERA_DEFAULTS/);
     assert.match(renderer, /near: 0\.05, far: 1000/);
     assert.match(panel, /\['x', 'y', 'z', 'yaw', 'pitch', 'roll', 'fov', 'orthoScale', 'near', 'far'\]/);
+});
+
+await check('3D objects expose shadow casting and planes define the scene receiver', () => {
+    const panel = read('client/src/components/TemplatePanel.jsx');
+    const renderer = read('client/src/motion/Scene3D.js');
+    assert.match(panel, /object3d\.receivesShadow === true/);
+    assert.match(panel, /templates\.scene3d\.receiveShadows/);
+    assert.match(panel, /object3d\.castsShadow !== false/);
+    assert.match(panel, /templates\.scene3d\.castShadows/);
+    assert.match(panel, /update3DShadowReceiver = enabled => update3DObject\(\{ receivesShadow: enabled \}\)/);
+    assert.match(renderer, /receiverObject\?\.type !== 'plane' \|\| receiverObject\.receivesShadow !== true/);
+    assert.match(renderer, /object\?\.castsShadow !== false/);
+    assert.match(renderer, /worldVertex\(vertex, receiverTransform\)/);
+    for (const lang of ['en', 'fr']) {
+        const words = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).templates?.scene3d;
+        assert.ok(words?.receiveShadows && words?.castShadows, `${lang}.templates.scene3d shadow controls`);
+    }
 });
 
 await check('3D source time remap curves can be authored at the playhead', () => {

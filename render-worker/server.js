@@ -35,7 +35,7 @@ app.post('/render', async (req, res) => {
     try {
         const { renderVideo } = await import('@revideo/renderer');
 
-        const { baseVideoUrl = '', tracks = [], duration = 10, fps = 30, aspectRatio = '16:9', backendUrl = '' } = req.body;
+        const { baseVideoUrl = '', tracks = [], duration = 10, fps = 30, aspectRatio = '16:9', backendUrl = '', audioWaveformsByAsset = {} } = req.body;
 
         if (!baseVideoUrl) {
             return res.status(400).json({ error: 'baseVideoUrl is required' });
@@ -67,7 +67,7 @@ app.post('/render', async (req, res) => {
         // actually applied to the launched browser.
         await renderVideo({
             projectFile: path.join(__dirname, 'revideo', 'src', 'project.ts'),
-            variables: { baseVideoUrl, tracks, duration, aspectRatio, fps, backendUrl },
+            variables: { baseVideoUrl, tracks, duration, aspectRatio, fps, backendUrl, audioWaveformsByAsset },
             settings: {
                 outFile,
                 outDir,
@@ -84,6 +84,13 @@ app.post('/render', async (req, res) => {
                 ffmpeg: {
                     ffmpegPath: '/usr/bin/ffmpeg',
                     ffprobePath: '/usr/bin/ffprobe',
+                },
+                // renderVideo() creates Vite with configFile:false and its own
+                // Revideo plugin instance, so revideo/vite.config.ts is not
+                // loaded here. Keep the runtime render target aligned with
+                // the modern-Chrome scene build configured for this worker.
+                viteConfig: {
+                    build: { target: 'esnext' },
                 },
                 puppeteer: {
                     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,

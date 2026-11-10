@@ -27,6 +27,7 @@ import { scaleFromDistanceRatio } from '../../utils/resizeGesture.js';
 // R92 round C: alignment guides while dragging
 import { computeSnap, startPosition, measureOthers } from '../../motion/SnapGuides.js';
 import { useSnapGuides } from './SnapGuidesLayer.jsx';
+import WaveformEngine from '../../services/WaveformEngine.js';
 
 // Map preset names to actual font families
 const FONT_MAP = {
@@ -256,9 +257,11 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
     // directly, which is always single-clip, so a drag here ignored the Text
     // panel's global/individual toggle entirely: the user set "Global", dragged a
     // caption on the canvas, and only that one segment moved.
-    const { currentTime, tracks, activeClipId, aspectRatio, applyCaptionUpdate, updateClip, setActiveClip, saveToHistory } = useTimelineStore(useShallow(state => ({
+    const { currentTime, tracks, assets, waveformsByAsset, activeClipId, aspectRatio, applyCaptionUpdate, updateClip, setActiveClip, saveToHistory } = useTimelineStore(useShallow(state => ({
         currentTime:        state.currentTime,
         tracks:             state.tracks,
+        assets:             state.assets,
+        waveformsByAsset:   state.waveformsByAsset || {},
         activeClipId:       state.activeClipId,
         aspectRatio:        state.aspectRatio,
         applyCaptionUpdate: state.applyCaptionUpdate,
@@ -266,6 +269,18 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
         setActiveClip:      state.setActiveClip,
         saveToHistory:      state.saveToHistory,
     })));
+
+    const reactiveAssetIds = React.useMemo(() => [...new Set(tracks.flatMap(track => track.clips || [])
+        .map(clip => clip.audioReactive?.assetId).filter(Boolean))], [tracks]);
+    React.useEffect(() => {
+        for (const assetId of reactiveAssetIds) {
+            if (waveformsByAsset[assetId]?.peaks?.length) continue;
+            const asset = assets.find(item => item.id === assetId);
+            if (!asset) continue;
+            WaveformEngine.getPeaks(assetId, { gcsPath: asset.gcsPath || asset.storagePath || null, proxyUrl: asset.proxyUrl || asset.url || null })
+                .catch(error => console.warn('[TextOverlay] audio envelope unavailable:', error?.message));
+        }
+    }, [reactiveAssetIds.join('|'), assets, waveformsByAsset]);
 
     // ── Preview↔export font-size parity ─────────────────────────────────────
     const [previewScale, setPreviewScale] = React.useState(1);
@@ -536,7 +551,7 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
                 // before R58 keeps animating without migration.
                 const layer = clipToMotionLayer(clip);
                 const motion = layer
-                    ? resolveMotionAt(layer, currentTime)
+                    ? resolveMotionAt(layer, currentTime, { audioWaveformsByAsset: waveformsByAsset })
                     : { x: 50, y: 50, scale: clip.scale || 1, rotation: 0, opacity: clip.opacity ?? 1, blur: 0, glow: 0, reveal: 1 };
 
                 // Fall back to the original positioning helper if adaptation

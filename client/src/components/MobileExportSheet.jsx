@@ -161,8 +161,9 @@ export default function MobileExportSheet({ open, onClose, onExport, isExporting
     // Deliberately NOT async. On iOS the share sheet only opens if
     // navigator.share() runs inside the tap's user activation, so when the
     // file is already in hand it is called here with nothing awaited before
-    // it. The async path below is only for the case where the prefetch has
-    // not finished or failed, where a download is the outcome anyway.
+    // it. The async path below only runs when the prefetch FAILED or timed
+    // out — the row is disabled while it is still in flight — and that path
+    // downloads rather than shares, for the activation reason above.
     const save = (mode) => {
         if (!result?.url) return;
         setShareError(null);
@@ -185,15 +186,16 @@ export default function MobileExportSheet({ open, onClose, onExport, isExporting
         setFetchPercent(null);
         try {
             const file = await fetchAsFile(result.url, result.filename, { onProgress: setFetchPercent });
-            if (mode === 'save') {
-                downloadFile(file);
-            } else if (canShareFiles && navigator.canShare({ files: [file] })) {
-                // Activation is likely already spent by the await above, so
-                // this can still be refused on iOS. It is the last resort.
-                await navigator.share({ files: [file], title: file.name });
-            } else {
-                setShareError(t('mobileExport.shareUnsupported'));
-            }
+            // R160: deliberately NO navigator.share() here, even for mode
+            // 'share'. The await above has spent the tap's user activation and
+            // iOS refuses a share outside it — that refusal IS the error Marc
+            // saw, "Impossible d'ouvrir le menu de partage". It used to be
+            // attempted anyway as a "last resort", which made the failure the
+            // likely outcome rather than the unlikely one. A download needs no
+            // activation, so it is the thing that still works; the row says so
+            // instead of showing an error for something that did succeed.
+            downloadFile(file);
+            if (mode === 'share') setShareError(t('mobileExport.savedInsteadOfShare'));
         } catch (err) {
             shareFailed(err, mode);
         } finally {
@@ -329,13 +331,13 @@ export default function MobileExportSheet({ open, onClose, onExport, isExporting
                                     // the tap, so waiting beats failing. Once it has
                                     // failed or timed out, the tap takes the on-demand
                                     // route — a download rather than a dead button.
-                                    disabled={!readyFile || busy === 'share'}
+                                    disabled={fetchState === 'loading' || busy === 'share'}
                                     style={{ ...SHARE_ROW, opacity: fetchState === 'loading' ? 0.55 : 1 }}
                                 >
                                     <ShareIcon size={21} style={{ color: 'var(--accent-2)', flex: 'none' }} />
                                     <span style={SHARE_ROW_LABEL}>
-                                        {!readyFile
-                                            ? (fetchState === 'loading' && fetchPercent != null
+                                        {fetchState === 'loading'
+                                            ? (fetchPercent != null
                                                 ? t('mobileExport.preparingFilePercent', { defaultValue: 'Preparing the file… {{percent}}%', percent: fetchPercent })
                                                 : t('mobileExport.preparingFile'))
                                             : busy === 'share'

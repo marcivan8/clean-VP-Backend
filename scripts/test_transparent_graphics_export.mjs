@@ -10,6 +10,21 @@ import { buildCompositionPlan } from '../client/src/motion/Compositor.js';
 const require = createRequire(import.meta.url);
 const ffmpeg = require('ffmpeg-static');
 const { compileCompositionPlan } = require('../server/compositor/CompositorCompiler.js');
+const exportProcessorSource = fs.readFileSync(new URL('../jobs/exportProcessor.js', import.meta.url), 'utf8');
+const exportModalSource = fs.readFileSync(new URL('../client/src/components/ExportModal.jsx', import.meta.url), 'utf8');
+const exportRequestSource = fs.readFileSync(new URL('../client/src/layouts/IDELayout.jsx', import.meta.url), 'utf8');
+assert.match(exportProcessorSource, /'transparent-png-sequence',\s*'transparent-mov'/,
+  'the export processor accepts the new transparent video format');
+assert.match(exportProcessorSource, /\['transparent-png-sequence',\s*'transparent-mov'\]\.includes\(String\(settings\.format/,
+  'transparent MOV exports render the same transparent overlay graph as PNG sequences');
+assert.match(exportProcessorSource, /requestedFormat === 'transparent-mov'[\s\S]*?'-c:v',\s*'prores_ks'[\s\S]*?'-profile:v',\s*'4'[\s\S]*?'-pix_fmt',\s*'yuva444p10le'/,
+  'transparent MOV delivery encodes ProRes 4444 with an alpha-capable pixel format');
+assert.match(exportProcessorSource, /requestedFormat === 'transparent-mov' \? 'video\/quicktime'/,
+  'transparent MOV uploads use the QuickTime media type');
+assert.match(exportModalSource, /\['transparent-mov',\s*'Alpha MOV'\]/,
+  'the export dialog exposes the transparent MOV format');
+assert.match(exportRequestSource, /format:\s*settings\.format\s*\|\|\s*'mp4'/,
+  'the chosen export format reaches the render job without being normalized away by the editor');
 const sceneEffects = [{ kind: 'brightness', params: { amount: 0.7 } }, { kind: 'grain', params: { amount: 5 } }, { kind: 'vignette', params: { intensity: 0.5 } }, { kind: 'glitch', params: { intensity: 0.3 } }, { kind: 'blur_motion', params: { intensity: { value: 0.5 }, samples: { value: 16 } } }, { kind: 'distortion', params: { amount: { value: 0.03 } } }, { type: 'glow', params: { radius: 8, intensity: 1, color: [0, 1, 0] } }];
 const planned = buildCompositionPlan([
   { id: 'base', type: 'video', clips: [{ id: 'base-clip', start: 0, duration: 1, url: 'base.mp4' }] },
@@ -92,6 +107,33 @@ try {
   assert.equal(pixel(64, 64)[3], 255, 'the graphic remains fully opaque');
   assert.ok(pixel(64, 64)[0] < 240, 'overlay footage effects alter pixels in the exported composition');
   assert.ok(pixel(40, 64)[0] < pixel(64, 64)[0], 'overlay vignette darkens its edges more than its center');
+
+  const alphaSequenceDir = path.join(tmp, 'alpha-prores-frames');
+  fs.mkdirSync(alphaSequenceDir, { recursive: true });
+  fs.copyFileSync(output, path.join(alphaSequenceDir, 'frame-000001.png'));
+  fs.copyFileSync(output, path.join(alphaSequenceDir, 'frame-000002.png'));
+  const alphaMov = path.join(tmp, 'graphics-alpha.mov');
+  const alphaEncode = spawnSync(ffmpeg, [
+    '-hide_banner', '-loglevel', 'error', '-framerate', '1', '-start_number', '1',
+    '-i', path.join(alphaSequenceDir, 'frame-%06d.png'), '-frames:v', '2', '-an',
+    '-c:v', 'prores_ks', '-profile:v', '4', '-pix_fmt', 'yuva444p10le', '-vendor', 'apl0',
+    '-f', 'mov', '-y', alphaMov,
+  ], { encoding: 'utf8' });
+  assert.equal(alphaEncode.status, 0, `FFmpeg encodes transparent ProRes 4444: ${alphaEncode.stderr}`);
+  const alphaProbe = spawnSync(ffmpeg, ['-hide_banner', '-i', alphaMov], { encoding: 'utf8' });
+  assert.match(alphaProbe.stderr, /prores \(4444\)/, 'the alpha MOV uses the ProRes 4444 profile');
+  assert.match(alphaProbe.stderr, /yuva444p\d+le/, 'the encoded video stream retains an alpha-capable pixel format');
+  const alphaDecoded = path.join(tmp, 'alpha-prores-decoded.png');
+  const alphaDecode = spawnSync(ffmpeg, [
+    '-hide_banner', '-loglevel', 'error', '-i', alphaMov, '-frames:v', '1', '-pix_fmt', 'rgba', '-y', alphaDecoded,
+  ], { encoding: 'utf8' });
+  assert.equal(alphaDecode.status, 0, `FFmpeg decodes transparent ProRes 4444: ${alphaDecode.stderr}`);
+  const alphaDecodedImage = await Canvas.loadImage(alphaDecoded);
+  const alphaDecodedCanvas = Canvas.createCanvas(128, 128);
+  const alphaDecodedCtx = alphaDecodedCanvas.getContext('2d');
+  alphaDecodedCtx.drawImage(alphaDecodedImage, 0, 0);
+  assert.equal(alphaDecodedCtx.getImageData(4, 4, 1, 1).data[3], 0, 'transparent pixels survive the ProRes 4444 round trip');
+  assert.ok(alphaDecodedCtx.getImageData(64, 64, 1, 1).data[3] >= 250, 'opaque graphic pixels survive the ProRes 4444 round trip');
 
   const maskedPlan = {
     ...plan,
@@ -316,7 +358,7 @@ try {
     ] }],
   };
   const timedGlowGraph = compileCompositionPlan(timedGlowPlan, [{ overlayId: 'icon', inputIndex: 1 }], { preserveAlpha: true }).filterComplex;
-  assert.match(timedGlowGraph, /enable='between\(t,0,1\)\*\(\(gte\(t,0\.2\)\*lt\(t,0\.8\)\)\)'/, 'alpha glow obeys its authored effect window during the overlay composite');
+  assert.match(timedGlowGraph, /enable='\(gte\(t,0\)\*lt\(t,1\)\)\*\(\(gte\(t,0\.2\)\*lt\(t,0\.8\)\)\)'/, 'alpha glow obeys its half-open overlay and authored effect windows during compositing');
   const iconGraph = path.join(tmp, 'icon-graph.txt');
   fs.writeFileSync(iconGraph, iconCompiled.filterComplex);
   const iconRender = spawnSync(ffmpeg, [

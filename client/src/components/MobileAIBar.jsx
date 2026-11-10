@@ -299,8 +299,12 @@ export default function MobileAIBar({ onExpand, expanded = false, onCollapse, fl
                 type="button"
                 onClick={expanded ? onCollapse : onExpand}
                 aria-expanded={expanded}
-                className="w-full shrink-0 flex items-center gap-2 px-3 active:opacity-70 transition-opacity"
-                style={{ borderBottom: '0.5px solid var(--line-soft)', minHeight: 36 }}
+                className="w-full shrink-0 flex items-center gap-2.5 px-3 active:opacity-70 transition-opacity"
+                // R160: the chat is the editing surface on phones now that the
+                // timeline is gone, so its header is a header. It was 10.5px
+                // mono in --fg-3 on a 36px row — sized for a strip you glance
+                // at, not the thing you work in.
+                style={{ borderBottom: '0.5px solid var(--line-soft)', minHeight: 44 }}
             >
                 {isAnalyzing ? (
                     <RokaWorkingIndicator />
@@ -317,17 +321,17 @@ export default function MobileAIBar({ onExpand, expanded = false, onCollapse, fl
                     className="flex-1 text-left"
                     style={{
                         fontFamily: 'var(--f-mono)',
-                        fontSize:   10.5,
-                        letterSpacing: '0.06em',
-                        color:      'var(--fg-3)',
+                        fontSize:   12,
+                        letterSpacing: '0.08em',
+                        color:      'var(--fg-2)',
                         textTransform: 'uppercase',
                     }}
                 >
                     {headerText}
                 </span>
                 {expanded
-                    ? <ChevronDown className="w-4 h-4 shrink-0" style={{ color: 'var(--fg-3)' }} aria-label={t('mobileRoka.collapse')} />
-                    : <ChevronUp className="w-4 h-4 shrink-0" style={{ color: 'var(--fg-3)' }} />}
+                    ? <ChevronDown className="w-5 h-5 shrink-0" style={{ color: 'var(--fg-2)' }} aria-label={t('mobileRoka.collapse')} />
+                    : <ChevronUp className="w-5 h-5 shrink-0" style={{ color: 'var(--fg-2)' }} aria-label={t('mobileRoka.expand')} />}
             </button>
 
             {/* ── Chat log / empty state — fills available space ── */}
@@ -449,6 +453,12 @@ export default function MobileAIBar({ onExpand, expanded = false, onCollapse, fl
                     <textarea
                         id="mobile-roka-input"
                         ref={inputRef}
+                        // R160: the "Now just ask" hint anchors here. The desktop
+                        // ChatComposer carries the same attribute, but on a phone
+                        // that composer is mounted off-screen, so the hint used to
+                        // point at a box nobody could see. This element comes
+                        // first in the DOM, and querySelector takes the first.
+                        data-hint="assistant-input"
                         rows={1}
                         placeholder={waitReason ? t('mobileRoka.placeholderWaiting') : t('mobileRoka.placeholder')}
                         onKeyDown={handleKeyDown}

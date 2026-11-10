@@ -23,6 +23,12 @@ const FUNCTIONS = Object.freeze({
     },
 });
 const EXPRESSION_FUNCTIONS = new Set([...Object.keys(FUNCTIONS), 'noise', 'wiggle']);
+const FUNCTION_ARITY = Object.freeze({
+    abs: [1, 1], ceil: [1, 1], floor: [1, 1], round: [1, 1],
+    sin: [1, 1], cos: [1, 1], tan: [1, 1], sqrt: [1, 1],
+    min: [1, 3], max: [1, 3], clamp: [3, 3], smoothstep: [3, 3],
+    noise: [1, 2], wiggle: [2, 3],
+});
 
 function hashNoise(index, seed) {
     const value = Math.sin(index * 127.1 + seed * 311.7) * 43758.5453123;
@@ -87,7 +93,10 @@ export function evaluateMotionExpression(expression, variables = {}) {
                 return noise1D(time * frequency, args[2] || 0) * amplitude;
             }
             const fn = FUNCTIONS[token];
-            if (!fn || args.length > 3) throw new Error('Unsupported function');
+            const arity = FUNCTION_ARITY[token];
+            if (!fn || !arity || args.length < arity[0] || args.length > arity[1]) {
+                throw new Error('Unsupported function arguments');
+            }
             return fn(...args);
         }
         throw new Error('Invalid expression');

@@ -95,7 +95,15 @@ check('the rail is mounted only on desktop', () => {
 
 check('the desktop timeline overlays the left rail and media panel as the top layer', () => {
     assert.ok(/<main className="flex-1 flex flex-col min-w-0 min-h-0 relative">/.test(LAYOUT), 'the preview column unexpectedly reserves a separate timeline row');
-    assert.ok(/mode === 'editor' && isMobile/.test(LAYOUT), 'mobile timeline is not kept in the center column');
+    // R160 removed the mobile timeline entirely — on a phone the chat is the
+    // editing surface, and the 144px row it used to sit in is the chat's now.
+    // This used to assert the mobile timeline stayed in the center column;
+    // what matters for the rail is the inverse, that no second timeline is
+    // mounted anywhere to fight the overlay for anchors or z-index.
+    assert.equal((LAYOUT.match(/<Timeline \/>/g) || []).length, 1,
+        'only the desktop overlay timeline should be mounted');
+    assert.ok(!/mode === 'editor' && isMobile/.test(LAYOUT),
+        'a mobile timeline row is back in the center column');
     assert.ok(/mode === 'editor' && !isMobile && \([\s\S]*?className="absolute bottom-0 left-0 right-80 z-50 hidden md:flex h-72/.test(LAYOUT), 'desktop timeline does not overlay from the workspace left edge to the AI sidebar');
 });
 

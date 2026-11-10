@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { resolveMotionAt, resolvedToCSS, sampleAnimation, sampleKeyframeTrack } from '../client/src/motion/MotionResolver.js';
+import { resolveMotionAt as resolveWorkerMotionAt } from '../render-worker/revideo/src/motion/MotionResolver.js';
 import { evaluateKeyframes } from '../client/src/motion/CameraMotionCompiler.js';
 import { clipToMotionLayer } from '../client/src/motion/ClipAdapter.js';
 import { buildCompositionPlan } from '../client/src/motion/Compositor.js';
@@ -9,6 +10,7 @@ import { evaluateMotionExpression, validateMotionExpression } from '../client/sr
 import { EffectNode } from '../client/src/effects/EffectNode.js';
 import { resolveEffectAtTime } from '../client/src/motion/EffectTiming.js';
 import { compilePath } from '../client/src/motion/SceneMotion.js';
+import { pointsToBezierSpline } from '../client/src/motion/SpatialMotion.js';
 import { animationsToParamTracks, paramTracksToAnimations } from '../client/src/motion/KeyframeBridge.js';
 import { appendMotionPathPoint, createMotionPath, MAX_MOTION_PATH_POINTS, removeMotionPathPoint, updateMotionPathPoint } from '../client/src/motion/MotionPath.js';
 import fs from 'node:fs';
@@ -47,6 +49,16 @@ const unevenMotionPath = {
   points: [[0, 0], [5, 0], [100, 0], [100, 100]],
   duration: 4, easing: 'linear', arcLength: true, bank: 0.4,
 };
+const canonicalSpline = pointsToBezierSpline(unevenMotionPath.points);
+for (const time of [0.25, 0.5, 1, 2, 3.5]) {
+  const expected = canonicalSpline.sampleAtNormalizedDistance(time / unevenMotionPath.duration);
+  const resolved = resolveMotionAt({ startTime: 0, duration: 4, x: 0, y: 0, motionPath: unevenMotionPath }, time);
+  assert.ok(Math.hypot(resolved.x - expected.x, resolved.y - expected.y) < 1e-8,
+    `clip preview/export resolver uses the same cached cubic spline as scene motion at ${time}s`);
+  const workerResolved = resolveWorkerMotionAt({ startTime: 0, duration: 4, x: 0, y: 0, motionPath: unevenMotionPath }, time);
+  assert.ok(Math.hypot(workerResolved.x - expected.x, workerResolved.y - expected.y) < 1e-8,
+    `render worker resolver uses the same cubic spline as scene motion at ${time}s`);
+}
 const flattenedPathAnimation = compilePath(unevenMotionPath, { duration: 4 });
 assert.equal(flattenedPathAnimation.keyframes.length, 24,
   'scene motion paths use the available keyframe budget to reduce flattening error');
@@ -199,6 +211,14 @@ assert.equal(evaluateMotionExpression('wiggle(1, 2)', {}), evaluateMotionExpress
   'wiggle defaults to the deterministic time-zero sample when no clock is supplied');
 assert.equal(evaluateMotionExpression('wiggle(1, 2, 3, 4)', { t: 1 }), null,
   'procedural expressions reject unsupported argument counts');
+assert.equal(evaluateMotionExpression('abs(1, 2)'), null,
+  'scalar math functions reject extra arguments instead of silently ignoring them');
+assert.equal(evaluateMotionExpression('clamp(1, 2)'), null,
+  'clamp requires all three bounds and value arguments');
+assert.equal(evaluateMotionExpression('min()'), null,
+  'variadic minimum requires at least one value');
+assert.equal(evaluateMotionExpression('min(3, 1, 2)'), 1,
+  'variadic minimum accepts supported value counts');
 assert.equal(validateMotionExpression('1 + 0.12 * sin(2 * pi * t)').valid, true,
   'procedural authoring accepts supported time-based formulas');
 assert.equal(validateMotionExpression('clamp(value + progress, 0, 1)', { variables: ['t', 'time', 'duration', 'progress', 'value'] }).valid, true,

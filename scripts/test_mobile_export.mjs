@@ -97,12 +97,30 @@ console.log('✓ server sizes the frame from the project aspect ratio when no pl
     assert.ok(!/borderTop: '1px solid var\(--line\)'/.test(dest), 'the old plain list is gone');
     assert.match(done, /SHARE_LABEL/, 'the section carries the mono heading');
 
-    // The share control must not be tappable before the file exists: that path
-    // awaits a download and iOS then refuses the share. This is the error Marc
-    // saw, "Impossible d'ouvrir le menu de partage".
-    assert.match(done, /disabled=\{!readyFile \|\| busy === 'share'\}/, 'share waits until the file is in hand');
-    assert.match(done, /!readyFile[\s\S]*?t\('mobileExport\.preparingFile'\)[\s\S]*?t\('mobileExport\.saveToPhotos'\)/,
+    // The share control must never run navigator.share() after an await: iOS
+    // refuses a share outside the tap's user activation, and that refusal is
+    // the error Marc saw, "Impossible d'ouvrir le menu de partage".
+    //
+    // The original guard was `disabled={!readyFile}`, which made that true by
+    // never letting the tap through at all — and so made the row permanently
+    // dead when the prefetch FAILED, which is the other thing Marc hit: the
+    // export finished and the row sat on "Préparation du fichier…". Both are
+    // held now by disabling only while the fetch is in flight AND making the
+    // post-await path a download instead of a share.
+    assert.match(done, /disabled=\{fetchState === 'loading' \|\| busy === 'share'\}/,
+        'tappable once the fetch has settled either way, not only when it succeeded');
+    assert.match(done, /fetchState === 'loading'[\s\S]*?t\('mobileExport\.preparingFile'\)[\s\S]*?t\('mobileExport\.saveToPhotos'\)/,
         'and says it is preparing rather than failing');
+
+    const slow = code.slice(code.indexOf('const saveSlowPath'), code.indexOf('const platform ='));
+    assert.ok(!/navigator\.share/.test(slow),
+        'the slow path awaits a multi-MB download first; a share after that is refused on iOS');
+    assert.match(slow, /downloadFile\(file\);/, 'a download needs no user activation, so it is what still works');
+    assert.match(slow, /setShareError\(t\('mobileExport\.savedInsteadOfShare'\)\)/,
+        'and the user is told the file was saved rather than shown an error for something that worked');
+
+    const fast = code.slice(code.indexOf('const save = (mode) => {'), code.indexOf('const saveSlowPath'));
+    assert.ok(!/await/.test(fast), 'the fast path must stay inside the activation');
 
     for (const lang of ['en', 'fr']) {
         const me = JSON.parse(readFileSync(new URL(`../client/src/locales/${lang}/editor.json`, import.meta.url), 'utf8')).mobileExport;

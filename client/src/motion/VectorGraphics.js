@@ -451,8 +451,19 @@ function getSvgArcGeometry(x1, y1, rxInput, ryInput, rotation, largeArc, sweep, 
 function drawSvgArc(ctx, x1, y1, rxInput, ryInput, rotation, largeArc, sweep, x2, y2) {
     const arc = getSvgArcGeometry(x1, y1, rxInput, ryInput, rotation, largeArc, sweep, x2, y2);
     if (!arc) { ctx.lineTo(x2, y2); return; }
-    if (typeof ctx.ellipse !== 'function') { ctx.lineTo(x2, y2); return; }
     const phi = (Number(rotation) || 0) * Math.PI / 180;
+    if (typeof ctx.ellipse !== 'function') {
+        // Some Canvas implementations (notably older embedded runtimes) do
+        // not expose ellipse(). Approximate the same SVG arc with bounded line
+        // segments instead of silently collapsing it to a straight chord.
+        const segments = Math.max(8, Math.min(128, Math.ceil(Math.abs(arc.delta) * Math.max(arc.rx, arc.ry) / 4)));
+        for (let index = 1; index <= segments; index++) {
+            const angle = arc.start + arc.delta * index / segments;
+            const ex = arc.rx * Math.cos(angle), ey = arc.ry * Math.sin(angle);
+            ctx.lineTo(arc.cx + arc.cos * ex - arc.sin * ey, arc.cy + arc.sin * ex + arc.cos * ey);
+        }
+        return;
+    }
     ctx.ellipse(arc.cx, arc.cy, arc.rx, arc.ry, phi, arc.start, arc.start + arc.delta, !sweep);
 }
 

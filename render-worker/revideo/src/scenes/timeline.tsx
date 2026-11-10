@@ -74,6 +74,7 @@ export default makeScene2D('timeline', function* (view) {
     const totalDuration = useVar<number>(vars, 'duration', 10);
     const baseVideoUrl = useVar<string>(vars, 'baseVideoUrl', '');
     const tracks = useVar<any[]>(vars, 'tracks', []); // ONLY 'text'/'overlay' tracks — see header
+    const audioWaveformsByAsset = useVar<Record<string, any>>(vars, 'audioWaveformsByAsset', {});
 
     const ar = useVar<string>(vars, 'aspectRatio', '16:9');
     const SIZE_MAP: Record<string, [number, number]> = {
@@ -130,7 +131,7 @@ export default makeScene2D('timeline', function* (view) {
                 yield* waitFor(layer.startTime);
                 if (!layerRefs[track.id] || !layerRefs[track.id]()) return;
 
-                const resolved = () => resolveMotionAt(layer, playback.time);
+                const resolved = () => resolveMotionAt(layer, playback.time, { audioWaveformsByAsset });
                 const nodeRef = createRef<Node>();
                 const effectFilters = createRevideoEffectFilters(clip.effects, clip.start, clip.duration, () => playback.time);
 

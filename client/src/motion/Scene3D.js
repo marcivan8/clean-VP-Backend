@@ -14,7 +14,8 @@ import { sceneImageTextureCache } from './SceneImageTextureCache.js';
 import { renderScene3DGpu } from './Scene3DGPU.js';
 import { remapSceneObjectTime } from './TimeRemap.js';
 import { sampleProceduralParticle } from './ProceduralParticles.js';
-export { remapSceneObjectTime, maxSceneObjectSourceTime } from './TimeRemap.js';
+import { sampleAudioEnvelope } from './AudioReactive.js';
+export { remapSceneObjectTime, resolveSceneVideoSourceTime, maxSceneObjectSourceTime, getSceneShutterSampleTimes } from './TimeRemap.js';
 
 /** Shared editor/renderer defaults so a new camera keyframe starts from the value actually rendered. */
 export const SCENE3D_CAMERA_DEFAULTS = Object.freeze({
@@ -28,10 +29,101 @@ const n = (v, d = 0) => Number.isFinite(Number(v)) ? Number(v) : d;
 // protect the renderer from pathological imported scenes while allowing
 // realistic nested compositions to inherit their complete transform stack.
 const MAX_SCENE_OBJECT_PARENT_DEPTH = 128;
+export const MAX_SCENE_OBJECTS = 80;
+export const MAX_SCENE_LIGHTS = 8;
+export const MAX_SCENE_PARTICLES = 500;
+export const MAX_MESH_VERTICES = 5000;
+export const MAX_MESH_FACES = 5000;
 // Bound per-frame geometry work. A single authored n-gon can expand into many
 // triangles, so raw face count alone is not a useful renderer budget.
 export const MAX_MESH_TRIANGLES = 10_000;
 export const MAX_SCENE_TRIANGLES = 50_000;
+export const MAX_SCENE_SHADOW_RECEIVERS = 16;
+/** Limits that truncate content in the deterministic 3D renderer. */
+export function getScene3DRenderLimitWarnings(scene = {}) {
+    const objects = Array.isArray(scene.objects) ? scene.objects : [];
+    const lights = Array.isArray(scene.lights) ? scene.lights : [];
+    const receivers = objects.filter(object => object?.type === 'plane' && object.receivesShadow === true).length
+        + (scene.shadows?.receiverPlane && typeof scene.shadows.receiverPlane === 'object' ? 1 : 0);
+    const particleCount = Number(scene.particles?.count);
+    const particles = Number.isFinite(particleCount) ? Math.max(0, Math.round(particleCount)) : 0;
+    const warnings = [
+        ['objects', objects.length, MAX_SCENE_OBJECTS],
+        ['lights', lights.length, MAX_SCENE_LIGHTS],
+        ['shadow receiver planes', receivers, MAX_SCENE_SHADOW_RECEIVERS],
+        ['particles', particles, MAX_SCENE_PARTICLES],
+    ].filter(([, actual, limit]) => actual > limit)
+        .map(([label, actual, limit]) => ({ label, actual, limit }));
+    let sceneTriangles = 0;
+    for (const object of objects.slice(0, MAX_SCENE_OBJECTS)) {
+        if (object?.type !== 'mesh') continue;
+        const vertices = Array.isArray(object.vertices) ? object.vertices.length : 0;
+        const faces = Array.isArray(object.faces) ? object.faces : [];
+        const validFaces = faces.slice(0, MAX_MESH_FACES).filter(face => Array.isArray(face)
+            && face.length >= 3 && face.length <= 64
+            && face.every(index => Number.isInteger(index) && index >= 0 && index < Math.min(vertices, MAX_MESH_VERTICES)));
+        const triangles = validFaces.reduce((total, face) => total + face.length - 2, 0);
+        const name = object.name || object.id || 'unnamed';
+        const meshLimits = [
+            [`vertices on mesh “${name}”`, vertices, MAX_MESH_VERTICES],
+            [`faces on mesh “${name}”`, faces.length, MAX_MESH_FACES],
+            [`triangles on mesh “${name}”`, triangles, MAX_MESH_TRIANGLES],
+        ];
+        for (const [label, actual, limit] of meshLimits) {
+            if (actual > limit) warnings.push({ label, actual, limit, objectId: object.id || null });
+        }
+        sceneTriangles += Math.min(triangles, MAX_MESH_TRIANGLES);
+    }
+    if (sceneTriangles > MAX_SCENE_TRIANGLES) {
+        warnings.push({ label: 'triangles in the 3D scene', actual: sceneTriangles, limit: MAX_SCENE_TRIANGLES });
+    }
+    return warnings.map(warning => ({ ...warning,
+        message: `This 3D scene has ${warning.actual} ${warning.label}; the renderer supports ${warning.limit}, so the extra content will not appear.` }));
+}
+/** Report authored 3D values that the renderer silently substitutes. */
+export function getScene3DCompatibilityWarnings(scene = {}) {
+    const supportedObjects = new Set(['box', 'sphere', 'cylinder', 'cone', 'torus', 'plane', 'image', 'video', 'text', 'mesh']);
+    const supportedLights = new Set(['point', 'directional', 'spot']);
+    const supportedSides = new Set(['front', 'back', 'double']);
+    const warnings = [];
+    const checkRange = (record, key, label, min, max, owner, fallback) => {
+        if (!record || !Object.hasOwn(record, key) || record[key] === undefined) return;
+        const value = Number(record[key]);
+        if (!Number.isFinite(value)) {
+            warnings.push({ ...owner, message: `${label} on ${owner.messageOwner} is invalid; the renderer will use ${fallback}.` });
+        } else if (value < min || value > max) {
+            warnings.push({ ...owner, message: `${label} on ${owner.messageOwner} is ${value}, outside the supported range ${min}–${max}; the renderer will clamp it.` });
+        }
+    };
+    for (const object of Array.isArray(scene.objects) ? scene.objects : []) {
+        const name = object?.name || object?.id || 'unnamed';
+        const owner = { objectId: object?.id || null, messageOwner: `3D object “${name}”` };
+        if (object && Object.hasOwn(object, 'type') && object.type !== undefined && !supportedObjects.has(object.type)) {
+            warnings.push({ objectId: object.id || null, message: `3D object “${name}” uses unsupported type “${object.type}”; it will render as a box.` });
+        }
+        if (object?.material && Object.hasOwn(object.material, 'side') && object.material.side !== undefined && !supportedSides.has(object.material.side)) {
+            warnings.push({ objectId: object.id || null, message: `3D object “${name}” uses unsupported material side “${object.material.side}”; it will render as front-sided.` });
+        }
+        if (object && Object.hasOwn(object, 'blendMode') && object.blendMode !== undefined && !SCENE3D_BLEND_MODES.includes(object.blendMode)) {
+            warnings.push({ objectId: object.id || null, message: `3D object “${name}” uses unsupported blend mode “${object.blendMode}”; it will render as source-over.` });
+        }
+        checkRange(object?.material, 'opacity', 'Material opacity', 0, 1, owner, '1');
+        checkRange(object?.material, 'roughness', 'Material roughness', 0.04, 1, owner, '0.62');
+        checkRange(object?.material, 'metalness', 'Material metalness', 0, 1, owner, '0.08');
+        checkRange(object?.material, 'emissiveIntensity', 'Emissive intensity', 0, 10, owner, '0');
+    }
+    (Array.isArray(scene.lights) ? scene.lights : []).forEach((light, index) => {
+        const owner = { lightIndex: index, messageOwner: `3D light ${index + 1}` };
+        if (light && Object.hasOwn(light, 'type') && light.type !== undefined && !supportedLights.has(light.type)) {
+            warnings.push({ lightIndex: index, message: `3D light ${index + 1} uses unsupported type “${light.type}”; it will render as a point light.` });
+        }
+        checkRange(light, 'intensity', 'Intensity', 0, 4, owner, '0.8');
+        checkRange(light, 'range', 'Range', 0.1, 1000, owner, '24');
+        checkRange(light, 'decay', 'Decay', 0, 8, owner, '0.3');
+        checkRange(light, 'angle', 'Spot angle', 1, 179, owner, '60');
+    });
+    return warnings.map(({ messageOwner, ...warning }) => warning);
+}
 export const SCENE3D_BLEND_MODES = Object.freeze([
     'source-over', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'difference',
     'addition', 'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'exclusion',
@@ -213,8 +305,8 @@ export function normalizeSceneMesh(object) {
     // from their current data. Built-in primitive topology only depends on a
     // small set of dimensions and is identical across animation frames.
     if (object?.type === 'mesh' && Array.isArray(object.vertices) && Array.isArray(object.faces)) {
-        const vertices = object.vertices.slice(0, 5000).map(p => V(p?.x, p?.y, p?.z));
-        const authoredFaces = object.faces.slice(0, 5000).filter(face => Array.isArray(face)
+        const vertices = object.vertices.slice(0, MAX_MESH_VERTICES).map(p => V(p?.x, p?.y, p?.z));
+        const authoredFaces = object.faces.slice(0, MAX_MESH_FACES).filter(face => Array.isArray(face)
             && face.length >= 3 && face.length <= 64
             && face.every(index => Number.isInteger(index) && index >= 0 && index < vertices.length));
         const faces = [];
@@ -380,10 +472,28 @@ function drawTexturedTriangle(ctx, image, uvs, points, opacity) {
     }
 }
 
-function clipPlaneMask(ctx, shape, rect) {
+// Shared by renderer validation and editor controls so a selectable mask is
+// always renderable and an unsupported authored value is reported up front.
+export const SCENE3D_TEXTURE_MASK_SHAPES = Object.freeze([
+    'none', 'ellipse', 'circle', 'rounded-rectangle', 'rectangle', 'capsule', 'polygon', 'star', 'arrow',
+]);
+const TEXTURE_MASK_SHAPES = new Set(SCENE3D_TEXTURE_MASK_SHAPES);
+
+function maskPolygon(shape, sides = 5) {
+    if (shape === 'arrow') return [[0.5, 0], [1, 0.42], [0.68, 0.42], [0.68, 1], [0.32, 1], [0.32, 0.42], [0, 0.42]];
+    const count = shape === 'star' ? 10 : Math.max(3, Math.min(32, Math.round(sides)));
+    return Array.from({ length: count }, (_, index) => {
+        const angle = -Math.PI / 2 + index * Math.PI * 2 / count;
+        const radius = shape === 'star' && index % 2 ? 0.25 : 0.5;
+        return [0.5 + Math.cos(angle) * radius, 0.5 + Math.sin(angle) * radius];
+    });
+}
+
+function clipPlaneMask(ctx, shape, rect, invert = false) {
     if (!shape || shape === 'none' || !rect || rect.width <= 0 || rect.height <= 0) return false;
     const { x, y, width, height } = rect;
     ctx.beginPath();
+    if (invert) ctx.rect(x - 1_000_000, y - 1_000_000, 2_000_000, 2_000_000);
     if (shape === 'circle' || shape === 'ellipse') {
         const radiusX = shape === 'circle' ? Math.min(width, height) / 2 : width / 2;
         const radiusY = shape === 'circle' ? Math.min(width, height) / 2 : height / 2;
@@ -397,8 +507,25 @@ function clipPlaneMask(ctx, shape, rect) {
             ctx.lineTo(x + radius, y + height); ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
             ctx.lineTo(x, y + radius); ctx.quadraticCurveTo(x, y, x + radius, y);
         }
+    } else if (['polygon', 'star', 'arrow'].includes(shape)) {
+        const vertices = maskPolygon(shape);
+        ctx.moveTo(x + vertices[0][0] * width, y + vertices[0][1] * height);
+        for (let index = 1; index < vertices.length; index++) ctx.lineTo(x + vertices[index][0] * width, y + vertices[index][1] * height);
+        ctx.closePath();
+    } else if (shape === 'capsule') {
+        const radius = Math.min(width, height) / 2;
+        if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, width, height, radius);
+        else {
+            ctx.moveTo(x + radius, y); ctx.lineTo(x + width - radius, y);
+            ctx.arc(x + width - radius, y + radius, radius, -Math.PI / 2, Math.PI / 2);
+            ctx.lineTo(x + radius, y + height);
+            ctx.arc(x + radius, y + radius, radius, Math.PI / 2, Math.PI * 1.5);
+        }
+    } else if (shape === 'rectangle') {
+        ctx.rect(x, y, width, height);
     } else return false;
-    ctx.clip();
+    if (invert) ctx.clip('evenodd');
+    else ctx.clip();
     return true;
 }
 
@@ -574,17 +701,33 @@ function rasterizeDepthBuffer(ctx, faces, logicalWidth, logicalHeight, depthOfFi
         }
         data[offset + 3] = Math.round(255 * outAlpha);
     };
-    const maskAlpha = (shape, u, v) => {
+    const maskAlpha = (shape, u, v, aspectRatio = 1, invert = false) => {
         if (!shape || shape === 'none') return 1;
-        const x = Math.abs(u - 0.5), y = Math.abs(v - 0.5);
+        const aspect = clamp(n(aspectRatio, 1), 0.01, 100);
+        const minSide = Math.min(aspect, 1);
+        const x = Math.abs(u - 0.5) * aspect, y = Math.abs(v - 0.5);
         let distance;
-        if (shape === 'circle') distance = 0.5 - Math.hypot(x, y);
-        else if (shape === 'ellipse') distance = 1 - Math.hypot(x * 2, y * 2);
-        else if (shape === 'rounded-rectangle') {
-            const radius = 0.12, qx = x - (0.5 - radius), qy = y - (0.5 - radius);
-            distance = radius - Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) - Math.min(Math.max(qx, qy), 0);
+        if (shape === 'circle') distance = (minSide / 2 - Math.hypot(x, y)) / minSide;
+        else if (shape === 'ellipse') distance = 1 - Math.hypot((u - 0.5) * 2, (v - 0.5) * 2);
+        else if (shape === 'rounded-rectangle' || shape === 'capsule') {
+            const radius = minSide * (shape === 'capsule' ? 0.5 : 0.12);
+            const qx = x - (aspect / 2 - radius), qy = y - (0.5 - radius);
+            distance = (radius - Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) - Math.min(Math.max(qx, qy), 0)) / minSide;
+        } else if (shape === 'rectangle') distance = Math.min(0.5 - Math.abs(u - 0.5), 0.5 - Math.abs(v - 0.5));
+        else if (['polygon', 'star', 'arrow'].includes(shape)) {
+            const vertices = maskPolygon(shape);
+            let inside = false, minDistance = Infinity;
+            for (let index = 0, previous = vertices.length - 1; index < vertices.length; previous = index++) {
+                const [ax, ay] = vertices[previous], [bx, by] = vertices[index];
+                const dx = bx - ax, dy = by - ay;
+                const projection = clamp(((u - ax) * dx + (v - ay) * dy) / (dx * dx + dy * dy || 1), 0, 1);
+                minDistance = Math.min(minDistance, Math.hypot(u - ax - dx * projection, v - ay - dy * projection));
+                if ((ay > v) !== (by > v) && u < (dx * (v - ay)) / (dy || 1e-12) + ax) inside = !inside;
+            }
+            distance = (inside ? 1 : -1) * minDistance;
         } else return 1;
-        return clamp((distance + 0.012) / 0.024, 0, 1);
+        const coverage = clamp((distance + 0.012) / 0.024, 0, 1);
+        return invert ? 1 - coverage : coverage;
     };
     const raster = (face, depthPass, clipRect = null, fragmentPixels = null) => {
         const [a, b, c] = face.points;
@@ -653,7 +796,7 @@ function rasterizeDepthBuffer(ctx, faces, logicalWidth, logicalHeight, depthOfFi
             const pixel = y * pixelWidth + x;
             const u = uv ? ((wa * uv[0][0] / a.z) + (wb * uv[1][0] / b.z) + (wc * uv[2][0] / c.z)) / reciprocalDepth : 0;
             const v = uv ? ((wa * uv[0][1] / a.z) + (wb * uv[1][1] / b.z) + (wc * uv[2][1] / c.z)) / reciprocalDepth : 0;
-            const mask = uv ? maskAlpha(face.maskShape, u, v) : 1;
+            const mask = uv ? maskAlpha(face.maskShape, u, v, face.maskAspectRatio, face.maskInvert) : 1;
             if (mask <= 0) continue;
             if (depthPass) {
                 // Blend-mode surfaces need the already-rendered backdrop to
@@ -921,15 +1064,8 @@ function project(p, camera, width, height) {
     return projectCameraPoint(q, camera, width, height);
 }
 
-/** Deterministically sample asset-keyed waveform peaks for preview and export. */
-export function sampleAudioEnvelope(peaks, time = 0, duration = 0) {
-    if (!Array.isArray(peaks) || !peaks.length) return 0;
-    const span = Math.max(0, n(duration));
-    const at = span > 0 ? clamp(n(time) / span, 0, 1) * (peaks.length - 1) : 0;
-    const lo = Math.floor(at), hi = Math.min(peaks.length - 1, lo + 1);
-    const a = clamp(n(peaks[lo]), 0, 1), b = clamp(n(peaks[hi]), 0, 1);
-    return a + (b - a) * (at - lo);
-}
+/** Re-export the shared normalized waveform sampler for existing consumers. */
+export { sampleAudioEnvelope };
 
 /** Validate and repair object parenting without mutating the authored scene.
  * Missing parents and cyclic edges are detached to the scene root so preview
@@ -1104,9 +1240,13 @@ function rgbaAlpha(color, alpha) {
 }
 
 function convexHull(points) {
-    const sorted = [...points].sort((a, b) => a.x - b.x || a.z - b.z);
+    // Callers project points into a 2D plane, which may use either X/Y or
+    // X/Z coordinates. Resolve the second axis once so the hull stays valid
+    // for vertical, horizontal, and arbitrarily oriented shadow receivers.
+    const ordinate = point => Number.isFinite(Number(point?.y)) ? Number(point.y) : Number(point?.z);
+    const sorted = [...points].sort((a, b) => a.x - b.x || ordinate(a) - ordinate(b));
     if (sorted.length < 3) return sorted;
-    const turn = (o, a, b) => (a.x - o.x) * (b.z - o.z) - (a.z - o.z) * (b.x - o.x);
+    const turn = (o, a, b) => (a.x - o.x) * (ordinate(b) - ordinate(o)) - (ordinate(a) - ordinate(o)) * (b.x - o.x);
     const lower = [], upper = [];
     for (const point of sorted) {
         while (lower.length >= 2 && turn(lower[lower.length - 2], lower[lower.length - 1], point) <= 0) lower.pop();
@@ -1119,6 +1259,45 @@ function convexHull(points) {
     }
     lower.pop(); upper.pop();
     return lower.concat(upper);
+}
+
+function clipPolygonToConvexPolygon(subject, boundary) {
+    if (!Array.isArray(subject) || subject.length < 3 || !Array.isArray(boundary) || boundary.length < 3) return [];
+    const area = boundary.reduce((sum, point, index) => {
+        const next = boundary[(index + 1) % boundary.length];
+        return sum + point.x * next.y - next.x * point.y;
+    }, 0);
+    const orientation = area >= 0 ? 1 : -1;
+    let output = subject;
+    for (let edge = 0; edge < boundary.length && output.length; edge++) {
+        const a = boundary[edge], b = boundary[(edge + 1) % boundary.length];
+        const signedDistance = point => orientation * ((b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x));
+        const input = output;
+        output = [];
+        let previous = input[input.length - 1];
+        let previousDistance = signedDistance(previous);
+        for (const current of input) {
+            const currentDistance = signedDistance(current);
+            const previousInside = previousDistance >= -1e-8;
+            const currentInside = currentDistance >= -1e-8;
+            if (previousInside !== currentInside) {
+                const amount = previousDistance / (previousDistance - currentDistance);
+                output.push({
+                    x: previous.x + (current.x - previous.x) * amount,
+                    y: previous.y + (current.y - previous.y) * amount,
+                    point: V(
+                        previous.point.x + (current.point.x - previous.point.x) * amount,
+                        previous.point.y + (current.point.y - previous.point.y) * amount,
+                        previous.point.z + (current.point.z - previous.point.z) * amount,
+                    ),
+                });
+            }
+            if (currentInside) output.push(current);
+            previous = current;
+            previousDistance = currentDistance;
+        }
+    }
+    return output;
 }
 
 /** Find projected mesh silhouette loops for a point/directional light. */
@@ -1346,7 +1525,7 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
         projection: animatedCamera.projection === 'orthographic' ? 'orthographic' : 'perspective',
         orthoScale: clamp(n(animatedCamera.orthoScale, SCENE3D_CAMERA_DEFAULTS.orthoScale), 10, 2400), depthOfField,
     };
-    const lights = (Array.isArray(scene.lights) ? scene.lights : []).slice(0, 8).map(light => {
+    const lights = (Array.isArray(scene.lights) ? scene.lights : []).slice(0, MAX_SCENE_LIGHTS).map(light => {
         const animated = { ...light, position: { ...(light?.position || {}) }, direction: { ...(light?.direction || {}) }, target: { ...(light?.target || {}) } };
         for (const animation of Array.isArray(light?.animations) ? light.animations : []) {
             const start = Math.max(0, n(animation?.startTime));
@@ -1403,6 +1582,33 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
     const shadows = [];
     const shadowConfig = scene.shadows || {};
     const groundY = n(shadowConfig.groundY, -1.8);
+    const authoredReceiverPlane = shadowConfig.receiverPlane && typeof shadowConfig.receiverPlane === 'object'
+        ? shadowConfig.receiverPlane : null;
+    const objects = (Array.isArray(scene.objects) ? scene.objects : []).slice(0, MAX_SCENE_OBJECTS);
+    const byId = new Map(objects.filter(o => o?.id).map(o => [o.id, o]));
+    const receiverPlanes = [];
+    if (authoredReceiverPlane) {
+        const point = authoredReceiverPlane.point && [authoredReceiverPlane.point.x, authoredReceiverPlane.point.y, authoredReceiverPlane.point.z].every(value => Number.isFinite(Number(value)))
+            ? V(authoredReceiverPlane.point.x, authoredReceiverPlane.point.y, authoredReceiverPlane.point.z) : V(0, groundY, 0);
+        const normal = authoredReceiverPlane.normal;
+        const normalLength = Math.hypot(n(normal?.x), n(normal?.y), n(normal?.z));
+        receiverPlanes.push({ point, normal: normalLength > 1e-6
+            ? V(n(normal.x) / normalLength, n(normal.y) / normalLength, n(normal.z) / normalLength) : V(0, 1, 0),
+        authored: true });
+    }
+    for (const receiverObject of objects) {
+        if (receiverObject?.type !== 'plane' || receiverObject.receivesShadow !== true || receiverObject.visible === false) continue;
+        const receiverMesh = normalizeSceneMesh(receiverObject);
+        const receiverTransform = resolveObjectTransform(receiverObject, time, duration, byId, scene.audioWaveformsByAsset || {});
+        const receiverVertices = receiverMesh.vertices.map(vertex => worldVertex(vertex, receiverTransform));
+        const firstFace = receiverMesh.faces.find(face => face.length >= 3 && face.slice(0, 3).every(index => receiverVertices[index]));
+        if (!firstFace) continue;
+        const [a, b, c] = firstFace.slice(0, 3).map(index => receiverVertices[index]);
+        const normal = norm(cross(sub(b, a), sub(c, a)));
+        receiverPlanes.push({ point: receiverTransform.position, normal, authored: false, sceneObject: true, boundaryPoints: receiverVertices });
+    }
+    if (!receiverPlanes.length) receiverPlanes.push({ point: V(0, groundY, 0), normal: V(0, 1, 0), authored: false });
+    receiverPlanes.length = Math.min(receiverPlanes.length, MAX_SCENE_SHADOW_RECEIVERS);
     const shadowLights = lights.filter(light => light.castsShadow && light.intensity > 0).map(light => ({
         ...light,
         projectionPoint: light.type === 'directional'
@@ -1410,8 +1616,6 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
             : light.position,
     }));
     const totalShadowIntensity = shadowLights.reduce((sum, light) => sum + light.intensity, 0);
-    const objects = (Array.isArray(scene.objects) ? scene.objects : []).slice(0, 80);
-    const byId = new Map(objects.filter(o => o?.id).map(o => [o.id, o]));
     for (let objectOrder = 0; objectOrder < objects.length; objectOrder++) {
         if (sceneTriangleCount >= MAX_SCENE_TRIANGLES) break;
         const object = objects[objectOrder];
@@ -1504,7 +1708,22 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
         if (shadowConfig.enabled !== false && object?.castsShadow !== false && object?.type !== 'plane') {
             for (const light of shadowLights) {
                 const shadowLight = light.projectionPoint;
-                if (shadowLight.y <= groundY) continue;
+                for (const receiverPlane of receiverPlanes) {
+                const receiverPoint = receiverPlane.point;
+                let planeNormal = receiverPlane.normal;
+                const lightSide = dot(sub(shadowLight, receiverPoint), planeNormal);
+                if (lightSide < 0) {
+                    planeNormal = V(-planeNormal.x, -planeNormal.y, -planeNormal.z);
+                }
+                const orientedLightSide = Math.abs(lightSide);
+                if (orientedLightSide < 1e-4) continue;
+                const planeReference = Math.abs(planeNormal.y) < 0.9 ? V(0, 1, 0) : V(1, 0, 0);
+                const planeTangent = norm(cross(planeReference, planeNormal));
+                const planeBitangent = norm(cross(planeNormal, planeTangent));
+                const receiverBoundary = receiverPlane.boundaryPoints?.map(point => {
+                    const relative = sub(point, receiverPoint);
+                    return { x: dot(relative, planeTangent), y: dot(relative, planeBitangent) };
+                });
                 // Surface shading limits spotlights to their authored cone.
                 // Apply the same cone to projected shadows, otherwise a spot
                 // aimed away from an object still paints a full-strength
@@ -1524,18 +1743,26 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
                     shadowCone *= shadowCone;
                     if (shadowCone <= 0) continue;
                 }
-                const projectToGround = vertex => {
-                    const dy = vertex.y - shadowLight.y;
-                    if (Math.abs(dy) < 1e-4) return null;
-                    const amount = (groundY - shadowLight.y) / dy;
-                    // Offset the projected surface to the visible top of a
-                    // typical ground plane. Without this small normal offset,
-                    // painter-only canvases sort the shadow behind the plane
-                    // and the plane completely hides it.
-                    const shadowPlaneY = groundY + 0.06;
-                    return amount > 0 ? V(shadowLight.x + (vertex.x - shadowLight.x) * amount, shadowPlaneY, shadowLight.z + (vertex.z - shadowLight.z) * amount) : null;
+                const projectToReceiver = vertex => {
+                    const vertexSide = dot(sub(vertex, receiverPoint), planeNormal);
+                    const denominator = orientedLightSide - vertexSide;
+                    if (Math.abs(denominator) < 1e-4) return null;
+                    const amount = orientedLightSide / denominator;
+                    if (!(amount > 0) || !Number.isFinite(amount)) return null;
+                    const intersection = add(shadowLight, V(
+                        (vertex.x - shadowLight.x) * amount,
+                        (vertex.y - shadowLight.y) * amount,
+                        (vertex.z - shadowLight.z) * amount,
+                    ));
+                    // Lift the catcher shadow slightly toward the light so
+                    // painter-only canvases keep it visible over the receiver.
+                    // The legacy ground plane retains its authored offset.
+                    const offset = Number.isFinite(Number(shadowConfig.surfaceOffset))
+                        ? clamp(Number(shadowConfig.surfaceOffset), 0, 0.2)
+                        : (receiverPlane.authored || receiverPlane.sceneObject ? 0.01 : 0.06);
+                    return add(intersection, V(planeNormal.x * offset, planeNormal.y * offset, planeNormal.z * offset));
                 };
-                const projectedGround = vertices.map(projectToGround);
+                const projectedGround = vertices.map(projectToReceiver);
                 const silhouetteLoops = object.type === 'mesh'
                     ? meshLightSilhouetteLoops(mesh, vertices, shadowLight) : null;
                 const shadowShapes = silhouetteLoops?.every(loop => loop.every(index => projectedGround[index]))
@@ -1556,17 +1783,31 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
                         }));
                     })
                     : (() => {
-                        const hull = convexHull(projectedGround.filter(Boolean));
-                        return hull.length >= 3 ? [{ points: hull.map(point => V(point.x, point.y, point.z)) }] : [];
+                        const planeCoordinates = projectedGround.filter(Boolean).map(point => {
+                            const relative = sub(point, receiverPoint);
+                            return { point, x: dot(relative, planeTangent), y: dot(relative, planeBitangent) };
+                        });
+                        const hull = convexHull(planeCoordinates);
+                        return hull.length >= 3 ? [{ points: hull.map(entry => entry.point) }] : [];
                     })();
                 for (const shape of shadowShapes) {
-                    if (shape.points.length < 3) continue;
+                    const clippedShape = receiverBoundary?.length >= 3
+                        ? clipPolygonToConvexPolygon(shape.points.map(point => {
+                            const relative = sub(point, receiverPoint);
+                            return { point, x: dot(relative, planeTangent), y: dot(relative, planeBitangent) };
+                        }), receiverBoundary)
+                        : shape.points.map(point => ({ point }));
+                    if (clippedShape.length < 3) continue;
+                    const shapePoints = clippedShape.map(entry => entry.point);
+                    const shapeUnchanged = shapePoints.length === shape.points.length
+                        && shapePoints.every((point, index) => point === shape.points[index]);
                     shadows.push({
-                        points: shape.points.map(point => project(point, camera, width, height)),
-                        ...(shape.edgeFlags ? { edgeFlags: shape.edgeFlags } : {}),
+                        points: shapePoints.map(point => project(point, camera, width, height)),
+                        ...(shape.edgeFlags && shapeUnchanged ? { edgeFlags: shape.edgeFlags } : {}),
                         opacity: clamp(n(shadowConfig.opacity, 0.24) * (light.intensity / Math.max(0.001, totalShadowIntensity)) * shadowCone * shadowAttenuation * objectOpacity, 0, 0.75),
                         blur: clamp(n(shadowConfig.blur, 12), 0, 80), color: shadowConfig.color || '#111827',
                     });
+                }
                 }
             }
         }
@@ -1641,7 +1882,9 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
                 const z = (triangle[0].z + triangle[1].z + triangle[2].z) / 3;
                 const face = { projected: triangle, z, order: objectOrder, color, opacity: objectOpacity,
                     textureLighting: textureLighting(ambient, contributions, metalness, roughness, emissiveColor, emissiveIntensity),
-                    maskShape: ['circle', 'ellipse', 'rounded-rectangle'].includes(object.maskShape) ? object.maskShape : 'none', maskRect,
+                    maskShape: TEXTURE_MASK_SHAPES.has(object.maskShape) ? object.maskShape : 'none',
+                    maskAspectRatio: Math.abs(n(object.size?.x, 1) / (n(object.size?.y, 1) || 1)),
+                    maskInvert: !!object.maskInvert, maskRect,
                     blendMode: SCENE3D_BLEND_MODES.includes(object.blendMode) ? object.blendMode : 'source-over', wireframe: !!object.wireframe,
                     wireframeWidth: clamp(n(object.wireframeWidth, 1.5), 0.5, 8), wireframeEdges: [true, i + 1 === projected.length - 1, i === 1],
                     stroke: object.wireframe ? colorWithLight(object.wireColor || '#FFFFFF', 0.8) : null };
@@ -1660,11 +1903,11 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
             }
         }
     }
-    // Cast shadows are translucent surfaces on the configured ground plane.
-    // Put them through the same depth compositor as meshes so an opaque ground
-    // plane does not paint over them and foreground geometry still occludes
-    // them. The fan's internal edges are excluded from blur coverage to avoid
-    // seams between its triangles.
+    // Cast shadows are translucent surfaces on the configured ground or
+    // authored receiver planes. Put them through the same depth compositor as
+    // meshes so receiver planes do not paint over them and foreground geometry
+    // still occludes them. The fan's internal edges are excluded from blur
+    // coverage to avoid seams between its triangles.
     for (const shadow of shadows) {
         if (faces.length >= MAX_SCENE_TRIANGLES) break;
         const triangles = shadow.edgeFlags
@@ -1690,7 +1933,7 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
         }
     }
     const particleConfig = scene.particles || {};
-    const particleCount = Math.round(clamp(n(particleConfig.count, 0), 0, 500));
+    const particleCount = Math.round(clamp(n(particleConfig.count, 0), 0, MAX_SCENE_PARTICLES));
     const seed = resolveParticleSeed(particleConfig);
     const particleReactive = particleConfig.audioReactive || {};
     const particleWaveform = scene.audioWaveformsByAsset?.[particleReactive.assetId];
@@ -1758,7 +2001,7 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
         }
         if (face.image) {
             const useMaskFallback = !depthRendered && face.maskShape !== 'none' && face.maskRect;
-            if (useMaskFallback) { ctx.save(); clipPlaneMask(ctx, face.maskShape, face.maskRect); }
+            if (useMaskFallback) { ctx.save(); clipPlaneMask(ctx, face.maskShape, face.maskRect, face.maskInvert); }
             ctx.globalCompositeOperation = face.blendMode === 'addition' ? 'lighter' : face.blendMode || 'source-over';
             drawTexturedTriangle(ctx, face.image, face.uvs, face.projected, face.opacity);
             if (useMaskFallback) ctx.restore();
@@ -1766,7 +2009,7 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
             continue;
         }
         const useMaskFallback = !depthRendered && face.maskShape !== 'none' && face.maskRect;
-        if (useMaskFallback) { ctx.save(); clipPlaneMask(ctx, face.maskShape, face.maskRect); }
+        if (useMaskFallback) { ctx.save(); clipPlaneMask(ctx, face.maskShape, face.maskRect, face.maskInvert); }
         ctx.beginPath();
         ctx.moveTo(face.projected[0].x, face.projected[0].y);
         for (let i = 1; i < face.projected.length; i++) ctx.lineTo(face.projected[i].x, face.projected[i].y);

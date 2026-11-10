@@ -850,6 +850,7 @@ export function flattenScene(scene, opts = {}) {
                 })) } : {}),
                 ...(animations.length ? { animations, animation: 'none' } : {}),
                 ...(node.expressions && Object.keys(node.expressions).length ? { expressions: { ...node.expressions } } : {}),
+                ...(node.audioReactive && typeof node.audioReactive === 'object' ? { audioReactive: { ...node.audioReactive } } : {}),
                 // Group effects are carried on compositionStack and applied
                 // after the group is isolated. Inheriting them onto each leaf
                 // changes the result for overlapping children (and applies

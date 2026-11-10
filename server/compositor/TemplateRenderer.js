@@ -114,9 +114,7 @@ async function renderTemplateFrames(template, opts) {
     const files = [];
     const videoImages = new Map();
     const sceneVideoObjects = (params.scene?.objects || []).filter(object => object?.type === 'video');
-    const remapSceneObjectTime = sceneVideoObjects.some(object => object.timeRemap)
-        ? (await loadScene3D()).remapSceneObjectTime
-        : (_remap, time) => time;
+    const { resolveSceneVideoSourceTime, getSceneShutterSampleTimes } = await loadScene3D();
     // Reuse the backing surface across frames; PNG bytes are copied out before
     // the next clear, avoiding per-frame native canvas allocation at 30–60fps.
     const c = Canvas.createCanvas(W, H);
@@ -136,10 +134,7 @@ async function renderTemplateFrames(template, opts) {
                 // the frame list so the requested absolute source time is mapped
                 // back into that sequence exactly once.
                 const extractedStart = Math.max(0, Number(frameSource?.startTime) || 0);
-                const speed = Math.max(0.05, Number(object.videoSpeed) || 1);
-                const sourceTime = remapSceneObjectTime(object.timeRemap, sampleTime, duration);
-                const videoStart = Math.max(0, Number(object.videoStart) || 0);
-                const requestedTime = videoStart + Math.max(0, sourceTime) * speed;
+                const requestedTime = resolveSceneVideoSourceTime(object, sampleTime, duration);
                 const requestedIndex = Math.max(0, Math.floor((requestedTime - extractedStart) * fps));
                 const frameIndex = object.videoLoop === false
                     ? Math.min(requestedIndex, sourceFrames.length - 1)
@@ -165,18 +160,16 @@ async function renderTemplateFrames(template, opts) {
         const externalShutter = !sceneOwnsMotionBlur ? opts.motionBlur : null;
         const shutter = sceneShutter || externalShutter;
         let sampleTimes = [i / fps];
-        if (shutter?.enabled) {
-            const samples = sceneOwnsMotionBlur
-                ? Math.round(Math.max(2, Math.min(5, Number(sceneShutter.samples) || 3)))
-                : Math.round(Math.max(2, Math.min(15, Number(externalShutter.samples) || 5)));
-            const shutterFps = Math.max(1, Math.min(120, Number(shutter.frameRate) || 30));
-            const angle = Math.max(0, Math.min(360, Number(shutter.shutterAngle ?? 180)));
+        if (sceneOwnsMotionBlur) {
+            sampleTimes = getSceneShutterSampleTimes(i, duration, fps, sceneShutter);
+        } else if (externalShutter?.enabled) {
+            const samples = Math.round(Math.max(2, Math.min(15, Number(externalShutter.samples) || 5)));
+            const shutterFps = Math.max(1, Math.min(120, Number(externalShutter.frameRate) || 30));
+            const angle = Math.max(0, Math.min(360, Number(externalShutter.shutterAngle ?? 180)));
             const exposure = angle / (360 * shutterFps);
             sampleTimes = Array.from({ length: samples }, (_, index) => {
                 const offset = ((index + 0.5) / samples - 0.5) * exposure;
-                return sceneOwnsMotionBlur
-                    ? Math.max(0, i / fps + offset)
-                    : Math.max(0, Math.min(duration, i / fps + offset));
+                return Math.max(0, Math.min(duration, i / fps + offset));
             });
         }
         const frameImagesByTime = new Map();

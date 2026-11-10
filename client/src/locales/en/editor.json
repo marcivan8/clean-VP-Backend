@@ -822,6 +822,7 @@
     "stripFailed": "upload failed",
     "play": "Play",
     "pause": "Pause",
+    "expand": "Open the full chat",
     "collapse": "Back to the editor"
   },
   "mobileCaptions": {
@@ -897,6 +898,7 @@
     "preparingFile": "Preparing the file…",
     "preparingFilePercent": "Preparing the file… {{percent}}%",
     "shareUnsupported": "Sharing files isn't supported on this browser. Use Save to phone.",
+    "savedInsteadOfShare": "Saved to your files. The share sheet needs the file ready first, so open it from there.",
     "shareFailed": "Couldn't open the share menu. Try Save to phone.",
     "exportAgain": "Export another version",
     "failed": "The export didn't finish",
@@ -1044,6 +1046,8 @@
       "meshGeometryHelp": "Enter vertices, indexed faces and optional per-vertex UVs. Limits: 5,000 vertices and faces.",
       "meshGeometryInvalid": "Geometry is invalid. Check vertex coordinates, face indices and UV count.",
       "parent": "Parent",
+      "castShadows": "Cast shadows",
+      "receiveShadows": "Receive cast shadows",
       "root": "Scene root",
       "size": "Size {{axis}}",
       "radius": "Radius",
@@ -1122,11 +1126,17 @@
         "luminosity": "Luminosity"
       },
       "mask": "Plane mask",
+      "maskInvert": "Invert mask",
       "masks": {
         "none": "None",
         "ellipse": "Ellipse",
         "circle": "Circle",
-        "rounded-rectangle": "Rounded rectangle"
+        "rounded-rectangle": "Rounded rectangle",
+        "rectangle": "Rectangle",
+        "capsule": "Capsule",
+        "polygon": "Polygon",
+        "star": "Star",
+        "arrow": "Arrow"
       },
       "keyframes": "Animation tracks",
       "property": "Animated property",
