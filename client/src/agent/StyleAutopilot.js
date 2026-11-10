@@ -292,7 +292,13 @@ export async function runAutopilot(request, opts = {}) {
                 details: { styleId, done: [], skipped: policySkipped, report },
             };
         }
-        return { success: false, operation: 'auto_edit', jobId: lastJobId, message: `${intro}Auto edit (${name}) could not apply anything. Skipped: ${[...skipped, ...policySkipped.map(sk => sk.id)].join('; ')}.` };
+        return {
+            success: false,
+            operation: 'auto_edit',
+            jobId: lastJobId,
+            message: `${intro}Auto edit (${name}) could not apply anything. Skipped: ${[...skipped, ...policySkipped.map(sk => sk.id)].join('; ')}.`,
+            details: { styleId, done: [], skipped: [...skipped, ...policySkipped], report },
+        };
     }
     // Work the policy dropped because it was already done is reported too:
     // "nothing to do" has to be legible, or a short Auto run looks broken.

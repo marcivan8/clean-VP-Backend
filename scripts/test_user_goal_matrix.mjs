@@ -152,7 +152,7 @@ const largeContext = ContextGenerator.getTimelineContext();
 assert.equal(largeContext.mediaBin.length, 70, 'large bins are not silently truncated');
 assert.equal(largeContext.assetManifest.total, 71);
 assert.ok(largeContext.mediaBin.some(asset => asset.id === 'bin-69'));
-assert.doesNotMatch(largeContext.display, /bin-reference|inspiration\.mp4/);
+assert.match(largeContext.display, /Style reference: inspiration\.mp4; analysis=pending\. It is design guidance only, never an edit source\./);
 
 // Incomplete transcription/analysis still yields a usable Auto plan that asks
 // for transcript-dependent work first rather than pretending analysis exists.
