@@ -33,6 +33,7 @@
 
 import { TEMPLATE_KINDS, TEMPLATE_DEFAULTS } from './TemplateGraphics.js';
 import { resolveGraphic } from './Storyboard.js';
+import { COMPONENT_PRESETS as COMPONENT_CATALOG } from './ComponentLibrary.js';
 
 /**
  * Where a beat's graphic sits, as the percentage position `addTemplateClip`
@@ -339,17 +340,45 @@ export function placementFor(beat, opts = {}) {
 
     const tries = [beat.graphic, ...(Array.isArray(opts.fallbacks) ? opts.fallbacks : [])];
     for (const graphic of tries) {
-        const resolved = resolveGraphic(graphic);
+        let resolved = resolveGraphic(graphic);
         if (!resolved) continue;
-        const params = resolved.source === 'component'
+        let params = resolved.source === 'component'
             ? componentParamsFor(resolved.id, beat)
             : paramsFor(graphic, beat, { imageUrl: opts.imageUrl || null });
         if (!params) continue;
         const pos = LAYOUT_POSITION[beat.layout] || LAYOUT_POSITION.card;
+        const techniques = (Array.isArray(opts.techniques) ? opts.techniques : [])
+            .filter(item => item?.component === resolved.id
+                && (!Array.isArray(item.beatKinds) || item.beatKinds.length === 0 || item.beatKinds.includes(beat.kind))
+                && item.preset && COMPONENT_CATALOG[resolved.id]?.[item.preset])
+            .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
+        let technique = techniques.length
+            ? techniques[Math.abs(num(opts.useIndex, 0)) % techniques.length]
+            : null;
+        // A semantic template (for example a stat card) can otherwise hide a
+        // retrieved motion technique because the KB names executable motion
+        // components. Allow a compatible technique to supply that beat's
+        // visual component when it can carry the same transcript evidence.
+        if (!technique) {
+            const compatible = (Array.isArray(opts.techniques) ? opts.techniques : [])
+                .filter(item => item?.component && item.preset
+                    && (!Array.isArray(item.beatKinds) || item.beatKinds.length === 0 || item.beatKinds.includes(beat.kind))
+                    && COMPONENT_CATALOG[item.component]?.[item.preset]
+                    && componentParamsFor(item.component, beat))
+                .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
+            if (compatible.length) {
+                technique = compatible[Math.abs(num(opts.useIndex, 0)) % compatible.length];
+                resolved = { source: 'component', id: technique.component };
+                params = componentParamsFor(resolved.id, beat);
+            }
+        }
         return {
             source: resolved.source,
             id: resolved.id,
-            preset: resolved.source === 'component' ? presetFor(resolved.id, num(opts.useIndex, 0)) : null,
+            preset: resolved.source === 'component'
+                ? (technique?.preset || presetFor(resolved.id, num(opts.useIndex, 0)))
+                : null,
+            technique: technique?.name || null,
             params,
             start,
             duration: Number((end - start).toFixed(3)),
@@ -404,7 +433,7 @@ export function placementsFor(beats, opts = {}) {
 
         let placement = null;
         for (const graphic of preferred) {
-            placement = placementFor({ ...beat, graphic }, { useIndex: used.get(graphic) || 0, imageUrl });
+            placement = placementFor({ ...beat, graphic }, { useIndex: used.get(graphic) || 0, imageUrl, techniques: opts.techniques });
             if (placement) break;
         }
 

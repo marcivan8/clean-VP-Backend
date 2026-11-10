@@ -12,12 +12,12 @@
 import useTimelineStore from '../store/useTimelineStore.js';
 import useAIStore from '../store/useAIStore.js';
 import { editJobManager } from './EditJobManager.js';
-import { buildAutopilotSteps, getEditingStyle } from './EditingStyles.js';
+import { buildAutopilotSteps, getEditingStyle, inferEditingStyle } from './EditingStyles.js';
 import { beginAutoRun, endAutoRun } from './autoRunContext.js';
 import { decide } from './EditPolicy.js';
 
 const STEP_LABEL = {
-    captions: 'captions', transcript: 'transcript', short: 'best moment kept', vertical: 'vertical 9:16', request: 'your request', montage: 'visual montage',
+    captions: 'captions', transcript: 'transcript', short: 'best moment kept', vertical: 'vertical 9:16', request: 'your request', montage: 'visual montage', storyboard: 'motion storyboard',
     silences: 'silences removed', fillers: 'filler words removed', audio: 'audio levelled', recipe: 'style recipe',
     broll: 'b-roll placed',
     // Steps the policy adds because the playbook needed them first.
@@ -46,8 +46,17 @@ function progress(message) {
  */
 export async function runAutopilot(request, opts = {}) {
     const store = useTimelineStore.getState();
-    const chosen = opts.styleId || store.editingStyle;
+    // A style named in the prompt is explicit creative direction. It should
+    // reach the planner even when the style picker is unset or still points
+    // at a previous project choice.
+    const chosen = opts.styleId || inferEditingStyle(request) || store.editingStyle;
     const styleId = getEditingStyle(chosen) ? chosen : 'talking_head';
+    if (chosen && getEditingStyle(chosen) && store.editingStyle !== chosen) {
+        // The style is shared input for ROKA, illustration placement, recipe
+        // effects and the short finisher. Keep them on the same inferred style
+        // for this project instead of only decorating the prompt text.
+        store.setEditingStyle?.(chosen);
+    }
     const run = opts.run || ((p) => editJobManager.processEditRequest(p, { autoApprove: true }));
     // store.captions holds the transcript words (filled by the background
     // transcription on upload), not caption clips: it is what Reel needs to
@@ -160,7 +169,7 @@ export async function runAutopilot(request, opts = {}) {
     } catch (err) {
         console.warn('[StyleAutopilot] progress plan callback failed:', err);
     }
-    const intro = getEditingStyle(chosen) ? '' : 'No style picked, so Talking head was used. ';
+    const intro = chosen && getEditingStyle(chosen) ? '' : 'No style picked, so Talking head was used. ';
 
     stopRequested = false;
     running = true;

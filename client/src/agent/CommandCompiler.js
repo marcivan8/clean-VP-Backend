@@ -563,7 +563,7 @@ function compileAutoCaptions(step, ctx) {
             endpoint: '/api/captions/generate',
             method: 'POST',
             payload: {
-                filename: '$uploaded_file', language: step.language || 'en', style: step.style || 'default',
+                filename: '$uploaded_file', language: step.language || 'auto', style: step.style || 'default',
                 ...(step.scope === 'range' ? { scope: 'range', rangeStart: step.range_start, rangeEnd: step.range_end } : {}),
                 ...(step.scope === 'clip' && step.clip_id ? { scope: 'clip', clipId: step.clip_id } : {}),
             },

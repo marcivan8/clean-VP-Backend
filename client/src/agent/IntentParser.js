@@ -395,6 +395,19 @@ const NLP_MAP = {
     ],
 };
 
+function negatesCameraEdit(text) {
+    const lower = String(text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const subject = String.raw`(?:camera\s+angles?|angles?\s+(?:de\s+)?camera|virtual\s+multicam|multi[- ]?cam(?:era)?|multicam|close[- ]?ups?)`;
+    return new RegExp(String.raw`\b(?:do\s+not|don't|dont|never|without|no|avoid|skip|remove|disable)\b(?:[\w'-]+\s+){0,5}${subject}`).test(lower)
+        || new RegExp(String.raw`\bne\s+(?:[\w'-]+\s+){0,5}(?:pas|plus)\s+(?:[\w'-]+\s+){0,3}${subject}`).test(lower)
+        || new RegExp(String.raw`\bsans\s+(?:aucun\s+)?${subject}`).test(lower);
+}
+
+const CAMERA_EDIT_OPERATIONS = new Set([
+    'apply_angle', 'apply_camera_angles', 'virtual_multicam', 'macro_multicam',
+    'compound_clean_virtual_multicam', 'compound_split_speakers_virtual_multicam',
+]);
+
 // System prompt lives server-side in controllers/aiAgentController.js (parseIntentHandler).
 // It is never sent from the client — only { prompt, context, conversationHistory } are posted.
 
@@ -491,8 +504,12 @@ export class IntentParser {
             console.log('[IntentParser] Attempting API parse...');
             const apiResult = await this.parseViaAPI(prompt, structuredContext, signal);
             if (apiResult) {
-                console.log('[IntentParser] API parse successful:', apiResult.operation);
-                return this.validateAndNormalize(apiResult, prompt);
+                const apiOperation = apiResult.operation || apiResult.intent?.operation;
+                console.log('[IntentParser] API parse successful:', apiOperation);
+                if (!(negatesCameraEdit(prompt) && CAMERA_EDIT_OPERATIONS.has(apiOperation))) {
+                    return this.validateAndNormalize(apiResult, prompt);
+                }
+                console.warn('[IntentParser] Ignoring camera-angle operation contradicted by the request.');
             }
         } catch (error) {
             if (signal && signal.aborted) throw error;
@@ -500,7 +517,7 @@ export class IntentParser {
             EventBus.emit(EVENT_TYPES.AI_UNAVAILABLE, { error: error.message, prompt });
 
             const fallbackResult = FallbackParser.parse(prompt);
-            if (fallbackResult) {
+            if (fallbackResult && !(negatesCameraEdit(prompt) && CAMERA_EDIT_OPERATIONS.has(fallbackResult.action))) {
                 console.log('[IntentParser] FallbackParser matched:', fallbackResult.action);
                 return this.validateAndNormalize({
                     success: true,
@@ -604,6 +621,11 @@ export class IntentParser {
 
         const cmd = resolved.match;
 
+        // A phrase match inside an instruction such as "do not add camera
+        // angles" is not authorization to run the positive command. Let the
+        // broader edit planner interpret the rest of the request instead.
+        if (['apply_angle', 'macro_multicam'].includes(cmd.id) && negatesCameraEdit(prompt)) return null;
+
         // `executes` is the operation the pipeline actually runs. It lets a
         // registry id differ from the legacy operation name (e.g. split_by_speaker
         // → split_speakers) so the vocabulary can be reorganised without
@@ -630,6 +652,13 @@ export class IntentParser {
     /** Resolve explicit conjunction-separated clauses as one atomic plan. */
     static tryCompoundRegistry(prompt) {
         const lowerPrompt = String(prompt || '').toLowerCase();
+        // These creation intents are complete operations. Splitting a prompt
+        // such as "create a video from the attached images and video clips"
+        // at its final "and" breaks the registered phrase before the normal
+        // registry pass can match it, then localParse can misroute it as
+        // build_from_rushes.
+        const wholeCommand = resolveCommand(prompt).match;
+        if (['create_video_from_assets', 'create_video_from_script'].includes(wholeCommand?.id)) return null;
         if ((lowerPrompt.includes('clean') || lowerPrompt.includes('remove silence'))
             && (lowerPrompt.includes('dynamic') || lowerPrompt.includes('zoom rhythm'))
             && !/\b(multicam|multi-cam|multi camera|multi-camera)\b/.test(lowerPrompt)) {
@@ -901,7 +930,7 @@ export class IntentParser {
         // "split speakers and add multicam" doesn't get swallowed by rhythmZoom.
         // ─────────────────────────────────────────────────────────────────────────
         const hasSplitSpeakersToken = matches('splitSpeakers') || /\b(split\s+speakers?|separate\s+speakers?|diarize)\b/.test(lower);
-        const hasMulticamSignal = matches('virtualMulticam') || /\b(add\s+(virtual\s+)?multi[\s-]?cam(era)?|add\s+multicam)\b/.test(lower);
+        const hasMulticamSignal = !negatesCameraEdit(lower) && (matches('virtualMulticam') || /\b(add\s+(virtual\s+)?multi[\s-]?cam(era)?|add\s+multicam)\b/.test(lower));
 
         if (hasSplitSpeakersToken && hasMulticamSignal) {
             return {
@@ -927,7 +956,7 @@ export class IntentParser {
         // block below, because "multicam" appears in the hasDynamicToken regex
         // and would otherwise hijack "clean + virtual multicam" → compound_clean_dynamic.
         // ─────────────────────────────────────────────────────────────────────────
-        const hasVirtualMulticamToken = matches('virtualMulticam');
+        const hasVirtualMulticamToken = matches('virtualMulticam') && !negatesCameraEdit(lower);
         const hasCleanToken = /\b(clean|remove\s+silence|filler)\b/.test(lower);
 
         // "clean the clips and add a virtual multicam feel" → silence_removal → virtual_multicam
@@ -1273,7 +1302,7 @@ export class IntentParser {
         // ── Split-speakers compound (localParse) ──────────────────────────────
         {
             const _hasSplitSp = matches('splitSpeakers') || /\b(split\s+speakers?|separate\s+speakers?|diarize)\b/.test(lower);
-            const _hasVMSignal = matches('virtualMulticam') || /\b(add\s+(virtual\s+)?multi[\s-]?cam(era)?|add\s+multicam)\b/.test(lower);
+            const _hasVMSignal = !negatesCameraEdit(lower) && (matches('virtualMulticam') || /\b(add\s+(virtual\s+)?multi[\s-]?cam(era)?|add\s+multicam)\b/.test(lower));
 
             if (_hasSplitSp && _hasVMSignal) {
                 return {
@@ -1305,7 +1334,7 @@ export class IntentParser {
         // ── Virtual multicam — check BEFORE compound_clean_dynamic to avoid
         // "multicam" token hijacking "clean + virtual multicam" prompts.
         {
-            const _hasVMToken = matches('virtualMulticam');
+            const _hasVMToken = matches('virtualMulticam') && !negatesCameraEdit(lower);
             const _hasClean   = lower.includes('clean') || lower.includes('remove silence');
 
             if (_hasClean && _hasVMToken) {

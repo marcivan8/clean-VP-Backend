@@ -261,7 +261,7 @@ check('a portrait is only planned when there is a real face to show', () => {
 
 check('the store passes the project\'s assets into the bridge', () => {
     const store = read('../client/src/store/useTimelineStore.js');
-    assert.ok(/placementsFor\(plan\.beats, \{ kindPlan: KIND_PLAN, assets: st\.assets \|\| \[\] \}\)/.test(store),
+    assert.ok(/placementsFor\(plan\.beats, \{[\s\S]*kindPlan: KIND_PLAN,[\s\S]*assets: st\.assets \|\| \[\],[\s\S]*techniques: Array\.isArray\(input\.techniques\)/.test(store),
         'applyStoryboard does not pass assets');
 });
 

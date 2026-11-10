@@ -80,12 +80,12 @@ await check('generic requests and questions', () => {
 });
 await check('playbooks: cuts first, captions after them, levelling after cuts', () => {
     const keys = (id, req = 'edit it', facts = { hasTranscript: true }) => ES.buildAutopilotSteps(id, req, facts).map(s => s.key);
-    // One creative pass only: style recipes include moment animation and SFX;
-    // Reel Pro Finish includes the same suite plus hook/camera treatment.
-    assert.deepEqual(keys('talking_head'), ['cleanup', 'captions', 'recipe']);
-    assert.deepEqual(keys('vlog'), ['silences', 'enhance', 'captions', 'recipe']);
-    assert.deepEqual(keys('podcast'), ['cleanup', 'captions', 'recipe']);
-    assert.deepEqual(keys('interview'), ['cleanup', 'captions', 'recipe']);
+    // Non-Reel styles storyboard transcript-timed beats before their finishing
+    // recipe; Reel Pro Finish owns its own scene planner and creative treatment.
+    assert.deepEqual(keys('talking_head'), ['cleanup', 'captions', 'storyboard', 'recipe']);
+    assert.deepEqual(keys('vlog'), ['silences', 'enhance', 'captions', 'storyboard', 'recipe']);
+    assert.deepEqual(keys('podcast'), ['cleanup', 'captions', 'storyboard', 'recipe']);
+    assert.deepEqual(keys('interview'), ['cleanup', 'captions', 'storyboard', 'recipe']);
     assert.deepEqual(keys('reel'), ['short', 'vertical', 'cleanup', 'finish']);
     assert.deepEqual(keys('reel', 'go', {}), ['transcript', 'short', 'vertical', 'cleanup', 'finish']);
     const referenceSteps = ES.buildAutopilotSteps('reel', 'I want to edit my video just like this reference video', { hasTranscript: true, hasStyleReference: true });
@@ -108,7 +108,7 @@ await check('pacing per style', () => {
 
 log('every playbook prompt reaches its command');
 setTimeline();
-const EXPECT = { captions: 'auto_captions', short: 'extract_short', vertical: 'set_aspect_ratio', silences: 'silence_removal', cleanup: 'long_form_edit', enhance: 'enhance_audio', animate: 'animate_automatically', finish: 'polish_short', recipe: 'apply_style_recipe', broll: 'place_contextual_broll' };
+const EXPECT = { captions: 'auto_captions', short: 'extract_short', vertical: 'set_aspect_ratio', silences: 'silence_removal', cleanup: 'long_form_edit', enhance: 'enhance_audio', animate: 'animate_automatically', finish: 'polish_short', recipe: 'apply_style_recipe', storyboard: 'storyboard_video', broll: 'place_contextual_broll' };
 const seen = new Map();
 for (const id of ES.EDITING_STYLE_IDS) for (const s of ES.buildAutopilotSteps(id, 'go', {})) if (EXPECT[s.key === 'transcript' ? 'captions' : s.key]) seen.set(s.prompt, EXPECT[s.key === 'transcript' ? 'captions' : s.key]);
 for (const [prompt, op] of seen) {
@@ -270,7 +270,7 @@ await check('runs the playbook in order as ONE undo step and reports skips', asy
         S.getState().addTemplateClip('counter', {}, { start: 2, select: false });
         return { success: true, jobId: 'j2' };
     } });
-    assert.deepEqual(prompts, ['Clean up the video', 'Add captions', 'Apply the punchy style recipe']);
+    assert.deepEqual(prompts, ['Clean up the video', 'Add captions', 'Storyboard the whole video', 'Apply the punchy style recipe']);
     assert.equal(r.success, true); assert.equal(r.operation, 'auto_edit');
     assert.match(r.message, /Talking head/); assert.match(r.message, /style recipe/);
     assert.equal(S.getState().past.length, before + 1);
@@ -326,7 +326,7 @@ await check('no style picked: Talking head, said so; clarifications skipped; a t
         if (p === 'Apply the punchy style recipe') throw new Error('boom');
         return { success: true };
     } });
-    assert.equal(prompts.length, 3);
+    assert.equal(prompts.length, 4);
     assert.match(r.message, /No style picked/);
     assert.match(r.message, /needed a clarification/);
     assert.match(r.message, /boom/);

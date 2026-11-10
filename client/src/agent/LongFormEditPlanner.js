@@ -212,7 +212,9 @@ export class LongFormEditPlanner {
         const styleId = captionBrief?.stylePresetId || 'clean-modern';
 
         steps.push(S('auto_captions', {
-            language: 'en',
+            // AssemblyAI accepts `auto` and detects the spoken language. Never
+            // force English for a creative build unless the user asked for it.
+            language: 'auto',
             style: styleId,
             reason: 'Generate synchronized captions for the finished edit',
         }));

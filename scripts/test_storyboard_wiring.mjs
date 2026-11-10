@@ -287,6 +287,22 @@ check('a component preset rotates on reuse and stays a real preset', () => {
     }
 });
 
+check('retrieved compatible motion techniques select a renderer-supported preset', () => {
+    const beat = { id: 'claim-1', start: 2, end: 4, kind: 'claim', graphic: 'kinetic-title', layout: 'punch', text: 'Build with intent', evidence: null };
+    const p = BR.placementFor(beat, { techniques: [
+        { name: 'spoken-word-reveal', component: 'KineticTitle', preset: 'creator', beatKinds: ['claim'], score: 12 },
+        { name: 'unsupported-look', component: 'KineticTitle', preset: 'futurist', beatKinds: ['claim'], score: 99 },
+    ] });
+    assert.equal(p.preset, 'creator');
+    assert.equal(p.technique, 'spoken-word-reveal');
+    const stat = BR.placementFor({ id: 'stat-1', start: 6, end: 9, kind: 'stat', graphic: 'kpi-stat-callout', layout: 'card', text: 'revenue grew by forty percent', evidence: '40%' }, {
+        techniques: [{ name: 'growth-callout', component: 'StatCallout', preset: 'growth', beatKinds: ['stat'], score: 9 }],
+    });
+    assert.equal(stat.id, 'StatCallout', 'the semantic template hid a compatible executable KB technique');
+    assert.equal(stat.preset, 'growth');
+    assert.equal(stat.params.stat, '40%');
+});
+
 check('the whole 44s script plans and bridges with nothing skipped', () => {
     const plan = SB.planStoryboard(REVIEW);
     const { placements, skipped } = BR.placementsFor(plan.beats, { kindPlan: SB.KIND_PLAN });

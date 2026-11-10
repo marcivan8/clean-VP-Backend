@@ -1163,6 +1163,11 @@ export class MediaExecutionEngine {
                 const result = await new VideoEditorTools().execute({ name: action, args });
                 return { action, ...result };
             }
+            case 'place_contextual_illustrations': {
+                const { VideoEditorTools } = await import('./VideoEditorTools.js');
+                const result = new VideoEditorTools().placeContextualIllustrations(args);
+                return { action, ...result };
+            }
             case 'addClip':        this._callStore(store, 'addClip', args.trackId, args.clip); return { action, success: true, message: `Added clip to ${args.trackId}` };
             case 'splitClip':      { this._callStore(store, 'splitClip', args.trackId, args.clipId, args.splitTime); return { action, success: true, message: `Split at ${args.splitTime}s` }; }
             case 'removeClip':     this._callStore(store, 'removeClip', args.trackId, args.clipId); return { action, success: true, message: `Removed clip ${args.clipId}` };
@@ -1357,11 +1362,36 @@ export class MediaExecutionEngine {
                     }
                 }
 
+                // Select executable motion techniques against the actual
+                // dialogue and active style. The storyboard remains usable
+                // when retrieval is unavailable, but its result reports that
+                // it used the built-in component presets instead.
+                let techniques = [];
+                let techniqueStatus = 'unavailable';
+                try {
+                    const transcript = words.slice(0, 600).map(w => String(w.word ?? w.text ?? '')).join(' ').slice(0, 600);
+                    const style = String(st.editingStyle || 'talking_head');
+                    const response = await authFetch('/api/motion/techniques', {
+                        method: 'POST',
+                        body: JSON.stringify({ query: `${style} ${transcript}`, platform: style, tone: style, limit: 24 }),
+                        ...(job?.signal ? { signal: job.signal } : {}),
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    if (response.ok && Array.isArray(data.techniques)) {
+                        techniques = data.techniques;
+                        techniqueStatus = techniques.length ? 'retrieved' : 'no_matches';
+                    }
+                } catch (err) {
+                    if (job?.signal?.aborted) throw err;
+                    console.warn('[storyboard_video] motion technique retrieval unavailable; using compatible built-in presets:', err.message);
+                }
+
                 const dryRun = !!args.dryRun;
-                const result = this._callStore(store, 'applyStoryboard', { words, cuts, dryRun });
+                const result = this._callStore(store, 'applyStoryboard', { words, cuts, dryRun, techniques });
                 if (!result?.success) {
                     return { action, success: false, error: result?.error, message: result?.error || 'The storyboard could not be placed.' };
                 }
+                if (techniqueStatus === 'retrieved' && !(result.techniques || []).length) techniqueStatus = 'no_compatible_match';
 
                 if (dryRun) {
                     // A review run: the plan in words, and the timeline
@@ -1388,7 +1418,7 @@ export class MediaExecutionEngine {
                         details: {
                             dryRun: true, beats: result.beats, reasoning: result.reasoning,
                             skipped: result.skipped?.length || 0,
-                            framing: result.framing, qa: result.qa,
+                            framing: result.framing, qa: result.qa, techniqueStatus,
                         },
                     };
                 }
@@ -1416,11 +1446,15 @@ export class MediaExecutionEngine {
                     message += ` ${result.skipped.length} ${result.skipped.length === 1 ? 'moment was' : 'moments were'} left clean: ${result.skipped[0].reason}.`;
                 }
                 message += ' Every word on screen is your own, and one undo reverts the whole storyboard.';
+                if (techniqueStatus === 'retrieved') message += ` Motion techniques matched to the dialogue and style: ${result.techniques.join(', ')}.`;
+                else if (techniqueStatus === 'no_compatible_match') message += ' No retrieved technique fit the planned graphics, so compatible built-in presets were used.';
+                else message += ' The motion library was unavailable, so compatible built-in presets were used.';
 
                 return {
                     action, success: true, message,
                     details: {
                         placed: result.placed,
+                        techniqueStatus,
                         beats: (result.beats || []).map(b => ({ start: b.start, end: b.end, kind: b.kind, graphic: b.graphic, layout: b.layout, onCut: b.onCut })),
                         cuts: cuts.length,
                         skipped: result.skipped?.length || 0,
@@ -1494,6 +1528,34 @@ export class MediaExecutionEngine {
 
                 const result = this._callStore(store, 'designScene', brief, { plan, palette: footagePalette, subject: footageSubject });
                 if (!result?.success) return { action, success: false, error: result?.error, message: result?.error };
+
+                // Do not leave obvious template copy or a scene that still
+                // fails hard validation on the timeline. `_placeScene` is a
+                // single history entry, so undoing here removes the scene and
+                // its generated clips as one atomic rollback.
+                const placeholders = Array.isArray(result.placeholders) ? result.placeholders : [];
+                const blockingIssues = (Array.isArray(result.issues) ? result.issues : [])
+                    .filter(issue => issue.severity === 'error');
+                if (blockingIssues.length > 0) {
+                    const live = useTimelineStore.getState();
+                    if (Number(live._historyGroupDepth) > 0) {
+                        // Auto owns one larger undo group. Remove only this
+                        // failed scene so earlier successful Auto steps stay.
+                        for (const track of live.tracks || []) {
+                            for (const clip of track.clips || []) {
+                                if (!clipsBefore.has(clip.id)) live.removeClip(track.id, clip.id, { skipHistory: true, only: true });
+                            }
+                        }
+                        if (result.sceneId) live.removeScene?.(result.sceneId);
+                    } else if (typeof live.undo === 'function') {
+                        // A standalone designScene is exactly one undo entry.
+                        live.undo();
+                    } else {
+                        return { action, success: false, message: 'The graphic failed frame checks, and I could not safely remove the incomplete scene. Please undo once to remove it.' };
+                    }
+                    const reason = `The graphic still failed frame checks (${blockingIssues[0]?.message || 'layout error'}), so I removed it.`;
+                    return { action, success: false, message: `${reason} Adjust the wording or layout and ask me to try again.` };
+                }
 
                 const beats = result.plan?.beats || [];
                 const left = (Array.isArray(result.issues) ? result.issues : []).filter(i => i.severity !== 'info');
@@ -2177,7 +2239,7 @@ export class MediaExecutionEngine {
                 if (!(Array.isArray(st.captions) && st.captions.length > 0) && job?.signal) {
                     const sources = listMainTrackSources(st.tracks, st.assets);
                     if (sources.length > 0) {
-                        await this._captionMainTrackSources(sources, { language: 'en', style: 'default' }, job, '/api/captions/generate', { skipHistory: true });
+                        await this._captionMainTrackSources(sources, { language: 'auto', style: 'default' }, job, '/api/captions/generate', { skipHistory: true });
                         st = useTimelineStore.getState();
                     }
                 }

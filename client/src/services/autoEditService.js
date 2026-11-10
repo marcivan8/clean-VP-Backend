@@ -21,7 +21,7 @@ function getSourceFile() {
 
 // ── Auto Captions ─────────────────────────────────────────────────────────────
 
-export const performAutoCaptions = async (filename) => {
+export const performAutoCaptions = async (filename, language = 'auto') => {
     try {
         const { setCaptions } = useTimelineStore.getState();
         console.log('🤖 Agent: Requesting Transcription for', filename);
@@ -29,7 +29,7 @@ export const performAutoCaptions = async (filename) => {
         // FIX: was fetch('/api/audio/transcribe', ...) — no auth → 401
         const response = await authFetch('/api/audio/transcribe', {
             method: 'POST',
-            body: JSON.stringify({ filename })
+            body: JSON.stringify({ filename, language })
         });
 
         if (!response.ok) throw new Error('Transcription failed on server');

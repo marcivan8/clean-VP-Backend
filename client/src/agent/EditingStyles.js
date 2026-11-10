@@ -88,6 +88,17 @@ export function getEditingStyle(id) {
     return EDITING_STYLES[id] || null;
 }
 
+/** Infer a style only when the request names one explicitly. */
+export function inferEditingStyle(text) {
+    const request = String(text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    if (/\b(reel|reels|instagram reel|instagram reels|tiktok|short[- ]form)\b/.test(request)) return 'reel';
+    if (/\b(podcast|podcast clip)\b/.test(request)) return 'podcast';
+    if (/\b(interview|two[- ]person conversation)\b/.test(request)) return 'interview';
+    if (/\b(vlog|video diary|travel diary)\b/.test(request)) return 'vlog';
+    if (/\b(talking head|face[- ]?cam|face camera)\b/.test(request)) return 'talking_head';
+    return null;
+}
+
 /** Silence removal defaults for the style, or null (planner keeps its own). */
 export function stylePacing(styleId) {
     return getEditingStyle(styleId)?.pacing || null;
@@ -146,7 +157,8 @@ export function isQuestion(text) {
  *    as it is, and a later cut does not move them;
  *  - "Clean up the video" is the full clean up: silences, filler words,
  *    repeated takes, then voice enhancement (after the cuts);
- *  - the style recipe is the single final motion pass, after cuts/captions;
+ *  - transcript-timed storyboard beats precede the finishing recipe, so Auto
+ *    plans motion from the actual dialogue instead of only applying a fixed look;
  *  - Reel picks its moment from the transcript; with no transcript yet it
  *    transcribes first.
  * @param {string} styleId
@@ -159,7 +171,10 @@ export function buildAutopilotSteps(styleId, request, facts = {}) {
     if (!style) return [];
     if (!isGenericEditRequest(request)) {
         const custom = String(request || '').trim();
-        return custom ? [{ key: 'request', prompt: custom }] : [];
+        return custom ? [{
+            key: 'request',
+            prompt: `${custom}\n\nEditing style: ${style.id === 'talking_head' ? 'Talking Head' : style.id[0].toUpperCase() + style.id.slice(1)}. Treat this as style guidance for choices the request leaves open; preserve the user's explicit constraints.`,
+        }] : [];
     }
     if (facts.visualOnly) {
         const sourcePrompt = facts.videoOnly
@@ -225,6 +240,10 @@ export function buildAutopilotSteps(styleId, request, facts = {}) {
         });
     } else {
         steps.push({ key: 'captions', prompt: 'Add captions' });
+        // Generic Auto used to jump from captions straight to a fixed recipe.
+        // This adds sparse, transcript-grounded visual beats before the
+        // selected style's finishing treatment.
+        steps.push({ key: 'storyboard', prompt: 'Storyboard the whole video' });
         steps.push({
             key: 'recipe',
             prompt: facts.hasStyleReference

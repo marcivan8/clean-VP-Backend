@@ -2661,7 +2661,11 @@ const useTimelineStore = create(
                     // The project's own images: when the speaker names a
                     // thing and an asset is called that, the card shows the
                     // real picture instead of its placeholder.
-                    bridged = placementsFor(plan.beats, { kindPlan: KIND_PLAN, assets: st.assets || [] });
+                    bridged = placementsFor(plan.beats, {
+                        kindPlan: KIND_PLAN,
+                        assets: st.assets || [],
+                        techniques: Array.isArray(input.techniques) ? input.techniques : [],
+                    });
                 } catch (err) {
                     console.error('[applyStoryboard] could not build the placements:', err);
                     return { success: false, error: `The beats could not be turned into graphics: ${err.message}` };
@@ -2712,6 +2716,7 @@ const useTimelineStore = create(
                     try { reviewFraming = framingPlan(plan.beats, baseForReview); } catch { /* reported as 0 */ }
                     return {
                         success: true, placed: 0, dryRun: true, beats: plan.beats, reasoning: plan.reasoning,
+                        techniques: [...new Set(bridged.placements.map(p => p.technique).filter(Boolean))],
                         skipped: bridged.skipped, placements: finalPlacements,
                         framing: { applied: reviewFraming.applied, refused: reviewFraming.refused },
                         qa: { found: foundBefore.length, repaired: qa.repairs, unresolved: qa.unresolved, notes: describeQa(foundBefore) },
@@ -2773,6 +2778,7 @@ const useTimelineStore = create(
                 }
                 return {
                     success: true, placed, beats: plan.beats, reasoning: plan.reasoning, skipped: failed,
+                    techniques: [...new Set(finalPlacements.map(p => p.technique).filter(Boolean))],
                     framing: { applied: framing.applied, refused: framing.refused },
                     qa: { found: foundBefore.length, repaired: qa.repairs, unresolved: qa.unresolved },
                 };
