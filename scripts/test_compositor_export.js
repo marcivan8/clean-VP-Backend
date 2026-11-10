@@ -627,8 +627,11 @@ function frameAt(dir, video, t, name) {
  * Sampling the region the overlay actually occupies asks the real question.
  */
 function regionColor(video, t, crop) {
-    const r = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-ss', String(t),
-        '-i', video, '-frames:v', '1',
+    // Output seeking decodes from the beginning and then selects the requested
+    // frame accurately. Input-side seeking can return a nearby keyframe on some
+    // FFmpeg builds, making early/late animation pixel samples identical.
+    const r = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+        '-i', video, '-ss', String(t), '-frames:v', '1',
         '-vf', `crop=${crop.w}:${crop.h}:${crop.x}:${crop.y},scale=1:1`,
         '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { timeout: 60_000, encoding: 'buffer' });
     if (r.status !== 0 || !r.stdout || r.stdout.length < 3) return null;
@@ -759,7 +762,7 @@ if (!FFMPEG) {
         (glowRender.stderr || '').split('\n').slice(-5).join(' | '));
     // The child is centered at (320, 180) with a 200x200 footprint, so x=414
     // is still inside its right edge (x=420). Probe clearly beyond the bounds.
-    const glowOutside = regionColor(glowOut, 1.5, { x: 424, y: 170, w: 8, h: 12 });
+    const glowOutside = regionColor(glowOut, 1.5, { x: 421, y: 170, w: 8, h: 12 });
     check('composition glow blooms beyond the child layer bounds', !!glowOutside && colorDist(glowOutside, '808080') > 5,
         `expected a tinted bloom outside the layer, got ${glowOutside}`);
     const animatedGlowStack = [{ id: 'animated-glow-comp', type: 'composition', opacity: 1, blendMode: 'source-over', effects: [{
