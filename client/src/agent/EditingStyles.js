@@ -171,6 +171,12 @@ export function buildAutopilotSteps(styleId, request, facts = {}) {
     if (!style) return [];
     if (!isGenericEditRequest(request)) {
         const custom = String(request || '').trim();
+        // A standalone animation command already has a stable, explicit scope.
+        // Keep its payload exact across styles so Auto runs only that action;
+        // style context remains available through the normal execution context.
+        if (/^(?:please\s+)?(?:animate(?:\s+it)?|auto\s+animate(?:\s+it)?|animate\s+automatically)[.!?]*$/i.test(custom)) {
+            return custom ? [{ key: 'request', prompt: custom }] : [];
+        }
         return custom ? [{
             key: 'request',
             prompt: `${custom}\n\nEditing style: ${style.id === 'talking_head' ? 'Talking Head' : style.id[0].toUpperCase() + style.id.slice(1)}. Treat this as style guidance for choices the request leaves open; preserve the user's explicit constraints.`,
