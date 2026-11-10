@@ -96,6 +96,10 @@ let helpers = null;
         // scope. These pure helper tests strip imports and do not use it.
         .replace(/^\s*import\s+\{\s*TEMPLATE_KINDS\s*\}\s+from\s+'\.\.\/motion\/TemplateGraphics\.js';\s*$/m, 'const TEMPLATE_KINDS = [];')
         .replace(/^\s*import\s+\{\s*describeToolCapabilities,\s*validateToolInvocation\s*\}\s+from\s+'\.\/ToolCapabilityCatalog\.js';\s*$/m, 'const describeToolCapabilities = definitions => definitions; const validateToolInvocation = () => ({ success: true });')
+        // Module-scope tool definitions also read these registries. The pure
+        // B-roll helpers do not use them, so keep this eval harness isolated.
+        .replace(/^\s*import\s+\{\s*effectRegistry\s*\}\s+from\s+'\.\.\/effects\/EffectRegistry\.js';\s*$/m, 'const effectRegistry = { get: () => null };')
+        .replace(/^\s*import\s+\{\s*COMPONENT_IDS\s*\}\s+from\s+'\.\.\/motion\/ComponentLibrary\.js';\s*$/m, 'const COMPONENT_IDS = [];')
         .replace(/^\s*import\s+[^;]+;\s*$/gm, '')
         .replace(/\bexport\s+(const|function|class)\b/g, '$1');
 
@@ -348,8 +352,8 @@ section('9 · R78 — still-image content analysis (VisualAnalyzer + MediaIntell
     const vaSrc = read('server/brain/media/VisualAnalyzer.js');
     check('VisualAnalyzer defines analyzeImageBase64() with optional style-reference mode', /async analyzeImageBase64\(base64,\s*\{\s*styleReference\s*=\s*false\s*\}\s*=\s*\{\}\)/.test(vaSrc));
     check('analyzeImageBase64 reuses analyzeWithVision with a single frame and mediaKind "image" (no new LLM prompt)',
-        /analyzeWithVision\(\[\{\s*timestamp:\s*0,\s*base64\s*\}\],\s*'image',\s*\{\s*styleReference\s*\}\)/.test(vaSrc));
-    check('analyzeWithVision accepts a mediaKind and optional reference-style mode', /analyzeWithVision\(frames,\s*mediaKind = 'video',\s*\{\s*styleReference\s*=\s*false\s*\}\s*=\s*\{\}\)/.test(vaSrc));
+        /analyzeWithVision\(\[\{\s*timestamp:\s*0,\s*base64\s*\}\],\s*'image',\s*\{\s*styleReference,\s*durationSec:\s*null\s*\}\)/.test(vaSrc));
+    check('analyzeWithVision accepts a mediaKind and optional reference-style mode', /analyzeWithVision\(frames,\s*mediaKind = 'video',\s*\{\s*styleReference\s*=\s*false,\s*durationSec\s*=\s*null\s*\}\s*=\s*\{\}\)/.test(vaSrc));
     check('analyzeImageBase64 still respects the "no OpenAI key configured" guard analyze() uses', /analyzeImageBase64[\s\S]{0,400}if \(!this\.openai\)/.test(vaSrc));
 
     const mipSrc = read('server/brain/media/MediaIntelligencePipeline.js');
