@@ -154,9 +154,13 @@ function compileIsolatedGroupEffects(group, groupToken = 'group') {
                     const commands = [...commandTimes].sort((a, b) => a - b).map(time =>
                         `${n4(time)} ${target} sigma ${n4(Math.max(0, Math.min(50, valueAt(time))))}`);
                     const initial = n4(Math.max(0, Math.min(50, valueAt(start))));
-                    parts.push(`sendcmd=c='${commands.join(';')}',gblur@${target}=sigma=${initial}`);
+                    // Isolated composition buffers are RGBA. Blur all four
+                    // planes so the alpha edge softens along with RGB; leaving
+                    // alpha untouched clips the bloom/blur to the child's
+                    // original bounds on FFmpeg builds that don't infer alpha.
+                    parts.push(`sendcmd=c='${commands.join(';')}',gblur@${target}=sigma=${initial}:planes=15`);
                 } else {
-                    parts.push(`gblur=sigma=${n4(sigma)}`);
+                    parts.push(`gblur=sigma=${n4(sigma)}:planes=15`);
                 }
                 break;
             }
@@ -1291,8 +1295,8 @@ function compileCompositionPlan(plan, inputs, options = {}) {
                 const ramp = `clip(((0.2126*r(X,Y)+0.7152*g(X,Y)+0.0722*b(X,Y)-(${thresholdValue}))/max(1,255-(${thresholdValue})))\\,0\\,1)`;
                 const target = `comp${String(groupSerial)}_glow_${processedIndex}`.replace(/[^a-zA-Z0-9_]/g, '_');
                 const radiusFilter = Array.isArray(glow.radiusCommands) && glow.radiusCommands.length > 1
-                    ? `sendcmd=c='${glow.radiusCommands.map(([time, value]) => `${time} ${target} sigma ${value}`).join(';')}',gblur@${target}=sigma=${glow.radiusCommands[0][1]}`
-                    : `gblur=sigma=${n4(glow.radius)}`;
+                    ? `sendcmd=c='${glow.radiusCommands.map(([time, value]) => `${time} ${target} sigma ${value}`).join(';')}',gblur@${target}=sigma=${glow.radiusCommands[0][1]}:planes=15`
+                    : `gblur=sigma=${n4(glow.radius)}:planes=15`;
                 chains.push(`[${processed}]split[${baseLabel}][${bloomLabel}]`);
                 chains.push(`[${bloomLabel}]geq=r='${glow.red}':g='${glow.green}':b='${glow.blue}':a='alpha(X,Y)*${ramp}*(${intensityValue})',${radiusFilter}[${blurredLabel}]`);
                 chains.push(`[${baseLabel}][${blurredLabel}]overlay=x=0:y=0:format=auto:shortest=1[${mergedLabel}]`);
