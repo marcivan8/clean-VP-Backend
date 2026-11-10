@@ -72,11 +72,19 @@ function loadCompositor() {
 const C = loadCompositor();
 
 function ffmpegBin() {
+    // Exercise the same renderer selected by exportProcessor. CI installs a
+    // system FFmpeg for drawtext fallback, but exports prefer ffmpeg-static
+    // when it is available; preferring PATH here caused runtime gblur command
+    // checks to run against a different FFmpeg build than production.
+    try {
+        const bundled = require('ffmpeg-static');
+        if (bundled) return bundled;
+    } catch { /* use a system binary when the optional package is unavailable */ }
     for (const bin of ['ffmpeg', '/usr/bin/ffmpeg']) {
         const r = spawnSync(bin, ['-version'], { encoding: 'utf8' });
         if (r.status === 0) return bin;
     }
-    try { return require('ffmpeg-static'); } catch { return null; }
+    return null;
 }
 const FFMPEG = ffmpegBin();
 
