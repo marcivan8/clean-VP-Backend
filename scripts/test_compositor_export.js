@@ -757,7 +757,9 @@ if (!FFMPEG) {
     ], { encoding: 'utf8', timeout: 120_000 });
     check('FFmpeg executes isolated composition glow', glowRender.status === 0,
         (glowRender.stderr || '').split('\n').slice(-5).join(' | '));
-    const glowOutside = regionColor(glowOut, 1.5, { x: 414, y: 175, w: 8, h: 8 });
+    // The child is centered at (320, 180) with a 200x200 footprint, so x=414
+    // is still inside its right edge (x=420). Probe clearly beyond the bounds.
+    const glowOutside = regionColor(glowOut, 1.5, { x: 424, y: 170, w: 8, h: 12 });
     check('composition glow blooms beyond the child layer bounds', !!glowOutside && colorDist(glowOutside, '808080') > 5,
         `expected a tinted bloom outside the layer, got ${glowOutside}`);
     const animatedGlowStack = [{ id: 'animated-glow-comp', type: 'composition', opacity: 1, blendMode: 'source-over', effects: [{
@@ -794,8 +796,10 @@ if (!FFMPEG) {
     ], { encoding: 'utf8', timeout: 120_000 });
     check('animated group blur fixture and FFmpeg render succeed', blurFixture.status === 0 && blurRender.status === 0,
         (blurFixture.stderr || blurRender.stderr || '').split('\n').slice(-5).join(' | '));
-    const sharpEdge = regionColor(animatedBlurOut, 0.2, { x: 338, y: 178, w: 6, h: 6 });
-    const softEdge = regionColor(animatedBlurOut, 2.5, { x: 338, y: 178, w: 6, h: 6 });
+    // Sample the center of the white fixture, not a 6px patch straddling its
+    // edge where tiny positioning/scale differences can make both samples black.
+    const sharpEdge = regionColor(animatedBlurOut, 0.2, { x: 314, y: 174, w: 12, h: 12 });
+    const softEdge = regionColor(animatedBlurOut, 2.5, { x: 314, y: 174, w: 12, h: 12 });
     check('animated group blur visibly increases as sampled radius advances', !!sharpEdge && !!softEdge && colorDist(sharpEdge, softEdge) > 5,
         `expected an edge change, got ${sharpEdge} -> ${softEdge}`);
 
@@ -815,8 +819,8 @@ if (!FFMPEG) {
     ], { encoding: 'utf8', timeout: 120_000 });
     check('animated layer blur renders with FFmpeg runtime commands', animatedLayerBlurRender.status === 0,
         (animatedLayerBlurRender.stderr || '').split('\n').slice(-5).join(' | '));
-    const layerBlurEarly = regionColor(animatedLayerBlurOut, 0.2, { x: 338, y: 178, w: 6, h: 6 });
-    const layerBlurLate = regionColor(animatedLayerBlurOut, 2.5, { x: 338, y: 178, w: 6, h: 6 });
+    const layerBlurEarly = regionColor(animatedLayerBlurOut, 0.2, { x: 314, y: 174, w: 12, h: 12 });
+    const layerBlurLate = regionColor(animatedLayerBlurOut, 2.5, { x: 314, y: 174, w: 12, h: 12 });
     check('animated layer blur visibly increases instead of freezing at its first sample',
         !!layerBlurEarly && !!layerBlurLate && colorDist(layerBlurEarly, layerBlurLate) > 5,
         `expected a softened edge, got ${layerBlurEarly} -> ${layerBlurLate}`);
