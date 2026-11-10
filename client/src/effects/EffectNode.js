@@ -47,11 +47,11 @@ function isFiniteEffectValue(value) {
 }
 
 function isRecoverableEffectTrackValue(value) {
-    // Vector parameters are atomic values. Accepting a partly malformed
-    // vector here lets interpolation combine channels from two different
-    // keyframes, while MotionResolver correctly drops that keyframe. Keep
-    // effect preview and the shared timeline/export sampler consistent.
-    return isFiniteEffectValue(value);
+    // Keep a partly malformed vector so its valid channels can still be used
+    // when sampling. Invalid channels are repaired from the nearest authored
+    // keyframe below; dropping the whole key would lose valid data.
+    return (Array.isArray(value) && value.length > 0 && value.some(Number.isFinite))
+        || isFiniteEffectValue(value);
 }
 
 // ============================================================================
@@ -214,31 +214,46 @@ export class EffectNode {
                 if (unique.at(-1)?.time === entry.time) unique[unique.length - 1] = entry;
                 else unique.push(entry);
                 return unique;
-            }, [])
-            .map(entry => ({ ...entry.keyframe, value: entry.value, time: entry.time }));
-        if (!sorted.length) return baseValue;
+            }, []);
+        const authoredVectors = sorted.filter(entry => Array.isArray(entry.value));
+        const authoredVectorValues = new Map(authoredVectors.map(entry => [entry, [...entry.value]]));
+        for (const entry of authoredVectors) {
+            if (entry.value.every(Number.isFinite)) continue;
+            entry.malformedVector = true;
+            entry.value = entry.value.map((component, componentIndex) => {
+                if (Number.isFinite(component)) return component;
+                const candidates = authoredVectors
+                    .filter(candidate => candidate !== entry && Number.isFinite(authoredVectorValues.get(candidate)[componentIndex]))
+                    .sort((a, b) => Math.abs(a.time - entry.time) - Math.abs(b.time - entry.time));
+                const baseComponent = Array.isArray(baseValue) ? baseValue[componentIndex] : undefined;
+                return (candidates.length ? authoredVectorValues.get(candidates[0])[componentIndex] : undefined)
+                    ?? (Number.isFinite(baseComponent) ? baseComponent : 0);
+            });
+        }
+        const normalized = sorted.map(entry => ({ ...entry.keyframe, value: entry.value, time: entry.time, malformedVector: entry.malformedVector }));
+        if (!normalized.length) return baseValue;
 
         const sampleTime = Number(time);
         if (!Number.isFinite(sampleTime)) return baseValue;
 
         // Before first keyframe
-        if (sampleTime <= sorted[0].time) {
-            return sorted[0].value;
+        if (sampleTime <= normalized[0].time) {
+            return normalized[0].value;
         }
 
         // After last keyframe
-        if (sampleTime >= sorted[sorted.length - 1].time) {
-            return sorted[sorted.length - 1].value;
+        if (sampleTime >= normalized[normalized.length - 1].time) {
+            return normalized[normalized.length - 1].value;
         }
 
         // Find surrounding keyframes
-        let fromKf = sorted[0];
-        let toKf = sorted[1];
+        let fromKf = normalized[0];
+        let toKf = normalized[1];
 
-        for (let i = 0; i < sorted.length - 1; i++) {
-            if (sampleTime >= sorted[i].time && sampleTime < sorted[i + 1].time) {
-                fromKf = sorted[i];
-                toKf = sorted[i + 1];
+        for (let i = 0; i < normalized.length - 1; i++) {
+            if (sampleTime >= normalized[i].time && sampleTime < normalized[i + 1].time) {
+                fromKf = normalized[i];
+                toKf = normalized[i + 1];
                 break;
             }
         }
@@ -252,6 +267,9 @@ export class EffectNode {
         const easedProgress = easing(progress);
 
         // Interpolate value
+        if (fromKf.malformedVector || toKf.malformedVector) {
+            return easedProgress < 0.5 ? fromKf.value : toKf.value;
+        }
         return this._interpolateValue(fromKf.value, toKf.value, easedProgress);
     }
 
