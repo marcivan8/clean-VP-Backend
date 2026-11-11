@@ -1,3 +1,5 @@
+import { isReferenceAsset } from '../utils/assetRoles.js';
+
 const ASSET_ROLES = new Set(['source', 'reference', 'stock', 'generated', 'audio', 'document']);
 
 function analysisFor(asset = {}) {
@@ -5,7 +7,7 @@ function analysisFor(asset = {}) {
 }
 
 function inferRole(asset = {}) {
-    if (asset.assistantReference === true || asset.role === 'reference') return 'reference';
+    if (isReferenceAsset(asset)) return 'reference';
     if (asset.provider || asset.isStock || asset.stockProvider) return 'stock';
     if (asset.generated === true || asset.isGenerated === true || asset.origin === 'generated') return 'generated';
     if (asset.type === 'audio') return 'audio';

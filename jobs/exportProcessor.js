@@ -115,23 +115,33 @@ function isRevideoEffectAnimationSupported(effect) {
 }
 
 function isRevideoTextStyleSupported(clip) {
-    if (clip.fontStyle && clip.fontStyle !== 'normal') return false;
-    if (clip.textDecoration && clip.textDecoration !== 'none') return false;
-    if (clip.textAlign && clip.textAlign !== 'center') return false;
-    if (clip.textShadow && clip.textShadow !== 'none') return false;
-    if (clip.stroke || clip.backgroundColor || clip.uppercase || clip.captionStyle?.uppercase) return false;
+    const style = clip.captionStyle || {};
+    if ((clip.fontStyle && clip.fontStyle !== 'normal') || (style.fontStyle && style.fontStyle !== 'normal')) return false;
+    if ((clip.textDecoration && clip.textDecoration !== 'none') || (style.textDecoration && style.textDecoration !== 'none')) return false;
+    if ((clip.textAlign && clip.textAlign !== 'center') || (style.textAlign && style.textAlign !== 'center')) return false;
+    if ((clip.textShadow && clip.textShadow !== 'none') || (style.textShadow && style.textShadow !== 'none')) return false;
+    // The Revideo <Txt> renderer only maps content, basic font/color, and
+    // transforms. RichTextEngine/DOM preview also support tracking, leading,
+    // stroke, backgrounds and case transforms; send those authored clips to
+    // the complete compositor instead of silently dropping their typography.
+    if (clip.stroke || clip.strokeWidth || clip.backgroundColor || clip.uppercase || style.uppercase
+        || style.stroke || style.strokeWidth || style.backgroundColor
+        || clip.letterSpacing || clip.tracking || style.letterSpacing || style.tracking
+        || clip.lineHeight != null || style.lineHeight != null
+        || (clip.textTransform && clip.textTransform !== 'none')
+        || (style.textTransform && style.textTransform !== 'none')) return false;
     const highlightMode = clip.captionStyle?.wordHighlight?.mode;
     return !highlightMode || ['none', 'color', 'opacity', 'scale'].includes(highlightMode);
 }
 
-const REVVIDEO_LEGACY_TEXT_CHANNELS = new Set([
+const REVVIDEO_LEGACY_TRANSFORM_CHANNELS = new Set([
     'x', 'y', 'scale', 'scaleX', 'scaleY', 'rotation', 'opacity',
 ]);
 
-function isRevideoLegacyTextKeyframesSupported(keyframes) {
+function isRevideoLegacyTransformKeyframesSupported(keyframes) {
     if (!keyframes || typeof keyframes !== 'object' || Array.isArray(keyframes)) return false;
     return Object.entries(keyframes).every(([channel, frames]) => {
-        if (!REVVIDEO_LEGACY_TEXT_CHANNELS.has(channel)) return false;
+        if (!REVVIDEO_LEGACY_TRANSFORM_CHANNELS.has(channel)) return false;
         if (!Array.isArray(frames)) return false;
         return frames.every(frame => frame?.time != null && frame?.value != null
             && Number.isFinite(Number(frame.time)) && Number.isFinite(Number(frame.value)));
@@ -160,11 +170,12 @@ function isRevideoTrackSupported(track, audioWaveformsByAsset = {}) {
                 || effect.outputWindows.some(window => !window || !Number.isFinite(Number(window.start))
                     || !Number.isFinite(Number(window.end)) || Number(window.start) < 0
                     || Number(window.end) <= Number(window.start))))) return false;
-        // Revideo text nodes evaluate legacy transform tracks directly. The
-        // image/video overlay branches do not, so keep those clips (as well as
-        // unknown or malformed tracks) on the compositor path.
+        // Revideo's shared resolver evaluates these absolute transform tracks
+        // for text and image overlays. Unknown or malformed tracks stay on the
+        // compositor path, which preserves their complete behavior.
         if (Object.keys(clip.keyframes || {}).length > 0
-            && (track.type !== 'text' || !isRevideoLegacyTextKeyframesSupported(clip.keyframes))) return false;
+            && (!['text', 'overlay'].includes(track.type)
+                || !isRevideoLegacyTransformKeyframesSupported(clip.keyframes))) return false;
         // Nested composition stacks are not yet represented by the Revideo
         // adapter. The compositor path preserves group transforms and effects.
         if (Array.isArray(clip.compositionStack) && clip.compositionStack.length > 0) return false;
@@ -254,15 +265,21 @@ function fitContainSizePx(mediaW, mediaH, canvasWidth, canvasHeight) {
     return { w: Math.round(mediaW * s), h: Math.round(mediaH * s) };
 }
 
+function optionalFiniteNumber(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+}
+
 /** True only for a clip actually moved/resized by the new handles — a tiny
  *  float epsilon so a clip that was merely re-saved (scale === 1.0000001 from
  *  a prior float round-trip) doesn't spuriously take the new code path. */
 function hasBaseClipTransform(clip) {
-    const scale = Number(clip.scale);
-    const scaleX = Number(clip.scaleX);
-    const scaleY = Number(clip.scaleY);
-    const rotation = Number(clip.rotation);
-    const opacity = Number(clip.opacity);
+    const scale = optionalFiniteNumber(clip.scale);
+    const scaleX = optionalFiniteNumber(clip.scaleX);
+    const scaleY = optionalFiniteNumber(clip.scaleY);
+    const rotation = optionalFiniteNumber(clip.rotation);
+    const opacity = optionalFiniteNumber(clip.opacity);
     const animatedOpacity = Array.isArray(clip.keyframes?.opacity) && clip.keyframes.opacity.length > 0;
     const animatedRotation = Array.isArray(clip.keyframes?.rotation) && clip.keyframes.rotation.length > 0;
     const x = Number(clip.x) || 0;
@@ -294,13 +311,16 @@ function buildTransformFilters(clip, targetWidth, targetHeight) {
     const srcW = rawSrcW * cropW;
     const srcH = rawSrcH * cropH;
     const fitted = fitContainSizePx(srcW, srcH, targetWidth, targetHeight);
-    const scale = Number.isFinite(Number(clip.scale)) && Number(clip.scale) > 0 ? Number(clip.scale) : 1;
-    const scaleX = Number.isFinite(Number(clip.scaleX)) && Number(clip.scaleX) > 0 ? Number(clip.scaleX) : scale;
-    const scaleY = Number.isFinite(Number(clip.scaleY)) && Number(clip.scaleY) > 0 ? Number(clip.scaleY) : scale;
+    const authoredScale = optionalFiniteNumber(clip.scale);
+    const authoredScaleX = optionalFiniteNumber(clip.scaleX);
+    const authoredScaleY = optionalFiniteNumber(clip.scaleY);
+    const scale = authoredScale !== null && authoredScale > 0 ? authoredScale : 1;
+    const scaleX = authoredScaleX !== null && authoredScaleX > 0 ? authoredScaleX : scale;
+    const scaleY = authoredScaleY !== null && authoredScaleY > 0 ? authoredScaleY : scale;
     const w = even(fitted.w * scaleX);
     const h = even(fitted.h * scaleY);
-    const rotation = Number.isFinite(Number(clip.rotation)) ? Number(clip.rotation) : 0;
-    const opacity = Number.isFinite(Number(clip.opacity)) ? Math.max(0, Math.min(1, Number(clip.opacity))) : 1;
+    const rotation = optionalFiniteNumber(clip.rotation) ?? 0;
+    const opacity = Math.max(0, Math.min(1, optionalFiniteNumber(clip.opacity) ?? 1));
     const radians = rotation * Math.PI / 180;
     const rotatedW = Math.abs(rotation) > 1e-6 ? even(Math.abs(w * Math.cos(radians)) + Math.abs(h * Math.sin(radians))) : w;
     const rotatedH = Math.abs(rotation) > 1e-6 ? even(Math.abs(h * Math.cos(radians)) + Math.abs(w * Math.sin(radians))) : h;
@@ -783,12 +803,17 @@ async function renderMattedSegment(clip, src, segPath, opts) {
     const settings = normalizeMatte(clip.layerMask?.settings);
     if (settings.mode === 'image' && !bgImagePath) settings.mode = 'blur';
     const speed = Number(clip.speed) > 0 ? Number(clip.speed) : 1;
+    const windowedAudioEffects = hasPartialTimelineAudioEffects(clip.effects, Number(clip.start) || 0, Number(clip.duration) || 0);
     const offset = Number(clip.offset) || 0;
     const readDur = (Number(clip.duration) || 0) * speed;
     const maskSeek = Math.max(0, offset - (Number(clip.layerMask?.sourceStart) || 0));
     const visualEffects = compileTimelineVisualEffects(clip.effects, {
         width: targetWidth, height: targetHeight, duration: Number(clip.duration) || 5, clipStart: Number(clip.start) || 0, complexGlow: true, clipLutFilters,
     });
+    if (clip.effectGraph) visualEffects.unshift(`__VIBED_EFFECT_DAG__${JSON.stringify({
+        graph: clip.effectGraph,
+        options: { width: targetWidth, height: targetHeight, duration: Number(clip.duration) || 5, clipStart: Number(clip.start) || 0, complexGlow: true, clipLutFilters },
+    })}`);
     const hasComplexGlow = visualEffects.some(filter => String(filter).startsWith('__VIBED_HIGHLIGHT_GLOW__'));
     const hasComplexLut = visualEffects.some(filter => String(filter).startsWith('__VIBED_LUT__'));
     const hasComplexShake = visualEffects.some(filter => String(filter).startsWith('__VIBED_SHAKE__'));
@@ -798,8 +823,8 @@ async function renderMattedSegment(clip, src, segPath, opts) {
         speed,
         duration: Number(clip.duration) || 5,
         sandwichFilter: sandwichFilter || null,
-        outputFilter: hasComplexGlow || hasComplexLut || hasComplexShake ? null : visualEffects.join(','),
-        outputGraph: hasComplexGlow || hasComplexLut || hasComplexShake ? compileTimelineVisualEffectGraph(visualEffects, { input: 'outbase', output: 'outv' }) : null,
+        outputFilter: hasComplexGlow || hasComplexLut || hasComplexShake || !!clip.effectGraph ? null : visualEffects.join(','),
+        outputGraph: hasComplexGlow || hasComplexLut || hasComplexShake || !!clip.effectGraph ? compileTimelineVisualEffectGraph(visualEffects, { input: 'outbase', output: 'outv' }) : null,
         crop: clip.virtualCam ? { x: clip.virtualCam.cropX, y: clip.virtualCam.cropY, w: clip.virtualCam.cropW, h: clip.virtualCam.cropH } : null,
         transform: { scale: Number(clip.scale) > 0 ? Number(clip.scale) : 1, x: Number(clip.x) || 0, y: Number(clip.y) || 0 },
     });
@@ -819,7 +844,7 @@ async function renderMattedSegment(clip, src, segPath, opts) {
             else af.push(...atempoChain(speed));
         }
         if (vol !== 1.0) af.push(`volume=${vol.toFixed(4)}`);
-        af.push(...compileTimelineAudioEffects(clip.effects));
+        if (!windowedAudioEffects) af.push(...compileTimelineAudioEffects(clip.effects));
         if (af.length) cmd.audioFilters(af);
         cmd
             .fps(targetFps)
@@ -831,7 +856,15 @@ async function renderMattedSegment(clip, src, segPath, opts) {
             .addOutputOption('-t', String(Number(clip.duration) || 0))
             .audioBitrate(audioBitrate)
             .output(segPath)
-            .on('end', resolve)
+            .on('end', async () => {
+                try {
+                    if (windowedAudioEffects) await applyWindowedTimelineAudioEffectsToFile(segPath, {
+                        effects: clip.effects, clipStart: Number(clip.start) || 0,
+                        duration: Number(clip.duration) || 0, bitrate: audioBitrate, hasVideo: true,
+                    });
+                    resolve();
+                } catch (error) { reject(error); }
+            })
             .on('error', reject)
             .run();
     });
@@ -1225,6 +1258,28 @@ function compileScalarEffectTrack(track) {
     return expression;
 }
 
+function toFfmpegColor(value, fallback = '0x000000') {
+    const toByte = channel => {
+        const number = Number(channel);
+        if (!Number.isFinite(number)) return 0;
+        return Math.round(Math.max(0, Math.min(255, number <= 1 ? number * 255 : number)));
+    };
+    if (Array.isArray(value)) {
+        const channels = value.slice(0, 3).map(toByte);
+        while (channels.length < 3) channels.push(0);
+        return `0x${channels.map(channel => channel.toString(16).padStart(2, '0')).join('')}`;
+    }
+    const color = String(value ?? '').trim();
+    const hex = color.match(/^#?([\da-f]{3}|[\da-f]{6})$/i)?.[1];
+    if (hex) {
+        const expanded = hex.length === 3 ? [...hex].map(channel => channel + channel).join('') : hex;
+        return `0x${expanded}`;
+    }
+    const rgb = color.match(/^rgba?\(\s*(\d+(?:\.\d+)?)\s*[, ]\s*(\d+(?:\.\d+)?)\s*[, ]\s*(\d+(?:\.\d+)?)(?:\s*[,/]\s*[\d.]+)?\s*\)$/i);
+    if (rgb) return toFfmpegColor(rgb.slice(1, 4).map(Number), fallback);
+    return color || fallback;
+}
+
 function effectParam(effect, key, fallback) {
     const value = effect?.params?.[key];
     return value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'value')
@@ -1260,6 +1315,80 @@ function compileTimelineAudioEffects(effects = []) {
         }
     }
     return filters;
+}
+
+function hasPartialTimelineAudioEffects(effects = [], clipStart = 0, duration = 0) {
+    return (Array.isArray(effects) ? effects : []).some(effect => {
+        const kind = effect?.kind || effect?.type;
+        return effect && effect.enabled !== false
+            && ['audio_normalize', 'audio_denoise'].includes(kind)
+            && timelineEffectWindow(effect, clipStart, duration).partial;
+    });
+}
+
+/** Apply audio effects to their authored clip-local windows, preserving the
+ * untouched audio before and after each window. The input has already been
+ * trimmed/retimed into timeline duration when this graph is used. */
+function compileWindowedTimelineAudioEffects(inputLabel, effects = [], clipStart = 0, duration = 0, outputLabel = 'audio_windowed') {
+    const length = Math.max(0, Number(duration) || 0);
+    if (!(length > 0) || !hasPartialTimelineAudioEffects(effects, clipStart, length)) return null;
+    const rows = (Array.isArray(effects) ? effects : [])
+        .filter(effect => effect && effect.enabled !== false && ['audio_normalize', 'audio_denoise'].includes(effect.kind || effect.type))
+        .map(effect => ({ effect, window: timelineEffectWindow(effect, clipStart, length) }))
+        .filter(row => row.window.active);
+    const boundaries = [...new Set([0, length, ...rows.flatMap(row => [row.window.start, row.window.end])]
+        .map(value => Math.max(0, Math.min(length, Number(value))))
+        .filter(Number.isFinite))].sort((a, b) => a - b);
+    const intervals = boundaries.slice(0, -1).map((start, index) => ({ start, end: boundaries[index + 1] }))
+        .filter(interval => interval.end - interval.start > 1e-6);
+    if (!intervals.length) return null;
+
+    const graph = [];
+    const splitLabels = intervals.map((_, index) => `[audio_window_in_${index}]`);
+    graph.push(`[${String(inputLabel).replace(/^\[|\]$/g, '')}]asplit=${intervals.length}${splitLabels.join('')}`);
+    const outputParts = intervals.map((interval, index) => {
+        const midpoint = (interval.start + interval.end) / 2;
+        const activeEffects = rows.filter(row => midpoint >= row.window.start && midpoint < row.window.end).map(row => row.effect);
+        const filters = compileTimelineAudioEffects(activeEffects);
+        const output = `audio_window_out_${index}`;
+        const chain = [
+            `atrim=start=${interval.start.toFixed(6)}:end=${interval.end.toFixed(6)}`,
+            'asetpts=PTS-STARTPTS',
+            'aformat=sample_rates=44100:channel_layouts=stereo',
+            ...filters,
+        ];
+        graph.push(`${splitLabels[index]}${chain.join(',')}[${output}]`);
+        return `[${output}]`;
+    });
+    graph.push(`${outputParts.join('')}concat=n=${outputParts.length}:v=0:a=1[${String(outputLabel).replace(/^\[|\]$/g, '')}]`);
+    return graph.join(';');
+}
+
+async function applyWindowedTimelineAudioEffectsToFile(filePath, { effects = [], clipStart = 0, duration = 0, bitrate = '192k', hasVideo = true } = {}) {
+    if (!hasPartialTimelineAudioEffects(effects, clipStart, duration) || !(await hasAudioStream(filePath))) return false;
+    const graph = compileWindowedTimelineAudioEffects('0:a', effects, clipStart, duration, 'audiofx');
+    if (!graph) return false;
+    const extension = path.extname(filePath) || (hasVideo ? '.mp4' : '.m4a');
+    const stem = filePath.slice(0, filePath.length - path.extname(filePath).length);
+    const outputPath = `${stem}.audio-window-${process.pid}-${Date.now()}${extension}`;
+    await new Promise((resolve, reject) => {
+        // fluent-ffmpeg treats each `complexFilter` map entry as a label and
+        // wraps it in brackets. The optional input video stream is a normal
+        // `-map` specifier, so add it as an output option instead of passing
+        // it through the filter-output mapping API.
+        const command = ffmpeg(filePath).complexFilter(graph, '[audiofx]')
+            .outputOptions([
+                ...(hasVideo ? ['-map', '0:v?', '-c:v', 'copy'] : []),
+                '-c:a', 'aac', '-b:a', bitrate, '-t', String(Math.max(0, Number(duration) || 0)),
+                ...(hasVideo ? ['-movflags', '+faststart'] : []),
+            ])
+            .output(outputPath)
+            .on('end', resolve)
+            .on('error', reject);
+        command.run();
+    });
+    await fs.promises.rename(outputPath, filePath);
+    return true;
 }
 
 function resolveTimelineSpeedEffect(effects = [], clipStart = 0, clipDuration = 0) {
@@ -1544,10 +1673,11 @@ function buildSpeedRetimePlan(clipDuration, keyframes, baseSpeed = 1, clipStart 
     };
 }
 
-function renderRetimeAudio(source, outputPath, retime, { offset = 0, duration, volume = 1, bitrate = '192k', effects = [], hasAudio = true } = {}) {
+function renderRetimeAudio(source, outputPath, retime, { offset = 0, duration, clipStart = 0, volume = 1, bitrate = '192k', effects = [], hasAudio = true } = {}) {
     return new Promise((resolve, reject) => {
+        const windowedEffects = hasPartialTimelineAudioEffects(effects, clipStart, duration);
         const postFilters = [
-            ...compileTimelineAudioEffects(effects),
+            ...(!windowedEffects ? compileTimelineAudioEffects(effects) : []),
             ...(Number(volume) !== 1 ? [`volume=${Number(volume).toFixed(4)}`] : []),
         ];
         if (!hasAudio) {
@@ -1563,7 +1693,13 @@ function renderRetimeAudio(source, outputPath, retime, { offset = 0, duration, v
                 .run();
             return;
         }
-        const graph = [retime.audioGraph, `[aretimed]${postFilters.length ? `${postFilters.join(',')},` : ''}anull[aout]`];
+        const graph = [retime.audioGraph];
+        if (windowedEffects) {
+            graph.push(compileWindowedTimelineAudioEffects('aretimed', effects, clipStart, duration, 'audiofx'));
+            graph.push(`[audiofx]${postFilters.length ? `${postFilters.join(',')},` : ''}anull[aout]`);
+        } else {
+            graph.push(`[aretimed]${postFilters.length ? `${postFilters.join(',')},` : ''}anull[aout]`);
+        }
         ffmpeg(source)
             .setStartTime(offset)
             .setDuration(duration)
@@ -1885,7 +2021,10 @@ function compileTimelineVisualEffects(effects = [], { width = 1080, height = 192
                     const frame = animated ? 'floor(T*30)' : '0';
                     const hash = `(sin((floor(X/${size.toFixed(4)})+${seed}*7.1)*12.9898+(floor(Y/${size.toFixed(4)})+${seed}*3.17)*78.233+${frame}*37.719)*43758.5453)`;
                     const noise = `((${hash})-floor(${hash})-0.5)*(${strength})`;
-                    filters.push(`format=rgba,geq=r='clip(r(X,Y)+${noise},0,255)':g='clip(g(X,Y)+${noise},0,255)':b='clip(b(X,Y)+${noise},0,255)':a='alpha(X,Y)'`);
+                    // Preserve fully transparent RGB. Otherwise grain in hidden
+                    // pixels can bleed across an overlay edge during scaling,
+                    // even though the alpha channel itself remains zero.
+                    filters.push(`format=rgba,geq=r='if(gt(alpha(X,Y),0),clip(r(X,Y)+${noise},0,255),r(X,Y))':g='if(gt(alpha(X,Y),0),clip(g(X,Y)+${noise},0,255),g(X,Y))':b='if(gt(alpha(X,Y),0),clip(b(X,Y)+${noise},0,255),b(X,Y))':a='alpha(X,Y)'`);
                     break;
                 }
                 case 'chromatic-aberration':
@@ -1988,7 +2127,7 @@ function compileTimelineVisualEffects(effects = [], { width = 1080, height = 192
                     const fadeDuration = Math.max(0.05, Math.min(Number(duration) || 60, read('duration', 0.5)));
                     const start = localTime(effect.startTime, 0);
                     const color = effectParam(effect, 'color', [0, 0, 0]);
-                    const hex = Array.isArray(color) ? `0x${color.slice(0, 3).map(c => Math.round(Math.max(0, Math.min(1, Number(c) || 0)) * 255).toString(16).padStart(2, '0')).join('')}` : String(color).replace('#', '0x');
+                    const hex = toFfmpegColor(color);
                     filters.push(`fade=t=in:st=${start.toFixed(3)}:d=${fadeDuration.toFixed(3)}:color=${hex}`);
                     break;
                 }
@@ -1997,7 +2136,7 @@ function compileTimelineVisualEffects(effects = [], { width = 1080, height = 192
                     const end = localTime(effect.endTime, Number(duration) || 0);
                     const start = Math.max(0, end - fadeDuration);
                     const color = effectParam(effect, 'color', [0, 0, 0]);
-                    const hex = Array.isArray(color) ? `0x${color.slice(0, 3).map(c => Math.round(Math.max(0, Math.min(1, Number(c) || 0)) * 255).toString(16).padStart(2, '0')).join('')}` : String(color).replace('#', '0x');
+                    const hex = toFfmpegColor(color);
                     filters.push(`fade=t=out:st=${start.toFixed(3)}:d=${Math.max(0.05, Math.min(fadeDuration, end - start)).toFixed(3)}:color=${hex}`);
                     break;
                 }
@@ -2218,6 +2357,15 @@ function compileTimelineVisualEffectGraph(filters = [], { input = '0:v', output 
         const lutPrefix = '__VIBED_LUT__';
         const shakePrefix = '__VIBED_SHAKE__';
         const blurPrefix = '__VIBED_ANIMATED_BLUR__';
+        const effectGraphPrefix = '__VIBED_EFFECT_DAG__';
+        if (String(filter).startsWith(effectGraphPrefix)) {
+            flushLinear();
+            const spec = JSON.parse(String(filter).slice(effectGraphPrefix.length));
+            const next = `vfx_${stage++}`;
+            graph.push(...compileTimelineVisualEffectDag(spec.graph, spec.options || {}, current, next));
+            current = next;
+            continue;
+        }
         if (String(filter).startsWith(blurPrefix)) {
             flushLinear();
             const spec = JSON.parse(String(filter).slice(blurPrefix.length));
@@ -2335,6 +2483,146 @@ function compileTimelineVisualEffectGraph(filters = [], { input = '0:v', output 
     return graph;
 }
 
+/** Compile an explicit fork/join effect graph without flattening its branches.
+ * Each join must be an authored `composite` node with `base` and `overlay`
+ * ports; ambiguous joins fail export rather than changing the user's design. */
+function compileTimelineVisualEffectDag(effectGraph, options = {}, inputLabel = '0:v', outputLabel = 'effect_dag_out') {
+    const nodes = Array.isArray(effectGraph?.nodes) ? effectGraph.nodes : [];
+    const connections = Array.isArray(effectGraph?.connections) ? effectGraph.connections : [];
+    if (!nodes.length) return [`[${inputLabel}]null[${outputLabel}]`];
+    const byId = new Map(nodes.map(node => [String(node.id), node]));
+    if (byId.size !== nodes.length || nodes.some(node => !node?.id)) throw new Error('Cannot export effect graph: node IDs must be present and unique');
+    const outgoing = new Map(nodes.map(node => [String(node.id), []]));
+    const incoming = new Map(nodes.map(node => [String(node.id), []]));
+    for (const edge of connections) {
+        const from = String(edge?.from || ''), to = String(edge?.to || '');
+        if (!byId.has(from) || !byId.has(to)) throw new Error('Cannot export effect graph: a connection references a missing node');
+        outgoing.get(from).push(edge);
+        incoming.get(to).push(edge);
+    }
+    const roots = nodes.filter(node => incoming.get(String(node.id)).length === 0);
+    const sinks = nodes.filter(node => outgoing.get(String(node.id)).length === 0);
+    if (roots.length !== 1 || sinks.length !== 1) throw new Error('Cannot export effect graph: expected exactly one input and one output');
+
+    const pending = new Map(nodes.map(node => [String(node.id), incoming.get(String(node.id)).length]));
+    const ready = roots.map(node => String(node.id));
+    const ordered = [];
+    while (ready.length) {
+        const id = ready.shift();
+        ordered.push(byId.get(id));
+        for (const edge of outgoing.get(id)) {
+            const remaining = pending.get(String(edge.to)) - 1;
+            pending.set(String(edge.to), remaining);
+            if (remaining === 0) ready.push(String(edge.to));
+        }
+    }
+    if (ordered.length !== nodes.length) throw new Error('Cannot export effect graph: circular dependency detected');
+
+    const graph = [];
+    const edgeLabels = new Map();
+    let labelIndex = 0;
+    const fresh = prefix => `${prefix}_${labelIndex++}`;
+    const unbracket = label => String(label).replace(/^\[|\]$/g, '');
+    const nodeOut = new Map();
+    const opts = { ...options };
+    for (const node of ordered) {
+        const id = String(node.id);
+        const inputs = incoming.get(id);
+        let source = unbracket(inputLabel);
+        if (inputs.length === 1) source = edgeLabels.get(inputs[0]);
+        if (inputs.length > 1) {
+            const ports = new Map(inputs.map(edge => [edge.port, edgeLabels.get(edge)]));
+            if ((node.type || node.kind) !== 'composite' || inputs.length !== 2 || ports.size !== 2 || !ports.has('base') || !ports.has('overlay')) {
+                throw new Error(`Cannot export effect graph: join "${node.name || id}" needs base and overlay inputs on a composite node`);
+            }
+            const base = ports.get('base'), overlay = ports.get('overlay');
+            const mode = String(node.params?.mode?.value ?? node.params?.mode ?? 'source-over').toLowerCase();
+            const opacityRaw = Number(node.params?.opacity?.value ?? node.params?.opacity ?? 1);
+            const opacity = Number.isFinite(opacityRaw) ? Math.max(0, Math.min(1, opacityRaw)) : 1;
+            const opacityExpression = compileEffectKeyframeExpression(node, 'opacity', opacity, 0, 1, Number(opts.clipStart) || 0);
+            const output = fresh('dag_composite');
+            const window = timelineEffectWindow(node, Number(opts.clipStart) || 0, Number(opts.duration) || 0);
+            if (node.enabled === false || !window.active) {
+                graph.push(`[${base}]null[${output}]`);
+            } else if (mode === 'normal' || mode === 'source-over') {
+                const overlayInput = fresh('dag_overlay');
+                if (opacityExpression) {
+                    const animatedOpacity = String(opacityExpression).replace(/\bt\b/g, 'T');
+                    graph.push(`[${overlay}]format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*clip((${animatedOpacity}),0,1)'[${overlayInput}]`);
+                } else {
+                    graph.push(`[${overlay}]format=rgba,colorchannelmixer=aa=${opacity.toFixed(6)}[${overlayInput}]`);
+                }
+                const enable = window.partial
+                    ? `:enable='gte(t,${window.start.toFixed(6)})*lt(t,${window.end.toFixed(6)})'`
+                    : '';
+                graph.push(`[${base}][${overlayInput}]overlay=shortest=1:eof_action=pass:format=auto${enable}[${output}]`);
+            } else {
+                const { alphaBlendChannelExpression, SUPPORTED_BLEND_MODE_KINDS } = require('../server/compositor/CompositorCompiler.js');
+                if (!SUPPORTED_BLEND_MODE_KINDS.includes(mode)) {
+                    throw new Error(`Cannot export effect graph: unsupported composite blend mode "${mode}"`);
+                }
+                const width = Math.max(1, Math.round(Number(opts.width) || 1920));
+                const baseRgba = fresh('dag_base_rgba');
+                const overlayRgba = fresh('dag_overlay_rgba');
+                const pair = fresh('dag_blend_pair');
+                const baseOffset = width;
+                const staticOpacity = opacityExpression ? null : opacity;
+                const activeOpacity = opacityExpression
+                    ? String(opacityExpression).replace(/\bt\b/g, 'T')
+                    : String(staticOpacity);
+                const activeWindow = window.partial
+                    ? `*if(gte(T,${window.start.toFixed(6)})*lt(T,${window.end.toFixed(6)}),1,0)`
+                    : '';
+                const alphaFactor = `clip((${activeOpacity}),0,1)${activeWindow}`
+                    .replace(/(?<!\\),/g, '\\,');
+                const alphaProcessedOverlay = fresh('dag_overlay_opacity');
+                graph.push(`[${base}]format=rgba[${baseRgba}]`);
+                if (opacityExpression || window.partial) {
+                    graph.push(`[${overlay}]format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*${alphaFactor}'[${alphaProcessedOverlay}]`);
+                } else if (staticOpacity < 1) {
+                    graph.push(`[${overlay}]format=rgba,colorchannelmixer=aa=${staticOpacity.toFixed(6)}[${alphaProcessedOverlay}]`);
+                } else {
+                    graph.push(`[${overlay}]format=rgba[${alphaProcessedOverlay}]`);
+                }
+                graph.push(`[${baseRgba}][${alphaProcessedOverlay}]hstack=inputs=2:shortest=1[${pair}]`);
+                const alpha = `255*(alpha(X+${baseOffset},Y)/255+(alpha(X,Y)/255)*(1-alpha(X+${baseOffset},Y)/255))`;
+                graph.push(`[${pair}]geq=r='${alphaBlendChannelExpression(mode, 'r', baseOffset)}':g='${alphaBlendChannelExpression(mode, 'g', baseOffset)}':b='${alphaBlendChannelExpression(mode, 'b', baseOffset)}':a='${alpha}',crop=${width}:${Math.max(1, Math.round(Number(opts.height) || 1080))}:0:0[${output}]`);
+            }
+            nodeOut.set(id, output);
+        } else if (node.type === 'composite' || node.kind === 'composite') {
+            throw new Error(`Cannot export effect graph: composite node "${node.name || id}" requires base and overlay inputs`);
+        } else if (node.enabled === false || node.engine === 'ai') {
+            nodeOut.set(id, source);
+        } else {
+            const window = timelineEffectWindow(node, Number(opts.clipStart) || 0, Number(opts.duration) || 0);
+            if (!window.active) {
+                nodeOut.set(id, source);
+            } else {
+            const filters = compileTimelineVisualEffects([node], opts);
+            if (!filters.length) {
+                throw new Error(`Cannot export effect graph: effect "${node.name || id}" (${node.type || node.kind || 'unknown'}) has no visual export implementation`);
+            } else {
+                const output = fresh('dag_node');
+                const labels = compileTimelineVisualEffectGraph(filters, { input: source, output });
+                const nodePrefix = `dag_node_graph_${labelIndex}_`;
+                graph.push(...labels.map(line => line.replace(/\bvfx_(\d+)\b/g, `${nodePrefix}$1`)));
+                nodeOut.set(id, output);
+            }
+            }
+        }
+
+        const edges = outgoing.get(id);
+        if (edges.length === 1) edgeLabels.set(edges[0], nodeOut.get(id));
+        else if (edges.length > 1) {
+            const labels = edges.map(() => fresh('dag_branch'));
+            graph.push(`[${nodeOut.get(id)}]split=${edges.length}${labels.map(label => `[${label}]`).join('')}`);
+            edges.forEach((edge, index) => edgeLabels.set(edge, labels[index]));
+        }
+    }
+    graph.push(`[${nodeOut.get(String(sinks[0].id))}]null[${outputLabel}]`);
+    return graph;
+}
+
 // ─── Main job handler ─────────────────────────────────────────────────────────
 
 module.exports = async function processExportJob(job) {
@@ -2401,36 +2689,33 @@ module.exports = async function processExportJob(job) {
     const audioTracks = timeline.tracks.filter(t =>
         t.type === 'audio' && t.clips?.length > 0
     );
-    // R69 — render architecture split. 'text' (captions/titles) and 'overlay'
-    // (stickers/logos/lower-thirds) tracks are the two categories that move to
-    // the Revideo render-worker when it's enabled; everything else (cuts,
-    // grading, camera motion, audio) stays exactly where it already is in
-    // this file, per the confirmed split.
+    // Revideo owns supported text tracks only. All timeline visual layers
+    // stay on the FFmpeg compositor, so a later Revideo failure cannot remove
+    // footage overlays, stickers, or templates.
     const allTextTracks    = timeline.tracks.filter(t => t.type === 'text'    && t.clips?.length > 0);
-    const allOverlayTracks = timeline.tracks.filter(t => t.type === 'overlay' && t.clips?.length > 0);
     const revideoTextTracks = allTextTracks.filter(track => isRevideoTrackSupported(track, timeline.audioWaveformsByAsset));
-    const revideoOverlayTracks = allOverlayTracks.filter(track => isRevideoTrackSupported(track, timeline.audioWaveformsByAsset));
-    // Opt-in only — with this unset (the default), nothing below changes:
-    // STEP 2.5 and STEP 4 run exactly as they always have. This is a NEW,
-    // not-yet-independently-verified render path (see CLAUDE.md), so it does
-    // not become every user's default behaviour just by existing.
-    const revideoEnabled = process.env.REVIDEO_RENDER_ENABLED === '1' && !!process.env.RENDER_WORKER_URL;
-    // A worker render replaces both the FFmpeg graphics compositor and the
-    // caption pass. It may take ownership only when it can draw EVERY visual
-    // track in this project; otherwise a mixed route would silently drop the
-    // unsupported tracks or their effects.
-    const hasUnsupportedVisualTracks = allTextTracks.length !== revideoTextTracks.length
-        || allOverlayTracks.length !== revideoOverlayTracks.length;
-    let useRevideo = revideoEnabled && !hasUnsupportedVisualTracks
-        && (revideoTextTracks.length > 0 || revideoOverlayTracks.length > 0);
+    // Revideo stays opt-in. Without it, STEP 4 draws text using the built-in
+    // renderer; STEP 2.5 always composites visual layers either way.
+    const alphaGraphicsExportRequested = ['transparent-png-sequence', 'transparent-mov']
+        .includes(String(settings.format || '').toLowerCase());
+    // Transparent graphics exports need the local caption layer descriptions
+    // so they can be composited over an alpha-preserving base. Keep captions
+    // on the shared local renderer for that export rather than rendering them
+    // only into the flattened Revideo pass.
+    const revideoEnabled = !alphaGraphicsExportRequested
+        && process.env.REVIDEO_RENDER_ENABLED === '1' && !!process.env.RENDER_WORKER_URL;
+    // Revideo only takes ownership of supported text tracks. Visual assets
+    // are composited by STEP 2.5 in every case, before this optional text pass.
+    const hasUnsupportedTextTracks = allTextTracks.length !== revideoTextTracks.length;
+    let useRevideo = revideoEnabled && !hasUnsupportedTextTracks && revideoTextTracks.length > 0;
     let revideoSucceeded = false;
     let revideoWarning = null;
-    // R92: check the worker BEFORE the compositor step is skipped for it. A
-    // down worker used to mean an export with no captions and no graphics;
-    // now the built-in renderer (STEP 2.5 + STEP 4) draws them instead.
+    // Check the worker before attempting the optional text pass. A down worker
+    // leaves the built-in text renderer and the already-composited visuals in
+    // place.
     if (useRevideo && !(await revideoWorkerHealthy())) {
         useRevideo = false;
-        revideoWarning = 'The motion graphics renderer was unreachable, so the built-in renderer drew the captions and graphics.';
+        revideoWarning = 'The text renderer was unreachable, so the built-in renderer drew the captions.';
         console.warn('  ⚠️  Revideo worker unhealthy, falling back to the built-in renderer');
     }
 
@@ -2950,6 +3235,7 @@ module.exports = async function processExportJob(job) {
 
             const vFilters = [];
             const aFilters = [];
+            const windowedAudioEffects = hasPartialTimelineAudioEffects(clip.effects, Number(clip.start) || 0, dur);
             // Scale keyframes animate on clip-local TIMELINE time, so the speed
             // change runs first whenever a zoom follows (spatial filters do not
             // care about timestamps, so this order changes nothing else).
@@ -3042,10 +3328,14 @@ module.exports = async function processExportJob(job) {
 
             // Timeline effect cards are stored on clips and mirror the live CSS
             // preview with supported FFmpeg filter approximations.
+            if (clip.effectGraph) vFilters.push(`__VIBED_EFFECT_DAG__${JSON.stringify({
+                graph: clip.effectGraph,
+                options: { width: targetWidth, height: targetHeight, duration: dur, clipStart: Number(clip.start) || 0, complexGlow: true, clipLutFilters },
+            })}`);
             vFilters.push(...compileTimelineVisualEffects(clip.effects, {
                 width: targetWidth, height: targetHeight, duration: dur, clipStart: Number(clip.start) || 0, complexGlow: true, clipLutFilters,
             }));
-            aFilters.push(...compileTimelineAudioEffects(clip.effects));
+            if (!windowedAudioEffects) aFilters.push(...compileTimelineAudioEffects(clip.effects));
 
             // Per-clip grading is the same user-authored grade the preview
             // shader receives. Compile it after footage effects and before a
@@ -3080,8 +3370,9 @@ module.exports = async function processExportJob(job) {
             const hasComplexGlow = vFilters.some(filter => String(filter).startsWith('__VIBED_HIGHLIGHT_GLOW__'));
             const hasComplexLut = vFilters.some(filter => String(filter).startsWith('__VIBED_LUT__'));
             const hasComplexShake = vFilters.some(filter => String(filter).startsWith('__VIBED_SHAKE__'));
-            const usedComplexFilter = !!baseTransform || hasZone || hasComplexGlow || hasComplexLut || hasComplexShake;
-            if (baseTransform || hasZone || hasComplexGlow || hasComplexLut || hasComplexShake) {
+            const hasEffectDag = vFilters.some(filter => String(filter).startsWith('__VIBED_EFFECT_DAG__'));
+            const usedComplexFilter = !!baseTransform || hasZone || hasComplexGlow || hasComplexLut || hasComplexShake || hasEffectDag;
+            if (baseTransform || hasZone || hasComplexGlow || hasComplexLut || hasComplexShake || hasEffectDag) {
                 const graph = compileTimelineVisualEffectGraph(vFilters, { input: '0:v', output: 'fg' });
                 const vbaseLabel = hasZone ? 'vbase' : 'vout';
                 if (baseTransform) {
@@ -3134,6 +3425,7 @@ module.exports = async function processExportJob(job) {
                             await renderRetimeAudio(src, retimedAudioPath, speedRetime, {
                                 offset: inPoint,
                                 duration: dur,
+                                clipStart: Number(clip.start) || 0,
                                 volume: vol,
                                 bitrate: audioBitrate,
                                 effects: clip.effects,
@@ -3146,6 +3438,11 @@ module.exports = async function processExportJob(job) {
                                 .on('end', muxResolve)
                                 .on('error', muxReject)
                                 .run());
+                        } else if (windowedAudioEffects) {
+                            await applyWindowedTimelineAudioEffectsToFile(videoOnlyPath, {
+                                effects: clip.effects, clipStart: Number(clip.start) || 0,
+                                duration: dur, bitrate: audioBitrate, hasVideo: true,
+                            });
                         }
                         segments.push(segPath);
                         // Record this clip's output start time BEFORE incrementing.
@@ -3268,6 +3565,7 @@ module.exports = async function processExportJob(job) {
     let compositorWarning = null;
     let transparentGraphicsPath = null;
     let transparentGraphicsFrameCount = 0;
+    let transparentCaptionLayers = null;
     const rawPlan = settings.compositionPlan || null;
 
     // R63 — animated captions. Declared here, at function scope, NOT inside the
@@ -3282,11 +3580,10 @@ module.exports = async function processExportJob(job) {
     // which are correctly declared at this same top level for the same reason.
     let captionProgramWarning = null;
 
-    // R69: when Revideo is compositing overlays, FFmpeg must not ALSO
-    // composite them here — doing both would draw every sticker/lower-third
-    // twice. `useRevideo` is decided up front, before this step, for exactly
-    // that reason.
-    if (rawPlan && (rawPlan.overlays || []).length > 0 && process.env.COMPOSITOR_DISABLED !== '1' && !useRevideo) {
+    // Visual layers are composited before Revideo. The worker receives only
+    // text tracks, preventing both duplicate overlays and dropped graphics if
+    // the optional text render fails.
+    if (rawPlan && (rawPlan.overlays || []).length > 0 && process.env.COMPOSITOR_DISABLED !== '1') {
         try {
             const { compileCompositionPlan, validateCompositionPlanShape } =
                 require('../server/compositor/CompositorCompiler.js');
@@ -3317,6 +3614,11 @@ module.exports = async function processExportJob(job) {
             const sceneLimitWarnings = [];
             for (let i = 0; i < overlays.length; i++) {
                 const ov = overlays[i];
+
+                if (ov.sourceTimeMapWarning) {
+                    skippedOverlayWarnings.push(`Overlay ${ov.id} skipped: ${ov.sourceTimeMapWarning}`);
+                    continue;
+                }
 
                 // R89: template components are DRAWN here (same drawing code as
                 // the preview), not downloaded. One PNG per output frame, sized
@@ -3500,7 +3802,11 @@ module.exports = async function processExportJob(job) {
                     outputEnd: ov.outputEnd,
                     // R88: a video overlay starts at its own in-point (clip.offset),
                     // not at the top of the file. Images/stickers have none.
-                    seek: ov.source?.type === 'video' ? Math.max(0, Number(ov.sourceOffset) || 0) : 0,
+                    seek: ov.source?.type === 'video'
+                        ? Math.max(0, (Number(ov.sourceOffset) || 0) + (Array.isArray(ov.sourceTimeMap) && ov.sourceTimeMap.length
+                            ? Math.min(...ov.sourceTimeMap.map(point => Number(point?.source) || 0))
+                            : 0))
+                        : 0,
                 });
             }
 
@@ -3535,7 +3841,7 @@ module.exports = async function processExportJob(job) {
             if (['transparent-png-sequence', 'transparent-mov'].includes(String(settings.format || '').toLowerCase())) {
                 const alphaGraph = compileCompositionPlan(rawPlan, inputs, { preserveAlpha: true });
                 if (!alphaGraph) throw new Error('no drawable graphic layers are available for a transparent sequence');
-                const duration = Math.max(0.1, Number(rawPlan.base?.totalDuration) || 0.1);
+                const duration = Math.max(0.1, Number(rawPlan.base?.totalDuration) || 0, cumulativeOut);
                 transparentGraphicsFrameCount = Math.max(1, Math.ceil(duration * targetFps));
                 const alphaDir = path.join(tmpDir, 'transparent-graphics');
                 fs.mkdirSync(alphaDir, { recursive: true });
@@ -3626,6 +3932,7 @@ module.exports = async function processExportJob(job) {
                     await renderRetimeAudio(src, aSegPath, speedResult.retime, {
                         offset: Number(clip.offset) || 0,
                         duration: Number(clip.duration) || 0,
+                        clipStart: Number(clip.start) || 0,
                         volume: vol,
                         bitrate: audioBitrate,
                         effects: clip.effects,
@@ -3637,6 +3944,7 @@ module.exports = async function processExportJob(job) {
 
                 await new Promise((resolve, reject) => {
                     const aSpeed = speedResult.speed ?? (Number(clip.speed) > 0 ? Number(clip.speed) : 1);
+                    const windowedAudioEffects = hasPartialTimelineAudioEffects(clip.effects, Number(clip.start) || 0, Number(clip.duration) || 0);
                     const speedFilters = aSpeed !== 1
                         ? (speedResult.maintainPitch === false
                             ? [`asetrate=44100*${aSpeed.toFixed(4)}`, 'aresample=44100']
@@ -3645,10 +3953,19 @@ module.exports = async function processExportJob(job) {
                     ffmpeg(src)
                         .setStartTime(clip.offset || 0)
                         .setDuration(clip.duration || 0) // output -t: the clip's timeline length
-                        .audioFilters([...speedFilters, ...compileTimelineAudioEffects(clip.effects), `volume=${vol.toFixed(4)}`].join(','))
+                        .audioFilters([...speedFilters, ...(!windowedAudioEffects ? compileTimelineAudioEffects(clip.effects) : []), `volume=${vol.toFixed(4)}`].join(','))
                         .audioBitrate(audioBitrate)
                         .output(aSegPath)
-                        .on('end', () => { audioSegments.push({ path: aSegPath, startTime: clip.start }); resolve(); })
+                        .on('end', async () => {
+                            try {
+                                if (windowedAudioEffects) await applyWindowedTimelineAudioEffectsToFile(aSegPath, {
+                                    effects: clip.effects, clipStart: Number(clip.start) || 0,
+                                    duration: Number(clip.duration) || 0, bitrate: audioBitrate, hasVideo: false,
+                                });
+                                audioSegments.push({ path: aSegPath, startTime: clip.start });
+                                resolve();
+                            } catch (error) { reject(error); }
+                        })
                         .on('error', reject)
                         .run();
                 });
@@ -3696,19 +4013,15 @@ module.exports = async function processExportJob(job) {
 
     await job.updateProgress(82);
 
-    // ── STEP 3.5: Revideo composite — captions + motion graphics (R69) ─────
+    // ── STEP 3.5: Revideo text composite ───────────────────────────────────
     // Only runs when REVIDEO_RENDER_ENABLED=1, RENDER_WORKER_URL is set, and
-    // there's actually a 'text' or 'overlay' track to draw. `finalVideoPath`
+    // there's actually a supported 'text' track to draw. `finalVideoPath`
     // at this point is FFmpeg's fully cut/graded/audio-mixed output — exactly
     // the single `baseVideoUrl` the render-worker's scene expects (see its
     // own header for why it owns nothing else).
     //
-    // FAILS OPEN, same rule as STEP 2.5 and STEP 4 below: any failure here
-    // (worker unreachable, timeout, bad response) leaves `finalVideoPath`
-    // pointing at the plain base video and STEP 4 runs as the fallback —
-    // this call and the old drawtext path are mutually exclusive, so a
-    // Revideo failure means "ship the video without captions/graphics and
-    // say so," never "run both and risk double-rendering."
+    // On worker failure, the already-composited video stays intact and STEP 4
+    // draws text through the built-in renderer.
     if (useRevideo) {
         try {
             const backendUrl = resolvePublicBackendUrl();
@@ -3736,7 +4049,7 @@ module.exports = async function processExportJob(job) {
             const revideoOutPath = path.join(tmpDir, 'revideo-composite.mp4');
             await renderViaRevideoWorker({
                 baseVideoUrl,
-                tracks: [...revideoTextTracks, ...revideoOverlayTracks],
+                tracks: revideoTextTracks,
                 duration: allClips.reduce((max, c) => Math.max(max, (c.start || 0) + (c.duration || 0)), 0),
                 aspectRatio: settings.aspectRatio || '16:9',
                 fps: targetFps,
@@ -3777,8 +4090,8 @@ module.exports = async function processExportJob(job) {
     const fontFallbackWarnings = new Set();
     const textTracks = timeline.tracks.filter(t => t.type === 'text' && t.clips?.length > 0);
 
-    // R92: gated on revideoSucceeded, not useRevideo. If the worker failed
-    // mid-render, captions are still drawn here instead of being dropped.
+    // Gated on revideoSucceeded, not useRevideo. If the worker fails mid-render,
+    // captions are still drawn here instead of being dropped.
     if (textTracks.length > 0 && !revideoSucceeded) {
         // ── Font resolution ────────────────────────────────────────────────
         const fontsDir = path.join(publicDir, 'fonts');
@@ -3858,6 +4171,14 @@ module.exports = async function processExportJob(job) {
             // This completely avoids ffmpeg filter-string escaping issues — apostrophes,
             // commas, colons, quotes, etc. in caption text all work transparently.
             const textFilters = [];
+            const captionSourcePath = finalVideoPath;
+            const { mergeCaptionFilterGroups } = require('../server/compositor/CaptionCompiler.js');
+            const captionFilterGroups = [];
+            const captionOrder = new Map();
+            let captionOrderIndex = 0;
+            for (const track of textTracks) {
+                for (const clip of track.clips) captionOrder.set(clip.id, captionOrderIndex++);
+            }
             let filterIdx = 0;
 
             // ── R63: animated captions (motion/textShadow/uppercase/reveal) ────
@@ -4094,32 +4415,41 @@ module.exports = async function processExportJob(job) {
                         ? `:borderw=${strokeWidth}:bordercolor=${strokeColor}`
                         : '';
 
-                    textFilters.push(
+                    captionFilterGroups.push({ clipId: clip.id, filters: [
                         `drawtext=fontfile='${escapedFont}'` +
                         `:textfile='${escapedTextFile}'` +
                         `:fontsize=${size}:fontcolor=${color}` +
                         `:x=${x}:y=${y}` +
                         strokePart +
                         `:enable='gte(t,${startSec})*lte(t,${endSec})'`
-                    );
+                    ] });
                     filterIdx++;
                 }
             }
 
-            // Splice in the animated-caption filters built above, appended
-            // AFTER every static filter. Each drawtext is `enable`-gated to
-            // its own window, so this is correct for the overwhelmingly
-            // common case (one caption visible at a time). KNOWN LIMIT: if a
-            // project has a STATIC caption on one track overlapping in time
-            // with an ANIMATED caption on another, the animated one always
-            // draws on top regardless of track order — this reorders relative
-            // to the original per-track/per-clip interleaving the static-only
-            // path used. Narrow edge case (multiple simultaneous overlapping
-            // caption tracks are themselves unusual); stated here rather than
-            // left to be discovered.
-            textFilters.push(...compiledCaptionProgram.filters);
+            // Keep each caption's filters together (shadow, glow and glyph
+            // passes are one visual layer), then restore the original timeline
+            // track/clip order across static and animated captions.
+            for (const group of compiledCaptionProgram.groups || []) {
+                captionFilterGroups.push({
+                    clipId: group.clipId,
+                    filters: group.filters,
+                });
+            }
+            const orderedCaptionFilters = mergeCaptionFilterGroups(captionFilterGroups, captionOrder);
+            textFilters.push(...orderedCaptionFilters);
 
-            if (textFilters.length > 0) {
+            // Keep the same resolved caption layers available to alpha
+            // exports. The flattened MP4 renderer below and the transparent
+            // graphics renderer must use the same caption compiler output.
+            transparentCaptionLayers = {
+                items: rasterPrepared?.items || [],
+                drawtextGroups: captionFilterGroups,
+                orderByClipId: captionOrder,
+            };
+
+            const hasRasterCaptionLayers = (rasterPrepared?.items || []).length > 0;
+            if (textFilters.length > 0 && !hasRasterCaptionLayers) {
                 const textOverlayPath = path.join(tmpDir, 'with_text.mp4');
                 // Join filters with comma; each drawtext is one element in the vf chain.
                 // Note: commas inside individual filter options are already inside
@@ -4190,11 +4520,13 @@ module.exports = async function processExportJob(job) {
                 try {
                     const graph = compileRasterOverlays(rasterPrepared.items, {
                         frameWidth: targetWidth, frameHeight: targetHeight, fps: targetFps,
+                        drawtextGroups: captionFilterGroups,
+                        orderByClipId: captionOrder,
                     });
                     if (!graph) throw new Error('nothing to draw');
                     const graphPath = path.join(tmpDir, 'raster_caption_graph.txt');
                     fs.writeFileSync(graphPath, graph.filterComplex, 'utf-8');
-                    const args = ['-i', finalVideoPath];
+                    const args = ['-i', captionSourcePath];
                     for (const inp of graph.inputs) args.push(...inp.inputOptions, '-i', inp.path);
                     args.push(
                         '-filter_complex_script', graphPath,
@@ -4238,12 +4570,17 @@ module.exports = async function processExportJob(job) {
                             fallbackFontPath,
                             resolveFont: (family) => (family && FAMILY_PATHS[family]) ? FAMILY_PATHS[family] : null,
                         });
-                        if (fallback.filters.length > 0) {
+                        const fallbackGroups = [
+                            ...captionFilterGroups,
+                            ...(fallback.groups || []),
+                        ];
+                        const orderedFallbackFilters = mergeCaptionFilterGroups(fallbackGroups, captionOrder);
+                        if (orderedFallbackFilters.length > 0) {
                             const fbScript = path.join(tmpDir, 'raster_fallback_filters.txt');
-                            fs.writeFileSync(fbScript, fallback.filters.join(','), 'utf-8');
+                            fs.writeFileSync(fbScript, orderedFallbackFilters.join(','), 'utf-8');
                             const fbOut = path.join(tmpDir, 'with_raster_fallback.mp4');
                             await runFfmpegArgs(DRAWTEXT_BIN, [
-                                '-i', finalVideoPath, '-filter_script:v', fbScript,
+                                '-i', captionSourcePath, '-filter_script:v', fbScript,
                                 '-map', '0:v', '-map', '0:a?',
                                 '-c:v', codec, '-b:v', videoBitrate, '-profile:v', profile,
                                 '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-y', fbOut,
@@ -4271,6 +4608,68 @@ module.exports = async function processExportJob(job) {
     let deliveredCodec = codec;
     const formatChoice = String(settings.format || 'mp4').toLowerCase();
     const requestedFormat = ['mp4', 'webm', 'png-sequence', 'transparent-png-sequence', 'transparent-mov'].includes(formatChoice) ? formatChoice : 'mp4';
+    if (['transparent-png-sequence', 'transparent-mov'].includes(requestedFormat)) {
+        const alphaDuration = Math.max(0.1, cumulativeOut,
+            Number(rawPlan?.base?.totalDuration) || 0);
+        const frameCount = Math.max(1, Math.ceil(alphaDuration * targetFps));
+        const captionLayers = transparentCaptionLayers;
+        const hasCaptions = !!(captionLayers
+            && (captionLayers.items.length || captionLayers.drawtextGroups.length));
+        if (!transparentGraphicsPath || !fs.existsSync(transparentGraphicsPath)) {
+            if (!hasCaptions) {
+                throw new Error(compositorWarning || 'Transparent graphics export needs at least one supported overlay or caption layer. Choose PNG sequence for a flattened video export.');
+            }
+            const alphaDir = path.join(tmpDir, 'transparent-graphics');
+            fs.mkdirSync(alphaDir, { recursive: true });
+            const alphaPattern = path.join(alphaDir, 'frame-%06d.png');
+            await runFfmpegArgs(ffmpegPath, [
+                '-hide_banner', '-loglevel', 'error',
+                '-f', 'lavfi', '-i', `color=c=black@0:s=${targetWidth}x${targetHeight}:r=${targetFps}:d=${alphaDuration},format=rgba`,
+                '-frames:v', String(frameCount), '-start_number', '1',
+                '-c:v', 'png', '-pix_fmt', 'rgba', '-compression_level', '3',
+                '-y', alphaPattern,
+            ]);
+            transparentGraphicsPath = alphaDir;
+            transparentGraphicsFrameCount = frameCount;
+        }
+
+        if (hasCaptions) {
+            const { compileRasterOverlays } = require('../server/compositor/RasterCaptionCompiler.js');
+            const graph = compileRasterOverlays(captionLayers.items, {
+                frameWidth: targetWidth,
+                frameHeight: targetHeight,
+                fps: targetFps,
+                drawtextGroups: captionLayers.drawtextGroups,
+                orderByClipId: captionLayers.orderByClipId,
+                inputLabel: 'alpha_base',
+            });
+            if (graph) {
+                const sourcePattern = path.join(transparentGraphicsPath, 'frame-%06d.png');
+                const outputDir = path.join(tmpDir, 'transparent-graphics-with-captions');
+                fs.mkdirSync(outputDir, { recursive: true });
+                const outputPattern = path.join(outputDir, 'frame-%06d.png');
+                const graphPath = path.join(tmpDir, 'transparent_caption_filter.txt');
+                fs.writeFileSync(graphPath, `[0:v]format=rgba[alpha_base];${graph.filterComplex}`, 'utf8');
+                const args = [
+                    '-hide_banner', '-loglevel', 'error',
+                    '-framerate', String(targetFps), '-start_number', '1', '-i', sourcePattern,
+                ];
+                for (const input of graph.inputs) args.push(...input.inputOptions, '-i', input.path);
+                args.push(
+                    '-filter_complex_script', graphPath,
+                    '-map', `[${graph.outputLabel}]`,
+                    '-frames:v', String(transparentGraphicsFrameCount),
+                    '-start_number', '1', '-c:v', 'png', '-pix_fmt', 'rgba', '-compression_level', '3',
+                    '-y', outputPattern,
+                );
+                await runFfmpegArgs(ffmpegPath, args);
+                transparentGraphicsPath = outputDir;
+            }
+        }
+
+        fs.writeFileSync(path.join(transparentGraphicsPath, 'README.txt'),
+            `Vibed transparent graphics sequence\nResolution: ${targetWidth}x${targetHeight}\nFrame rate: ${targetFps} fps\nFrames are numbered from 000001 and preserve transparency. Footage base and audio are not included. Captions are included when present.\n`);
+    }
     if (requestedFormat === 'webm') {
         deliveredPath = path.join(exportsDir, `${jobId}.webm`);
         await runFfmpegArgs(ffmpegPath, [
@@ -4303,7 +4702,7 @@ module.exports = async function processExportJob(job) {
             throw new Error(compositorWarning || 'Transparent graphics export needs at least one supported overlay layer. Choose PNG sequence for a flattened video export.');
         }
         deliveredPath = path.join(exportsDir, `${jobId}-transparent-graphics.zip`);
-        await runProgram('zip', ['-q', '-r', '-X', deliveredPath, 'transparent-graphics'], tmpDir);
+        await runProgram('zip', ['-q', '-r', '-X', deliveredPath, path.basename(transparentGraphicsPath)], tmpDir);
         deliveredCodec = 'png-sequence-alpha';
     } else if (requestedFormat === 'transparent-mov') {
         if (!transparentGraphicsPath || !fs.existsSync(transparentGraphicsPath)) {
@@ -4447,7 +4846,10 @@ module.exports.buildSelectiveGradeCube = buildSelectiveGradeCube;
 module.exports.hasSelectiveGrade = hasSelectiveGrade;
 module.exports.compileClipColorGradeFilters = compileClipColorGradeFilters;
 module.exports.compileTimelineVisualEffectGraph = compileTimelineVisualEffectGraph;
+module.exports.compileTimelineVisualEffectDag = compileTimelineVisualEffectDag;
 module.exports.compileTimelineAudioEffects = compileTimelineAudioEffects;
+module.exports.compileWindowedTimelineAudioEffects = compileWindowedTimelineAudioEffects;
+module.exports.applyWindowedTimelineAudioEffectsToFile = applyWindowedTimelineAudioEffectsToFile;
 module.exports.applyEffectSamples = applyEffectSamples;
 module.exports.resolveTimelineSpeedEffect = resolveTimelineSpeedEffect;
 module.exports.buildSpeedRetimePlan = buildSpeedRetimePlan;

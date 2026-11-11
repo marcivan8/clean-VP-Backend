@@ -85,6 +85,8 @@ const ide  = read('client/src/layouts/IDELayout.jsx');
 check('the library picker takes many files and accepts stills', () => {
     assert.ok(/multiple=\{!capture\}/.test(home), 'the picker must be multi-select');
     assert.ok(/accept="video\/\*,image\/\*"/.test(home), 'photos belong in a short too');
+    assert.ok(/setSelectedFiles\(current\s*=>\s*\[\.\.\.current,\s*\.\.\.files\]\)/.test(home), 'selection must retain every picked item instead of silently slicing at 20');
+    assert.ok(!/selectedFiles\.length\s*<\s*20/.test(home), 'the add-more control must remain available after 20 items');
 });
 
 check('the camera stays single — a take is one take', () => {
@@ -251,8 +253,8 @@ check('mobile waits briefly for upload analysis before ranking primary and cutaw
     assert.match(flow, /timeoutMs: 12_000, intervalMs: 1_000, retryOnError: true/, 'analysis waiting is bounded and retries transient failures');
     assert.match(flow, /try \{ profiles = await fetchProfiles\(\); \} catch \{ \/\* Ambiguity is handled without guessing\. \*\//, 'profiles are refreshed after analysis settles');
     const wait = read('client/src/agent/assetAnalysisWait.js');
-    assert.match(wait, /i \+= 200/, 'large bins are split to respect the status endpoint limit');
-    assert.match(wait, /Promise\.all\(batches/, 'large-bin status batches are checked concurrently');
+    assert.match(wait, /ASSET_ANALYSIS_STATUS_BATCH_SIZE = 100/, 'large bins are split into URL-safe status batches');
+    assert.match(wait, /mapWithConcurrency\(batches, ASSET_ANALYSIS_STATUS_CONCURRENCY/, 'large-bin status batches use bounded concurrency');
 });
 
 check('the step list is announced to a screen reader', () => {

@@ -13,6 +13,7 @@ import { GPUEffectEngine } from './engines/GPUEffects.js';
 import { CPUEffectEngine } from './engines/CPUEffects.js';
 import { AIEffectEngine } from './engines/AIEffects.js';
 import { resolveEffectParameter } from '../motion/EffectTiming.js';
+import { cssFilterToColorMatrix } from './lutPreview.js';
 
 const MAX_EFFECT_EXPRESSION_SAMPLES = 60;
 
@@ -251,7 +252,9 @@ function detachEffectFromGraph(graphsByTarget, targetId, effectId) {
     graph.removeNode(effectId);
     if (incoming.length === 1 && outgoing.length === 1
         && graph.nodes.has(incoming[0].from) && graph.nodes.has(outgoing[0].to)) {
-        graph.connect(incoming[0].from, outgoing[0].to);
+        // The port belongs to the destination node. Preserve it when a
+        // regular effect is removed from a branch feeding an explicit join.
+        graph.connect(incoming[0].from, outgoing[0].to, outgoing[0].port || 'default');
     }
     if (graph.isEmpty) graphsByTarget.delete(targetId);
 }
@@ -271,9 +274,23 @@ function attachEffectToGraph(graphsByTarget, effect) {
         graph.addNode(effect);
         return;
     }
-    const chain = graph.connections.length ? graph.getExecutionOrder() : null;
+    let chain = null;
+    let appendAfterDagSink = null;
+    if (graph.connections.length) {
+        const plan = graph.getExecutionPlan();
+        if (plan.branches.length || plan.joins.length) {
+            // Ordinary effects-panel additions remain useful after a user has
+            // authored a DAG: append them after its explicit output, preserving
+            // every branch and join instead of flattening or rejecting it.
+            appendAfterDagSink = plan.sinks[0]?.id || null;
+        } else {
+            chain = graph.getExecutionOrder();
+        }
+    }
     graph.addNode(effect);
-    if (chain) {
+    if (appendAfterDagSink) {
+        graph.connect(appendAfterDagSink, effect.id);
+    } else if (chain) {
         let insertionIndex = chain.findIndex(node => Number(node.order) > Number(effect.order));
         if (insertionIndex < 0) insertionIndex = chain.length;
         chain.splice(insertionIndex, 0, effect);
@@ -305,7 +322,33 @@ export class EffectPipeline {
         // Event handlers
         this.onEffectChange = options.onEffectChange || null;
         this.onPreviewWarning = options.onPreviewWarning || null;
+        this.lutPreviewProvider = options.lutPreviewProvider || null;
+        this._lutPreviewFilters = new Map();
+        this._lutPreviewRequests = new Map();
         this._previewWarnings = new Set();
+    }
+
+    _lutId(effect) {
+        const value = effect?.getParam?.('lutId') ?? effect?.params?.lutId;
+        return String(value && typeof value === 'object' && 'value' in value ? value.value : value || '');
+    }
+
+    _ensureLutPreview(effect) {
+        const lutId = this._lutId(effect);
+        if (!lutId || this._lutPreviewFilters.has(lutId) || this._lutPreviewRequests.has(lutId)) return;
+        if (typeof this.lutPreviewProvider !== 'function') {
+            this._lutPreviewFilters.set(lutId, 'none');
+            return;
+        }
+        const request = Promise.resolve().then(() => this.lutPreviewProvider(lutId)).then(filter => {
+            this._lutPreviewFilters.set(lutId, typeof filter === 'string' ? filter : 'none');
+            this._previewWarnings.clear();
+            this.onEffectChange?.({ type: 'preview_ready', effectId: effect.id, lutId });
+        }).catch(() => {
+            this._lutPreviewFilters.set(lutId, 'none');
+            this.onEffectChange?.({ type: 'preview_ready', effectId: effect.id, lutId });
+        }).finally(() => this._lutPreviewRequests.delete(lutId));
+        this._lutPreviewRequests.set(lutId, request);
     }
 
     // ========================================================================
@@ -500,8 +543,13 @@ export class EffectPipeline {
     // ========================================================================
 
     _warnCpuEffectsUnavailable(targetId, effects) {
-        const cpuEffects = (effects || []).filter(effect => effect.engine === ENGINE_TYPES.CPU
-            && !this.gpuEngine?.supportsPreviewEffect?.(effect));
+        const cpuEffects = (effects || []).filter(effect => effect.engine === ENGINE_TYPES.CPU && (
+            effect.type === 'lut_apply'
+                ? !this._lutId(effect) || (this._lutPreviewFilters.has(this._lutId(effect))
+                    && (this._lutPreviewFilters.get(this._lutId(effect)) === 'none'
+                        || !cssFilterToColorMatrix(this._lutPreviewFilters.get(this._lutId(effect)))))
+                : !this.gpuEngine?.supportsPreviewEffect?.(effect)
+        ));
         if (!cpuEffects.length) return;
         const effectIds = cpuEffects.map(effect => effect.id);
         const key = `cpu-effect-preview-unavailable:${targetId}:${effectIds.join(',')}`;
@@ -529,12 +577,17 @@ export class EffectPipeline {
      */
     processPreview(texture, targetId, time, context = {}) {
         const activeAtTime = this.getActiveEffects(targetId, time, context.placement);
+        activeAtTime.filter(effect => effect.type === 'lut_apply').forEach(effect => this._ensureLutPreview(effect));
         this._warnCpuEffectsUnavailable(targetId, activeAtTime);
         // Most CPU effects are export-only. Fade in/out also have equivalent
         // shaders, so route those through the live renderer to keep preview and
         // export in sync without changing their canonical export engine.
-        const activeEffects = activeAtTime.filter(effect => effect.engine === ENGINE_TYPES.GPU
-            || this.gpuEngine?.supportsPreviewEffect?.(effect));
+        const lutAvailable = effect => effect.type !== 'lut_apply'
+            || (Boolean(this._lutId(effect)) && this._lutPreviewFilters.has(this._lutId(effect))
+                && this._lutPreviewFilters.get(this._lutId(effect)) !== 'none'
+                && Boolean(cssFilterToColorMatrix(this._lutPreviewFilters.get(this._lutId(effect)))));
+        const activeEffects = activeAtTime.filter(effect => (effect.engine === ENGINE_TYPES.GPU
+            || this.gpuEngine?.supportsPreviewEffect?.(effect)) && lutAvailable(effect));
 
         if (activeEffects.length === 0) {
             return texture;
@@ -586,7 +639,29 @@ export class EffectPipeline {
         if (!renderableEffects.length) return texture;
 
         // Process through GPU engine
-        return this.gpuEngine.processChain(renderableEffects, texture, time, context);
+        const lutPreviewFilters = Object.fromEntries(this._lutPreviewFilters);
+        const graph = this.effectsByTarget.get(targetId);
+        const topology = graph?.getTopologyPlan();
+        if (graph?.connections.length && (topology?.branches.length || topology?.joins.length)) {
+            const renderableIds = new Set(renderableEffects.map(effect => effect.id));
+            if (typeof this.gpuEngine.processGraph === 'function') {
+                return this.gpuEngine.processGraph(graph, texture, time,
+                    { ...context, lutPreviewFilters }, effect => renderableIds.has(effect.id));
+            }
+            const key = `effect-graph-renderer-unavailable:${targetId}`;
+            if (!this._previewWarnings.has(key)) {
+                this._previewWarnings.add(key);
+                const warning = {
+                    type: 'effect_graph_preview_unavailable',
+                    targetId,
+                    message: 'This effect graph needs a renderer that supports parallel branches and explicit composite joins.',
+                    recoverable: true,
+                };
+                this.onPreviewWarning?.(warning);
+            }
+            return texture;
+        }
+        return this.gpuEngine.processChain(renderableEffects, texture, time, { ...context, lutPreviewFilters });
     }
 
     /**
@@ -666,6 +741,7 @@ export class EffectPipeline {
             gpuEffects: gpuEffects.map(e => e.serialize()),
             cpuFilter: cpuResult.videoFilter,
             audioFilter: cpuResult.audioFilter,
+            warnings: cpuResult.warnings || [],
             aiData: Object.fromEntries(this.aiAnalysisCache)
         };
 
@@ -703,7 +779,9 @@ export class EffectPipeline {
         // clip keyframes before export; storing analysis JSON alone would not
         // affect the rendered picture.
         for (const [targetId, graph] of this.effectsByTarget) {
-            const effects = graph.getExecutionOrder().filter(e => e.enabled);
+            const executionPlan = graph.getExecutionPlan();
+            const effects = executionPlan.orderedNodes.filter(e => e.enabled);
+            const isBranchedGraph = executionPlan.branches.length > 0 || executionPlan.joins.length > 0;
 
             if (effects.length === 0) continue;
             const aiEffects = effects.filter(e => e.engine === ENGINE_TYPES.AI);
@@ -760,7 +838,7 @@ export class EffectPipeline {
                 // native keyframes or concrete effects above; serializing the
                 // AI directive itself leaves an unknown no-op in the export.
                 const outputFps = context.settings?.fps || context.exportSettings?.fps || 30;
-                const compiledEffects = effects.filter(effect => effect.engine !== ENGINE_TYPES.AI).map((effect, executionOrder) => ({
+                const compiledEffects = (isBranchedGraph ? [] : effects.filter(effect => effect.engine !== ENGINE_TYPES.AI)).map((effect, executionOrder) => ({
                     id: effect.id,
                     kind: effect.type,
                     type: effect.type,
@@ -778,6 +856,21 @@ export class EffectPipeline {
                     metadata: { ...effect.metadata, aiData: this.aiAnalysisCache.get(effect.id) }
                 }));
                 const graphEffectIds = new Set(compiledEffects.map(effect => effect.id));
+                if (isBranchedGraph) {
+                    for (const effect of executionPlan.orderedNodes) graphEffectIds.add(effect.id);
+                    // Preserve graph connections for the export worker. A DAG
+                    // cannot be represented by clip.effects' ordered array;
+                    // flattening it would change its visual meaning.
+                    clip.effectGraph = {
+                        nodes: executionPlan.orderedNodes.map(effect => ({
+                            ...effect.serialize(),
+                            params: effect.params,
+                            metadata: { ...effect.metadata, aiData: this.aiAnalysisCache.get(effect.id) },
+                            samples: sampleEffectExpressions(effect, clip, outputFps) || undefined,
+                        })),
+                        connections: executionPlan.connections.map(edge => ({ ...edge })),
+                    };
+                }
                 // PlaybackEngine routes clip effects into the target graph
                 // after the graph's existing nodes. With a connected stack,
                 // newly added nodes are inserted by authored order; equal or

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { canRenderOpaqueScene3DGpu, canRenderScene3DGpu, renderOpaqueScene3DGpu } from '../client/src/motion/Scene3DGPU.js';
+import { canRenderOpaqueScene3DGpu, canRenderScene3DGpu, renderScene3DGpu, renderOpaqueScene3DGpu } from '../client/src/motion/Scene3DGPU.js';
 
 const triangle = { projected: [
     { x: 1, y: 1, z: 2 }, { x: 9, y: 1, z: 3 }, { x: 4, y: 9, z: 4 },
@@ -14,13 +14,30 @@ const texturedTriangle = {
     image: { width: 2, height: 2 },
     uvs: [[0, 0], [1, 0], [0.5, 1]],
 };
-assert.equal(canRenderScene3DGpu([texturedTriangle]), false,
-    'textured triangles stay on software rendering so transparent texels do not write incorrect GPU depth');
+assert.equal(canRenderScene3DGpu([texturedTriangle]), true,
+    'a single textured surface can use source-over GPU rendering without writing alpha pixels to depth');
 assert.equal(canRenderScene3DGpu([{ ...texturedTriangle, uvs: null }]), false, 'textured geometry without complete UVs remains on software rendering');
 assert.equal(canRenderOpaqueScene3DGpu([texturedTriangle]), false,
     'the strict opaque-only predicate does not claim an image texture is opaque without inspecting its pixels');
 assert.equal(canRenderScene3DGpu([{ ...texturedTriangle, image: { width: 8192, height: 8192 } }]), false,
     'individual textures over the GPU allocation budget remain on the software renderer');
+assert.equal(canRenderScene3DGpu([
+    { ...triangle, order: 1 }, { ...texturedTriangle, order: 2 },
+]), true, 'opaque geometry and a single transparent texture share the GPU depth-tested path');
+assert.equal(canRenderScene3DGpu([
+    { ...translucentTriangle, order: 1 },
+    { ...translucentTriangle, order: 2, projected: translucentTriangle.projected.map(point => ({ ...point, x: point.x + 20 })) },
+]), true, 'multiple transparent surfaces with disjoint projected bounds use the GPU fast path');
+assert.equal(canRenderScene3DGpu([
+    { ...translucentTriangle, order: 1 },
+    { ...translucentTriangle, order: 2, projected: translucentTriangle.projected.map(point => ({ ...point, z: point.z + 10 })) },
+]), true, 'overlapping transparent surfaces with a provably stable depth order use the GPU fast path');
+assert.equal(canRenderScene3DGpu([
+    { ...translucentTriangle, order: 1 },
+    { ...translucentTriangle, order: 2, projected: translucentTriangle.projected.map((point, index) => ({
+        ...point, z: point.z + (index === 0 ? -1 : 1),
+    })) },
+]), false, 'overlapping transparent surfaces whose depth intervals cross retain per-pixel software compositing');
 for (const unsupported of [
     { ...triangle, opacity: -0.1 }, { ...triangle, opacity: 1.1 }, { ...triangle, image: {} }, { ...triangle, shadow: true },
     { ...triangle, particle: true }, { ...triangle, text: true }, { ...triangle, wireframe: true },
@@ -60,9 +77,14 @@ const gl = {
     drawArrays: (_mode, start, count) => calls.push(['drawArrays', count, start]), isContextLost: () => gpuContextLost,
 };
 let offscreenCreations = 0;
+let webglContextOptions = null;
 class FakeOffscreenCanvas {
     constructor(width, height) { this.width = width; this.height = height; offscreenCreations++; }
-    getContext(type) { return type === 'webgl2' ? gl : null; }
+    getContext(type, options) {
+        if (type !== 'webgl2') return null;
+        webglContextOptions = options;
+        return gl;
+    }
 }
 const oldOffscreen = globalThis.OffscreenCanvas;
 globalThis.OffscreenCanvas = FakeOffscreenCanvas;
@@ -79,6 +101,8 @@ try {
         drawImage: (...args) => drawn.push(args),
     };
     assert.equal(renderOpaqueScene3DGpu(ctx, [triangle], 640, 360, { near: 0.05, far: 1000 }), true);
+    assert.equal(webglContextOptions?.premultipliedAlpha, true,
+        'the GPU surface declares its source-over framebuffer as premultiplied before 2D compositing');
     assert.equal(calls.find(([name]) => name === 'drawArrays')[1], 3, 'the GPU draws the scene triangle');
     const uploadedVertices = calls.find(([name]) => name === 'bufferData')[1];
     assert.equal(uploadedVertices.length, 51);
@@ -107,34 +131,64 @@ try {
         && args.join(',') === '14,15,16,15'), 'source-over blending preserves correct RGB and alpha blend factors');
     assert.ok(calls.some(([name, value]) => name === 'depthMask' && value === false),
         'translucent solid faces do not write occluding depth');
+    const textureCalls = calls.length;
+    assert.equal(renderScene3DGpu(ctx, [texturedTriangle], 640, 360), true,
+        'a single image-textured surface uses the bounded GPU path');
+    assert.ok(calls.slice(textureCalls).some(([name]) => name === 'texImage2D'),
+        'the image texture is uploaded for the GPU surface');
+    assert.ok(calls.slice(textureCalls).some(([name, value]) => name === 'depthMask' && value === false),
+        'textured surfaces blend over established depth without writing depth through transparent texels');
+    assert.ok(calls.slice(textureCalls).some(([name]) => name === 'drawArrays'),
+        'the textured triangle reaches the GPU draw call');
+    const opaqueFirstCall = calls.length;
+    assert.equal(renderScene3DGpu(ctx, [texturedTriangle, { ...triangle, projected: triangle.projected.map(point => ({ ...point, z: point.z + 10 })) }], 640, 360), true,
+        'an opaque surface behind the texture still renders through the GPU path');
+    const opaqueFirstVertices = calls.slice(opaqueFirstCall).find(([name]) => name === 'bufferData')[1];
+    assert.equal(opaqueFirstVertices[10], 0, 'opaque geometry is packed before alpha-bearing texture geometry');
+    assert.equal(opaqueFirstVertices[51 + 10], 1, 'textured geometry is composited after opaque depth has been established');
     const transparentCalls = calls.length;
     assert.equal(renderOpaqueScene3DGpu(ctx, [
         { ...translucentTriangle, order: 1 }, { ...translucentTriangle, order: 2 },
     ], 640, 360), false,
         'distinct transparent surfaces use the per-pixel software compositor instead of average-depth GPU ordering');
     assert.equal(calls.length, transparentCalls, 'ambiguous transparent scenes are rejected before issuing GPU work');
+    const disjointTransparentFaces = [
+        { ...translucentTriangle, order: 1 },
+        { ...translucentTriangle, order: 2, projected: translucentTriangle.projected.map(point => ({ ...point, x: point.x + 20 })) },
+    ];
+    assert.equal(renderScene3DGpu(ctx, disjointTransparentFaces, 640, 360), true,
+        'multiple spatially disjoint translucent surfaces are actually rendered on the GPU');
+    assert.equal(calls.filter(([name]) => name === 'drawArrays').at(-1)[1], 6,
+        'both transparent surface triangles are submitted in the GPU scene pass');
+    const layeredTransparentCall = calls.length;
+    assert.equal(renderScene3DGpu(ctx, [
+        { ...translucentTriangle, order: 1, z: 3 },
+        { ...translucentTriangle, order: 2, z: 13, projected: translucentTriangle.projected.map(point => ({ ...point, z: point.z + 10 })) },
+    ], 640, 360), true, 'stable-depth overlapping translucent surfaces use the GPU fast path');
+    const layeredVertices = calls.slice(layeredTransparentCall).find(([name]) => name === 'bufferData')[1];
+    assert.ok(layeredVertices[3] > layeredVertices[54], 'the far transparent surface is submitted before its foreground surface');
     const textureStart = calls.length;
-    assert.equal(renderOpaqueScene3DGpu(ctx, [texturedTriangle, { ...texturedTriangle, projected: triangle.projected }], 640, 360), false,
-        'textured scenes stay on the software path so transparent pixels participate in per-pixel depth resolution');
+    assert.equal(renderScene3DGpu(ctx, [texturedTriangle, { ...texturedTriangle, order: 2, image: { width: 2, height: 2 } }], 640, 360), false,
+        'multiple transparent textures stay on per-pixel software depth resolution');
     const litTexture = { ...texturedTriangle, textureLighting: {
         diffuse: [0.5, 0.6, 0.7], metallicSpecular: [0.1, 0.2, 0.3],
         dielectricSpecular: [0, 64, 128], emission: [0, 32, 64],
     } };
-    assert.equal(renderOpaqueScene3DGpu(ctx, [litTexture], 640, 360), false,
-        'lit textures remain on the software path until alpha-correct GPU depth is supported');
+    assert.equal(renderScene3DGpu(ctx, [litTexture], 640, 360), true,
+        'the texture shader retains its lighting controls on the GPU path');
     const videoCanvas = { tagName: 'CANVAS', width: 640, height: 360 };
     const dynamicTexture = { ...texturedTriangle, image: videoCanvas };
     const manyTextures = Array.from({ length: 18 }, (_, index) => ({ ...texturedTriangle, order: 1, image: { id: index, width: 2, height: 2 } }));
-    assert.equal(renderOpaqueScene3DGpu(ctx, [dynamicTexture], 640, 360), false,
-        'video textures also use alpha-correct software rendering');
+    assert.equal(renderScene3DGpu(ctx, [dynamicTexture], 640, 360), true,
+        'video textures use the GPU path with alpha-safe depth writes');
     assert.equal(renderOpaqueScene3DGpu(ctx, manyTextures, 640, 360), false,
         'a texture-heavy scene is rejected before allocating GPU texture handles');
-    const largeTextures = Array.from({ length: 4 }, (_, index) => ({
+    const largeTextures = Array.from({ length: 5 }, (_, index) => ({
         ...texturedTriangle, order: 1, image: { id: `large-${index}`, width: 2048, height: 2048 },
     }));
     assert.equal(renderOpaqueScene3DGpu(ctx, largeTextures, 640, 360), false,
         'large texture arrays are rejected before GPU allocation');
-    assert.equal(calls.length, textureStart, 'unsupported textured scenes issue no GPU work');
+    assert.ok(calls.length > textureStart, 'supported image and video textures issue GPU work while oversized batches are rejected');
     const drawnBeforeRecovery = drawn.length;
     gpuContextLost = true;
     assert.equal(renderOpaqueScene3DGpu(ctx, [triangle], 640, 360), false,

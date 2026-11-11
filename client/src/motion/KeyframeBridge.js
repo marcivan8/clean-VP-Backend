@@ -38,6 +38,8 @@
  */
 
 import { createAnimation, createKeyframe, ANIMATION_TYPES } from './MotionSchema.js';
+import { resolveMotionAt } from './MotionResolver.js';
+import { resolveClipAnimations } from './ClipAdapter.js';
 
 /** Marks the single animation the keyframe editor owns. */
 export const CUSTOM_ANIMATION_ID = 'custom-motion';
@@ -59,6 +61,8 @@ export const MOTION_PARAM_DEFS = {
     rotation: { type: 'float', label: 'Rotation',   min: -180, max: 180, step: 1,    value: 0, neutral: 0 },
     opacity:  { type: 'float', label: 'Opacity',    min: 0,    max: 1,   step: 0.01, value: 1, neutral: 1 },
     blur:     { type: 'float', label: 'Blur',       min: 0,    max: 40,  step: 0.5,  value: 0, neutral: 0 },
+    glow:     { type: 'float', label: 'Glow',       min: 0,    max: 100, step: 1,    value: 0, neutral: 0 },
+    reveal:   { type: 'float', label: 'Reveal',     min: 0,    max: 1,   step: 0.01, value: 1, neutral: 1 },
 };
 
 export const MOTION_PARAM_NAMES = Object.keys(MOTION_PARAM_DEFS);
@@ -78,6 +82,76 @@ export const MOTION_PARAM_NAMES = Object.keys(MOTION_PARAM_DEFS);
 export function animationsToParamTracks(animations, clipDuration) {
     const tracks = {};
     if (!Array.isArray(animations)) return tracks;
+
+    // Presets may stack and compose (for example, two scale animations
+    // multiply). A flat editor track cannot expose either source curve as the
+    // rendered result. In that case expose an adaptive approximation of the
+    // composed curve. On the first edit the bridge intentionally turns this
+    // view into one custom animation, so sample densely enough to retain the
+    // visible result while keeping the editor bounded for long clips.
+    if (animations.length > 1) {
+        const duration = Math.max(0, Number(clipDuration) || 0);
+        const layer = { startTime: 0, duration, animations };
+        // Keep the clip's neutral transform separate from the animation stack.
+        // Subtracting the resolved stack value at t=0 shifts every composed
+        // translation/rotation curve when the user edits a different channel.
+        const base = resolveMotionAt({ ...layer, animations: [] }, 0);
+        const authoredParams = new Set(animations.flatMap(anim => Array.isArray(anim?.keyframes)
+            ? anim.keyframes.flatMap(keyframe => Object.keys(keyframe?.properties || {}))
+            : []));
+        const valueAt = (param, time) => {
+            const value = resolveMotionAt(layer, time)[param];
+            if (!Number.isFinite(value)) return MOTION_PARAM_DEFS[param].neutral;
+            if (param === 'x' || param === 'y' || param === 'rotation') return value - base[param];
+            return value;
+        };
+        const times = new Set([0, duration]);
+        for (const anim of animations) {
+            if (!anim || !Array.isArray(anim.keyframes)) continue;
+            const animDuration = Math.max(0, Number(anim.duration) || 0);
+            const start = anim.anchor === 'out'
+                ? Math.max(0, duration - animDuration - (Number(anim.startTime) || 0))
+                : Math.max(0, Number(anim.startTime) || 0);
+            times.add(start);
+            times.add(Math.min(duration, start + animDuration));
+            for (const kf of anim.keyframes) times.add(Math.max(0, Math.min(duration, start + (Number(kf?.time) || 0))));
+            // Out animations (and auto-animate events) contribute nothing
+            // before their start, then may begin at a non-identity value. Add
+            // a close pre-boundary sample so flattening doesn't invent a ramp
+            // across the entire preceding interval.
+            if ((anim.anchor === 'out' || anim.source === 'auto-animate') && start > 0) {
+                times.add(Math.max(0, start - 1e-3));
+            }
+        }
+
+        const orderedTimes = [...times].filter(Number.isFinite).sort((a, b) => a - b);
+        for (const param of MOTION_PARAM_NAMES) {
+            if (!authoredParams.has(param)) continue;
+            const keys = new Map();
+            const add = time => {
+                if (keys.size >= 1024 && !keys.has(time)) return;
+                keys.set(time, { time, value: valueAt(param, time), easing: 'linear' });
+            };
+            for (const time of orderedTimes) add(time);
+            const refine = (a, b, depth) => {
+                if (depth >= 9 || keys.size >= 1024 || b - a <= 1e-5) return;
+                const va = valueAt(param, a);
+                const vb = valueAt(param, b);
+                const tolerance = param === 'opacity' || param === 'reveal' ? 0.002 : 0.05;
+                const mid = (a + b) / 2;
+                const q1 = a + (b - a) / 4;
+                const q3 = a + (b - a) * 3 / 4;
+                const linearAt = time => va + ((time - a) / (b - a)) * (vb - va);
+                if ([q1, mid, q3].every(time => Math.abs(valueAt(param, time) - linearAt(time)) <= tolerance)) return;
+                add(mid);
+                refine(a, mid, depth + 1);
+                refine(mid, b, depth + 1);
+            };
+            for (let i = 1; i < orderedTimes.length; i++) refine(orderedTimes[i - 1], orderedTimes[i], 0);
+            tracks[param] = [...keys.values()].sort((a, b) => a.time - b.time);
+        }
+        return tracks;
+    }
 
     for (const anim of animations) {
         if (!anim || !Array.isArray(anim.keyframes)) continue;
@@ -141,7 +215,11 @@ export function paramTracksToAnimations(tracks, clipDuration) {
             const t = Math.max(0, Number(kf?.time) || 0);
             const value = Number(kf?.value);
             if (!Number.isFinite(value)) continue;
-            const key = t.toFixed(4);
+            // Preserve the authored instant exactly. Rounding to four decimal
+            // places merged independent sub-frame keys (and their easing),
+            // even though the resolver can sample the full floating-point
+            // timeline precision.
+            const key = t;
             if (!byTime.has(key)) byTime.set(key, { time: t, properties: {}, easingByProperty: {} });
             byTime.get(key).properties[param] = value;
             byTime.get(key).easingByProperty[param] = kf.easing || 'linear';
@@ -189,7 +267,7 @@ export function buildEditorModel(clip) {
     return {
         effect: {
             id: CUSTOM_ANIMATION_ID,
-            keyframes: animationsToParamTracks(clip.animations, duration),
+            keyframes: animationsToParamTracks(resolveClipAnimations(clip), duration),
         },
         definition: { params: MOTION_PARAM_DEFS },
         duration,
@@ -207,7 +285,7 @@ export function applyKeyframeOp(clip, op) {
     if (!clip || !op || !MOTION_PARAM_DEFS[op.param]) return {};
 
     const duration = Number(clip.duration) || 0;
-    const tracks = animationsToParamTracks(clip.animations, duration);
+    const tracks = animationsToParamTracks(resolveClipAnimations(clip), duration);
     const param = op.param;
     const time = Math.max(0, Number(op.time) || 0);
     const list = Array.isArray(tracks[param]) ? [...tracks[param]] : [];

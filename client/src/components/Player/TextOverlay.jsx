@@ -15,6 +15,7 @@ import { revealedWordCount, activeWordIndex, resolveEmphasis } from '../../motio
 import { highlightMixAt } from '../../motion/TextCraft.js';
 import { mixColor, withAlpha } from '../../motion/ColorTheory.js';
 import { resolveTimelineEffectFilter } from '../../motion/TimelineVisualEffects.js';
+import { groupCompositionEntries, resolveCompositionOpacity } from '../../motion/CompositionGrouping.js';
 // R66 — clip grouping. See the identical import in GraphicOverlay.jsx: a
 // LowerThird's title (this component) and its background bar (GraphicOverlay,
 // a different track) share a `groupId`; dragging either one must move both.
@@ -83,6 +84,30 @@ const FONT_MAP = {
     'Lato':               '"Lato", sans-serif',
     'Outfit':             '"Outfit", sans-serif',
 };
+
+function renderGroupedTextEntries(entries, currentTime, depth = 0) {
+    return groupCompositionEntries(entries, depth).map(item => item.type === 'layer'
+        ? item.entry.element
+        : <TextCompositionGroup key={`text-comp-${item.key}-${depth}`} group={item.group} currentTime={currentTime} depth={depth}>
+            {renderGroupedTextEntries(item.children, currentTime, depth + 1)}
+        </TextCompositionGroup>);
+}
+
+function TextCompositionGroup({ group, currentTime, depth, children }) {
+    const start = Number(group?.start) || 0;
+    const duration = Number(group?.duration) || 0;
+    const opacity = resolveCompositionOpacity([group], currentTime);
+    const filter = resolveTimelineEffectFilter(group?.effects, currentTime, { clipStart: start, clipDuration: duration });
+    const blendMode = group?.blendMode === 'addition' ? 'plus-lighter' : group?.blendMode;
+    return <div data-composition-id={group?.id || undefined}
+        style={{
+            position: 'absolute', inset: 0, pointerEvents: 'none', opacity, isolation: 'isolate',
+            ...(blendMode && blendMode !== 'source-over' ? { mixBlendMode: blendMode } : {}),
+            ...(filter && filter !== 'none' ? { filter } : {}),
+        }}>
+        {children}
+    </div>;
+}
 
 // REMOVED IN R58: the injected `vibed-fade-in` / `vibed-slide-up` / `vibed-pop`
 // CSS keyframes and their `getAnimationStyle()` helper.
@@ -539,9 +564,7 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
         return { left: '50%', top: '50%' };
     };
 
-    return (
-        <div ref={containerRef} className={`absolute inset-0 pointer-events-none overflow-hidden ${placementFilter === 'behind_subject' ? 'z-[2]' : 'z-10'}`}>
-            {activeTextClips.map((clip) => {
+    const textEntries = activeTextClips.map((clip) => {
                 const isActive = clip.id === activeClipId;
 
                 // ── Motion resolution (R58) ─────────────────────────────────
@@ -595,7 +618,7 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
                     ? `0 0 ${motion.glow * previewScale}px currentColor, 0 0 ${motion.glow * 2 * previewScale}px currentColor`
                     : null;
 
-                return (
+                const element = (
                     <div
                         // Keyed on id alone (R58). The old key folded in
                         // `clip.animation` purely to force a remount so the CSS
@@ -628,6 +651,9 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
                             textShadow: glowShadow || clip.textShadow || 'none',
                             WebkitTextStroke: clip.stroke ? `${clip.stroke.width * previewScale}px ${clip.stroke.color}` : 'none',
                             textTransform: clip.captionStyle?.uppercase ? 'uppercase' : 'none',
+                            // Composition opacity is applied once to the isolated
+                            // parent group below so overlapping siblings fade as
+                            // one precomposition.
                             opacity: motion.opacity,
                             ...(filters.length > 0 ? { filter: filters.join(' ') } : {}),
                             pointerEvents: 'auto',
@@ -695,7 +721,11 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
 
                     </div>
                 );
-            })}
+                return { clip, element };
+            });
+    return (
+        <div ref={containerRef} className={`absolute inset-0 pointer-events-none overflow-hidden ${placementFilter === 'behind_subject' ? 'z-[2]' : 'z-10'}`}>
+            {renderGroupedTextEntries(textEntries, currentTime)}
         </div>
     );
 };

@@ -365,6 +365,48 @@ async function main() {
         check('asks it to reason about assets together',
             /TOGETHER/.test(prompt));
         check('includes the asset descriptions', prompt.includes('Founder explaining the product.'));
+
+        const largeBin = Array.from({ length: 87 }, (_, index) => ({
+            id: `rush-${index}`, name: `Rush ${index}.mp4`, scene_type: 'b_roll',
+        }));
+        const largePrompt = pi.buildDerivationPrompt({ assets: largeBin, clipCount: 0 });
+        check('includes assets beyond the former 40-item prompt cap',
+            largePrompt.includes('rush-40') && largePrompt.includes('rush-86'));
+        check('does not claim a partial inventory is complete',
+            /complete inventory/.test(largePrompt) && !/showing first/i.test(largePrompt));
+    }
+
+    section('7b · Oversized bins are derived in complete, bounded batches');
+    {
+        const { ProjectIntelligence } = loadProjectIntelligence(makeSupabaseStub().stub);
+        const prompts = [];
+        const openai = {
+            chat: { completions: { create: async ({ messages }) => {
+                const prompt = messages[0].content;
+                prompts.push(prompt);
+                const ids = [...prompt.matchAll(/\[id: ([^\]]+)\]/g)].map(match => match[1]);
+                const body = /GROUP SUMMARIES/.test(prompt)
+                    ? { project_type: 'vlog', through_line: 'A complete project summary.', target_audience: null, tone: null, coverage_gaps: [] }
+                    : {
+                        project_type: 'vlog', through_line: 'A creator explains a topic.', target_audience: null, tone: 'conversational',
+                        asset_roles: ids.map(assetId => ({ assetId, role: 'supporting', serves: null })), coverage_gaps: [],
+                    };
+                return { choices: [{ message: { content: JSON.stringify(body) } }] };
+            } } },
+        };
+        const pi = new ProjectIntelligence({ openai });
+        const assets = Array.from({ length: 80 }, (_, index) => ({
+            id: `large-${index}`, name: `Rush ${index}.mp4`, scene_type: 'b_roll',
+            content_description: `A useful visual detail ${index}. `.repeat(24),
+            transcript_text: `A long transcript for asset ${index}. `.repeat(20),
+        }));
+        const result = await pi.deriveMap({ assets, clipCount: 0 });
+        check('the oversized project uses multiple bounded requests', prompts.length > 2);
+        check('every analyzed asset remains assigned in the result', result.asset_roles.length === assets.length,
+            `${result.asset_roles.length} roles for ${assets.length} assets`);
+        check('all requests remain below the prompt budget', prompts.every(prompt => prompt.length <= 28_000),
+            `longest prompt was ${Math.max(...prompts.map(prompt => prompt.length))} characters`);
+        check('the final summary is reconciled from batch summaries', result.through_line === 'A complete project summary.');
     }
 
     // ── 8 · binReady comes from server-side rows ─────────────────────────────

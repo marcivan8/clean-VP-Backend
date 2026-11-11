@@ -54,6 +54,9 @@ ok('export worker routes cropped media through the shared transform and animated
     assert.equal(hasBaseClipTransform({ rotation: 18 }), true);
     assert.equal(hasBaseClipTransform({ opacity: 0.5 }), true);
     assert.equal(hasBaseClipTransform({ opacity: 1 }), false);
+    assert.equal(hasBaseClipTransform({ scale: null, scaleX: null, scaleY: null,
+        rotation: null, opacity: null, x: null, y: null }), false,
+        'nullable transform fields must not be mistaken for authored zeros');
     assert.equal(hasBaseClipTransform({ keyframes: { opacity: [{ time: 0, value: 0.5 }] } }), true);
     assert.equal(hasBaseClipTransform({ x: 50 }), true);
     assert.equal(hasBaseClipTransform({ y: -30 }), true);
@@ -68,6 +71,15 @@ ok('export worker routes cropped media through the shared transform and animated
     assert.equal(t1.w, 1080); assert.equal(t1.h, 1920);
     assert.equal(t1.overlayX, 0); assert.equal(t1.overlayY, 0);
     ok('scale=1, x=0, y=0 on a matching-aspect source fills the canvas exactly, centred');
+
+    const nullable = buildTransformFilters({ scale: null, scaleX: null, scaleY: null,
+        rotation: null, opacity: null, x: null, y: null,
+        metadata: { resolution: { w: 1080, h: 1920 } } }, 1080, 1920);
+    assert.equal(nullable.w, 1080); assert.equal(nullable.h, 1920);
+    assert.equal(nullable.overlayX, 0); assert.equal(nullable.overlayY, 0);
+    assert.equal(nullable.rotation, 0); assert.equal(nullable.opacity, 1);
+    assert.doesNotMatch(nullable.scaleFilter, /colorchannelmixer/);
+    ok('nullable transforms resolve to centred, full-opacity defaults instead of exporting transparent video');
 
     // Half scale -> half size, still centred by default.
     const t2 = buildTransformFilters({ scale: 0.5, x: 0, y: 0, metadata: { resolution: { w: 1080, h: 1920 } } }, 1080, 1920);

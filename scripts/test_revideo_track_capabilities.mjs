@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { isEffectActiveAt } from '../render-worker/revideo/src/motion/EffectWindows.js';
 import { resolveRevideoEffectParameter } from '../render-worker/revideo/src/motion/EffectParameters.js';
+import { clipToLayer } from '../render-worker/revideo/src/motion/RevideoLayerAdapter.js';
+import { resolveMotionAt } from '../render-worker/revideo/src/motion/MotionResolver.js';
+import { clipToMotionLayer } from '../client/src/motion/ClipAdapter.js';
+import { resolveMotionAt as resolveClientMotionAt } from '../client/src/motion/MotionResolver.js';
 
 const require = createRequire(import.meta.url);
 const { isRevideoTrackSupported } = require('../jobs/exportProcessor.js');
@@ -12,6 +16,22 @@ assert.equal(isRevideoTrackSupported({ type: 'overlay', clips: [{ id: 'logo', ty
   'static image overlays use the Revideo path');
 assert.equal(isRevideoTrackSupported({ type: 'overlay', clips: [{ id: 'video', type: 'video', url: 'https://assets.test/broll.mp4' }] }), false,
   'video overlays stay on the media compositor path');
+const videoOverlay = { id: 'video-overlay', type: 'video', url: '/broll.mp4', start: 0, duration: 2 };
+assert.equal(clipToLayer(videoOverlay, { type: 'overlay' }).kind,
+  clipToMotionLayer(videoOverlay, { type: 'overlay' }).kind,
+  'worker and client adapters classify video layers identically even when another renderer owns the video pixels');
+const nullableTransform = { id: 'nullable', type: 'image', position: 'bottom', x: null, y: null,
+  scale: null, scaleX: null, scaleY: null, rotation: null, opacity: null, duration: 2 };
+const nullableClientLayer = clipToMotionLayer(nullableTransform, { type: 'overlay' });
+const nullableWorkerLayer = clipToLayer(nullableTransform, { type: 'overlay' });
+assert.deepEqual([nullableClientLayer.x, nullableClientLayer.y, nullableClientLayer.scale,
+  nullableClientLayer.scaleX, nullableClientLayer.scaleY, nullableClientLayer.rotation, nullableClientLayer.opacity],
+  [50, 85, 1, 1, 1, 0, 1], 'nullable transforms use position and neutral transform defaults in client preview');
+assert.deepEqual([nullableWorkerLayer.x, nullableWorkerLayer.y, nullableWorkerLayer.scale,
+  nullableWorkerLayer.scaleX, nullableWorkerLayer.scaleY, nullableWorkerLayer.rotation, nullableWorkerLayer.opacity],
+  [nullableClientLayer.x, nullableClientLayer.y, nullableClientLayer.scale, nullableClientLayer.scaleX,
+    nullableClientLayer.scaleY, nullableClientLayer.rotation, nullableClientLayer.opacity],
+  'nullable transforms use the same position and neutral defaults in worker export');
 assert.equal(isRevideoTrackSupported({ type: 'overlay', clips: [{ id: 'logo', type: 'image', url: '/logo.png', effects: [{ kind: 'glow' }] }] }), false,
   'image effect stacks stay on the compositor path until Revideo renders them');
 assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type: 'text', content: 'Hello', start: 0, duration: 2,
@@ -54,6 +74,20 @@ assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type
 assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type: 'text', content: 'Hello', start: 0, duration: 2,
   textAlign: 'left' }] }), false,
   'non-centred text alignment stays on the caption compositor path');
+for (const [field, value] of [
+  ['letterSpacing', 2], ['tracking', 0.05], ['lineHeight', 1.4], ['textTransform', 'uppercase'],
+  ['strokeWidth', 2],
+]) {
+  assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type: 'text', content: 'Hello', [field]: value }] }), false,
+    `${field} typography stays on the complete compositor path`);
+}
+for (const [field, value] of [
+  ['letterSpacing', 2], ['tracking', 0.05], ['lineHeight', 1.4], ['textTransform', 'uppercase'],
+  ['strokeWidth', 2], ['backgroundColor', '#000000'],
+]) {
+  assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type: 'text', content: 'Hello', captionStyle: { [field]: value } }] }), false,
+    `captionStyle.${field} typography stays on the complete compositor path`);
+}
 assert.equal(isRevideoTrackSupported({ type: 'overlay', clips: [{ id: 'logo', type: 'image', url: '/logo.png', sceneMask: { kind: 'shape' } }] }), false,
   'masked overlays stay on the compositor path');
 assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type: 'text', content: 'Hello', keyframes: {
@@ -62,10 +96,29 @@ assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type
   opacity: [{ time: 0, value: 0 }, { time: 1, value: 1 }],
 } }] }), true,
   'Revideo text layers evaluate supported legacy clip transform keyframes');
-assert.equal(isRevideoTrackSupported({ type: 'overlay', clips: [{ id: 'logo', type: 'image', url: '/logo.png', keyframes: {
+const animatedOverlay = { type: 'overlay', clips: [{ id: 'logo', type: 'image', url: '/logo.png', start: 2, duration: 2, x: 20, y: 50, keyframes: {
+  x: [{ time: 0, value: 20 }, { time: 2, value: 60 }],
   scale: [{ time: 0, value: 1 }, { time: 1, value: 1.5 }],
+  opacity: [{ time: 0, value: 0 }, { time: 2, value: 1 }],
+} }] };
+assert.equal(isRevideoTrackSupported(animatedOverlay), true,
+  'image overlays with supported legacy transform tracks use Revideo');
+const animatedOverlayLayer = clipToLayer(animatedOverlay.clips[0], animatedOverlay);
+const sampledOverlay = resolveMotionAt(animatedOverlayLayer, 2.5);
+assert.deepEqual([sampledOverlay.x, sampledOverlay.scale, sampledOverlay.opacity], [30, 1.25, 0.25],
+  'Revideo samples legacy overlay transform tracks on the clip-local clock');
+const clientOverlayLayer = clipToMotionLayer(animatedOverlay.clips[0], animatedOverlay);
+const clientSampledOverlay = resolveClientMotionAt(clientOverlayLayer, 2.5);
+assert.deepEqual([clientSampledOverlay.x, clientSampledOverlay.scale, clientSampledOverlay.opacity],
+  [sampledOverlay.x, sampledOverlay.scale, sampledOverlay.opacity],
+  'browser overlay preview and Revideo worker resolve identical legacy keyframes');
+const baseVideoLayer = clipToMotionLayer({ ...animatedOverlay.clips[0], type: 'video' }, { type: 'video' });
+assert.equal(resolveClientMotionAt(baseVideoLayer, 2.5).scale, 1,
+  'base-video camera keyframes remain owned by VideoPlayer and are not applied twice');
+assert.equal(isRevideoTrackSupported({ type: 'overlay', clips: [{ id: 'logo', type: 'image', url: '/logo.png', keyframes: {
+  unsupportedChannel: [{ time: 0, value: 1 }],
 } }] }), false,
-  'overlay image and video nodes keep legacy keyframes on the compositor path because their Revideo branch does not evaluate them');
+  'unknown legacy overlay channels stay on the compositor path');
 assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type: 'text', content: 'Hello', keyframes: {
   unknownChannel: [{ time: 0, value: 1 }],
 } }] }), false,

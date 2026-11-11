@@ -1,5 +1,6 @@
 import { resolveEffectParameter } from './EffectTiming.js';
 import { isGpuClipEffect, resolveGpuClipEffectType } from '../effects/ClipEffectAdapter.js';
+import { cssFilterToColorMatrix } from '../effects/lutPreview.js';
 
 /** Small CSS effects that work on both the editor preview and the web export. */
 export const TIMELINE_EFFECTS = Object.freeze([
@@ -205,6 +206,7 @@ export function resolveTimelineLutPreviewFilter(effects = [], lutFilters = {}, t
         .sort((a, b) => (Number(a.effect?.order) || 0) - (Number(b.effect?.order) || 0) || a.index - b.index)
         .map(({ effect }) => effect);
     const result = [];
+    const gpuSupported = new Set(context.gpuSupportedEffectTypes || []);
     for (const effect of ordered) {
         if (!effect || effect.enabled === false || !isEffectActiveAtTime(effect, time)
             || (effect.kind || effect.type || effect.id) !== 'lut_apply') continue;
@@ -213,6 +215,10 @@ export function resolveTimelineLutPreviewFilter(effects = [], lutFilters = {}, t
             ? lutParam.value : lutParam;
         const cssFilter = lutFilters[String(lutId || '')];
         if (!cssFilter || cssFilter === 'none') continue;
+        // WebGL renders supported LUT color filters in the authored effect
+        // chain. Keep the CSS approximation for fallback renderers and LUT
+        // filters outside the shader's deliberately supported subset.
+        if (context.gpuPreview && gpuSupported.has('lut_apply') && cssFilterToColorMatrix(cssFilter)) continue;
         const intensity = Math.max(0, Math.min(1, Number(readEffectParam(effect, 'intensity', 1, time, context))));
         if (!intensity) continue;
         // Interpolate CSS filter functions that have a neutral identity at

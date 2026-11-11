@@ -60,6 +60,41 @@ assert.equal(located.details.candidates[1].timebase, 'source');
 assert.equal(store.getState().assetTargetFindings.length, 1, 'unplaced rush match is stored for the media-bin badge');
 assert.equal(store.getState().targetFindings.length, 1, 'visual match is surfaced for timeline review');
 
+// Large bins are processed in bounded batches without omitting later uploads.
+let searchedAssetCount = 0;
+let activeSearches = 0;
+let maxActiveSearches = 0;
+const largeAssets = Array.from({ length: 37 }, (_, index) => ({
+    id: `large-${index}`, type: 'video', name: `rush-${index}.mp4`,
+}));
+const priorTargetFindings = store.getState().targetFindings;
+const priorAssetTargetFindings = store.getState().assetTargetFindings;
+store.setState({ ...store.getState(), tracks: [], assets: largeAssets, targetFindings: [], assetTargetFindings: [] });
+globalThis.fetch = async (url, init = {}) => {
+    if (url === '/api/brain/locate-target') {
+        const { assetId } = JSON.parse(init.body || '{}');
+        searchedAssetCount++;
+        activeSearches++;
+        maxActiveSearches = Math.max(maxActiveSearches, activeSearches);
+        await Promise.resolve();
+        activeSearches--;
+        return new Response(JSON.stringify({ jobId: `target-job-${assetId}` }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.startsWith('/api/jobs/target-job-')) {
+        return new Response(JSON.stringify({ state: 'completed', result: { ranges: [] } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`Unexpected large-bin fetch ${url}`);
+};
+const largeSearch = await tools.locateVisualTargets({ query: 'red car' });
+assert.equal(searchedAssetCount, 37, 'all videos, including assets after the old 30-item cutoff, are searched');
+assert.ok(maxActiveSearches <= 6, 'analysis submissions stay within the bounded batch size');
+assert.equal(largeSearch.details.scannedAssetCount, 37);
+assert.equal(largeSearch.details.requestedAssetCount, 37);
+store.setState({ ...store.getState(), tracks: tm.toLegacyTracks(), assets: [
+    { id: 'asset-a', type: 'video', name: 'camera.mp4' },
+    { id: 'asset-b', type: 'video', name: 'rushes-b.mp4' },
+], targetFindings: priorTargetFindings, assetTargetFindings: priorAssetTargetFindings });
+
 const cutIntent = await IntentParser.parse('Cut all those matches');
 assert.equal(cutIntent.operation, 'apply_target_ranges');
 assert.equal(cutIntent.constraints.confirmed, true);

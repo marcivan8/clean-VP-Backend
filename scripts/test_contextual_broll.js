@@ -100,6 +100,7 @@ let helpers = null;
         // B-roll helpers do not use them, so keep this eval harness isolated.
         .replace(/^\s*import\s+\{\s*effectRegistry\s*\}\s+from\s+'\.\.\/effects\/EffectRegistry\.js';\s*$/m, 'const effectRegistry = { get: () => null };')
         .replace(/^\s*import\s+\{\s*COMPONENT_IDS\s*\}\s+from\s+'\.\.\/motion\/ComponentLibrary\.js';\s*$/m, 'const COMPONENT_IDS = [];')
+        .replace(/^\s*import\s+\{\s*isReferenceAsset\s*\}\s+from\s+'\.\.\/utils\/assetRoles\.js';\s*$/m, 'const isReferenceAsset = asset => asset?.assistantReference === true || asset?.isReference === true || asset?.is_reference === true || asset?.role === "reference";')
         .replace(/^\s*import\s+[^;]+;\s*$/gm, '')
         .replace(/\bexport\s+(const|function|class)\b/g, '$1');
 

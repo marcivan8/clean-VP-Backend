@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { GPUEffectEngine, GPU_SHADER_TYPES, resolveFadeProgress } from '../client/src/effects/engines/GPUEffects.js';
+import { GPUEffectEngine, GPU_SHADER_TYPES, resolveFadeProgress, resolveGpuCompositeModeId } from '../client/src/effects/engines/GPUEffects.js';
 import { EFFECT_DEFINITIONS } from '../client/src/effects/EffectRegistry.js';
 import { EffectRenderer } from '../client/src/effects/EffectRenderer.js';
 import { EffectPipeline } from '../client/src/effects/EffectPipeline.js';
@@ -10,6 +10,24 @@ import { handleWebGLContextLost, handleWebGLContextRestored } from '../client/sr
 import { createGpuClipEffectConfigs, isGpuClipEffect } from '../client/src/effects/ClipEffectAdapter.js';
 import { resolveTimelineEffectFilter, resolveTimelineSvgEffectInstances, resolveTimelineSvgEffectParams, resolveTimelineVignetteStyle } from '../client/src/motion/TimelineVisualEffects.js';
 import exportProcessor from '../jobs/exportProcessor.js';
+import { cssFilterToColorMatrix, scaleCssFilterIntensity } from '../client/src/effects/lutPreview.js';
+import { BLEND_MODE_KINDS } from '../client/src/motion/SceneSchema.js';
+
+const identityLutMatrix = cssFilterToColorMatrix('none');
+assert.deepEqual(identityLutMatrix, [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+  'an empty LUT preview resolves to the neutral color matrix');
+const lutMatrix = cssFilterToColorMatrix('brightness(1.1) contrast(1.2) saturate(0.9) hue-rotate(12deg)');
+assert.ok(lutMatrix && lutMatrix.slice(0, 3).flat().every(Number.isFinite),
+  'the LUT preview matrix composes supported color filters in their authored order');
+assert.equal(cssFilterToColorMatrix('url(#unsupported) blur(2px)'), null,
+  'unsupported LUT preview functions do not silently become a different color grade');
+assert.equal(cssFilterToColorMatrix('brightness(1.1deg)'), null,
+  'invalid CSS filter units are rejected instead of being interpreted as color values');
+assert.equal(scaleCssFilterIntensity('brightness(1.2) hue-rotate(20deg)', 0.5),
+  'brightness(1.1) hue-rotate(10deg)', 'animated LUT intensity follows the editor preview neutral interpolation');
+assert.equal(scaleCssFilterIntensity('blur(2px)', 0.5), null,
+  'unsupported LUT filters are not approximated at partial intensity');
+assert.ok(GPU_SHADER_TYPES.includes('lut_apply'), 'the GPU renderer registers the LUT preview shader');
 
 const shaderDeletes = [], shaderDetaches = [], programDeletes = [], bufferDeletes = [], textureDeletes = [], framebufferDeletes = [];
 const bootstrapGl = {
@@ -310,6 +328,7 @@ const gl = {
   uniform1i: (name, value) => calls.push([name, value]),
   uniform2f: (name, x, y) => calls.push([name, x, y]),
   uniform3f: (name, x, y, z) => calls.push([name, x, y, z]),
+  uniform4f: (name, x, y, z, w) => calls.push([name, x, y, z, w]),
 };
 const engine = Object.create(GPUEffectEngine.prototype);
 engine._setEffectUniforms(gl, {}, 'vignette', { intensity: 0, radius: 0, softness: 0, color: [0, 0, 0] });
@@ -330,6 +349,27 @@ assert.deepEqual(calls.filter(([name]) => ['u_intensity', 'u_radius', 'u_softnes
   ['u_intensity', 0.25], ['u_radius', 1.2], ['u_softness', 0.3], ['u_color', 0.2, 0.4, 0.6],
 ], 'GPU numeric and color controls honor serialized { value } parameters');
 const radialShader = fs.readFileSync(new URL('../client/src/effects/engines/GPUEffects.js', import.meta.url), 'utf8');
+const gpuCompositeModes = [
+  ['source-over', 0], ['multiply', 1], ['screen', 2], ['addition', 3],
+  ['overlay', 4], ['darken', 5], ['lighten', 6], ['difference', 7], ['color-dodge', 8],
+  ['color-burn', 9], ['hard-light', 10], ['soft-light', 11], ['exclusion', 12],
+  ['hue', 13], ['saturation', 14], ['color', 15], ['luminosity', 16],
+];
+assert.deepEqual(gpuCompositeModes.map(([mode]) => mode).sort(), [...BLEND_MODE_KINDS].sort(),
+  'GPU compositor modes stay aligned with the scene schema blend-mode catalog');
+for (const [mode, expectedId] of gpuCompositeModes) {
+  assert.equal(resolveGpuCompositeModeId(mode), expectedId, `GPU composition resolves ${mode} to its canonical shader branch`);
+}
+assert.equal(resolveGpuCompositeModeId(undefined), 0, 'an omitted blend mode defaults to canonical source-over');
+for (const unsupportedMode of ['normal', 'add', 'plus-lighter', 'unrecognized-mode']) assert.equal(resolveGpuCompositeModeId(unsupportedMode), null,
+  'unsupported GPU composite modes are detectable instead of being mistaken for a supported mode');
+for (const modeId of Array.from({ length: 17 }, (_, index) => index)) {
+  assert.match(radialShader, new RegExp(`u_mode == ${modeId}\\b`), `GPU composite shader implements blend mode ${modeId}`);
+}
+assert.match(radialShader, /vec3 setLum\([\s\S]*?vec3 setSat\([\s\S]*?u_mode == 16/,
+  'GPU composite shader implements the component-based hue, saturation, color and luminosity modes');
+assert.match(radialShader, /softLightChannel\([\s\S]*?u_mode == 11/,
+  'GPU composite shader implements the W3C soft-light curve');
 const shaderBodies = [...radialShader.matchAll(/^\s{4}([a-z][a-z0-9_]*): `([\s\S]*?)`[,]?$/gm)];
 assert.ok(shaderBodies.length >= GPU_SHADER_TYPES.length, 'shader source map can be inspected for uniform declarations');
 for (const [, shaderName, body] of shaderBodies) {
@@ -338,6 +378,14 @@ for (const [, shaderName, body] of shaderBodies) {
   for (const uniformName of referencedUniforms) {
     assert.ok(declaredUniforms.has(uniformName), `${shaderName} references ${uniformName}, which must be declared`);
   }
+}
+for (const shaderName of ['blur_gaussian', 'blur_motion', 'blur_radial']) {
+  const match = shaderBodies.find(([, name]) => name === shaderName);
+  assert.ok(match, `${shaderName} shader is registered`);
+  assert.match(match[2], /sampleColor\.rgb\s*\*\s*sampleColor\.a/,
+    `${shaderName} accumulates RGB premultiplied by alpha to avoid transparent-edge color fringes`);
+  assert.match(match[2], /result\.rgb\s*\/\s*result\.a/,
+    `${shaderName} returns straight RGB after its alpha-correct accumulation`);
 }
 assert.match(radialShader, /dist\s*>\s*0\.00001\s*\?\s*toCenter\s*\/\s*dist\s*:\s*vec2\(0\.0\)/,
   'radial blur uses a finite direction at its exact center pixel');
@@ -367,6 +415,8 @@ assert.deepEqual(calls.filter(([name]) => ['u_animated', 'u_time'].includes(name
 const grainShader = fs.readFileSync(new URL('../client/src/effects/engines/GPUEffects.js', import.meta.url), 'utf8');
 assert.match(grainShader, /floor\(v_texCoord \* u_resolution \/ max\(u_size/, 'grain size controls the spatial grain cell scale');
 assert.match(grainShader, /floor\(u_time \* 30\.0\)/, 'animated grain advances in discrete frame steps');
+assert.match(grainShader, /if\s*\(color\.a\s*>\s*0\.0\)\s*color\.rgb\s*\+=\s*grain\s*\*\s*u_intensity/,
+  'film grain leaves fully transparent RGB untouched to prevent edge halos');
 const shakeShader = fs.readFileSync(new URL('../client/src/effects/engines/GPUEffects.js', import.meta.url), 'utf8');
 assert.match(shakeShader, /float hash\(float x\)[\s\S]*float noise\(float x\)[\s\S]*mix\(hash\(cell\), hash\(cell \+ 1\.0\), blend\)/,
   'camera shake interpolates deterministic samples smoothly over time');
@@ -416,8 +466,12 @@ assert.match(glowShader, /vec3\(0\.2126,\s*0\.7152,\s*0\.0722\)/,
   'GPU glow extracts Rec. 709 luminance to match the SVG and export paths');
 assert.match(glowShader, /clamp\(\(sampleLuminance\s*-\s*u_threshold\)\s*\/\s*thresholdWidth,\s*0\.0,\s*1\.0\)/,
   'GPU glow uses the same soft highlight threshold ramp as SVG and export');
-assert.match(glowShader, /mix\(original\.rgb,\s*u_color,\s*glowAlpha\)/,
-  'GPU glow composites its tint over the source rather than adding and clipping RGB');
+assert.match(glowShader, /dot\(sampleColor\.rgb,\s*vec3\(0\.2126,\s*0\.7152,\s*0\.0722\)\)\s*\*\s*sampleColor\.a/,
+  'GPU glow ignores hidden RGB when extracting highlights from transparent texels');
+assert.match(glowShader, /original\.rgb\s*\*\s*original\.a\s*\*\s*\(1\.0\s*-\s*glowAlpha\)\s*\+\s*u_color\s*\*\s*glowAlpha/,
+  'GPU glow composites source and tint in premultiplied-alpha space');
+assert.match(glowShader, /outputAlpha\s*>\s*0\.00001\s*\?\s*outputPremultiplied\s*\/\s*outputAlpha/,
+  'GPU glow converts the premultiplied result back to straight RGBA safely');
 assert.match(glowShader, /clamp\(bloom\s*\*\s*clamp\(u_intensity,\s*0\.0,\s*3\.0\)\s*\*\s*0\.7,\s*0\.0,\s*1\.0\)/,
   'GPU glow intensity above 1 increases bloom opacity until the composite reaches full opacity');
 assert.match(glowShader, /original\.a\s*\+\s*glowAlpha\s*\*\s*\(1\.0\s*-\s*original\.a\)/,
@@ -428,8 +482,8 @@ assert.match(vignetteShader, /float\(max\(u_samples\s*-\s*1,\s*1\)\)/,
   'motion blur shader protects its interpolation denominator');
 assert.match(vignetteShader, /float\(max\(u_samples,\s*1\)\)/,
   'radial blur shader protects its interpolation denominator');
-assert.match(vignetteShader, /total\s*>\s*0\.0\s*\?\s*result\s*\/\s*total\s*:/,
-  'empty blur accumulations fall back to the source pixel');
+assert.match(vignetteShader, /outColor\s*=\s*total\s*>\s*0\.0[\s\S]*:\s*texture\(u_image,\s*v_texCoord\)/,
+  'empty directional and radial blur accumulations fall back to the source pixel');
 assert.match(grainShader, /direction\s*\*\s*t\s*\*\s*u_intensity\s*\*\s*0\.1\s*\*\s*u_resolution\.x\s*\*\s*texelSize/,
   'motion blur samples its direction in pixel space so portrait and landscape angles match');
 assert.match(grainShader, /\(u_center\s*-\s*v_texCoord\)\s*\*\s*u_resolution/,
@@ -445,13 +499,14 @@ const drawRecords = [];
 const radiusUniforms = [];
 const qualityUniforms = [];
 const grainSeedUniforms = [];
+const compositeModeUniforms = [];
 let targetAllocations = 0;
 let boundFramebuffer = null;
 let boundTexture = null;
 let currentDirection;
 let currentProgram;
 let uniformLocationLookups = 0;
-const blurProgram = {}, vignetteProgram = {}, grainProgram = {};
+const blurProgram = {}, vignetteProgram = {}, grainProgram = {}, compositeProgram = {};
 const mockGL = {
   FRAMEBUFFER: 1, TEXTURE_2D: 2, COLOR_ATTACHMENT0: 3, TEXTURE0: 4,
   RGBA: 5, UNSIGNED_BYTE: 6, ARRAY_BUFFER: 7, FLOAT: 8, TRIANGLES: 9,
@@ -461,11 +516,14 @@ const mockGL = {
   bindFramebuffer: (_target, framebuffer) => { boundFramebuffer = framebuffer; },
   viewport: () => {}, useProgram: program => { currentProgram = program; }, enableVertexAttribArray: () => {},
   bindBuffer: () => {}, vertexAttribPointer: () => {}, activeTexture: () => {},
-  uniform1i: (name, value) => { if (name === 'u_quality' && currentProgram === blurProgram) qualityUniforms.push(value); },
+  uniform1i: (name, value) => {
+    if (name === 'u_quality' && currentProgram === blurProgram) qualityUniforms.push(value);
+    if (name === 'u_mode' && currentProgram === compositeProgram) compositeModeUniforms.push(value);
+  },
   uniform1f: (name, value) => {
     if (name === 'u_radius' && currentProgram === blurProgram) radiusUniforms.push(value);
     if (name === 'u_seed' && currentProgram === grainProgram) grainSeedUniforms.push(value);
-  }, uniform3f: () => {},
+  }, uniform3f: () => {}, uniform4f: (name, ...values) => { if (name.startsWith('u_lutRow')) calls.push([name, ...values]); },
   uniform2f: (name, x, y) => { if (name === 'u_direction') currentDirection = [x, y]; },
   getUniformLocation: (_program, name) => { uniformLocationLookups++; return name; },
   drawArrays: () => {
@@ -479,8 +537,21 @@ Object.assign(gpu, {
   textures: [textureA, textureB], positionBuffer: {}, texCoordBuffer: {},
   programs: new Map([['blur_gaussian', { program: blurProgram, attributes: { position: 0, texCoord: 1 } }],
     ['vignette', { program: vignetteProgram, attributes: { position: 0, texCoord: 1 } }],
-    ['film_grain', { program: grainProgram, attributes: { position: 0, texCoord: 1 } }]]),
+    ['film_grain', { program: grainProgram, attributes: { position: 0, texCoord: 1 } }],
+    ['composite', { program: compositeProgram, attributes: { position: 0, texCoord: 1 } }],
+    ['lut_apply', { program: {}, attributes: { position: 0, texCoord: 1 } }]]),
 });
+for (const [mode, expectedId] of gpuCompositeModes) {
+  gpu.processComposite({ getParamsAt: () => ({ mode, opacity: 1 }) }, textureA, textureB, 0);
+}
+assert.deepEqual(compositeModeUniforms, gpuCompositeModes.map(([, expectedId]) => expectedId),
+  'the preview compositor sends every supported blend mode to its matching GPU shader branch');
+const drawsBeforeUnsupportedMode = drawRecords.length;
+assert.equal(gpu.processComposite({ getParamsAt: () => ({ mode: 'plus-lighter', opacity: 1 }) }, textureA, textureB, 0), textureA,
+  'an unsupported blend mode preserves the base frame rather than silently rendering source-over');
+assert.equal(drawRecords.length, drawsBeforeUnsupportedMode,
+  'an unsupported blend mode does not execute a misleading composite pass');
+drawRecords.length = 0;
 const chain = [
   { type: 'blur_gaussian', engine: 'gpu', enabled: true, getParamsAt: () => ({ radius: { value: 4 }, quality: { value: 20 } }), isActiveAt: () => true },
   { type: 'vignette', engine: 'gpu', enabled: true, getParamsAt: () => ({ intensity: 0.4 }), isActiveAt: () => true },
@@ -489,15 +560,132 @@ const chainOutput = gpu.processChain(chain, sourceTexture, 0.5, { width: 320, he
 assert.equal(chainOutput, textureA, 'effects after a multipass blur continue through the ping-pong chain');
 assert.deepEqual(drawRecords.map(({ direction }) => direction), [[1, 0], [0, 1], undefined],
   'Gaussian blur renders horizontal and vertical passes before the next effect');
+const branchGraph = new EffectGraph();
+branchGraph.addNode({ id: 'graph-source', type: 'glow', engine: 'gpu' });
+branchGraph.addNode({ id: 'graph-base', type: 'color_grade', engine: 'gpu' });
+branchGraph.addNode({ id: 'graph-overlay', type: 'vignette', engine: 'gpu' });
+branchGraph.addNode({ id: 'graph-merge', type: 'composite', engine: 'gpu' });
+branchGraph.connect('graph-source', 'graph-base')
+  .connect('graph-source', 'graph-overlay')
+  .connect('graph-base', 'graph-merge', 'base')
+  .connect('graph-overlay', 'graph-merge', 'overlay');
+const dagGpu = Object.create(GPUEffectEngine.prototype);
+let graphTargetHighWater = 2;
+Object.assign(dagGpu, { gl: { drawingBufferWidth: 320, drawingBufferHeight: 180 }, initialized: true,
+  framebuffers: [{ id: 'graph-fb-0' }, { id: 'graph-fb-1' }],
+  textures: [{ id: 'graph-texture-0' }, { id: 'graph-texture-1' }],
+  _ensureRenderTargets: (_width, _height, count) => {
+    graphTargetHighWater = Math.max(graphTargetHighWater, count);
+    while (dagGpu.framebuffers.length < count) {
+      dagGpu.framebuffers.push({ id: `graph-fb-${dagGpu.framebuffers.length}` });
+      dagGpu.textures.push({ id: `graph-texture-${dagGpu.textures.length}` });
+    }
+  },
+  processEffect: (effect, input, _time, renderContext) => ({ node: effect.id, input, fbIndex: renderContext.fbIndex }),
+  processComposite: (_effect, base, overlay, _time, renderContext) => ({ node: 'merged', base, overlay, fbIndex: renderContext.fbIndex }),
+});
+const dagOutput = dagGpu.processGraph(branchGraph, sourceTexture, 0.5);
+assert.equal(dagOutput.node, 'merged', 'the GPU DAG executor returns the explicit composite sink');
+assert.equal(dagOutput.base.input.node, 'graph-source', 'the base fork receives the preserved parent output');
+assert.equal(dagOutput.overlay.input.node, 'graph-source', 'the overlay fork receives the same preserved parent output');
+assert.equal(graphTargetHighWater, 3,
+  'parallel preview reuses a released root target at the join instead of allocating two targets per graph node');
+const chainedDagOutput = dagGpu.processGraph(branchGraph, dagGpu.textures[0], 0.5);
+assert.notEqual(chainedDagOutput.base.input.fbIndex, 0,
+  'a DAG never renders its root into the framebuffer that contains its input texture');
+const bypassedDagOutput = dagGpu.processGraph(branchGraph, dagGpu.textures[0], 0.5, {}, () => false);
+assert.equal(bypassedDagOutput.base, dagGpu.textures[0],
+  'bypassed root and branch nodes preserve a framebuffer-backed source through the composite');
+assert.equal(bypassedDagOutput.overlay, dagGpu.textures[0],
+  'all fork consumers retain a bypassed framebuffer-backed source until the join');
+assert.notEqual(bypassedDagOutput.fbIndex, 0,
+  'the composite join also avoids overwriting a framebuffer-backed source while reading it');
+const blurBranchGraph = new EffectGraph();
+blurBranchGraph.addNode({ id: 'blur-root', type: 'glow', engine: 'gpu' });
+blurBranchGraph.addNode({ id: 'blur-branch', type: 'blur_gaussian', engine: 'gpu' });
+blurBranchGraph.addNode({ id: 'clean-branch', type: 'vignette', engine: 'gpu' });
+blurBranchGraph.addNode({ id: 'blur-merge', type: 'composite', engine: 'gpu' });
+blurBranchGraph.connect('blur-root', 'blur-branch')
+  .connect('blur-root', 'clean-branch')
+  .connect('blur-branch', 'blur-merge', 'base')
+  .connect('clean-branch', 'blur-merge', 'overlay');
+let blurGraphTargetHighWater = 2;
+const blurGraphPasses = [];
+const recyclingGpu = Object.create(GPUEffectEngine.prototype);
+Object.assign(recyclingGpu, {
+  gl: { drawingBufferWidth: 320, drawingBufferHeight: 180 }, initialized: true,
+  framebuffers: [{ id: 'recycle-fb-0' }, { id: 'recycle-fb-1' }],
+  textures: [{ id: 'recycle-texture-0' }, { id: 'recycle-texture-1' }],
+  _ensureRenderTargets: (_width, _height, count) => {
+    blurGraphTargetHighWater = Math.max(blurGraphTargetHighWater, count);
+    while (recyclingGpu.framebuffers.length < count) {
+      recyclingGpu.framebuffers.push({ id: `recycle-fb-${recyclingGpu.framebuffers.length}` });
+      recyclingGpu.textures.push({ id: `recycle-texture-${recyclingGpu.textures.length}` });
+    }
+  },
+  processEffect: (effect, input, _time, renderContext) => {
+    const outputIndex = renderContext.fbIndex + (effect.type === 'blur_gaussian' ? 1 : 0);
+    const output = recyclingGpu.textures[outputIndex];
+    blurGraphPasses.push({ effectId: effect.id, input, output, inputIndex: renderContext.fbIndex, outputIndex });
+    return output;
+  },
+  processComposite: (_effect, _base, _overlay, _time, renderContext) => recyclingGpu.textures[renderContext.fbIndex],
+});
+const blurGraphOutput = recyclingGpu.processGraph(blurBranchGraph, sourceTexture, 0.5);
+assert.ok(blurGraphOutput, 'a DAG with a two-pass blur reaches its explicit composite output');
+assert.equal(blurGraphTargetHighWater, 3,
+  'a Gaussian blur branch reserves its scratch/output pair and then recycles the scratch target');
+assert.ok(blurGraphPasses.every(pass => pass.input !== pass.output),
+  'recycled graph targets never create a same-texture input/output feedback pass');
+assert.match(radialShader, /composite:[\s\S]*?uniform sampler2D u_overlay/,
+  'the branch join shader samples an independent overlay texture');
+assert.match(radialShader, /premultiplied \/ outAlpha/,
+  'the branch join shader composites alpha-correctly');
+let placementAwareTime;
+const placementAwareEffect = {
+  type: 'vignette', engine: 'gpu', enabled: true,
+  getParamsAt: () => ({ intensity: 0.4 }),
+  isActiveAt: (time, placement) => { placementAwareTime = [time, placement]; return Boolean(placement); },
+};
+const clipPlacement = { startTime: 12, duration: 5 };
+gpu.processChain([placementAwareEffect], sourceTexture, 13, { width: 320, height: 180, placement: clipPlacement });
+assert.deepEqual(placementAwareTime, [13, clipPlacement],
+  'GPU preview activity checks use the same clip placement bounds as pipeline selection');
 gpu.processChain([{ type: 'film_grain', engine: 'gpu', enabled: true,
   getParamsAt: () => ({ intensity: 0.2, size: 2, animated: true, seed: 17 }), isActiveAt: () => true }],
 sourceTexture, 0.5, { width: 320, height: 180 });
+const lutUniformStart = calls.length;
+gpu.processChain([{ type: 'lut_apply', engine: 'cpu', enabled: true,
+  getParamsAt: () => ({ lutId: 'warm', intensity: 0.5 }), isActiveAt: () => true }],
+sourceTexture, 0.5, { width: 320, height: 180, lutPreviewFilters: { warm: 'brightness(1.2) contrast(1.1)' } });
+assert.deepEqual(calls.slice(lutUniformStart).filter(([name]) => name.startsWith('u_lutRow'))
+  .map(([name, ...values]) => [name, ...values.map(value => Number(value.toFixed(3)))]), [
+  ['u_lutRow0', 1.155, 0, 0, -0.025],
+  ['u_lutRow1', 0, 1.155, 0, -0.025],
+  ['u_lutRow2', 0, 0, 1.155, -0.025],
+], 'the real GPU pass applies per-effect LUT intensity to its color matrix uniforms');
 assert.deepEqual(grainSeedUniforms, [17], 'the GPU preview receives the authored deterministic film-grain seed');
 assert.deepEqual(radiusUniforms, [4, 4], 'both Gaussian blur passes use the same radius');
 assert.deepEqual(qualityUniforms, [20, 20], 'the authored Gaussian quality controls the tap count in both passes');
 assert.ok(drawRecords.every(({ input, output }) => input !== output),
   'effect passes never sample from the texture attached as their render target');
 assert.equal(targetAllocations, 2, 'render targets allocate once for a frame size, not once per effect pass');
+let addedTargetStorage = 0;
+let addedRenderTargets = 0;
+const growGl = {
+  TEXTURE_2D: 2, TEXTURE_WRAP_S: 10, TEXTURE_WRAP_T: 11, TEXTURE_MIN_FILTER: 12,
+  TEXTURE_MAG_FILTER: 13, CLAMP_TO_EDGE: 14, LINEAR: 15, FRAMEBUFFER: 1,
+  COLOR_ATTACHMENT0: 3, RGBA: 5, UNSIGNED_BYTE: 6,
+  createTexture: () => ({ id: `dag-texture-${addedRenderTargets++}` }),
+  createFramebuffer: () => ({ id: `dag-framebuffer-${addedRenderTargets}` }),
+  bindTexture: () => {}, texParameteri: () => {}, bindFramebuffer: () => {}, framebufferTexture2D: () => {},
+  texImage2D: () => { addedTargetStorage++; },
+};
+const growingGpu = Object.create(GPUEffectEngine.prototype);
+Object.assign(growingGpu, { gl: growGl, textures: [{}, {}], framebuffers: [{}, {}], targetWidth: 320, targetHeight: 180 });
+growingGpu._ensureRenderTargets(320, 180, 6);
+assert.equal(growingGpu.textures.length, 6, 'parallel graph preview allocates a retained render target per graph node');
+assert.equal(addedTargetStorage, 4, 'new graph targets receive storage even when the preview size is already cached');
 
 const routedTargets = [];
 const routingRenderer = new EffectRenderer({
@@ -610,6 +798,24 @@ assert.equal(cpuPreviewWarnings[0].type, 'cpu_effect_preview_unavailable');
 assert.match(cpuPreviewWarnings[0].message, /not rendered in real-time preview: Custom LUT/);
 assert.equal(cpuOnlyPreviewPipeline.processPreview(unprocessedPreviewTexture, 'cpu-preview-target', 1), unprocessedPreviewTexture);
 assert.equal(cpuPreviewWarnings.length, 1, 'CPU preview limitation warnings are deduplicated for a stable stack');
+let lutProviderCalls = 0;
+let renderedLutContext = null;
+const lutPreviewPipeline = new EffectPipeline({
+  lutPreviewProvider: async lutId => { lutProviderCalls++; assert.equal(lutId, 'look-1'); return 'brightness(1.1) saturate(0.8)'; },
+  gpuEngine: {
+    supportsPreviewEffect: effect => effect.type === 'lut_apply',
+    processChain: (_effects, _texture, _time, context) => { renderedLutContext = context; return { id: 'lut-preview' }; },
+  },
+});
+lutPreviewPipeline.getActiveEffects = () => [{ id: 'lut-1', type: 'lut_apply', name: 'Look', engine: 'cpu', enabled: true, params: { lutId: 'look-1', intensity: 0.7 } }];
+assert.equal(lutPreviewPipeline.processPreview(unprocessedPreviewTexture, 'lut-target', 0), unprocessedPreviewTexture,
+  'the source frame remains available while the authenticated LUT preview is loading');
+await Promise.all([...lutPreviewPipeline._lutPreviewRequests.values()]);
+assert.equal(lutProviderCalls, 1, 'the authenticated LUT preview is fetched once and cached');
+assert.equal(lutPreviewPipeline.processPreview(unprocessedPreviewTexture, 'lut-target', 0).id, 'lut-preview',
+  'a supported LUT preview joins the GPU effect chain once its preview filter is ready');
+assert.equal(renderedLutContext.lutPreviewFilters['look-1'], 'brightness(1.1) saturate(0.8)',
+  'the GPU effect chain receives the fetched filter for LUT matrix conversion');
 const noWebGLWarnings = [];
 const noWebGLPipeline = new EffectPipeline({ onPreviewWarning: warning => noWebGLWarnings.push(warning) });
 noWebGLPipeline.getActiveEffects = () => [{ id: 'webgl-lost-effect', engine: 'gpu', enabled: true }];
@@ -676,7 +882,22 @@ assert.equal(invalidGraphPipeline.processPreview(unprocessedPreviewTexture, 'bra
   'subsequent frames remain playable while the graph is invalid');
 assert.equal(invalidGraphWarnings.length, 1, 'invalid graph warnings are deduplicated per target and cause');
 assert.equal(invalidGraphWarnings[0].type, 'effect_graph_preview_unavailable');
-assert.match(invalidGraphWarnings[0].message, /branching/);
+assert.match(invalidGraphWarnings[0].message, /one input and one output/);
+const compositeGraphWarnings = [];
+let processedGraphPlan = null;
+const compositeGraphPipeline = new EffectPipeline({
+  gpuEngine: {
+    supportsPreviewEffect: () => true,
+    processGraph: (graph, texture) => { processedGraphPlan = graph.getExecutionPlan(); return { id: 'composite-graph-preview', texture }; },
+  },
+  onPreviewWarning: warning => compositeGraphWarnings.push(warning),
+});
+compositeGraphPipeline.effectsByTarget.set('composite-graph-target', branchGraph);
+const compositeGraphPreview = compositeGraphPipeline.processPreview(unprocessedPreviewTexture, 'composite-graph-target', 0.5);
+assert.equal(compositeGraphPreview.id, 'composite-graph-preview',
+  'a valid branched graph is sent to the DAG renderer instead of being skipped');
+assert.equal(processedGraphPlan.joins[0].type, 'composite', 'the graph plan preserves its explicit merge operation');
+assert.equal(compositeGraphWarnings.length, 0, 'supported branch preview does not emit an invalid-graph warning');
 missingRendererPipeline.getActiveEffects = () => [];
 assert.equal(missingRendererPipeline.processPreview(unprocessedPreviewTexture, 'no-effects-target', 2), unprocessedPreviewTexture);
 assert.equal(missingRendererWarnings.length, 1, 'no warning is emitted when the target has no active GPU effects');

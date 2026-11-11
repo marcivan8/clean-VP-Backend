@@ -18,6 +18,7 @@ const GPU_CLIP_EFFECT_TYPES = Object.freeze({
     grain: 'film_grain',
     glitch: 'glitch',
     color_grade: 'color_grade',
+    lut_apply: 'lut_apply',
     fade_in: 'fade_in',
     fade_out: 'fade_out',
 });

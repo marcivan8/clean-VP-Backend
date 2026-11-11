@@ -5,6 +5,7 @@
  */
 
 import { authFetch } from '../utils/authFetch.js';
+import { isReferenceAsset } from '../utils/assetRoles.js';
 
 // Status is a cheap DB read, but several Brain triggers can wait at once.
 // Five seconds still notices uploads promptly without producing a request
@@ -12,6 +13,22 @@ import { authFetch } from '../utils/authFetch.js';
 export const ASSET_ANALYSIS_POLL_MS = 5000;
 export const INITIAL_ASSET_ANALYSIS_WAIT_MS = 30_000;
 export const LATE_ASSET_ANALYSIS_WAIT_MS = 120_000;
+export const ASSET_ANALYSIS_STATUS_BATCH_SIZE = 100;
+export const ASSET_ANALYSIS_STATUS_CONCURRENCY = 4;
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+    const results = new Array(items.length);
+    let nextIndex = 0;
+    const workerCount = Math.min(items.length, Math.max(1, Math.floor(concurrency) || 1));
+    await Promise.all(Array.from({ length: workerCount }, async () => {
+        while (true) {
+            const index = nextIndex++;
+            if (index >= items.length) return;
+            results[index] = await mapper(items[index], index);
+        }
+    }));
+    return results;
+}
 
 const isVisualAsset = (asset) => {
     const type = String(asset?.type || asset?.contentType || '').toLowerCase();
@@ -21,17 +38,21 @@ const isVisualAsset = (asset) => {
 /** Visual assets queued for Gemini analysis (oversized/unsupported uploads opt out). */
 export function visualAnalysisAssetIds(mediaBin = []) {
     return [...new Set((Array.isArray(mediaBin) ? mediaBin : [])
-        .filter(asset => asset?.id && isVisualAsset(asset) && asset.assistantReference !== true
-            && asset.isReference !== true && asset.role !== 'reference' && asset.visualAnalysisRequested !== false)
+        .filter(asset => asset?.id && isVisualAsset(asset) && !isReferenceAsset(asset)
+            && asset.visualAnalysisRequested !== false)
         .map(asset => String(asset.id)))];
 }
 
-/** Fetch all visual-analysis states, chunking the Brain route's 200-id limit. */
+/** Fetch every visual-analysis state with URL-safe batches. */
 export async function fetchProjectAssetAnalysisStatuses(projectId, assetIds, { timeoutMs = 5_000 } = {}) {
     const ids = [...new Set((assetIds || []).map(String).filter(Boolean))];
     const batches = [];
-    for (let i = 0; i < ids.length; i += 200) batches.push(ids.slice(i, i + 200));
-    const responses = await Promise.all(batches.map(async batch => {
+    for (let i = 0; i < ids.length; i += ASSET_ANALYSIS_STATUS_BATCH_SIZE) {
+        batches.push(ids.slice(i, i + ASSET_ANALYSIS_STATUS_BATCH_SIZE));
+    }
+    // Keep large bins complete without launching an unbounded number of
+    // requests on every poll. Results are still returned in input order.
+    const responses = await mapWithConcurrency(batches, ASSET_ANALYSIS_STATUS_CONCURRENCY, async batch => {
         const params = new URLSearchParams({ projectId: String(projectId), assetIds: batch.join(',') });
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -48,7 +69,7 @@ export async function fetchProjectAssetAnalysisStatuses(projectId, assetIds, { t
         } finally {
             clearTimeout(timeout);
         }
-    }));
+    });
     return Object.fromEntries(responses.flat().map(item => [String(item.assetId), item.status]));
 }
 

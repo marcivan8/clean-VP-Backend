@@ -27,7 +27,103 @@ export class AgentOrchestrator {
     async generatePlan(userPrompt) {
         console.log('🤖 Agent Planning...', userPrompt);
         const timelineContext = ContextGenerator.getTimelineContext();
-        const plan = await this.getAgentPlan(userPrompt, timelineContext);
+        let planningContext = timelineContext;
+        let plan = null;
+        const searchedQueries = new Set();
+        const searchFindings = [];
+        let searchBlocked = false;
+
+        // Large-bin planning is deliberately split into retrieval and editing.
+        // The model may only see a prompt-sized shortlist, while the local
+        // search tool can inspect every uploaded asset. Resolve its read-only
+        // searches here, feed the evidence back into a fresh plan, and never
+        // mix a search pass with edits that were planned before seeing results.
+        for (let pass = 0; pass < 3; pass += 1) {
+            plan = await this.getAgentPlan(userPrompt, planningContext);
+            if (!plan || !Array.isArray(plan.actions)) break;
+
+            const searches = plan.actions.filter(action => action?.name === 'search_uploaded_assets');
+            if (!searches.length) break;
+
+            let madeProgress = false;
+            for (const action of searches.slice(0, 2)) {
+                const query = String(action.args?.query || '').trim();
+                const requestedOffset = Math.max(0, Math.floor(Number(action.args?.offset) || 0));
+                const normalizedQuery = `${query.toLocaleLowerCase()}|${requestedOffset}`;
+                if (!query || searchedQueries.has(normalizedQuery)) continue;
+                searchedQueries.add(normalizedQuery);
+                const result = await this.tools.execute({
+                    ...action,
+                    args: { ...action.args, offset: requestedOffset, limit: 30 },
+                });
+                if (result?.success !== true) {
+                    searchFindings.push({ query, success: false, message: result?.message || 'Search could not be completed.' });
+                    continue;
+                }
+
+                const details = result.details || {};
+                const results = (details.results || []).slice(0, 30).map(asset => ({
+                    id: asset.id,
+                    name: asset.name,
+                    type: asset.type,
+                    role: asset.role,
+                    editable: asset.editable,
+                    analysisStatus: asset.analysisStatus,
+                    confidence: asset.confidence,
+                    duration: asset.duration,
+                    evidence: String(asset.evidence || '').slice(0, 140) || null,
+                    matchedTerms: (asset.matchedTerms || []).slice(0, 8),
+                }));
+
+                searchFindings.push({
+                    query,
+                    success: true,
+                    totalAssetsScanned: details.totalAssetsScanned ?? null,
+                    totalMatches: details.totalMatches ?? results.length,
+                    offset: requestedOffset,
+                    returned: results.length,
+                    hasMore: details.hasMore === true,
+                    nextOffset: details.nextOffset ?? null,
+                    results,
+                });
+                madeProgress = true;
+            }
+
+            if (!madeProgress) {
+                // A repeated/unusable search cannot safely justify edits based
+                // on an incomplete bin. Return no edit actions for this pass.
+                searchBlocked = true;
+                plan = {
+                    ...plan,
+                    actions: [],
+                    thought: 'Asset discovery did not return new usable evidence; no edit was planned from an incomplete inventory.',
+                };
+                break;
+            }
+
+            planningContext = {
+                ...planningContext,
+                assetSearchQueries: [...searchedQueries],
+                assetSearchFindings: searchFindings,
+            };
+        }
+
+        if (plan?.actions?.some(action => action?.name === 'search_uploaded_assets')) {
+            searchBlocked = true;
+            plan = {
+                ...plan,
+                actions: [],
+                thought: 'Asset discovery reached its bounded planning budget before a complete edit plan was ready; no partial edit was produced.',
+            };
+        }
+
+        if (searchBlocked) {
+            return {
+                success: false,
+                message: 'I could not finish discovering the required footage within the planning limit, so I did not create a partial edit. Try a more specific subject or filename.',
+                details: searchFindings,
+            };
+        }
 
         if (!plan || !plan.actions) {
             return { success: false, message: 'Agent could not generate a plan.' };
@@ -37,7 +133,9 @@ export class AgentOrchestrator {
             success: true,
             thought: plan.thought,
             actions: plan.actions,
-            message: 'Plan generated successfully. Waiting for approval.'
+            message: searchFindings.length
+                ? `Plan generated after searching ${searchFindings.reduce((sum, item) => sum + (Number(item.returned) || 0), 0)} matching asset(s). Waiting for approval.`
+                : 'Plan generated successfully. Waiting for approval.'
         };
     }
 

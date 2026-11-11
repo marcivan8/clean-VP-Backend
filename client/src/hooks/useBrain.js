@@ -21,33 +21,16 @@ import {
     LATE_ASSET_ANALYSIS_WAIT_MS,
     ASSET_ANALYSIS_POLL_MS,
     visualAnalysisAssetIds,
+    fetchProjectAssetAnalysisStatuses,
     waitForAssetAnalysisStatus,
 } from '../agent/assetAnalysisWait.js';
 import { useState, useCallback, useRef } from 'react';
 import useTimelineStore from '../store/useTimelineStore';
 import { authFetch } from '../utils/authFetch';
 import useAIStore from '../store/useAIStore.js';
+import { isReferenceAsset } from '../utils/assetRoles.js';
 
-const ASSET_ANALYSIS_STATUS_REQUEST_TIMEOUT_MS = 5_000;
-
-async function fetchAssetAnalysisStatuses(projectId, assetIds) {
-    const params = new URLSearchParams({ projectId, assetIds: assetIds.join(',') });
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), ASSET_ANALYSIS_STATUS_REQUEST_TIMEOUT_MS);
-    try {
-        const response = await authFetch(`/api/brain/analysis-status?${params}`, { signal: controller.signal });
-        if (!response.ok) {
-            const error = new Error(`Asset analysis status failed (${response.status})`);
-            const retryAfterSeconds = Number(response.headers?.get?.('Retry-After'));
-            if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) error.retryAfterMs = retryAfterSeconds * 1000;
-            throw error;
-        }
-        const data = await response.json();
-        return Object.fromEntries((data.statuses || []).map(item => [item.assetId, item.status]));
-    } finally {
-        clearTimeout(timeout);
-    }
-}
+const fetchAssetAnalysisStatuses = fetchProjectAssetAnalysisStatuses;
 
 /**
  * Build a lightweight project state snapshot from the current timeline store.
@@ -108,6 +91,10 @@ function buildProjectState() {
         duration:         a.duration || a.sourceDuration || 0,
         originalDuration: a.duration || a.sourceDuration || 0,
         analysis_status:  a.analysis_status || null,
+        // Preserve safety-critical roles even when the server-side intelligence
+        // lookup is unavailable; the Brain must never treat a reference as an
+        // editable source just because analysis is temporarily offline.
+        is_reference:     isReferenceAsset(a),
         visualAnalysisRequested: a.visualAnalysisRequested !== false,
     }));
 
@@ -175,7 +162,6 @@ function buildProjectState() {
                 .filter(t => t.type === 'video')
                 .flatMap(t => (t.clips || []).map(c => ({ ...c, _trackId: t.id })))
                 .sort((a, b) => (a.start ?? 0) - (b.start ?? 0))
-                .slice(0, 60)
                 .map(c => {
                     const from = c.offset ?? 0;
                     const to   = from + (c.duration ?? 0);

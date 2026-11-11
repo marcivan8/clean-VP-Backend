@@ -13,8 +13,14 @@ import { canRenderScene3DGpu } from '../client/src/motion/Scene3DGPU.js';
 const gpuEligibleTriangle = { projected: [{ x: 0, y: 0, z: 1 }, { x: 1, y: 0, z: 1 }, { x: 0, y: 1, z: 1 }], color: '#FFFFFF' };
 assert.equal(canRenderScene3DGpu([gpuEligibleTriangle]), true,
   'the GPU fast path accepts supported untextured geometry');
-assert.equal(canRenderScene3DGpu([{ ...gpuEligibleTriangle, image: Canvas.createCanvas(2, 2), uvs: [[0, 0], [1, 0], [0, 1]] }]), false,
-  'textured geometry uses software per-pixel depth compositing until the GPU can preserve mixed texture alpha');
+const gpuTexture = Canvas.createCanvas(2, 2);
+const gpuTexturedTriangle = { ...gpuEligibleTriangle, image: gpuTexture, uvs: [[0, 0], [1, 0], [0, 1]] };
+assert.equal(canRenderScene3DGpu([gpuTexturedTriangle]), true,
+  'a single textured surface is eligible for alpha-safe GPU rendering');
+assert.equal(canRenderScene3DGpu([
+  { ...gpuTexturedTriangle, order: 1 },
+  { ...gpuTexturedTriangle, image: Canvas.createCanvas(2, 2), order: 1 },
+]), false, 'separate transparent textures stay on the software path even if their scene order collides');
 
 function countGroundShadowPixels(enabled, forcePainterFallback = false, lights = [{ type: 'point', position: { x: -3, y: 5, z: 4 }, intensity: 1,
   color: '#FFFFFF', range: 50, decay: 0.1 }]) {
@@ -96,27 +102,49 @@ assert.ok(oversizedPolygonMesh.faces.reduce((sum, face) => sum + face.length - 2
   'polygon meshes are capped by triangulated work, not only authored face count');
 assert.equal(MAX_SCENE_TRIANGLES, 50_000, 'the scene rasterizer has a finite aggregate triangle budget');
 assert.deepEqual(getScene3DRenderLimitWarnings({
-  objects: Array.from({ length: 81 }, (_, id) => ({ id, type: 'box' })),
+  objects: Array.from({ length: 257 }, (_, id) => ({ id, type: 'box' })),
   lights: Array.from({ length: 9 }, () => ({ type: 'point' })),
-  particles: { count: 501 },
+  particles: { count: 2_001 },
 }), [
-  { label: 'objects', actual: 81, limit: 80, message: 'This 3D scene has 81 objects; the renderer supports 80, so the extra content will not appear.' },
+  { label: 'objects', actual: 257, limit: 256, message: 'This 3D scene has 257 objects; the renderer supports 256, so the extra content will not appear.' },
   { label: 'lights', actual: 9, limit: 8, message: 'This 3D scene has 9 lights; the renderer supports 8, so the extra content will not appear.' },
-  { label: 'particles', actual: 501, limit: 500, message: 'This 3D scene has 501 particles; the renderer supports 500, so the extra content will not appear.' },
+  { label: 'particles', actual: 2_001, limit: 2_000, message: 'This 3D scene has 2001 particles; the renderer supports 2000, so the extra content will not appear.' },
 ], 'export preflight warnings match the renderer truncation limits');
-assert.deepEqual(getScene3DRenderLimitWarnings({ particles: { count: 500.4 } }), [],
+assert.deepEqual(getScene3DRenderLimitWarnings({ particles: { count: 2_000.4 } }), [],
   'particle validation rounds with the same rule as the renderer before deciding if content will be dropped');
 assert.deepEqual(getScene3DCompatibilityWarnings({
   objects: [{ id: 'bad-primitive', name: 'Authored shape', type: 'star-poly', material: { side: 'both' }, blendMode: 'linear-dodge' }],
   lights: [{ type: 'sun' }],
 }).map(warning => warning.message), [
-  '3D object “Authored shape” uses unsupported type “star-poly”; it will render as a box.',
+  '3D object “Authored shape” uses unsupported type “star-poly”; it will be skipped.',
   '3D object “Authored shape” uses unsupported material side “both”; it will render as front-sided.',
   '3D object “Authored shape” uses unsupported blend mode “linear-dodge”; it will render as source-over.',
   '3D light 1 uses unsupported type “sun”; it will render as a point light.',
 ], '3D compatibility checks disclose renderer substitutions');
 assert.deepEqual(getScene3DCompatibilityWarnings({ objects: [{ type: 'box', material: { side: 'double' }, blendMode: 'multiply' }], lights: [{ type: 'spot' }] }), [],
   'supported 3D authored values do not produce compatibility warnings');
+assert.equal(normalizeSceneMesh({ type: 'mesh', size: { x: 3, y: 3, z: 3 } }).faces.length, 0,
+  'a custom mesh missing authored topology is not silently replaced by a box');
+assert.deepEqual(normalizeSceneMesh({ type: 'star-poly', size: { x: 3, y: 3, z: 3 } }), { vertices: [], faces: [] },
+  'an unsupported authored primitive is skipped instead of being shown as a box');
+assert.deepEqual(normalizeSceneMesh({ type: '', size: { x: 3, y: 3, z: 3 } }), { vertices: [], faces: [] },
+  'an explicitly empty primitive type is not silently treated as the default box');
+assert.deepEqual(normalizeSceneMesh({ type: 'toString' }), { vertices: [], faces: [] },
+  'prototype property names are not mistaken for supported primitive types');
+assert.match(getScene3DCompatibilityWarnings({ objects: [{ id: 'missing-topology', type: 'mesh' }] })[0]?.message || '',
+  /missing its vertex or face array and will not render/,
+  'invalid custom-mesh topology is reported before preview or export');
+const partiallyInvalidMeshWarnings = getScene3DCompatibilityWarnings({ objects: [{
+  id: 'partial-topology', type: 'mesh',
+  vertices: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }],
+  faces: [[0, 1, 2], [0, 1, 8], [0, 1]],
+}] });
+assert.match(partiallyInvalidMeshWarnings.map(warning => warning.message).join(' '),
+  /2 malformed face\(s\)/,
+  'malformed mesh faces are surfaced while valid authored faces remain renderable');
+assert.match(getScene3DCompatibilityWarnings({ objects: [{ id: 'empty-topology', type: 'mesh', vertices: [], faces: [] }] })
+  .map(warning => warning.message).join(' '), /no valid faces and will not render/,
+  'a custom mesh with no valid faces is reported as unrenderable');
 assert.match(getScene3DCompatibilityWarnings({ particles: { shape: 'triangle' } })[0]?.message || '', /unsupported shape.*circles/,
   'unsupported particle shapes are disclosed before rendering falls back to circles');
 assert.deepEqual(getScene3DCompatibilityWarnings({ lights: [{ type: 'area', width: 40, height: 40 }] }), [],
@@ -139,8 +167,26 @@ const denseMesh = {
 const meshLimitWarnings = getScene3DRenderLimitWarnings({ objects: Array.from({ length: 6 }, () => denseMesh) });
 assert.ok(meshLimitWarnings.some(warning => warning.label === 'triangles on mesh “dense-mesh”' && warning.actual === 310_000 && warning.limit === MAX_MESH_TRIANGLES),
   'export preflight reports actual triangulated work when a single mesh exceeds its triangle budget');
-assert.ok(meshLimitWarnings.some(warning => warning.label === 'triangles in the 3D scene' && warning.actual === 60_000 && warning.limit === MAX_SCENE_TRIANGLES),
+assert.ok(meshLimitWarnings.some(warning => warning.label === 'triangles and particle sprites in the 3D scene' && warning.actual === 60_000 && warning.limit === MAX_SCENE_TRIANGLES),
   'export preflight reports aggregate mesh triangle truncation across the scene');
+const fullTriangleBudgetWithShadows = getScene3DRenderLimitWarnings({
+  objects: [
+    ...Array.from({ length: 5 }, (_, index) => ({ ...denseMesh, id: `budget-mesh-${index}` })),
+    { id: 'budget-shadow-caster', type: 'box' },
+  ],
+  lights: [{ type: 'point', intensity: 1, castsShadow: true }],
+});
+assert.ok(fullTriangleBudgetWithShadows.some(warning =>
+  warning.label === 'minimum projected shadow triangles that may be omitted'
+  && warning.actual === 6 && warning.limit === 0),
+  'export preflight warns when dense geometry leaves no capacity for even the minimum authored shadows');
+const noShadowBudgetWarningWhenDisabled = getScene3DRenderLimitWarnings({
+  objects: [{ type: 'box' }],
+  lights: [{ type: 'point', intensity: 1, castsShadow: true }],
+  shadows: { enabled: false },
+});
+assert.ok(!noShadowBudgetWarningWhenDisabled.some(warning => warning.label === 'minimum projected shadow triangles that may be omitted'),
+  'disabled shadows do not create shadow-capacity warnings');
 assert.equal(countGroundShadowPixels(true, false, [{ ...spotLight, target: { x: -6, y: 10, z: 8 } }]), 0,
   'a spotlight aimed away from the caster does not produce a ground shadow');
 assert.equal(countGroundShadowPixels(true, true, [{ ...spotLight, target: { x: -6, y: 10, z: 8 } }]), 0,

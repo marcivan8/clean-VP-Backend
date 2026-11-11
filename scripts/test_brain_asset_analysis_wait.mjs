@@ -62,6 +62,7 @@ assert.equal(retries429.pendingAssetIds[0], 'video-1');
 
 const route = fs.readFileSync(path.join(root, 'server/routes/brainRoutes.js'), 'utf8');
 const hook = fs.readFileSync(path.join(root, 'client/src/hooks/useBrain.js'), 'utf8');
+const readiness = fs.readFileSync(path.join(root, 'client/src/agent/assetAnalysisWait.js'), 'utf8');
 const editorialBrain = fs.readFileSync(path.join(root, 'server/brain/EditorialBrain.js'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
 assert.match(route, /analysis_status:\s*ASSET_ANALYSIS_PENDING/);
@@ -69,7 +70,7 @@ assert.match(route, /router\.get\('\/analysis-status', authenticateUser/);
 assert.match(route, /\.eq\('project_id', projectId\)[\s\S]*\.eq\('user_id', req\.user\.id\)/);
 assert.match(hook, /trigger === 'project_opened' \|\| trigger === 'asset_added'/);
 assert.match(hook, /INITIAL_ASSET_ANALYSIS_WAIT_MS/);
-assert.match(hook, /new AbortController\(\)/, 'the readiness request itself has a timeout');
+assert.match(readiness, /new AbortController\(\)/, 'the readiness request itself has a timeout');
 assert.match(hook, /retryOnError:\s*true/,
     'temporary status errors and 429s are retried with backoff during the bounded wait');
 assert.match(hook, /timedOutAssetIds\s*=\s*waitResult\.pendingAssetIds/,

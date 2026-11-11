@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Canvas from '@napi-rs/canvas';
-import { createNode, createScene, flattenScene, NODE_TYPES } from '../client/src/motion/SceneSchema.js';
+import { createNode, createScene, flattenScene, nodeFromClip, sceneFromPlacements, NODE_TYPES } from '../client/src/motion/SceneSchema.js';
 import { drawRichTextFrame, layoutRichText, sampleTypographyMotion } from '../client/src/motion/RichTextEngine.js';
 import { renderTemplateFrames } from '../server/compositor/TemplateRenderer.js';
 
@@ -79,6 +79,38 @@ const settled = draw(0.8);
 assert.equal(entrance.glyphCount, graphic.text.length);
 assert.notDeepEqual(entrance.pixels, settled.pixels, 'glyph animation should change the rendered frame over time');
 
+const pathGraphic = {
+    ...graphic,
+    text: 'FOLLOW THE CURVE',
+    charAnim: { preset: 'typewriter', unit: 'char', stagger: 0.12, duration: 0.01 },
+    textPath: { data: 'M 40 250 C 180 30 620 30 760 250', align: 'center', side: 'left', offset: 0 },
+};
+const pathFrame = time => {
+    const canvas = Canvas.createCanvas(pathGraphic.w, pathGraphic.h);
+    drawRichTextFrame(canvas.getContext('2d'), pathGraphic, time, { width: pathGraphic.w, height: pathGraphic.h });
+    return canvas.toBuffer('image/png');
+};
+assert.notDeepEqual(pathFrame(0.1), pathFrame(1), 'text-on-path preserves per-character animation');
+const flatPathFrame = (() => {
+    const canvas = Canvas.createCanvas(pathGraphic.w, pathGraphic.h);
+    drawRichTextFrame(canvas.getContext('2d'), { ...pathGraphic, textPath: null, charAnim: null }, 1,
+        { width: pathGraphic.w, height: pathGraphic.h });
+    return canvas.toBuffer('image/png');
+})();
+assert.notDeepEqual(pathFrame(1), flatPathFrame, 'glyph baselines follow the authored cubic SVG path');
+
+const pathScene = createScene({ frame: { aspectRatio: '16:9', w: 1920, h: 1080 }, duration: 2, nodes: [
+    createNode(NODE_TYPES.TEXT, { id: 'path-title', content: pathGraphic.text, start: 0, duration: 2,
+        size: { w: pathGraphic.w, h: pathGraphic.h }, transform: { x: 50, y: 50 }, style: pathGraphic.style,
+        charAnim: pathGraphic.charAnim, textPath: pathGraphic.textPath }),
+] });
+const [pathPlacement] = flattenScene(pathScene).placements;
+assert.equal(pathPlacement.clip.template.params.textPath.data, pathGraphic.textPath.data,
+    'scene flattening forwards the text path into the shared graphics renderer');
+const [roundTrippedPathNode] = sceneFromPlacements([pathPlacement], { aspectRatio: '16:9' }).nodes[0].children;
+assert.equal(roundTrippedPathNode.textPath.data, pathGraphic.textPath.data,
+    'text path survives lifting a rich-text graphic from the timeline');
+
 const lifecycleLayout = layoutRichText('VIBED', { fontSize: 84, fontFamily: 'Inter', maxWidth: 600, maxHeight: 160 });
 const lifecycle = { preset: 'fade', unit: 'char', duration: 0.1, exit: { preset: 'shrink', duration: 0.3 }, emphasis: [{ preset: 'pulse', start: 0.5, duration: 0.5 }] };
 const beforeExit = sampleTypographyMotion(lifecycleLayout, lifecycle, 1, 2).get(0);
@@ -100,6 +132,17 @@ try {
     assert.equal(sequence.frames, 4);
     assert.equal(sequence.files.length, 4);
     assert.ok(sequence.files.every(file => fs.statSync(file).size > 100), 'export frames should contain rasterized text');
+
+    const pathSequence = await renderTemplateFrames({ kind: 'rich-text', params: pathGraphic }, {
+        durationSec: 1,
+        fps: 4,
+        widthPx: pathGraphic.w,
+        tmpDir,
+        name: 'text-on-path',
+        canvasModule: Canvas,
+    });
+    assert.notDeepEqual(fs.readFileSync(pathSequence.files[0]), fs.readFileSync(pathSequence.files[3]),
+        'exported frames preserve animated text along the SVG path');
 
     const captionParams = captionPlacement.clip.template.params;
     const captionSequence = await renderTemplateFrames({ kind: 'rich-text', params: captionParams }, {

@@ -66,7 +66,11 @@ function createTarget(sourceCanvas) {
             alpha: true,
             antialias: true,
             depth: true,
-            premultipliedAlpha: false,
+            // The source-over blend pass stores premultiplied RGB in the
+            // framebuffer (`SRC_ALPHA`, `ONE_MINUS_SRC_ALPHA`). Declare that
+            // representation accurately so drawImage does not premultiply the
+            // translucent edge a second time when this surface enters 2D.
+            premultipliedAlpha: true,
             preserveDrawingBuffer: true,
             powerPreference: 'high-performance',
         });
@@ -133,21 +137,33 @@ function validTextureCoordinates(face) {
             && Number.isFinite(Number(uv[0])) && Number.isFinite(Number(uv[1])));
 }
 
-/** Only accept untextured scenes whose visible result maps to a depth-tested source-over color pass. */
+function withinTextureBudget(faces) {
+    const images = new Set((faces || []).map(face => face?.image).filter(Boolean));
+    if (images.size > MAX_CACHED_TEXTURES) return false;
+    let totalBytes = 0;
+    for (const image of images) {
+        const metrics = textureMetrics(image);
+        if (!metrics) return false;
+        totalBytes += metrics.bytes;
+        if (totalBytes >= MAX_TEXTURE_CACHE_BYTES) return false;
+    }
+    return true;
+}
+
+/** Accept source-over faces with bounded textures and a depth-safe surface set. */
 export function canRenderScene3DGpu(faces, depthOfField = null) {
     return !depthOfField && Array.isArray(faces) && faces.length > 0 && faces.every(face =>
         !face.shadow && !face.particle && !face.text && !face.wireframe
-        // A texture can mix opaque and transparent pixels. The current GPU
-        // path cannot write depth only for opaque texels, so letting a later
-        // triangle use its depth buffer can incorrectly cover opaque texture
-        // pixels. The software renderer resolves these fragments per pixel.
-        && !face.image
         && face.projected?.length === 3
         && Number.isFinite(Number(face.opacity ?? 1))
         && Number(face.opacity ?? 1) >= 0 && Number(face.opacity ?? 1) <= 1
         && (!face.blendMode || face.blendMode === 'source-over')
         && (!face.maskShape || face.maskShape === 'none')
-        && !!parseOpaqueColor(face.color));
+        && (face.image
+            ? !!textureMetrics(face.image) && validTextureCoordinates(face)
+            : !!parseOpaqueColor(face.color)))
+        && withinTextureBudget(faces)
+        && !hasMultipleTransparentSurfaces(faces);
 }
 
 /** Backwards-compatible strict predicate for integrations requiring opaque geometry. */
@@ -160,23 +176,52 @@ export function canRenderOpaqueScene3DGpu(faces, depthOfField = null) {
 }
 
 function hasMultipleTransparentSurfaces(faces) {
-    // The WebGL fast path orders triangles by their average depth. That is
-    // sufficient for opaque depth writes and a single transparent surface,
-    // but not for two transparent surfaces whose depth order can cross within
-    // their projected area. The software depth renderer sorts those fragments
-    // per pixel, so leave multi-surface alpha compositing to that path.
-    const surfaceOrders = new Set();
-    const ungrouped = new Set();
+    // Transparent geometry can safely share the GPU path when projected
+    // surfaces are disjoint or their depth intervals prove a stable ordering.
+    // Overlapping surfaces whose depth ranges cross still need per-pixel
+    // fragment sorting from the software compositor.
+    const surfaces = new Map();
+    const imageIds = new Map();
+    let nextImageId = 0;
     for (let index = 0; index < faces.length; index++) {
         const face = faces[index];
         if (Number(face.opacity ?? 1) >= 0.999 && !face.image) continue;
+        if (!Array.isArray(face.projected) || face.projected.length !== 3
+            || !face.projected.every(point => Number.isFinite(Number(point.x))
+                && Number.isFinite(Number(point.y)) && Number.isFinite(Number(point.z)))) return true;
         // Scene3D assigns one order to all triangles of a scene object. Treat
         // those triangles as a single transparent surface, including a
         // textured plane split into multiple triangles.
-        if (Number.isFinite(Number(face.order))) surfaceOrders.add(Number(face.order));
-        else if (face.image) ungrouped.add(face.image);
-        else ungrouped.add(face);
-        if (surfaceOrders.size + ungrouped.size > 1) return true;
+        let key;
+        if (face.image && Number.isFinite(Number(face.order))) {
+            if (!imageIds.has(face.image)) imageIds.set(face.image, nextImageId++);
+            key = `image:${Number(face.order)}:${imageIds.get(face.image)}`;
+        } else if (Number.isFinite(Number(face.order))) key = `order:${Number(face.order)}`;
+        else if (face.image) {
+            if (!imageIds.has(face.image)) imageIds.set(face.image, nextImageId++);
+            key = `image:${imageIds.get(face.image)}`;
+        } else key = `face:${index}`;
+
+        const xs = face.projected.map(point => Number(point.x));
+        const ys = face.projected.map(point => Number(point.y));
+        const zs = face.projected.map(point => Number(point.z));
+        const surface = surfaces.get(key) || { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity, near: Infinity, far: -Infinity };
+        surface.left = Math.min(surface.left, ...xs);
+        surface.top = Math.min(surface.top, ...ys);
+        surface.right = Math.max(surface.right, ...xs);
+        surface.bottom = Math.max(surface.bottom, ...ys);
+        surface.near = Math.min(surface.near, ...zs);
+        surface.far = Math.max(surface.far, ...zs);
+        surfaces.set(key, surface);
+    }
+
+    const groups = [...surfaces.values()];
+    for (let first = 0; first < groups.length; first++) for (let second = first + 1; second < groups.length; second++) {
+        const a = groups[first], b = groups[second];
+        const projectedOverlap = Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1e-4
+            && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1e-4;
+        const orderedDepth = a.far < b.near - 1e-4 || b.far < a.near - 1e-4;
+        if (projectedOverlap && !orderedDepth) return true;
     }
     return false;
 }
@@ -228,9 +273,18 @@ export function renderScene3DGpu(ctx, faces, logicalWidth, logicalHeight, camera
     const near = Math.max(0.01, Number(camera.near) || 0.05);
     const far = Math.max(near + 0.01, Number(camera.far) || 1000);
     const perspective = camera.projection !== 'orthographic';
-    const vertices = new Float32Array(faces.length * 3 * 17);
+    // Establish opaque depth before compositing alpha-bearing faces. Sort the
+    // alpha pass far-to-near; opaque depth is already established, and the
+    // surface safety gate rejects overlapping transparent depth crossings.
+    const faceDepth = face => Number.isFinite(Number(face.z))
+        ? Number(face.z)
+        : face.projected.reduce((sum, point) => sum + Number(point.z), 0) / face.projected.length;
+    const renderFaces = faces.filter(face => !face.image && Number(face.opacity ?? 1) >= 0.999)
+        .concat(faces.filter(face => face.image || Number(face.opacity ?? 1) < 0.999)
+            .sort((a, b) => faceDepth(b) - faceDepth(a) || Number(a.order || 0) - Number(b.order || 0)));
+    const vertices = new Float32Array(renderFaces.length * 3 * 17);
     let offset = 0;
-    for (const face of faces) {
+    for (const face of renderFaces) {
         const color = face.image ? [255, 255, 255] : parseOpaqueColor(face.color);
         const [red, green, blue] = color.map(channel => channel / 255);
         for (let pointIndex = 0; pointIndex < face.projected.length; pointIndex++) {
@@ -286,18 +340,15 @@ export function renderScene3DGpu(ctx, faces, logicalWidth, logicalHeight, camera
         // Keep consecutive image batches in the scene's painter order. Depth
         // testing still resolves intersecting geometry, while a video texture
         // is uploaded only once per frame even when a mesh has many triangles.
-        const uploadedThisFrame = new Set();
+    const uploadedThisFrame = new Set();
         let batchStart = 0;
-        while (batchStart < faces.length) {
-            const image = faces[batchStart].image || null;
+    while (batchStart < renderFaces.length) {
+        const image = renderFaces[batchStart].image || null;
             let batchEnd = batchStart + 1;
-            while (batchEnd < faces.length && (faces[batchEnd].image || null) === image) batchEnd++;
-            // Alpha faces must not occlude later faces through transparent
-            // pixels. The list is far-to-near, so source-over ordering plus
-            // opaque depth writes retains the correct layering.
+        while (batchEnd < renderFaces.length && (renderFaces[batchEnd].image || null) === image) batchEnd++;
             let batchIsOpaque = !image;
             for (let i = batchStart; batchIsOpaque && i < batchEnd; i++) {
-                if (Number(faces[i].opacity ?? 1) < 0.999) batchIsOpaque = false;
+            if (Number(renderFaces[i].opacity ?? 1) < 0.999) batchIsOpaque = false;
             }
             gl.depthMask(batchIsOpaque);
             if (image) {

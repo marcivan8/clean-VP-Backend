@@ -980,7 +980,9 @@ const VideoPlayer = () => {
         gpuPreview: gpuClipEffectPreview,
         gpuSupportedEffectTypes,
     });
-    const canvasClipLutFilter = resolveTimelineLutPreviewFilter(activeClip?.effects, clipLutPreviewFilters, currentTime, effectContext);
+    const canvasClipLutFilter = resolveTimelineLutPreviewFilter(activeClip?.effects, clipLutPreviewFilters, currentTime, {
+        ...effectContext, gpuPreview: gpuClipEffectPreview, gpuSupportedEffectTypes,
+    });
     const previewEffectContext = { ...effectContext, gpuPreview: gpuClipEffectPreview, gpuSupportedEffectTypes };
     const svgEffectParams = resolveTimelineSvgEffectParams(activeClip?.effects, currentTime, previewEffectContext);
     const svgEffectInstances = resolveTimelineSvgEffectInstances(activeClip?.effects, currentTime, previewEffectContext);
@@ -1166,7 +1168,7 @@ const VideoPlayer = () => {
             >
                 {/* R93: Sandwich depth layer — text & graphics placed behind the speaker */}
                 <TextOverlay placementFilter="behind_subject" />
-                <GraphicOverlay placementFilter="behind_subject" />
+                <GraphicOverlay placementFilter="behind_subject" onWarning={warning => setPlaybackWarning(warning)} />
             </ObjectLayerOverlay>
 
             {transitionWins.length > 0 && <TransitionLayer fx={tfx} frameWidth={frameWidthPx} />}

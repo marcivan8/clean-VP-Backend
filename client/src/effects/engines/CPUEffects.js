@@ -173,9 +173,33 @@ export class CPUEffectEngine {
      */
     compileChain(effects, context = {}) {
         const cpuEffects = effects.filter(e => e.enabled && e.engine === ENGINE_TYPES.CPU);
+        const warnings = [];
+        const compiledFilters = new Map();
+        const compile = effect => {
+            if (compiledFilters.has(effect)) return compiledFilters.get(effect);
+            const filter = this.compileEffect(effect, context);
+            compiledFilters.set(effect, filter);
+            if (!filter) {
+                const params = effect.getParamsSnapshot();
+                const isNoopSpeed = effect.type === 'speed_change'
+                    && Math.abs(Number(params.speed ?? 1) - 1) < 1e-9;
+                if (!isNoopSpeed) {
+                    const missingLut = effect.type === 'lut_apply' && !params.lutFile;
+                    warnings.push({
+                        effectId: effect.id,
+                        effectType: effect.type,
+                        reason: missingLut ? 'missing_lut_file' : 'effect_not_compiled',
+                        message: missingLut
+                            ? `Effect "${effect.name || effect.type}" was skipped because no LUT file is assigned.`
+                            : `Effect "${effect.name || effect.type}" has no CPU render implementation and was skipped.`,
+                    });
+                }
+            }
+            return filter;
+        };
 
         if (cpuEffects.length === 0) {
-            return { filter: null, hasVideo: false, hasAudio: false };
+            return { filter: null, hasVideo: false, hasAudio: false, warnings };
         }
 
         const videoFilters = [];
@@ -190,7 +214,7 @@ export class CPUEffectEngine {
             let current = '0:v';
             let labelIndex = 0;
             for (const effect of cpuEffects) {
-                const filter = this.compileEffect(effect, context);
+                const filter = compile(effect);
                 if (!filter) continue;
                 if (this._isAudioFilter(effect.type)) {
                     audioFilters.push(filter);
@@ -233,7 +257,7 @@ export class CPUEffectEngine {
         }
 
         if (!needsFilterGraph) for (const effect of cpuEffects) {
-            const filter = this.compileEffect(effect, context);
+            const filter = compile(effect);
             if (!filter) continue;
 
             // Classify as audio or video filter
@@ -254,7 +278,8 @@ export class CPUEffectEngine {
             videoFilterComplex: needsFilterGraph,
             audioFilter: audioFilters.length > 0 ? audioFilters.join(',') : null,
             hasVideo: videoFilters.length > 0 || needsFilterGraph,
-            hasAudio: audioFilters.length > 0
+            hasAudio: audioFilters.length > 0,
+            warnings,
         };
     }
 

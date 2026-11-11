@@ -92,6 +92,7 @@ export function startOutcome(outcomeId, opts = {}) {
     return runAutopilot(request, {
         styleId: outcome.styleId,
         shortTargetSeconds,
+        sourceSelection: outcomeId === 'photo_collage' ? 'visual' : 'narration',
         userDirection: opts.request?.trim() || (outcomeId === 'photo_collage'
             ? 'Create a photo collage from the uploaded images with clean transitions and subtle motion. Use an uploaded music track as the background soundtrack when available.'
             : ''),

@@ -200,6 +200,8 @@ export function createNode(type, overrides = {}) {
         /** Advanced Typography: Multi-style runs and character motion. */
         runs: Array.isArray(overrides.runs) ? overrides.runs.map(r => ({ ...r })) : null,
         charAnim: overrides.charAnim && typeof overrides.charAnim === 'object' ? { ...overrides.charAnim } : null,
+        /** SVG path followed by rich-text glyphs during canvas rendering. */
+        textPath: overrides.textPath && typeof overrides.textPath === 'object' ? { ...overrides.textPath } : null,
         /** Per-word timings for a caption node. See CaptionModel.js. */
         words: Array.isArray(overrides.words) ? overrides.words : null,
 
@@ -950,7 +952,7 @@ export function flattenScene(scene, opts = {}) {
                 const requiresGraphicRender = requiresCompositionIsolation || !!node.motionBlur?.enabled;
                 const canUseRichGraphic = node.type === NODE_TYPES.TEXT
                     || (node.type === NODE_TYPES.CAPTION && requiresGraphicRender);
-                if ((node.runs?.length || node.charAnim?.preset || requiresGraphicRender) && canUseRichGraphic) {
+                if ((node.runs?.length || node.charAnim?.preset || node.textPath?.data || requiresGraphicRender) && canUseRichGraphic) {
                     const size = node.size || { w: Math.round(scene.frame.w * 0.8), h: Math.round(scene.frame.h * 0.38) };
                     placements.push({
                         trackType: 'overlay',
@@ -968,6 +970,7 @@ export function flattenScene(scene, opts = {}) {
                                     runs: node.runs || null,
                                     text: node.content ?? '',
                                     charAnim: node.charAnim || null,
+                                    textPath: node.textPath || null,
                                     ...(node.type === NODE_TYPES.CAPTION ? {
                                         captionMode: true,
                                         captionWords: node.words || [],
@@ -1010,6 +1013,7 @@ export function flattenScene(scene, opts = {}) {
                         ...(node.words ? { words: node.words } : {}),
                         ...(node.runs ? { runs: node.runs } : {}),
                         ...(node.charAnim ? { charAnim: node.charAnim } : {}),
+                        ...(node.textPath ? { textPath: { ...node.textPath } } : {}),
                 ...(node.alternatives?.length ? { alternatives: [...node.alternatives] } : {}),
                 ...(node.slotWidth ? { slotWidth: node.slotWidth } : {}),
                 ...(node.dwell ? { dwell: node.dwell } : {}),
@@ -1084,15 +1088,20 @@ const TEXT_STYLE_KEYS = ['fontFamily', 'fontSize', 'fontWeight', 'color', 'textA
 export function nodeFromClip(clip, trackType = 'overlay') {
     if (!clip) return null;
     const wordCycleTemplate = clip.type === 'template' && clip.template?.kind === 'word-cycle';
+    const richTextTemplate = clip.type === 'template' && clip.template?.kind === 'rich-text';
+    const richParams = richTextTemplate ? (clip.template.params || {}) : {};
     const type = clip.type === 'text' ? (clip.words ? NODE_TYPES.CAPTION : NODE_TYPES.TEXT)
-        : wordCycleTemplate ? NODE_TYPES.TEXT
+        : (wordCycleTemplate || richTextTemplate) ? NODE_TYPES.TEXT
             : clip.type === 'template' ? NODE_TYPES.SHAPE
             : (clip.type === 'vector' || clip.type === 'shape') ? NODE_TYPES.SHAPE
             : clip.type === 'image' ? NODE_TYPES.IMAGE
                 : clip.type === 'video' ? NODE_TYPES.VIDEO
                     : NODE_TYPES.STICKER;
     const style = {};
-    for (const k of TEXT_STYLE_KEYS) if (clip[k] !== undefined) style[k] = clip[k];
+    for (const k of TEXT_STYLE_KEYS) {
+        const value = clip[k] ?? richParams.style?.[k];
+        if (value !== undefined) style[k] = value;
+    }
     if (wordCycleTemplate) {
         const params = clip.template.params || {};
         style.fontSize = num(params.fontSize, style.fontSize || 86);
@@ -1118,9 +1127,12 @@ export function nodeFromClip(clip, trackType = 'overlay') {
         },
         size: res && num(res.w, 0) > 0 ? { w: res.w, h: res.h } : null,
         style,
-        content: clip.content ?? (wordCycleTemplate ? clip.template.params?.prefix : '') ?? '',
-        runs: Array.isArray(clip.runs) ? clip.runs : null,
-        charAnim: clip.charAnim && typeof clip.charAnim === 'object' ? clip.charAnim : null,
+        content: clip.content ?? (wordCycleTemplate ? clip.template.params?.prefix : null) ?? richParams.text ?? '',
+        runs: Array.isArray(clip.runs) ? clip.runs : Array.isArray(richParams.runs) ? richParams.runs : null,
+        charAnim: clip.charAnim && typeof clip.charAnim === 'object' ? clip.charAnim
+            : richParams.charAnim && typeof richParams.charAnim === 'object' ? richParams.charAnim : null,
+        textPath: clip.textPath && typeof clip.textPath === 'object' ? { ...clip.textPath }
+            : richParams.textPath && typeof richParams.textPath === 'object' ? { ...richParams.textPath } : null,
         alternatives: Array.isArray(clip.alternatives)
             ? clip.alternatives
             : wordCycleTemplate ? String(clip.template.params?.words || '').split(',').map(word => word.trim()).filter(Boolean) : null,

@@ -18,6 +18,7 @@ import { effectRegistry } from '../effects/EffectRegistry.js';
 import { isGpuClipEffect } from '../effects/ClipEffectAdapter.js';
 import { PARAM_TYPES } from '../effects/EffectNode.js';
 import { COMPONENT_IDS } from '../motion/ComponentLibrary.js';
+import { isReferenceAsset } from '../utils/assetRoles.js';
 
 const ROKA_FOOTAGE_EFFECT_TYPES = Object.freeze([
     'blur_gaussian', 'blur_radial', 'blur_motion', 'glow', 'vignette', 'rgb_split',
@@ -48,6 +49,22 @@ const ROKA_FOOTAGE_EFFECT_GUIDE = ROKA_FOOTAGE_EFFECT_TYPES.map(type => {
  */
 
 export const TOOL_DEFINITIONS = [
+    {
+        name: 'search_uploaded_assets',
+        description: 'Search the complete uploaded media bin by filename and existing analysis evidence (description, transcript, scene, tags). Use this before choosing rushes when the bin is large or the prompt names a topic. Read-only; returns matching asset IDs, roles, analysis status, confidence, and pagination so no asset is silently hidden.',
+        parameters: {
+            type: 'object',
+            properties: {
+                query: { type: 'string', description: 'Topic, spoken phrase, scene, person, filename, or visual description to match against stored metadata.' },
+                roles: { type: 'array', items: { type: 'string', enum: ['source', 'reference', 'stock', 'generated', 'audio', 'document'] } },
+                types: { type: 'array', items: { type: 'string' } },
+                includeReferences: { type: 'boolean', description: 'Include reference-only assets for inspiration. They remain ineligible as timeline sources.' },
+                offset: { type: 'number', description: 'Result offset for paging through more matches.' },
+                limit: { type: 'number', description: 'Page size, maximum 50 (default 20).' },
+            },
+            required: ['query'],
+        },
+    },
     {
         name: 'locate_visual_targets',
         description: 'Search video assets in the media bin and on the timeline for a visible object, person, action, or event. Returns timestamped candidate ranges, highlights matches already on the timeline, and identifies unplaced rushes by asset name. This tool never edits the video.',
@@ -793,7 +810,7 @@ export function buildBrollCandidates(profiles, assets) {
         // References are inspiration/context, never timeline footage. Filter
         // them here as well as at placement time so they cannot rank as a
         // local cutaway candidate.
-        if (asset?.id && asset.assistantReference !== true && asset.isReference !== true && asset.role !== 'reference') {
+        if (asset?.id && !isReferenceAsset(asset)) {
             editableAssetsById.set(asset.id, asset);
         }
     }
@@ -1105,6 +1122,7 @@ export class VideoEditorTools {
         };
 
         switch (action.name) {
+            case 'search_uploaded_assets': return this.searchUploadedAssets(action.args);
             case 'locate_visual_targets': return await this.locateVisualTargets(action.args, action.signal || null);
             case 'apply_target_ranges': return await this.applyTargetRanges(action.args);
             // Editing
@@ -1181,6 +1199,64 @@ export class VideoEditorTools {
             default:
                 throw new Error(`Unknown tool: ${action.name}`);
         }
+    }
+
+    /** Search every uploaded item locally without putting the whole bin in an LLM prompt. */
+    searchUploadedAssets({ query = '', roles = null, types = null, includeReferences = false, offset = 0, limit = 20 } = {}) {
+        const terms = String(query).toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || [];
+        if (!terms.length) return { success: false, message: 'Give me a topic, phrase, filename, or scene to search for.' };
+        const roleFilter = Array.isArray(roles) && roles.length ? new Set(roles.map(value => String(value).toLowerCase())) : null;
+        const typeFilter = Array.isArray(types) && types.length ? new Set(types.map(value => String(value).toLowerCase())) : null;
+        const stopWords = new Set(['the', 'and', 'for', 'with', 'from', 'this', 'that', 'video', 'clip', 'show', 'use', 'les', 'des', 'une', 'pour', 'avec']);
+        const queryTerms = [...new Set(terms.filter(term => !stopWords.has(term)))];
+        if (!queryTerms.length) return { success: false, message: 'Use a more specific topic, phrase, filename, or scene.' };
+        const assets = (this.store.assets || []).filter(Boolean);
+        const matches = [];
+        assets.forEach((asset, index) => {
+            const reference = isReferenceAsset(asset);
+            const role = reference ? 'reference'
+                : asset.provider || asset.isStock || asset.stockProvider ? 'stock'
+                    : asset.generated || asset.isGenerated || asset.origin === 'generated' ? 'generated'
+                        : ['document', 'pdf', 'text'].includes(String(asset.type || '').toLowerCase()) ? 'document'
+                            : String(asset.type || '').toLowerCase() === 'audio' ? 'audio' : 'source';
+            const type = String(asset.type || 'unknown').toLowerCase();
+            if ((!includeReferences && reference) || (roleFilter && !roleFilter.has(role)) || (typeFilter && !typeFilter.has(type))) return;
+            const evidence = [
+                asset.name, asset.description, asset.content_description, asset.contentDescription,
+                asset.visualAnalysis?.contentDescription, asset.visualAnalysis?.summary,
+                asset.analysis?.contentDescription, asset.analysis?.content_description,
+                asset.suggestedLabel, asset.suggested_label, asset.scene_type, asset.sceneType,
+                asset.camera_angle, asset.cameraAngle, asset.transcript_text, asset.transcriptText,
+                asset.transcript, asset.tags, asset.keywords,
+            ].filter(Boolean).map(value => Array.isArray(value) ? value.join(' ') : String(value)).join(' ').toLowerCase();
+            const hits = queryTerms.filter(term => evidence.includes(term));
+            if (!hits.length) return;
+            const name = String(asset.name || '').toLowerCase();
+            const score = hits.length + hits.filter(term => name.includes(term)).length * 2;
+            const analysisStatus = String(asset.analysis_status || asset.analysisStatus || asset.visualAnalysis?.status || asset.analysis?.status || 'not_started').toLowerCase();
+            matches.push({
+                index, score,
+                asset: {
+                    id: String(asset.id || ''), name: asset.name || 'Untitled asset', type, role,
+                    editable: !reference, analysisStatus,
+                    confidence: Number.isFinite(Number(asset.analysisConfidence ?? asset.confidence)) ? Number(asset.analysisConfidence ?? asset.confidence) : null,
+                    duration: Number.isFinite(Number(asset.duration)) ? Number(asset.duration) : null,
+                    evidence: String(asset.content_description || asset.contentDescription || asset.visualAnalysis?.contentDescription || asset.visualAnalysis?.summary || asset.analysis?.contentDescription || asset.analysis?.content_description || asset.description || asset.transcript_text || asset.transcriptText || asset.suggestedLabel || '').replace(/[\r\n]+/g, ' ').slice(0, 240) || null,
+                    matchedTerms: hits,
+                },
+            });
+        });
+        matches.sort((a, b) => b.score - a.score || a.index - b.index);
+        const start = Math.max(0, Math.floor(Number(offset) || 0));
+        const pageSize = Math.max(1, Math.min(50, Math.floor(Number(limit) || 20)));
+        const results = matches.slice(start, start + pageSize).map(item => item.asset);
+        return {
+            success: true,
+            message: results.length
+                ? `Found ${matches.length} matching asset(s) across all ${assets.length} uploaded item(s); showing ${start + 1}–${start + results.length}.`
+                : `No uploaded assets matched “${String(query).trim()}” across ${assets.length} items.`,
+            details: { query: String(query).trim(), totalAssetsScanned: assets.length, totalMatches: matches.length, offset: start, limit: pageSize, hasMore: start + results.length < matches.length, nextOffset: start + results.length < matches.length ? start + results.length : null, results },
+        };
     }
 
     // --- Tool Implementations ---
@@ -2294,27 +2370,47 @@ export class VideoEditorTools {
         if (assetIds.length === 0) return { success: false, message: 'Add a video to the media bin before searching its visual content.' };
 
         const selectedRange = state.selectedTimelineRange;
-        const searchableAssetIds = assetIds.slice(0, 30);
-        const jobs = await Promise.all(searchableAssetIds.map(async id => {
-            const asset = (state.assets || []).find(a => a.id === id);
-            if (asset?.type && asset.type !== 'video') return null;
-            const response = await authFetch('/api/brain/locate-target', {
-                method: 'POST',
-                body: JSON.stringify({ assetId: id, query: targetQuery }),
-                signal,
-            });
-            if (!response.ok) {
-                const details = await response.json().catch(() => ({}));
-                throw new Error(details.error || `Could not start visual search for ${asset?.name || id} (${response.status}).`);
-            }
-            const { jobId } = await response.json();
-            return { asset, jobId };
-        }));
-
-        const results = await Promise.all(jobs.filter(Boolean).map(async ({ asset, jobId }) => {
-            const result = await pollJobResult(jobId, signal, 600_000);
-            return { assetId: asset?.id || null, assetName: asset?.name || null, ...(result || {}) };
-        }));
+        const searchableAssetIds = assetIds;
+        const results = [];
+        const failures = [];
+        // Bound concurrent analysis work, but scan the complete bin. A fixed
+        // first-N slice silently hid later rushes from ROKA's edit decisions.
+        const batchSize = 6;
+        for (let offset = 0; offset < searchableAssetIds.length; offset += batchSize) {
+            const batch = searchableAssetIds.slice(offset, offset + batchSize);
+            const jobs = await Promise.all(batch.map(async id => {
+                const asset = (state.assets || []).find(a => a.id === id);
+                if (asset?.type && asset.type !== 'video') return null;
+                try {
+                    const response = await authFetch('/api/brain/locate-target', {
+                        method: 'POST',
+                        body: JSON.stringify({ assetId: id, query: targetQuery }),
+                        signal,
+                    });
+                    if (!response.ok) {
+                        const details = await response.json().catch(() => ({}));
+                        throw new Error(details.error || `Could not start visual search (${response.status}).`);
+                    }
+                    const { jobId } = await response.json();
+                    return { asset, jobId };
+                } catch (error) {
+                    if (signal?.aborted) throw error;
+                    failures.push({ assetId: id, assetName: asset?.name || null, error: error.message });
+                    return null;
+                }
+            }));
+            const batchResults = await Promise.all(jobs.filter(Boolean).map(async ({ asset, jobId }) => {
+                try {
+                    const result = await pollJobResult(jobId, signal, 600_000);
+                    return { assetId: asset?.id || null, assetName: asset?.name || null, ...(result || {}) };
+                } catch (error) {
+                    if (signal?.aborted) throw error;
+                    failures.push({ assetId: asset?.id || null, assetName: asset?.name || null, error: error.message });
+                    return null;
+                }
+            }));
+            results.push(...batchResults.filter(Boolean));
+        }
         const sourceFindings = results.flatMap(result => (result.ranges || []).map(hit => ({
             ...hit,
             assetId: result.assetId,
@@ -2373,16 +2469,20 @@ export class VideoEditorTools {
         );
 
         return {
-            success: true,
+            success: results.length > 0,
             message: allCandidates.length
-                ? `Found ${allCandidates.length} candidate moment(s) for “${targetQuery}”${summary.length ? `: ${summary.join('; ')}` : ''}.${assetFindings.length ? ' Unplaced matches are marked on their media-bin cards.' : ''}${timelineFindings.length ? ' Timeline matches are highlighted for review.' : ''}`
-                : `No confident visual matches for “${targetQuery}” were found in the sampled frames.`,
+                ? `Found ${allCandidates.length} candidate moment(s) for “${targetQuery}”${summary.length ? `: ${summary.join('; ')}` : ''}.${assetFindings.length ? ' Unplaced matches are marked on their media-bin cards.' : ''}${timelineFindings.length ? ' Timeline matches are highlighted for review.' : ''}${failures.length ? ` ${failures.length} asset(s) could not be analyzed.` : ''}`
+                : failures.length === results.length
+                    ? `Visual search could not analyze any of the ${searchableAssetIds.length} video assets.`
+                    : `No confident visual matches for “${targetQuery}” were found in the sampled frames.${failures.length ? ` ${failures.length} asset(s) could not be analyzed.` : ''}`,
             details: {
                 query: targetQuery,
                 scannedAssets: results.map(r => ({ id: r.assetId, name: r.assetName, sampleInterval: r.sampleInterval })),
                 candidates: allCandidates,
                 note: 'Frame-sampled matches are suggestions. Review the highlighted ranges before applying edits.',
-                ...(assetIds.length > searchableAssetIds.length ? { warning: 'Search is limited to the first 30 video assets per request.' } : {}),
+                scannedAssetCount: results.length,
+                requestedAssetCount: searchableAssetIds.length,
+                ...(failures.length ? { failures } : {}),
             },
         };
     }
@@ -3252,7 +3352,7 @@ export class VideoEditorTools {
             .filter(({ clip }) => ['video', 'image'].includes(clip.type))
             .sort((a, b) => (Number(a.clip.start) || 0) - (Number(b.clip.start) || 0));
         const uploadedVisuals = (initial.assets || []).filter(asset =>
-            ['video', 'image'].includes(asset.type) && !asset.provider && !asset.assistantReference && (asset.userUploaded || asset.file || /^asset-/.test(String(asset.id)))
+            ['video', 'image'].includes(asset.type) && !asset.provider && !isReferenceAsset(asset) && (asset.userUploaded || asset.file || /^asset-/.test(String(asset.id)))
         );
         const videoAssets = uploadedVisuals.filter(asset => asset.type === 'video');
         const sourceAssets = args.includeImages === false && videoAssets.length

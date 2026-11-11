@@ -152,6 +152,7 @@ const largeContext = ContextGenerator.getTimelineContext();
 assert.equal(largeContext.mediaBin.length, 70, 'large bins are not silently truncated');
 assert.equal(largeContext.assetManifest.total, 71);
 assert.ok(largeContext.mediaBin.some(asset => asset.id === 'bin-69'));
+assert.ok(largeContext.assetManifest.assets.some(asset => asset.id === 'bin-69'), 'last large-bin asset remains in the complete manifest');
 assert.match(largeContext.display, /Style reference: inspiration\.mp4; analysis=pending\. It is design guidance only, never an edit source\./);
 
 // Incomplete transcription/analysis still yields a usable Auto plan that asks

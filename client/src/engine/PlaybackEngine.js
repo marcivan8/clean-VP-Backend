@@ -5,6 +5,7 @@ import { createGpuClipEffectConfigs } from '../effects/ClipEffectAdapter.js';
 import { mapSourceIntervalToTimelineSegments, mapSourceTimeToTimeline, mapTimelineTimeToRate, mapTimelineTimeToSource } from '../timeline/retimeMap.js';
 import { resampleMonoPcm } from './audioResample.js';
 import { handleWebGLContextLost, handleWebGLContextRestored } from './webglContextLifecycle.js';
+import { audioEngineAPI } from '../audio-engine/AudioEngineAPI.js';
 
 /**
  * Playback State Machine
@@ -131,6 +132,7 @@ class PlaybackEngine {
         // Loop State
         this.rafId = null;
         this.lastFrameRendered = null; // Debug info
+        this._lastRenderedTimestamp = null;
         this.currentUrl = null; // Cache URL for resume
 
         // Perf counters
@@ -228,8 +230,13 @@ class PlaybackEngine {
             // Create effect pipeline
             this.effectsPipeline = new EffectPipeline({
                 gpuEngine: this.gpuEffectEngine,
+                lutPreviewProvider: lutId => audioEngineAPI.getLUTPreview(lutId),
                 onPreviewWarning: warning => this.onWarning(warning),
                 onEffectChange: (change) => {
+                    if (change?.type === 'preview_ready') {
+                        this.renderCurrentFrame();
+                        return;
+                    }
                     console.log('[PlaybackEngine] Effect changed:', change.type);
                 }
             });
@@ -903,7 +910,9 @@ class PlaybackEngine {
      * from unrelated layers are not applied to its texture.
      */
     setEffectSourceClipId(clipId) {
-        this.effectSourceClipId = clipId || null;
+        const nextClipId = clipId || null;
+        if (nextClipId !== this.effectSourceClipId) this._lastRenderedTimestamp = null;
+        this.effectSourceClipId = nextClipId;
     }
 
     /**
@@ -1505,8 +1514,14 @@ class PlaybackEngine {
         }
     }
 
+    renderCurrentFrame() {
+        if (this._lastRenderedTimestamp == null) return false;
+        this.render({ reuseTexture: true, timestamp: this._lastRenderedTimestamp });
+        return true;
+    }
+
     render(frameItem) {
-        if (!this.gl || this._webglContextLost || !frameItem.data) return;
+        if (!this.gl || this._webglContextLost || (!frameItem?.data && !frameItem?.reuseTexture)) return;
 
         const gl = this.gl;
 
@@ -1537,7 +1552,9 @@ class PlaybackEngine {
         gl.bindTexture(gl.TEXTURE_2D, this.texture);
         // texImage2D with VideoFrame is supported in Chrome/Edge. 
         // Need to be careful about format. VideoFrame usually RGBA or similar.
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frameItem.data);
+        if (!frameItem.reuseTexture) {
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frameItem.data);
+        }
 
         // GPU effects render into ping-pong textures. Feed that processed
         // texture into the visible frame shader instead of discarding it; this
@@ -1614,6 +1631,7 @@ class PlaybackEngine {
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
         this.lastFrameRendered = frameItem.timestamp;
+        this._lastRenderedTimestamp = frameItem.timestamp;
     }
 
     destroy() {

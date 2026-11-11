@@ -15,6 +15,9 @@ import { editJobManager } from './EditJobManager.js';
 import { buildAutopilotSteps, getEditingStyle, inferEditingStyle } from './EditingStyles.js';
 import { beginAutoRun, endAutoRun } from './autoRunContext.js';
 import { decide } from './EditPolicy.js';
+import { selectPrimaryNarrationAsset } from './PrimarySourceSelector.js';
+import { authFetch } from '../utils/authFetch.js';
+import { isReferenceAsset } from '../utils/assetRoles.js';
 
 const STEP_LABEL = {
     captions: 'captions', transcript: 'transcript', short: 'best moment kept', vertical: 'vertical 9:16', request: 'your request', montage: 'visual montage', storyboard: 'motion storyboard',
@@ -61,12 +64,59 @@ export async function runAutopilot(request, opts = {}) {
     // store.captions holds the transcript words (filled by the background
     // transcription on upload), not caption clips: it is what Reel needs to
     // pick its moment. Caption clips are always (re)placed after the cuts.
-    const hasTranscript = Array.isArray(store.captions) && store.captions.length > 0;
-    const visualClips = (store.tracks || []).filter(track => track.type === 'video').flatMap(track => track.clips || [])
+    let visualClips = (store.tracks || []).filter(track => track.type === 'video').flatMap(track => track.clips || [])
         .filter(clip => ['video', 'image'].includes(clip.type));
-    const visualAssets = (store.assets || []).filter(asset => ['video', 'image'].includes(asset.type) && !asset.provider && !asset.assistantReference);
+    const visualAssets = (store.assets || []).filter(asset => ['video', 'image'].includes(String(asset.type || '').toLowerCase()) && !asset.provider && !isReferenceAsset(asset));
+
+    // Mobile creation is narration-led when the user uploads video footage.
+    // Do not turn every rush into a sequential base montage: establish one
+    // primary source and leave the remaining assets in the bin, where the
+    // contextual b-roll step can match them to the transcript.
+    let primarySource = null;
+    if (opts.sourceSelection === 'narration' && visualClips.length === 0) {
+        const videos = visualAssets.filter(asset => String(asset.type || '').toLowerCase().startsWith('video'));
+        if (videos.length > 0) {
+            let profiles = [];
+            if (videos.length > 1 && store.projectId) {
+                try {
+                    const response = await authFetch(`/api/brain/broll-profiles?projectId=${encodeURIComponent(store.projectId)}`);
+                    if (response.ok) profiles = (await response.json())?.profiles || [];
+                } catch (error) {
+                    console.warn('[StyleAutopilot] Could not load source profiles; using upload order:', error.message);
+                }
+            }
+            primarySource = selectPrimaryNarrationAsset(videos, profiles);
+            if (primarySource.asset) {
+                useTimelineStore.getState().addAssetToTimeline(primarySource.asset);
+                visualClips = (useTimelineStore.getState().tracks || []).filter(track => track.type === 'video')
+                    .flatMap(track => track.clips || []).filter(clip => ['video', 'image'].includes(clip.type));
+                const sourceOnTimeline = visualClips.some(clip => clip.assetId === primarySource.asset.id);
+                if (sourceOnTimeline) {
+                    const primaryPath = primarySource.asset.gcsPath || primarySource.asset.originalPath || null;
+                    if (primaryPath) useTimelineStore.getState().setUploadedFilePath?.(primaryPath);
+                    const live = useTimelineStore.getState();
+                    const transcriptBasename = value => String(value || '').split(/[\\/]/).pop();
+                    const sourceName = transcriptBasename(primaryPath || primarySource.asset.name);
+                    const transcriptKey = Object.keys(live.transcripts || {}).find(key =>
+                        transcriptBasename(key) === sourceName
+                    );
+                    const sourceWords = transcriptKey && live.transcriptVerified?.[transcriptKey]
+                        ? live.transcripts[transcriptKey]
+                        : [];
+                    // Never let an upload-order transcript annotate a different
+                    // main source. If this source has no verified transcript yet,
+                    // the normal Auto prerequisite will generate it.
+                    live.setTimelineTranscript?.(sourceWords);
+                    progress(primarySource.confidence === 'analysis'
+                        ? `Mobile edit: ${primarySource.asset.name || 'Primary video'} selected as the narration source from media analysis; supporting footage stays available for contextual cutaways.`
+                        : `Mobile edit: ${primarySource.asset.name || 'First uploaded video'} selected as the narration source. Other footage stays in the media bin for contextual cutaways.`);
+                }
+            }
+        }
+    }
+    const hasTranscript = Array.isArray(useTimelineStore.getState().captions) && useTimelineStore.getState().captions.length > 0;
     const hasStyleReference = (store.assets || []).some(asset =>
-        asset.assistantReference && ['video', 'image'].includes(asset.type))
+        isReferenceAsset(asset) && ['video', 'image'].includes(String(asset.type || '').toLowerCase()))
         || /Reference media supplied by the user for guidance only/i.test(request);
     const explicitSilent = /\b(silent|without (?:speech|dialogue|voice)|no (?:speech|dialogue|voice)|without narration|sans (?:parole|voix|dialogue))\b/i.test(request);
     const imageOnlyProject = [...visualClips.map(clip => clip.type), ...visualAssets.map(asset => asset.type)].length > 0

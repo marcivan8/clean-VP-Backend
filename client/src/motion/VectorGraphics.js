@@ -258,7 +258,7 @@ export function parseSvgPath(d) {
 }
 
 /**
- * Interpolate two SVG paths only when their command topology matches.
+ * Interpolate SVG paths with matching commands or resampled compatible contours.
  * Arc flags are categorical SVG values, not coordinates: interpolating a
  * sweep flag from 0 to 1 produces invalid, discontinuous arc geometry.
  */
@@ -299,11 +299,21 @@ export function interpolateSvgPaths(from, to, progress) {
     // then interpolate matching points. This supports e.g. a rectangle
     // morphing into a curve without requiring authored paths to share syntax.
     const contoursA = flattenMorphContours(a), contoursB = flattenMorphContours(b);
-    if (!contoursA || !contoursB || contoursA.length !== contoursB.length) return null;
+    if (!contoursA || !contoursB) return null;
+    // Pair contours by their geometry rather than authored order. If the
+    // number differs, surplus contours grow from or collapse to a point.
+    if (Math.max(contoursA.length, contoursB.length) > 128) return null;
+    const contourPairs = matchMorphContours(contoursA, contoursB);
+    const centroid = contour => {
+        const points = contour.points;
+        return points.reduce((sum, point) => [sum[0] + point[0] / points.length, sum[1] + point[1] / points.length], [0, 0]);
+    };
+    const degenerate = (point, closed) => ({ points: [point, point], closed: !!closed });
     const morphed = [];
-    for (let index = 0; index < contoursA.length; index++) {
-        const left = contoursA[index], right = contoursB[index];
-        if (left.closed !== right.closed) return null;
+    for (const [matchedLeft, matchedRight] of contourPairs) {
+        let left = matchedLeft, right = matchedRight;
+        if (!left) left = degenerate(centroid(right), right.closed);
+        if (!right) right = degenerate(centroid(left), left.closed);
         const count = Math.min(128, Math.max(2, left.points.length, right.points.length));
         const fromPoints = resampleMorphContour(left.points, count, left.closed);
         let toPoints = resampleMorphContour(right.points, count, right.closed);
@@ -323,7 +333,20 @@ export function interpolateSvgPaths(from, to, progress) {
             fromPoints[point][0] + (toPoints[point][0] - fromPoints[point][0]) * t,
             fromPoints[point][1] + (toPoints[point][1] - fromPoints[point][1]) * t,
         ] });
-        if (left.closed) morphed.push({ type: 'Z', args: [] });
+        if (left.closed !== right.closed) {
+            // Represent closure as an animated final edge. The open contour's
+            // endpoint is duplicated, so that edge starts at zero length;
+            // the closed contour's endpoint returns to its start. This avoids
+            // changing topology halfway through the morph (which caused the
+            // renderer to reject the entire path pair).
+            const fromClosure = left.closed ? fromPoints[0] : fromPoints[count - 1];
+            const toClosure = right.closed ? toPoints[0] : toPoints[count - 1];
+            morphed.push({ type: 'L', args: [
+                fromClosure[0] + (toClosure[0] - fromClosure[0]) * t,
+                fromClosure[1] + (toClosure[1] - fromClosure[1]) * t,
+            ] });
+            if ((t === 0 && left.closed) || (t === 1 && right.closed)) morphed.push({ type: 'Z', args: [] });
+        } else if (left.closed) morphed.push({ type: 'Z', args: [] });
     }
     return morphed;
 }
@@ -395,6 +418,73 @@ function flattenMorphContours(commands, steps = 24) {
 }
 
 function pointDistance(a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1]); }
+/** Match unordered SVG contours by geometry so reordered subpaths do not cross-morph. */
+function matchMorphContours(leftContours, rightContours) {
+    const size = Math.max(leftContours.length, rightContours.length);
+    if (!size) return [];
+    const describe = contour => {
+        const points = contour.points || [];
+        const center = points.length
+            ? points.reduce((sum, point) => [sum[0] + point[0] / points.length, sum[1] + point[1] / points.length], [0, 0])
+            : [0, 0];
+        let length = 0;
+        for (let index = 1; index < points.length; index++) length += pointDistance(points[index - 1], points[index]);
+        if (contour.closed && points.length > 1) length += pointDistance(points.at(-1), points[0]);
+        return { center, length, area: Math.abs(contourArea(points)) };
+    };
+    const left = leftContours.map(describe), right = rightContours.map(describe);
+    const cost = Array.from({ length: size }, (_, i) => Array.from({ length: size }, (_, j) => {
+        // Dummy rows and columns let surplus contours grow or collapse without
+        // forcing a distant, poor pairing.
+        if (i >= left.length || j >= right.length) return 0;
+        const a = left[i], b = right[j];
+        const lengthDelta = Math.abs(Math.log((a.length + 1) / (b.length + 1)));
+        const areaDelta = Math.abs(Math.log((a.area + 1) / (b.area + 1)));
+        return pointDistance(a.center, b.center) + (lengthDelta + areaDelta) * 0.25;
+    }));
+
+    // Hungarian assignment, O(n^3), bounded by the 128-contour morph limit.
+    const u = Array(size + 1).fill(0), v = Array(size + 1).fill(0);
+    const p = Array(size + 1).fill(0), way = Array(size + 1).fill(0);
+    for (let i = 1; i <= size; i++) {
+        p[0] = i;
+        let j0 = 0;
+        const minv = Array(size + 1).fill(Infinity);
+        const used = Array(size + 1).fill(false);
+        do {
+            used[j0] = true;
+            const i0 = p[j0];
+            let delta = Infinity, j1 = 0;
+            for (let j = 1; j <= size; j++) {
+                if (used[j]) continue;
+                const current = cost[i0 - 1][j - 1] - u[i0] - v[j];
+                if (current < minv[j]) { minv[j] = current; way[j] = j0; }
+                if (minv[j] < delta) { delta = minv[j]; j1 = j; }
+            }
+            for (let j = 0; j <= size; j++) {
+                if (used[j]) { u[p[j]] += delta; v[j] -= delta; }
+                else minv[j] -= delta;
+            }
+            j0 = j1;
+        } while (p[j0] !== 0);
+        do {
+            const j1 = way[j0];
+            p[j0] = p[j1];
+            j0 = j1;
+        } while (j0 !== 0);
+    }
+    const assignedRight = Array(left.length).fill(-1);
+    for (let j = 1; j <= size; j++) {
+        const i = p[j] - 1;
+        if (i >= 0 && i < left.length && j - 1 < right.length) assignedRight[i] = j - 1;
+    }
+    const usedRight = new Set(assignedRight.filter(index => index >= 0));
+    const pairs = assignedRight.map((rightIndex, index) => [leftContours[index], rightIndex >= 0 ? rightContours[rightIndex] : null]);
+    for (let index = 0; index < rightContours.length; index++) {
+        if (!usedRight.has(index)) pairs.push([null, rightContours[index]]);
+    }
+    return pairs;
+}
 function contourArea(points) {
     return points.reduce((sum, point, index) => {
         const next = points[(index + 1) % points.length];

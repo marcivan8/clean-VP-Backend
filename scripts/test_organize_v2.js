@@ -307,6 +307,10 @@ section('5 · Client payload is asset-scoped (R21 global-field bug)');
         'the global uploadedFilePath is still the primary path for every clip');
     check('uploadedFilePath is only a fallback when gcsPath is absent',
         /filePath:\s*asset\?\.gcsPath\s*\?\s*null\s*:/.test(block));
+    check('organize_clips uses per-asset transcript routing',
+        /transcriptForAssetRange\([\s\S]*diarizationByAsset:\s*ocStore\.diarizationByAsset/.test(block));
+    check('unscoped captions are only trusted for a single source asset',
+        /allowUnscopedCaptions:\s*uniqueSourceAssetIds\.size\s*<=\s*1/.test(block));
 }
 
 // ── 6 · Nobody claims semantic ordering without signal (R30) ─────────────────
@@ -355,6 +359,14 @@ section('7 · Frame extraction works in GCS mode');
         'the local-file-only precondition is still present');
     check('clip sources resolve through resolveClipSource',
         /resolveClipSource\(/.test(block));
+    check('large clip sets use bounded ordering batches',
+        /clips\.length > ORGANIZE_SINGLE_CALL_LIMIT/.test(block) && /chunkItems\(clips, ORGANIZE_BATCH_SIZE\)/.test(block));
+    check('vision batches use a smaller payload bound',
+        /imageDescriptors\.length > 0 \? 12 : 40/.test(block));
+    check('large-bin merge summaries are reduced hierarchically',
+        /while \(mergeGroups\.length > 40\)/.test(block));
+    check('batch output validates IDs and restores omitted clips',
+        /completeOrder\(group\.clips\.map\(c => c\.id\), parsed\.orderedIds\)/.test(block));
 }
 
 // ── Summary ──────────────────────────────────────────────────────────────────

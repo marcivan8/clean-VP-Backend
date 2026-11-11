@@ -40,8 +40,8 @@ const effectVectorTrack = new EffectNode({
         { time: 2, value: [2, 2] },
     ] },
 });
-assert.deepEqual(effectVectorTrack.getParamAt('color', 1), [1, 1],
-    'effect tracks ignore partially invalid vector keyframes instead of synthesizing mixed channels');
+assert.deepEqual(effectVectorTrack.getParamAt('color', 1), [2, 4],
+    'effect tracks recover a malformed vector channel from the nearest finite authored value');
 const dimensionChangeTrack = new EffectNode({
     type: 'glow',
     params: { color: [0, 0, 0] },

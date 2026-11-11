@@ -1,4 +1,4 @@
-const READ_ONLY = new Set(['locate_visual_targets', 'identify_quotable_moments', 'recommend_luts']);
+const READ_ONLY = new Set(['search_uploaded_assets', 'locate_visual_targets', 'identify_quotable_moments', 'recommend_luts']);
 const ANALYSIS = new Set(['locate_visual_targets', 'identify_quotable_moments', 'auto_captions']);
 const NETWORK = new Set(['fetch_stock_broll', 'create_video_from_script', 'create_video_from_assets', 'place_contextual_broll']);
 const EXPENSIVE = new Set(['create_video_from_script', 'create_video_from_assets', 'auto_captions', 'silence_removal', 'remove_filler_words']);

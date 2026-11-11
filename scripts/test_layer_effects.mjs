@@ -78,6 +78,30 @@ function render(stack, timeSeconds = 0) {
   return canvas.toBuffer('image/png');
 }
 assert.notDeepEqual(render([]), render(effects), 'effect stack changes actual rendered output');
+const sequentialPixelEffects = [
+  { kind: 'film_grain', params: { intensity: 0.7, size: 1.5, seed: 17, animated: false } },
+  { kind: 'color_grade', params: { brightness: 145, contrast: 125, saturation: 135, temperature: 12 } },
+  { kind: 'rgb_split', params: { amount: 5, angle: 32, centerX: 0.5, centerY: 0.5 } },
+];
+const combinedPixelStack = Canvas.createCanvas(160, 160);
+drawLayerWithEffects(combinedPixelStack.getContext('2d'), sequentialPixelEffects, drawCtx => {
+  drawCtx.fillStyle = '#456789'; drawCtx.fillRect(20, 20, 120, 120);
+});
+let sequentialCanvas = Canvas.createCanvas(160, 160);
+{
+  const drawCtx = sequentialCanvas.getContext('2d');
+  drawCtx.fillStyle = '#456789'; drawCtx.fillRect(20, 20, 120, 120);
+}
+for (const effect of sequentialPixelEffects) {
+  const nextCanvas = Canvas.createCanvas(160, 160);
+  drawLayerWithEffects(nextCanvas.getContext('2d'), [effect], drawCtx => drawCtx.drawImage(sequentialCanvas, 0, 0));
+  sequentialCanvas = nextCanvas;
+}
+assert.deepEqual(
+  [...combinedPixelStack.getContext('2d').getImageData(0, 0, 160, 160).data],
+  [...sequentialCanvas.getContext('2d').getImageData(0, 0, 160, 160).data],
+  'consecutive pixel effects use each prior effect result, matching individually applied stages',
+);
 assert.deepEqual(
   render([{ type: 'brightness', params: { amount: 0.35 } }]),
   render([{ kind: 'brightness', params: { amount: 0.35 } }]),
@@ -88,6 +112,39 @@ assert.deepEqual(
   render([]),
   'disabled registry-shaped effects remain disabled after kind normalization',
 );
+const unavailableSurfaceWarnings = [];
+class UnavailableCanvas {
+  constructor() { throw new Error('surface unavailable'); }
+}
+const unavailableSurface = { width: 24, height: 24, constructor: UnavailableCanvas };
+const unavailableContext = {
+  canvas: unavailableSurface, globalAlpha: 1, globalCompositeOperation: 'source-over',
+  save() {}, restore() {}, getTransform() { return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }; },
+};
+drawLayerWithEffects(unavailableContext, [{ id: 'unavailable-grain', kind: 'grain' }], () => {}, null, 0, {
+  onWarning: warning => unavailableSurfaceWarnings.push(warning),
+});
+assert.equal(unavailableSurfaceWarnings[0]?.type, 'layer_effect_preview_unavailable',
+  'preview reports when offscreen isolation prevents an active effect from rendering');
+assert.deepEqual(unavailableSurfaceWarnings[0]?.effectIds, ['unavailable-grain'],
+  'preview warnings identify the effects that could not render');
+const pixelReadWarnings = [];
+{
+  const effectCanvasContextPrototype = Object.getPrototypeOf(Canvas.createCanvas(2, 2).getContext('2d'));
+  const originalGetImageData = effectCanvasContextPrototype.getImageData;
+  try {
+    effectCanvasContextPrototype.getImageData = function () { throw new Error('SecurityError: canvas is tainted'); };
+    drawLayerWithEffects(Canvas.createCanvas(24, 24).getContext('2d'), [{ id: 'tainted-grain', kind: 'grain' }], drawCtx => {
+      drawCtx.fillStyle = '#FFFFFF'; drawCtx.fillRect(2, 2, 20, 20);
+    }, null, 0, { onWarning: warning => pixelReadWarnings.push(warning) });
+  } finally {
+    effectCanvasContextPrototype.getImageData = originalGetImageData;
+  }
+}
+assert.equal(pixelReadWarnings[0]?.type, 'layer_effect_preview_unavailable',
+  'preview reports pixel effects skipped when browser security blocks canvas reads');
+assert.deepEqual(pixelReadWarnings[0]?.effectIds, ['tainted-grain'],
+  'pixel-read warnings identify the exact effects that were skipped');
 const translucentEffectCanvas = Canvas.createCanvas(24, 24);
 const translucentEffectCtx = translucentEffectCanvas.getContext('2d');
 translucentEffectCtx.globalAlpha = 0.4;
@@ -166,6 +223,28 @@ function directionalBlurBounds(width, height) {
 const portraitDirectionalBlur = directionalBlurBounds(40, 100);
 assert.ok(Math.abs(portraitDirectionalBlur.x - portraitDirectionalBlur.y) <= 2,
   `45 degree CPU motion blur keeps equal pixel travel in portrait frames, got ${JSON.stringify(portraitDirectionalBlur)}`);
+function assertBlurKeepsStraightEdgeColor(kind, params) {
+  const source = Canvas.createCanvas(48, 32);
+  const sourceContext = source.getContext('2d');
+  const sourcePixels = sourceContext.createImageData(source.width, source.height);
+  const center = (16 * source.width + 24) * 4;
+  sourcePixels.data.set([240, 32, 16, 255], center);
+  sourceContext.putImageData(sourcePixels, 0, 0);
+  const output = Canvas.createCanvas(source.width, source.height);
+  drawLayerWithEffects(output.getContext('2d'), [{ kind, params }], ctx => ctx.drawImage(source, 0, 0));
+  const pixels = output.getContext('2d').getImageData(0, 0, output.width, output.height).data;
+  const fringe = [];
+  for (let i = 0; i < pixels.length; i += 4) {
+    if (pixels[i + 3] > 0 && pixels[i + 3] < 255) fringe.push([...pixels.slice(i, i + 4)]);
+  }
+  assert.ok(fringe.length > 0, `${kind} creates partially transparent edge pixels for the test source`);
+  assert.ok(fringe.every(([red, green, blue]) => Math.abs(red - 240) <= 8
+    && Math.abs(green - 32) <= 8 && Math.abs(blue - 16) <= 8),
+    `${kind} keeps the source hue at translucent edges instead of darkening straight RGB: ${JSON.stringify(fringe.slice(0, 3))}`);
+}
+assertBlurKeepsStraightEdgeColor('motion-blur', { angle: 0, amount: 4 });
+assertBlurKeepsStraightEdgeColor('blur_motion', { angle: 0, intensity: 1, samples: 32 });
+assertBlurKeepsStraightEdgeColor('blur_radial', { centerX: 0.2, centerY: 0.5, intensity: 1, samples: 24 });
 const radialGradient = Canvas.createCanvas(101, 5);
 const radialGradientCtx = radialGradient.getContext('2d');
 const radialPixels = radialGradientCtx.createImageData(101, 5);
@@ -405,6 +484,32 @@ const blurThenStroke = renderOrderedEffects([
   { kind: 'stroke', params: { width: 3, color: '#FF0000' } },
 ]);
 assert.notDeepEqual(strokeThenBlur, blurThenStroke, 'effects run in declared stack order instead of fixed implementation order');
+const orderMetadataStack = renderOrderedEffects([
+  { kind: 'blur', order: 2, params: { radius: 2 } },
+  { kind: 'stroke', order: 1, params: { width: 3, color: '#FF0000' } },
+]);
+assert.deepEqual(orderMetadataStack, strokeThenBlur,
+  'canvas preview honors effect order metadata the same way as export');
+const contextPrototype = Object.getPrototypeOf(Canvas.createCanvas(2, 2).getContext('2d'));
+const originalGetImageData = contextPrototype.getImageData;
+let effectStackReadbacks = 0;
+contextPrototype.getImageData = function (...args) {
+  effectStackReadbacks++;
+  return originalGetImageData.apply(this, args);
+};
+try {
+  const canvas = Canvas.createCanvas(48, 48);
+  drawLayerWithEffects(canvas.getContext('2d'), [
+    { kind: 'grain', params: { amount: 4 } },
+    { kind: 'rgb_split', params: { amount: 2 } },
+    { kind: 'distortion', params: { amount: 0.002 } },
+  ], drawCtx => {
+    drawCtx.fillStyle = '#FFFFFF'; drawCtx.fillRect(16, 16, 16, 16);
+  });
+} finally {
+  contextPrototype.getImageData = originalGetImageData;
+}
+assert.equal(effectStackReadbacks, 1, 'consecutive pixel effects share a single full-layer ImageData readback');
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibed-layer-effects-'));
 try {
   const exported = await renderVectorFrames({ kind: 'circle', w: 120, h: 120, fill: '#FF355E' }, {

@@ -32,6 +32,204 @@ const { ContextEngine } = require('./ContextEngine');
 const { UserProfileEngine } = require('./UserProfileEngine');
 const { ASSET_ANALYSIS_DONE } = require('./media/analysisStatus');
 
+// Keep large-bin context useful without allowing per-asset descriptions to
+// consume the entire model window. Every asset stays in the index; detailed
+// evidence is reserved for the most relevant entries.
+const DETAILED_ASSET_CONTEXT_LIMIT = 40;
+const DETAILED_ASSET_CONTEXT_MAX_TOTAL = 80;
+// Bound by prompt size rather than a fixed number of assets. Long names and
+// descriptions consume more room, while compactly described bins can expose
+// more candidates. Query-relevant assets are packed first; the remaining space
+// is used for a diverse sample of the rest of the inventory.
+// The full system prompt includes substantial editing guidance in addition
+// to this inventory. Keep the index below 16k so those fixed instructions
+// still fit comfortably inside the planner request budget.
+const MAX_ASSET_CONTEXT_CHARS = 16_000;
+
+function queryTerms(text) {
+    const stopWords = new Set([
+        'the', 'and', 'for', 'with', 'from', 'that', 'this', 'these', 'those', 'then',
+        'make', 'made', 'edit', 'video', 'videos', 'clip', 'clips', 'use', 'using',
+        'put', 'add', 'create', 'show', 'want', 'please', 'into', 'onto', 'have',
+        'has', 'was', 'are', 'were', 'about', 'into', 'your', 'you', 'our', 'their',
+        'les', 'des', 'une', 'pour', 'avec', 'dans', 'sur', 'qui', 'que', 'est', 'aux',
+    ]);
+    return new Set((String(text || '').toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || [])
+        .filter(term => !stopWords.has(term)));
+}
+
+function assetRelevance(asset, terms, role) {
+    // Transcript and project-map evidence often carries the only useful clue
+    // for generically named rushes (for example, IMG_1042.mov). Include both
+    // client and server field spellings so those assets can outrank filename
+    // noise when the request names a topic or spoken phrase.
+    const fields = [
+        asset.name, asset.description, asset.content_description, asset.contentDescription,
+        asset.suggested_label, asset.suggestedLabel, asset.scene_type, asset.sceneType,
+        asset.camera_angle, asset.cameraAngle, asset.audio_type, asset.audioType,
+        asset.transcript_text, asset.transcriptText, asset.transcript,
+        asset.keywords, asset.tags, role?.role, role?.serves,
+    ].filter(Boolean).map(value => Array.isArray(value) ? value.join(' ') : String(value)).join(' ').toLowerCase();
+    let score = 0;
+    for (const term of terms) {
+        if (fields.includes(term)) score += 1;
+        // Small inflection tolerance helps English and French plural forms
+        // without turning broad substring matches into dominant evidence.
+        else if (term.length > 4 && (fields.includes(`${term}s`) || fields.includes(`${term}es`))) score += 0.7;
+    }
+    const exactPhrase = String(asset.content_description || asset.contentDescription || asset.transcript_text || asset.transcriptText || '').toLowerCase();
+    const rawTerms = [...terms].filter(term => term.length > 3);
+    if (rawTerms.length >= 2 && exactPhrase.includes(rawTerms.slice(0, 3).join(' '))) score += 2;
+    return score;
+}
+
+function assetRoleLabel(asset, projectRole) {
+    if (projectRole?.role) return `${projectRole.role}${projectRole.serves ? `→${projectRole.serves}` : ''}`;
+    if (asset.role && ['source', 'reference', 'stock', 'generated', 'audio', 'document'].includes(String(asset.role).toLowerCase())) {
+        return String(asset.role).toLowerCase();
+    }
+    if (asset.is_reference === true || asset.isReference === true || asset.assistantReference === true) return 'reference';
+    if (asset.provider || asset.isStock || asset.stockProvider) return 'stock';
+    if (asset.generated === true || asset.isGenerated === true || asset.origin === 'generated') return 'generated';
+    if (String(asset.type || '').toLowerCase() === 'audio') return 'audio';
+    if (['document', 'pdf', 'text'].includes(String(asset.type || '').toLowerCase())) return 'document';
+    return 'source';
+}
+
+// Combine the client bin, server-side analysis rows, and project-map roles
+// into one compact inventory. Keeping these as separate prompt sections
+// duplicated every asset and made large-bin requests fail on context limits.
+function buildAssetInventoryText(ctx = {}, rawInput = '') {
+    const rows = new Map();
+    const roles = new Map((Array.isArray(ctx.projectMap?.asset_roles) ? ctx.projectMap.asset_roles : [])
+        .filter(role => role?.assetId)
+        .map(role => [String(role.assetId), role]));
+    for (const asset of [...(ctx.binItems || []), ...(ctx.assetIntelligence || [])]) {
+        if (!asset) continue;
+        const id = String(asset.id || asset.assetId || '');
+        if (!id) continue;
+        const current = rows.get(id) || {};
+        rows.set(id, { ...current, ...asset, id });
+    }
+    if (!rows.size) return { text: '(no assets in the media bin)', visibleIds: [], total: 0, omittedCount: 0 };
+
+    const terms = queryTerms([
+        rawInput,
+        ctx.projectMap?.through_line,
+        ctx.projectMap?.project_type,
+        ctx.storyMap?.summary,
+    ].filter(Boolean).join(' '));
+    const entries = [...rows.values()].map((asset, index) => {
+        const role = roles.get(asset.id);
+        return { asset, role, index, relevance: assetRelevance(asset, terms, role) };
+    });
+    const useCompactIndex = entries.length > DETAILED_ASSET_CONTEXT_MAX_TOTAL;
+    const detailLimit = useCompactIndex ? DETAILED_ASSET_CONTEXT_LIMIT : entries.length;
+    const ranked = [...entries].sort((a, b) => b.relevance - a.relevance || a.index - b.index);
+    const detailed = ranked.filter(entry => entry.relevance > 0).slice(0, detailLimit);
+    const selected = new Set(detailed.map(entry => entry.index));
+    // A relevance tie must not turn into an upload-order bias. Fill remaining
+    // detail slots from evenly spaced positions in the unselected inventory.
+    const remaining = entries.filter(entry => !selected.has(entry.index));
+    const slots = detailLimit - detailed.length;
+    for (let slot = 0; slot < slots && remaining.length; slot += 1) {
+        const position = Math.min(remaining.length - 1, Math.floor(((slot + 0.5) / slots) * remaining.length));
+        const entry = remaining[position];
+        selected.add(entry.index);
+        remaining.splice(position, 1);
+    }
+    const detailedIndexes = selected;
+    const rowFor = ({ asset, role, index }) => {
+        const name = String(asset.name || asset.id).replace(/[\r\n]+/g, ' ').slice(0, 80);
+        const type = String(asset.type || 'media').slice(0, 16);
+        const analysisStatus = asset.analysis_status || asset.analysisStatus;
+        const status = analysisStatus && analysisStatus !== ASSET_ANALYSIS_DONE
+            ? `analysis=${String(analysisStatus).slice(0, 16)}`
+            : analysisStatus ? 'analysed' : 'analysis status unknown';
+        const roleLabel = assetRoleLabel(asset, role);
+        if (!detailedIndexes.has(index)) {
+            // Keep enough low-cost metadata on every row for the model to avoid
+            // treating a reference, document, or unprocessed asset as footage.
+            const duration = Number(asset.duration);
+            const durationLabel = Number.isFinite(duration) && duration > 0 ? `|${Math.round(duration)}s` : '';
+            return `  ${asset.id}|${name}|${type}|${roleLabel.slice(0, 24)}|${status}|${durationLabel}`;
+        }
+        const duration = Number(asset.duration);
+        const details = [
+            `role=${roleLabel.slice(0, 48)}`,
+            asset.scene_type && `scene=${String(asset.scene_type).slice(0, 24)}`,
+            asset.camera_angle && `framing=${String(asset.camera_angle).slice(0, 18)}`,
+            Number.isFinite(Number(asset.subject_count)) && `people=${Number(asset.subject_count)}`,
+            asset.is_broll && 'B-roll',
+            asset.is_screen_recording && 'screen recording',
+            asset.has_main_speaker && 'main speaker',
+            asset.has_spoken_word === false && 'no speech',
+            Number.isFinite(duration) && duration > 0 && `${Math.round(duration)}s`,
+            (asset.content_description || asset.contentDescription || asset.description)
+                && String(asset.content_description || asset.contentDescription || asset.description).replace(/[\r\n]+/g, ' ').slice(0, 100),
+            (asset.transcript_text || asset.transcriptText || asset.transcript)
+                && `transcript=${String(asset.transcript_text || asset.transcriptText || asset.transcript).replace(/[\r\n]+/g, ' ').slice(0, 100)}`,
+        ].filter(Boolean);
+        return `  - id=${asset.id} | ${name} | ${type} | ${status}${details.length ? ` | ${details.join('; ')}` : ''}`;
+    };
+
+    // Never let upload order crowd prompt matches out. Add matching assets in
+    // relevance order, then fill remaining prompt budget with evenly spread
+    // rows from the rest of the bin. This keeps prompt size bounded without a
+    // fixed asset-count ceiling and makes late-uploaded matches discoverable.
+    const relevantEntries = [...entries].filter(entry => entry.relevance > 0)
+        .sort((a, b) => b.relevance - a.relevance || a.index - b.index);
+    const nonRelevantEntries = entries.filter(entry => entry.relevance <= 0);
+    const visibleIndexes = new Set();
+    let inventoryRows = '';
+    const formattedRows = new Map();
+    const append = entry => {
+        if (visibleIndexes.has(entry.index)) return false;
+        const row = formattedRows.get(entry.index) || rowFor(entry);
+        formattedRows.set(entry.index, row);
+        const extra = inventoryRows ? 1 : 0;
+        if (inventoryRows.length + extra + row.length > MAX_ASSET_CONTEXT_CHARS) return false;
+        inventoryRows += `${extra ? '\n' : ''}${row}`;
+        visibleIndexes.add(entry.index);
+        return true;
+    };
+    for (const entry of relevantEntries) append(entry);
+
+    const remainingVisible = nonRelevantEntries.filter(entry => !visibleIndexes.has(entry.index));
+    const remainingRows = remainingVisible.map(entry => {
+        const row = rowFor(entry);
+        formattedRows.set(entry.index, row);
+        return row;
+    });
+    const availableChars = Math.max(0, MAX_ASSET_CONTEXT_CHARS - inventoryRows.length);
+    const averageRowLength = remainingRows.length
+        ? remainingRows.reduce((sum, row) => sum + row.length + 1, 0) / remainingRows.length
+        : 1;
+    const sampleCount = Math.min(remainingVisible.length, Math.max(1, Math.floor(availableChars / averageRowLength)));
+    // Spread the background sample through the source bin, rather than making
+    // the first uploads disproportionately likely to appear in the prompt.
+    const sampled = new Set();
+    for (let slot = 0; slot < sampleCount; slot += 1) {
+        const position = Math.min(remainingVisible.length - 1,
+            Math.floor(((slot + 0.5) / sampleCount) * remainingVisible.length));
+        sampled.add(position);
+        append(remainingVisible[position]);
+    }
+    // Rows vary in size; use any leftover budget after the spread sample.
+    for (let index = 0; index < remainingVisible.length && inventoryRows.length < MAX_ASSET_CONTEXT_CHARS; index += 1) {
+        if (!sampled.has(index)) append(remainingVisible[index]);
+    }
+    const omittedCount = entries.length - visibleIndexes.size;
+    const omittedRelevantCount = relevantEntries.filter(entry => !visibleIndexes.has(entry.index)).length;
+    const coverageNote = omittedCount > 0
+        ? `Context-limited shortlist: ${visibleIndexes.size} of ${entries.length} assets shown; ${omittedCount} additional assets remain in the project manifest but are outside this model prompt${omittedRelevantCount ? `, including ${omittedRelevantCount} query-matching asset(s)` : ''}. This shortlist is not proof that omitted assets are irrelevant. Do not claim to have reviewed them. Use full-bin search or a batch-aware edit tool to inspect omitted assets when the task needs them; ask the user only when the missing analysis or choice cannot be resolved from the available assets.`
+        : `Complete inventory: all ${entries.length} assets are shown.`;
+    const text = useCompactIndex || omittedCount > 0
+        ? `${coverageNote} Every shown row includes id, name, type, role and analysis status. Up to ${detailLimit} entries also include content evidence; query-matching assets are prioritized and remaining prompt space is filled with a spread across the bin.\n${inventoryRows}`
+        : inventoryRows;
+    return { text, visibleIds: [...visibleIndexes].map(index => entries[index]?.asset.id).filter(Boolean), total: entries.length, omittedCount };
+}
+
 /**
  * Strict JSON Schema Mode schema for BrainOutput — kept in sync with the
  * "RESPONSE FORMAT" block in buildSystemPrompt() below, with
@@ -166,7 +364,7 @@ class EditorialBrain {
             const profile = input?.context?.profile || await this.profileEngine.getProfile(input?.userId);
             const platform = input?.context?.platform || null;
 
-            const systemPrompt = this.buildSystemPrompt(context, profile, platform, session);
+            const systemPrompt = this.buildSystemPrompt(context, profile, platform, session, input?.rawInput);
 
             // Classify intent type for temperature selection
             // We use 0.2 for precise execution tasks, 0.4 for creative/advisory
@@ -252,7 +450,7 @@ class EditorialBrain {
      * @param {import('./Session').EditingSession} session
      * @returns {string}
      */
-    buildSystemPrompt(context, profile, platformKey, session) {
+    buildSystemPrompt(context, profile, platformKey, session, rawInput = '') {
         const ctx      = context  || {};
         const prof     = profile  || {};
         const summary  = session?.summarize() || { duration: 0, eventsCount: 0, commandsRun: [], recentEvents: [] };
@@ -285,6 +483,7 @@ class EditorialBrain {
             : '(no captions/transcript yet)';
 
         const inferredContentType = ctx.inferredContentType || 'unknown';
+        const { text: assetInventoryText } = buildAssetInventoryText(ctx, rawInput);
 
         const hiddenNote = permanentlyHidden.length > 0
             ? `NEVER suggest these — user permanently dismissed them: ${permanentlyHidden.join(', ')}`
@@ -310,28 +509,10 @@ Effect coverage: camera angles on ${ctx.effects?.multicamClips ?? 0}/${ctx.effec
 NEVER recommend an edit that "Edits applied" or "Effect coverage" shows is already done — recommend the next thing that genuinely improves THIS project, or a refinement of what's there.
 
 ═══════════════════════════════════════════════
-FOOTAGE IN THE BIN (what the clips actually contain)
+MEDIA BIN INVENTORY (prompt-bounded index)
 ═══════════════════════════════════════════════
-${(ctx.assetIntelligence || []).length === 0
-    ? '(not analysed yet — base your advice on the transcript and timeline only, and do NOT speculate about what the footage looks like)'
-    : (ctx.assetIntelligence || []).map(a => {
-        if (a.analysis_status && a.analysis_status !== ASSET_ANALYSIS_DONE) {
-            return `  - ${a.name || a.id}: analysis ${a.analysis_status}`;
-        }
-        const bits = [
-            a.scene_type && `scene: ${a.scene_type}`,
-            a.camera_angle && `framing: ${a.camera_angle}`,
-            typeof a.subject_count === 'number' && `${a.subject_count} person(s) on camera`,
-            a.is_broll && 'B-ROLL (no primary speaker)',
-            a.is_screen_recording && 'screen recording',
-            a.location_type && `location: ${a.location_type}`,
-            a.lighting_quality && `lighting: ${a.lighting_quality}`,
-            a.stability && `stability: ${a.stability}`,
-            a.emotional_tone && `tone: ${a.emotional_tone}`,
-            a.has_spoken_word === false && 'no speech',
-        ].filter(Boolean).join(', ');
-        return `  - ${a.name || a.id}: ${a.content_description || '(no description)'}${bits ? `\n      [${bits}]` : ''}`;
-    }).join('\n')}
+${assetInventoryText}
+Use an asset only when its ID, type, role, and analysis evidence support the request. Unknown or pending analysis is not evidence about content. This prompt index is bounded, while the project manifest and media-bin tools cover the full bin. Never treat omitted assets as irrelevant or claim to have visually reviewed them. For large bins or when a named subject is missing from this prompt index, call search_uploaded_assets with the topic; it searches the complete local asset manifest and returns paginated evidence-backed matches without editing. If the request requires ordering the full bin, use organize_clips; for a transcript-led edit with illustrative cutaways, use place_contextual_broll; for a montage from uploaded visuals, use create_video_from_assets. These tools inspect the full eligible bin and exclude references from timeline footage. Do not ask the user to narrow the bin merely because some rows are outside this prompt. Compact rows identify assets and their status; do not claim knowledge of their visual content unless analysis evidence is present. If relevant assets are still unanalyzed, use the relevant analysis-capable workflow or report which assets could not be inspected; ask the user only when analysis or a required choice is unavailable.
 
 ═══════════════════════════════════════════════
 PROJECT MAP (what this project IS, not what each clip is)
@@ -351,10 +532,7 @@ ${(() => {
         m.tone ? `Tone:         ${m.tone}` : '',
         `Built from:   ${m.asset_count || 0} analysed asset(s)`,
         '',
-        'Roles:',
-        roles.length === 0
-            ? '  (none assigned)'
-            : roles.map(r => `  — ${r.name || r.assetId}: ${r.role}${r.serves ? ` (supports ${r.serves})` : ''}`).join('\n'),
+        `Per-asset roles: ${roles.length} assigned; see the complete inventory above.`,
         '',
         'Missing / thin:',
         gaps.length === 0
@@ -523,14 +701,7 @@ Total assets:   ${ctx.totalAssets || 0}
 Types:          video=${ctx.assetTypes?.video || 0}, audio=${ctx.assetTypes?.audio || 0}, music=${ctx.assetTypes?.music || 0}, sfx=${ctx.assetTypes?.sfx || 0}
 Unused assets:  ${unusedAssetsText}
 Bin analyzed:   ${ctx.binReady ? 'yes' : `no — ${ctx.analyzedAssets || 0} of ${ctx.totalAssets || 0} analysed so far`}
-Clips:
-${(ctx.binItems || []).length === 0
-    ? '  (none)'
-    : ctx.binItems.map(a => {
-        const d = Number(a.duration) || 0;
-        const mm = Math.floor(d / 60), ss = Math.floor(d % 60).toString().padStart(2, '0');
-        return `  — ${a.name || a.id}${d ? ` (${mm}:${ss})` : ''}`;
-      }).join('\n')}
+Asset names, IDs, roles, and analysis states are listed once in MEDIA BIN INVENTORY above.
 
 ═══════════════════════════════════════════════
 ASSET ENGINE — available creative tools
@@ -755,4 +926,4 @@ function _platformRulesText(platformKey) {
     }
 }
 
-module.exports = { EditorialBrain };
+module.exports = { EditorialBrain, buildAssetInventoryText };

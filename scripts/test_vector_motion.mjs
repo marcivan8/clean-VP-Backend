@@ -92,6 +92,34 @@ function morphFrame(time, morphStartTime = 0) {
 assert.notDeepEqual(morphFrame(0), morphFrame(0.5), 'normalized contour morphs are visible in rendered preview frames');
 assert.deepEqual(morphFrame(0.2, 0.25), morphFrame(0), 'delayed path morph holds the source shape until its authored start time');
 assert.notDeepEqual(morphFrame(0.5, 0.25), morphFrame(0.2, 0.25), 'delayed path morph animates after its authored start time');
+function openClosedMorphPixels(time) {
+  const canvas = Canvas.createCanvas(32, 32);
+  drawVectorFrame(canvas.getContext('2d'), {
+    kind: 'path', x: 0, y: 0, w: 32, h: 32, pathData: 'M 3 3 L 29 3 L 16 29 Z', fill: '#FFFFFF', stroke: '#000000', strokeWidth: 2,
+    motion: { pathFrom: 'M 3 3 L 29 3 L 16 29 Z', pathTo: 'M 3 3 L 29 3 L 16 29', morphDuration: 1, easing: 'linear' },
+  }, time, 1);
+  return canvas.getContext('2d').getImageData(0, 0, 32, 32).data;
+}
+const openClosedStart = openClosedMorphPixels(0);
+const openClosedMiddle = openClosedMorphPixels(0.5);
+const openClosedEnd = openClosedMorphPixels(1);
+assert.notDeepEqual(openClosedMiddle, openClosedStart, 'open/closed transition changes actual preview pixels during the morph');
+assert.notDeepEqual(openClosedEnd, openClosedMiddle, 'open/closed transition reaches a distinct destination frame');
+function reorderedContourMorphPixels(time) {
+  const canvas = Canvas.createCanvas(100, 100);
+  drawVectorFrame(canvas.getContext('2d'), {
+    kind: 'path', x: 0, y: 0, w: 100, h: 100, fill: '#FFFFFF',
+    pathData: 'M 10 10 H 30 V 30 H 10 Z M 70 70 H 90 V 90 H 70 Z',
+    motion: {
+      pathFrom: 'M 10 10 H 30 V 30 H 10 Z M 70 70 H 90 V 90 H 70 Z',
+      pathTo: 'M 70 70 L 90 70 L 90 90 L 70 90 Z M 10 10 L 30 10 L 30 30 L 10 30 Z',
+      morphDuration: 1, easing: 'linear',
+    },
+  }, time, 1);
+  return canvas.getContext('2d').getImageData(0, 0, 100, 100).data;
+}
+assert.deepEqual(reorderedContourMorphPixels(0.5), reorderedContourMorphPixels(1),
+  'reordering equivalent contours does not make shapes cross-morph through the composition center');
 const compoundPathCanvas = Canvas.createCanvas(100, 100);
 drawVectorGraphic(compoundPathCanvas.getContext('2d'), {
   kind: 'path', x: 0, y: 0, w: 100, h: 100,
@@ -128,18 +156,45 @@ assert.deepEqual(ellipseFallbackContext.getImageData(0, 0, 100, 60).data, ellips
 const vectorPanelSource = fs.readFileSync(new URL('../client/src/components/TemplatePanel.jsx', import.meta.url), 'utf8');
 assert.match(vectorPanelSource, /\['path', 'rect', 'circle', 'ellipse', 'capsule', 'callout'/,
   'callout is exposed in the vector shape authoring menu');
-assert.equal(interpolateSvgPaths('M 0 0 L 10 0 Z', 'M 0 0 L 10 0', 0.5), null,
-  'open and closed paths are rejected instead of morphing into invalid topology');
+const closingMorph = interpolateSvgPaths('M 0 0 L 10 0', 'M 0 0 L 10 0 Z', 0.5);
+assert.ok(closingMorph?.every(command => command.args.every(Number.isFinite)),
+  'open and closed paths animate their closing edge with finite coordinates');
+assert.equal(closingMorph.at(-1).type, 'L', 'an open-to-closed morph keeps its closing edge open during interpolation');
+assert.equal(interpolateSvgPaths('M 0 0 L 10 0', 'M 0 0 L 10 0 Z', 0).at(-1).type, 'L',
+  'the open source topology is preserved at morph start');
+assert.equal(interpolateSvgPaths('M 0 0 L 10 0', 'M 0 0 L 10 0 Z', 1).at(-1).type, 'Z',
+  'the destination closes exactly when the morph completes');
+assert.ok(interpolateSvgPaths('M 0 0 L 10 0 Z', 'M 0 0 L 10 0', 0.5),
+  'closed-to-open path morphs are supported as well');
+const expandingContourMorph = interpolateSvgPaths(
+  'M 5 5 L 25 5 L 15 25 Z',
+  'M 5 5 L 25 5 L 15 25 Z M 35 35 L 55 35 L 45 55 Z',
+  0.5,
+);
+assert.ok(expandingContourMorph?.length >= 8 && expandingContourMorph.every(command => command.args.every(Number.isFinite)),
+  'different closed contour counts morph by growing the additional contour from a degenerate point');
+assert.ok(interpolateSvgPaths(
+  'M 5 5 L 25 5 L 15 25 Z M 35 35 L 55 35 L 45 55 Z',
+  'M 5 5 L 25 5 L 15 25 Z',
+  0.5,
+), 'an extra contour can collapse into a point while the remaining contour continues to morph');
 const compatibleMorphScene = createScene({ duration: 1, nodes: [createNode(NODE_TYPES.SHAPE, {
   duration: 1, vector: { kind: 'path', pathData: 'M 0 0 L 10 0 Z', motion: { pathFrom: 'M 0 0 L 10 0 Z', pathTo: 'M 0 0 C 2 8 8 8 10 0 Z' } },
 })] });
 assert.ok(!validateScene(compatibleMorphScene, { skipCollisions: true }).issues.some(issue => issue.code === ISSUE_CODES.UNSUPPORTED_VECTOR_MORPH),
   'compatible vector morphs pass scene validation');
 const incompatibleMorphScene = createScene({ duration: 1, nodes: [createNode(NODE_TYPES.SHAPE, {
-  duration: 1, vector: { kind: 'path', pathData: 'M 0 0 L 10 0 Z', motion: { pathFrom: 'M 0 0 L 10 0 Z', pathTo: 'M 0 0 L 10 0 Z M 20 20 L 30 20 Z' } },
+  duration: 1, vector: { kind: 'path', pathData: 'M 0 0 L 10 0 Z', motion: { pathFrom: 'M 0 0 L 10 0 Z', pathTo: 'M 0 0 L 10 0' } },
 })] });
-assert.ok(validateScene(incompatibleMorphScene, { skipCollisions: true }).issues.some(issue => issue.code === ISSUE_CODES.UNSUPPORTED_VECTOR_MORPH),
-  'incompatible contour counts produce a clear warning instead of a silently skipped morph');
+assert.ok(!validateScene(incompatibleMorphScene, { skipCollisions: true }).issues.some(issue => issue.code === ISSUE_CODES.UNSUPPORTED_VECTOR_MORPH),
+  'open and closed topology morphs pass scene validation');
+const multiContourMorphScene = createScene({ duration: 1, nodes: [createNode(NODE_TYPES.SHAPE, {
+  duration: 1, vector: { kind: 'path', pathData: 'M 0 0 L 10 0 Z', motion: {
+    pathFrom: 'M 0 0 L 10 0 Z', pathTo: 'M 0 0 L 10 0 Z M 20 20 L 30 20 Z',
+  } },
+})] });
+assert.ok(!validateScene(multiContourMorphScene, { skipCollisions: true }).issues.some(issue => issue.code === ISSUE_CODES.UNSUPPORTED_VECTOR_MORPH),
+  'different closed contour counts now pass vector morph validation');
 assert.equal(interpolateSvgPaths([{ type: 'M', args: [0, NaN] }], [{ type: 'M', args: [0, 1] }], 0.5), null,
   'non-finite path coordinates are rejected');
 const malformedPathScene = createScene({ duration: 1, nodes: [createNode(NODE_TYPES.SHAPE, {
@@ -227,6 +282,45 @@ try {
   }));
   assert.deepEqual(morphPixels[0], morphPixels[1], 'export keeps the source SVG path before the delayed morph begins');
   assert.notDeepEqual(morphPixels[1], morphPixels[2], 'exported SVG path morph changes actual frame pixels after its authored start time');
+
+  const contourCountExport = await renderVectorFrames({
+    kind: 'path', x: 0, y: 0, w: 96, h: 96,
+    pathData: 'M 10 10 L 40 10 L 25 40 Z', fill: '#FFFFFF', stroke: 'none',
+    motion: {
+      pathFrom: 'M 10 10 L 40 10 L 25 40 Z',
+      pathTo: 'M 10 10 L 40 10 L 25 40 Z M 55 55 L 85 55 L 70 85 Z',
+      morphStartTime: 0, morphDuration: 1, easing: 'linear',
+    },
+  }, { durationSec: 1, fps: 2, widthPx: 96, tmpDir, name: 'path-contour-count-morph-export', canvasModule: Canvas });
+  const contourCountPixels = await Promise.all(contourCountExport.files.map(async file => {
+    const image = await Canvas.loadImage(fs.readFileSync(file));
+    const canvas = Canvas.createCanvas(image.width, image.height);
+    const context = canvas.getContext('2d');
+    context.drawImage(image, 0, 0);
+    return context.getImageData(0, 0, image.width, image.height).data;
+  }));
+  assert.notDeepEqual(contourCountPixels[0], contourCountPixels[1],
+    'exported path with a changing contour count renders visibly different morph frames');
+  const openClosedExport = await renderVectorFrames({
+    kind: 'path', x: 0, y: 0, w: 96, h: 96,
+    pathData: 'M 10 10 L 86 10 L 48 86 Z', fill: '#FFFFFF', stroke: '#000000', strokeWidth: 3,
+    motion: {
+      pathFrom: 'M 10 10 L 86 10 L 48 86 Z',
+      pathTo: 'M 10 10 L 86 10 L 48 86',
+      morphStartTime: 0, morphDuration: 1, easing: 'linear',
+    },
+  }, { durationSec: 1, fps: 4, widthPx: 96, tmpDir, name: 'open-closed-path-morph-export', canvasModule: Canvas });
+  const openClosedExportPixels = await Promise.all(openClosedExport.files.slice(0, 3).map(async file => {
+    const image = await Canvas.loadImage(fs.readFileSync(file));
+    const canvas = Canvas.createCanvas(image.width, image.height);
+    const context = canvas.getContext('2d');
+    context.drawImage(image, 0, 0);
+    return context.getImageData(0, 0, image.width, image.height).data;
+  }));
+  assert.notDeepEqual(openClosedExportPixels[0], openClosedExportPixels[1],
+    'export renders the animated closing edge instead of holding the source topology');
+  assert.notDeepEqual(openClosedExportPixels[1], openClosedExportPixels[2],
+    'export continues the open/closed morph across subsequent frames');
 } finally {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 }

@@ -10,6 +10,7 @@ import { buildCompositionPlan } from '../client/src/motion/Compositor.js';
 const require = createRequire(import.meta.url);
 const ffmpeg = require('ffmpeg-static');
 const { compileCompositionPlan } = require('../server/compositor/CompositorCompiler.js');
+const { compileRasterOverlays } = require('../server/compositor/RasterCaptionCompiler.js');
 const exportProcessorSource = fs.readFileSync(new URL('../jobs/exportProcessor.js', import.meta.url), 'utf8');
 const exportModalSource = fs.readFileSync(new URL('../client/src/components/ExportModal.jsx', import.meta.url), 'utf8');
 const exportRequestSource = fs.readFileSync(new URL('../client/src/layouts/IDELayout.jsx', import.meta.url), 'utf8');
@@ -108,10 +109,38 @@ try {
   assert.ok(pixel(64, 64)[0] < 240, 'overlay footage effects alter pixels in the exported composition');
   assert.ok(pixel(40, 64)[0] < pixel(64, 64)[0], 'overlay vignette darkens its edges more than its center');
 
+  const captionGraph = compileRasterOverlays([], {
+    frameWidth: 128, frameHeight: 128, fps: 1,
+    drawtextGroups: [{ clipId: 'alpha-caption', filters: [
+      `drawtext=fontfile=${path.join(new URL('../render-worker/revideo/src/fonts/Anton-Regular.ttf', import.meta.url).pathname)}:text=CAPTION:fontcolor=white:fontsize=12:x=4:y=4`,
+    ] }],
+    orderByClipId: new Map([['alpha-caption', 0]]),
+    inputLabel: 'alpha_base',
+  });
+  const captionedAlpha = path.join(tmp, 'captioned-alpha.png');
+  const captionedGraph = path.join(tmp, 'captioned-alpha.txt');
+  fs.writeFileSync(captionedGraph, `[0:v]format=rgba[alpha_base];${captionGraph.filterComplex}`);
+  const captionRender = spawnSync(ffmpeg, [
+    '-hide_banner', '-loglevel', 'error', '-loop', '1', '-t', '1', '-i', output,
+    '-filter_complex_script', captionedGraph, '-map', `[${captionGraph.outputLabel}]`, '-frames:v', '1',
+    '-c:v', 'png', '-pix_fmt', 'rgba', '-y', captionedAlpha,
+  ], { encoding: 'utf8' });
+  assert.equal(captionRender.status, 0, `FFmpeg composites captions over the alpha graphics sequence: ${captionRender.stderr}`);
+  const captionImage = await Canvas.loadImage(captionedAlpha);
+  const captionCanvas = Canvas.createCanvas(128, 128);
+  const captionCtx = captionCanvas.getContext('2d');
+  captionCtx.drawImage(captionImage, 0, 0);
+  let captionRegionAlphaPixels = 0;
+  for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+    if (captionCtx.getImageData(x, y, 1, 1).data[3] > 0) captionRegionAlphaPixels++;
+  }
+  assert.ok(captionRegionAlphaPixels > 5, 'caption glyphs add visible alpha to the transparent graphics sequence');
+  assert.equal(captionCtx.getImageData(120, 120, 1, 1).data[3], 0, 'combining captions preserves empty transparent pixels');
+
   const alphaSequenceDir = path.join(tmp, 'alpha-prores-frames');
   fs.mkdirSync(alphaSequenceDir, { recursive: true });
-  fs.copyFileSync(output, path.join(alphaSequenceDir, 'frame-000001.png'));
-  fs.copyFileSync(output, path.join(alphaSequenceDir, 'frame-000002.png'));
+  fs.copyFileSync(captionedAlpha, path.join(alphaSequenceDir, 'frame-000001.png'));
+  fs.copyFileSync(captionedAlpha, path.join(alphaSequenceDir, 'frame-000002.png'));
   const alphaMov = path.join(tmp, 'graphics-alpha.mov');
   const alphaEncode = spawnSync(ffmpeg, [
     '-hide_banner', '-loglevel', 'error', '-framerate', '1', '-start_number', '1',
@@ -132,7 +161,7 @@ try {
   const alphaDecodedCanvas = Canvas.createCanvas(128, 128);
   const alphaDecodedCtx = alphaDecodedCanvas.getContext('2d');
   alphaDecodedCtx.drawImage(alphaDecodedImage, 0, 0);
-  assert.equal(alphaDecodedCtx.getImageData(4, 4, 1, 1).data[3], 0, 'transparent pixels survive the ProRes 4444 round trip');
+  assert.equal(alphaDecodedCtx.getImageData(120, 120, 1, 1).data[3], 0, 'empty transparent pixels survive the ProRes 4444 round trip');
   assert.ok(alphaDecodedCtx.getImageData(64, 64, 1, 1).data[3] >= 250, 'opaque graphic pixels survive the ProRes 4444 round trip');
 
   const maskedPlan = {
@@ -441,4 +470,4 @@ try {
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
-console.log('Transparent graphics export passed: alpha masks, inverted masks, blend-mode pixels, and footage effects render through FFmpeg.');
+console.log('Transparent graphics export passed: captions, alpha masks, ProRes 4444 round trip, blend modes, and footage effects render through FFmpeg.');

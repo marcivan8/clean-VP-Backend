@@ -44,6 +44,28 @@ export class EffectGraph {
 
         if (nodeOrConfig instanceof EffectNode) {
             node = nodeOrConfig;
+        } else if (nodeOrConfig.type === 'composite') {
+            const compositeParams = {};
+            const suppliedParams = nodeOrConfig.params || {};
+            const schemas = {
+                mode: { value: 'normal', type: 'select', options: ['normal', 'multiply', 'screen', 'add', 'overlay', 'darken', 'lighten'], label: 'Blend Mode' },
+                opacity: { value: 1, min: 0, max: 1, type: 'float', label: 'Opacity' },
+            };
+            for (const [key, schema] of Object.entries(schemas)) {
+                const supplied = suppliedParams[key];
+                compositeParams[key] = supplied && typeof supplied === 'object' && !Array.isArray(supplied) && 'value' in supplied
+                    ? { ...schema, ...supplied }
+                    : { ...schema, value: supplied ?? schema.value };
+            }
+            for (const [key, value] of Object.entries(suppliedParams)) {
+                if (!Object.hasOwn(schemas, key)) compositeParams[key] = value;
+            }
+            node = createEffectNode({
+                ...nodeOrConfig,
+                name: nodeOrConfig.name || 'Composite Branches',
+                engine: 'gpu',
+                params: compositeParams,
+            });
         } else if (nodeOrConfig.type && effectRegistry.has(nodeOrConfig.type)) {
             // Create from registry
             const config = effectRegistry.createConfig(nodeOrConfig.type, nodeOrConfig);
@@ -210,10 +232,141 @@ export class EffectGraph {
     }
 
     /**
-     * Return the executable effect stack. Unconnected graphs retain the
-     * authored order. Connected graphs are currently a single-input chain;
-     * reject branching and disconnected nodes instead of silently dropping
-     * part of the user's effect graph.
+     * Describe the graph as ordered, parallel stages without flattening
+     * branches into a serial effect stack. This is deliberately a topology
+     * description only: a renderer must still implement the declared joins
+     * (including their blend/composite operation) before it may execute a
+     * branched plan.
+     */
+    getTopologyPlan() {
+        if (!this.connections.length) {
+            const orderedNodes = this.getAllNodes()
+                .map((node, index) => ({ node, index }))
+                .sort((a, b) => (Number(a.node.order) || 0) - (Number(b.node.order) || 0) || a.index - b.index)
+                .map(({ node }) => node);
+            return {
+                valid: true,
+                errors: [],
+                stages: orderedNodes.map(node => [node]),
+                orderedNodes,
+                roots: orderedNodes.length ? [orderedNodes[0]] : [],
+                sinks: orderedNodes.length ? [orderedNodes.at(-1)] : [],
+                branches: [],
+                joins: [],
+                connections: [],
+                implicitChain: true,
+                executableAsLinearStack: true,
+            };
+        }
+
+        const insertionOrder = new Map([...this.nodes.keys()].map((id, index) => [id, index]));
+        const indegree = new Map([...this.nodes.keys()].map(id => [id, 0]));
+        const outgoing = new Map([...this.nodes.keys()].map(id => [id, []]));
+        const errors = [];
+
+        for (const edge of this.connections) {
+            if (!this.nodes.has(edge.from) || !this.nodes.has(edge.to)) {
+                errors.push(`Connection references missing ${!this.nodes.has(edge.from) ? 'source' : 'destination'} node: ${!this.nodes.has(edge.from) ? edge.from : edge.to}`);
+                continue;
+            }
+            outgoing.get(edge.from).push(edge);
+            indegree.set(edge.to, indegree.get(edge.to) + 1);
+        }
+
+        const compareIds = (left, right) => {
+            const leftNode = this.nodes.get(left), rightNode = this.nodes.get(right);
+            const orderDelta = (Number(leftNode?.order) || 0) - (Number(rightNode?.order) || 0);
+            return orderDelta || insertionOrder.get(left) - insertionOrder.get(right);
+        };
+        const ready = [...this.nodes.keys()].filter(id => indegree.get(id) === 0).sort(compareIds);
+        const stages = [];
+        const orderedIds = [];
+
+        while (ready.length) {
+            const stage = ready.splice(0).sort(compareIds);
+            stages.push(stage);
+            orderedIds.push(...stage);
+            const next = new Set();
+            for (const id of stage) {
+                for (const edge of outgoing.get(id)) {
+                    const remaining = indegree.get(edge.to) - 1;
+                    indegree.set(edge.to, remaining);
+                    if (remaining === 0) next.add(edge.to);
+                }
+            }
+            ready.push(...[...next].sort(compareIds));
+        }
+
+        const hasCycle = orderedIds.length !== this.nodes.size;
+        if (hasCycle) errors.push('Effect graph contains a circular dependency');
+        const roots = [...this.nodes.keys()].filter(id => !this.connections.some(edge => edge.to === id && this.nodes.has(edge.from)));
+        const sinks = [...this.nodes.keys()].filter(id => !(outgoing.get(id) || []).length);
+        const branches = [...this.nodes.keys()].filter(id => (outgoing.get(id) || []).length > 1);
+        const joins = [...this.nodes.keys()].filter(id => this.connections.filter(edge => edge.to === id && this.nodes.has(edge.from)).length > 1);
+
+        return {
+            valid: errors.length === 0,
+            errors,
+            stages: stages.map(stage => stage.map(id => this.nodes.get(id))),
+            orderedNodes: orderedIds.map(id => this.nodes.get(id)),
+            roots: roots.map(id => this.nodes.get(id)),
+            sinks: sinks.map(id => this.nodes.get(id)),
+            branches: branches.map(id => this.nodes.get(id)),
+            joins: joins.map(id => this.nodes.get(id)),
+            connections: this.connections.filter(edge => this.nodes.has(edge.from) && this.nodes.has(edge.to)).map(edge => ({ ...edge })),
+            implicitChain: false,
+            // Explicitly prevents consumers from mistaking a DAG ordering
+            // for an executable render graph.
+            executableAsLinearStack: errors.length === 0 && branches.length === 0 && joins.length === 0 && roots.length <= 1,
+        };
+    }
+
+    /**
+     * Validate and return an execution plan for a connected effect DAG.
+     * Forks are allowed; joins must use an explicit composite node with one
+     * `base` and one `overlay` input so renderers never guess merge semantics.
+     */
+    getExecutionPlan() {
+        const topology = this.getTopologyPlan();
+        if (!topology.valid) throw new Error(topology.errors.join('; '));
+        if (!this.connections.length) return { ...topology, graph: this };
+        // Check reachability before enforcing a single sink. An orphan node
+        // creates extra roots and sinks too, but that is a disconnected graph
+        // with a concrete repair (reconnect/remove the orphan), not merely an
+        // ambiguous multi-output DAG.
+        if (topology.roots.length !== 1) {
+            throw new Error('Effect graph contains disconnected nodes and must have one input');
+        }
+        const reachable = new Set();
+        const visit = node => {
+            if (reachable.has(node.id)) return;
+            reachable.add(node.id);
+            for (const edge of this.getOutputConnections(node.id)) visit(this.nodes.get(edge.to));
+        };
+        visit(topology.roots[0]);
+        if (reachable.size !== this.nodes.size) throw new Error('Effect graph contains disconnected nodes');
+        if (topology.sinks.length !== 1) {
+            throw new Error('Effect graph must have one input and one output');
+        }
+
+        for (const node of topology.orderedNodes) {
+            const incoming = this.getInputConnections(node.id);
+            if (incoming.length > 1) {
+                const ports = incoming.map(edge => edge.port);
+                if (node.type !== 'composite' || incoming.length !== 2
+                    || new Set(ports).size !== 2 || !ports.includes('base') || !ports.includes('overlay')) {
+                    throw new Error(`Effect graph join "${node.name || node.id}" must be a composite node with one base and one overlay input`);
+                }
+            } else if (node.type === 'composite') {
+                throw new Error(`Composite node "${node.name || node.id}" requires base and overlay inputs`);
+            }
+        }
+        return { ...topology, graph: this };
+    }
+
+    /**
+     * Return the executable effect stack for a linear graph. Branched graphs
+     * must be consumed through getExecutionPlan() by a DAG-capable renderer.
      */
     getExecutionOrder() {
         if (!this.connections.length) {
@@ -273,7 +426,7 @@ export class EffectGraph {
      * Get effects active at a specific time
      */
     getActiveEffectsAt(time, placement = null) {
-        return this.getExecutionOrder().filter(node =>
+        return this.getExecutionPlan().orderedNodes.filter(node =>
             node.enabled && node.isActiveAt(time, placement)
         );
     }
@@ -389,13 +542,10 @@ export class EffectGraph {
             }
         }
 
-        // Check that the graph can actually be executed by this renderer. A
-        // topological ordering alone is insufficient: this engine currently
-        // executes a single stack, so acyclic branches and disconnected nodes
-        // must be reported as invalid instead of passing validation and
-        // failing only when preview/export starts.
+        // Topological order alone is insufficient: joins need an explicit
+        // composite operation and the full graph must have one source/sink.
         try {
-            this.getExecutionOrder();
+            this.getExecutionPlan();
         } catch (e) {
             if (!errors.includes(e.message)) errors.push(e.message);
         }
@@ -424,12 +574,31 @@ export class EffectGraph {
             }
         }
 
+        // Invalid topology is not synonymous with a cycle: a DAG can be
+        // unsupported by the current linear renderer because it forks,
+        // joins, or contains disconnected nodes. Keep those states distinct
+        // so the UI and diagnostics do not tell users to repair a cycle that
+        // does not exist.
+        const validation = this.validate();
+        const hasCircularDeps = validation.errors.some(error => /circular dependency/i.test(error));
+        const topology = this.getTopologyPlan();
+
         return {
             totalNodes: this.nodes.size,
             totalConnections: this.connections.length,
             nodesByEngine,
             nodesByCategory,
-            hasCircularDeps: !this.validate().valid
+            hasCircularDeps,
+            isExecutable: validation.valid,
+            validationErrors: validation.errors,
+            topology: {
+                valid: topology.valid,
+                roots: topology.roots.length,
+                sinks: topology.sinks.length,
+                branchNodes: topology.branches.length,
+                joinNodes: topology.joins.length,
+                executableAsLinearStack: topology.executableAsLinearStack,
+            },
         };
     }
 }

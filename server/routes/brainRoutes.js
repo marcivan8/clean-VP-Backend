@@ -42,6 +42,7 @@ const { StoryIntelligence }     = require('../brain/StoryIntelligence');
 const { getOrCreateSession }    = require('../brain/Session');
 const { supabaseAdmin }         = require('../../config/database');
 const { ASSET_ANALYSIS_DONE, ASSET_ANALYSIS_PENDING, ASSET_ANALYSIS_FAILED } = require('../brain/media/analysisStatus');
+const { readAllRows } = require('../brain/media/readAllRows');
 
 // Singleton instances — shared across requests
 const orchestrator   = new BrainOrchestrator();
@@ -135,14 +136,19 @@ router.post('/analyze', authenticateUser, async (req, res) => {
         // Best-effort: any failure leaves the Brain with timeline-only context.
         let assetIntelligence = [];
         try {
-            const ids = (projectState.mediaBin || []).map(a => a.id).filter(Boolean);
-            if (ids.length > 0) {
-                const { data, error } = await supabaseAdmin
+            if (projectState.projectId && (projectState.mediaBin || []).length > 0) {
+                // Query the project's owned rows directly and page through the
+                // result. Avoid a large IN list and ensure client-side bin
+                // truncation cannot silently hide analyzed footage from ROKA.
+                assetIntelligence = await readAllRows(() => supabaseAdmin
                     .from('media_assets')
-                    .select('id, name, scene_type, camera_angle, subject_count, has_main_speaker, has_faces, is_broll, is_screen_recording, location_type, lighting_quality, stability, emotional_tone, content_description, suggested_label, audio_type, has_spoken_word, analysis_status')
-                    .in('id', ids);
-                if (error) throw error;
-                assetIntelligence = data || [];
+                    .select('id, name, scene_type, camera_angle, subject_count, has_main_speaker, has_faces, is_broll, is_screen_recording, location_type, lighting_quality, stability, emotional_tone, content_description, suggested_label, transcript_text, audio_type, has_spoken_word, analysis_status')
+                    .eq('project_id', projectState.projectId)
+                    .eq('user_id', req.user.id))
+                    // Transcript is useful for finding semantically relevant
+                    // rushes when filenames are opaque. Keep only a planning
+                    // excerpt here; full transcript data remains in its store.
+                    .map(asset => ({ ...asset, transcript_text: String(asset.transcript_text || '').slice(0, 500) }));
             }
         } catch (miErr) {
             console.warn('[brainRoutes] /analyze: media intelligence lookup failed (continuing without it):', miErr.message);
@@ -639,9 +645,12 @@ router.post('/locate-target', authenticateUser, async (req, res) => {
 router.get('/analysis-status', authenticateUser, async (req, res) => {
     try {
         const { projectId, assetIds: rawAssetIds = '' } = req.query;
-        const assetIds = String(rawAssetIds).split(',').filter(Boolean).slice(0, 200);
+        const assetIds = [...new Set(String(rawAssetIds).split(',').map(id => id.trim()).filter(Boolean))];
         if (!projectId || assetIds.length === 0) {
             return res.status(400).json({ error: 'projectId and assetIds query params are required' });
+        }
+        if (assetIds.length > 200) {
+            return res.status(400).json({ error: 'Request at most 200 asset IDs at a time. Batch larger media bins into separate requests.' });
         }
 
         const { data, error } = await supabaseAdmin
@@ -670,15 +679,11 @@ router.get('/bin-summary', authenticateUser, async (req, res) => {
             return res.status(400).json({ error: 'projectId query param required' });
         }
 
-        const { data: assets, error } = await supabaseAdmin
+        const assets = await readAllRows(() => supabaseAdmin
             .from('media_assets')
             .select('*')
-            .eq('project_id', projectId);
-
-        if (error) {
-            console.error('[brainRoutes] bin-summary DB error:', error.message);
-            return res.status(500).json({ error: error.message });
-        }
+            .eq('project_id', projectId)
+            .eq('user_id', req.user.id));
 
         const summary = mediaIntel.getSummary(assets || []);
         return res.json(summary);
@@ -708,17 +713,12 @@ router.get('/broll-profiles', authenticateUser, async (req, res) => {
             return res.status(400).json({ error: 'projectId query param required' });
         }
 
-        const { data: assets, error } = await supabaseAdmin
+        const assets = await readAllRows(() => supabaseAdmin
             .from('media_assets')
-            .select('id, name, content_description, suggested_label, scene_type, location_type, is_broll, has_main_speaker, camera_angle, emotional_tone, lighting_quality, stability, is_reference, visual_style_profile')
+            .select('id, name, content_description, suggested_label, scene_type, location_type, is_broll, has_main_speaker, has_spoken_word, audio_type, camera_angle, emotional_tone, lighting_quality, stability, is_reference, visual_style_profile')
             .eq('project_id', projectId)
             .eq('user_id', req.user.id)
-            .eq('analysis_status', ASSET_ANALYSIS_DONE);
-
-        if (error) {
-            console.error('[brainRoutes] broll-profiles DB error:', error.message);
-            return res.status(500).json({ error: error.message });
-        }
+            .eq('analysis_status', ASSET_ANALYSIS_DONE));
 
         const profiles = (assets || []).map(a => ({
             assetId:        a.id,
@@ -729,6 +729,8 @@ router.get('/broll-profiles', authenticateUser, async (req, res) => {
             locationType:   a.location_type || null,
             isBroll:        a.is_broll === true,
             hasMainSpeaker: a.has_main_speaker === true,
+            hasSpokenWord:  a.has_spoken_word === true,
+            audioType:      a.audio_type || null,
             cameraAngle:    a.camera_angle || null,
             emotionalTone:  a.emotional_tone || null,
             lightingQuality: a.lighting_quality || null,

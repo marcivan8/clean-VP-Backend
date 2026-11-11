@@ -6,6 +6,7 @@
  */
 
 import { ENGINE_TYPES } from '../EffectNode.js';
+import { cssFilterToColorMatrix, scaleCssFilterIntensity } from '../lutPreview.js';
 
 const unwrapEffectParam = (params, key, fallback) => {
     const raw = params?.[key];
@@ -47,6 +48,84 @@ void main() {
 }`;
 
 const SHADERS = {
+    composite: `#version 300 es
+precision highp float;
+in vec2 v_texCoord;
+uniform sampler2D u_image;
+uniform sampler2D u_overlay;
+uniform float u_opacity;
+uniform int u_mode;
+out vec4 outColor;
+float lum(vec3 color) { return dot(color, vec3(0.3, 0.59, 0.11)); }
+float sat(vec3 color) { return max(max(color.r, color.g), color.b) - min(min(color.r, color.g), color.b); }
+vec3 clipColor(vec3 color) {
+    float l = lum(color);
+    float n = min(min(color.r, color.g), color.b);
+    float x = max(max(color.r, color.g), color.b);
+    if (n < 0.0) color = l + ((color - l) * l) / max(l - n, 0.000001);
+    if (x > 1.0) color = l + ((color - l) * (1.0 - l)) / max(x - l, 0.000001);
+    return color;
+}
+vec3 setLum(vec3 color, float target) { return clipColor(color + (target - lum(color))); }
+vec3 setSat(vec3 color, float target) {
+    float minimum = min(min(color.r, color.g), color.b);
+    float maximum = max(max(color.r, color.g), color.b);
+    float middle = color.r + color.g + color.b - minimum - maximum;
+    if (maximum > minimum) {
+        middle = (middle - minimum) * target / (maximum - minimum);
+        maximum = target;
+        minimum = 0.0;
+    } else {
+        minimum = 0.0;
+        middle = 0.0;
+        maximum = 0.0;
+    }
+    if (color.r <= color.g) {
+        if (color.g <= color.b) return vec3(minimum, middle, maximum);
+        if (color.r <= color.b) return vec3(minimum, maximum, middle);
+        return vec3(middle, maximum, minimum);
+    }
+    if (color.r <= color.b) return vec3(middle, minimum, maximum);
+    if (color.g <= color.b) return vec3(maximum, minimum, middle);
+    return vec3(maximum, middle, minimum);
+}
+float softLightChannel(float base, float over) {
+    if (over <= 0.5) return base - (1.0 - 2.0 * over) * base * (1.0 - base);
+    float d = base <= 0.25 ? ((16.0 * base - 12.0) * base + 4.0) * base : sqrt(max(base, 0.0));
+    return base + (2.0 * over - 1.0) * (d - base);
+}
+vec3 blendColor(vec3 base, vec3 over) {
+    if (u_mode == 0) return over;
+    if (u_mode == 1) return base * over;
+    if (u_mode == 2) return 1.0 - (1.0 - base) * (1.0 - over);
+    if (u_mode == 3) return min(vec3(1.0), base + over);
+    if (u_mode == 4) return mix(2.0 * base * over, 1.0 - 2.0 * (1.0 - base) * (1.0 - over), step(vec3(0.5), base));
+    if (u_mode == 5) return min(base, over);
+    if (u_mode == 6) return max(base, over);
+    if (u_mode == 7) return abs(base - over);
+    if (u_mode == 8) return min(vec3(1.0), base / max(vec3(1.0) - over, vec3(0.000001)));
+    if (u_mode == 9) return 1.0 - min(vec3(1.0), (1.0 - base) / max(over, vec3(0.000001)));
+    if (u_mode == 10) return mix(2.0 * base * over, 1.0 - 2.0 * (1.0 - base) * (1.0 - over), step(vec3(0.5), over));
+    if (u_mode == 11) return vec3(softLightChannel(base.r, over.r), softLightChannel(base.g, over.g), softLightChannel(base.b, over.b));
+    if (u_mode == 12) return base + over - 2.0 * base * over;
+    if (u_mode == 13) return setLum(setSat(over, sat(base)), lum(base));
+    if (u_mode == 14) return setLum(setSat(base, sat(over)), lum(base));
+    if (u_mode == 15) return setLum(over, lum(base));
+    if (u_mode == 16) return setLum(base, lum(over));
+    return over;
+}
+void main() {
+    vec4 base = texture(u_image, v_texCoord);
+    vec4 overlay = texture(u_overlay, v_texCoord);
+    float ao = clamp(overlay.a * u_opacity, 0.0, 1.0);
+    float ab = clamp(base.a, 0.0, 1.0);
+    float outAlpha = ao + ab * (1.0 - ao);
+    vec3 mixed = blendColor(base.rgb, overlay.rgb);
+    vec3 premultiplied = (1.0 - ao) * ab * base.rgb
+        + (1.0 - ab) * ao * overlay.rgb + ab * ao * mixed;
+    outColor = vec4(outAlpha > 0.00001 ? premultiplied / outAlpha : vec3(0.0), outAlpha);
+}`,
+
     fade_in: `#version 300 es
 precision mediump float;
 in vec2 v_texCoord;
@@ -69,6 +148,22 @@ out vec4 outColor;
 void main() {
     vec4 source = texture(u_image, v_texCoord);
     outColor = vec4(mix(u_color, source.rgb, clamp(u_fadeProgress, 0.0, 1.0)), source.a);
+}`,
+
+    lut_apply: `#version 300 es
+precision mediump float;
+in vec2 v_texCoord;
+uniform sampler2D u_image;
+uniform vec4 u_lutRow0;
+uniform vec4 u_lutRow1;
+uniform vec4 u_lutRow2;
+uniform float u_intensity;
+out vec4 outColor;
+void main() {
+    vec4 source = texture(u_image, v_texCoord);
+    vec4 color = vec4(source.rgb, 1.0);
+    vec3 graded = vec3(dot(u_lutRow0, color), dot(u_lutRow1, color), dot(u_lutRow2, color));
+    outColor = vec4(mix(source.rgb, clamp(graded, 0.0, 1.0), clamp(u_intensity, 0.0, 1.0)), source.a);
 }`,
 
     // === Gaussian Blur (Two-pass) ===
@@ -95,11 +190,17 @@ void main() {
         float radius = max(u_radius, 0.0001);
         float weight = exp(-0.5 * position * position);
         vec2 offset = u_direction * texelSize * position * radius;
-        result += texture(u_image, v_texCoord + offset) * weight;
+        vec4 sampleColor = texture(u_image, v_texCoord + offset);
+        // Blur in premultiplied-alpha space so transparent RGB in graphic
+        // edges cannot tint neighboring opaque pixels. The framebuffer stores
+        // straight RGBA, so unpremultiply only after the weighted average.
+        result.rgb += sampleColor.rgb * sampleColor.a * weight;
+        result.a += sampleColor.a * weight;
         total += weight;
     }
     
-    outColor = result / total;
+    float alpha = total > 0.0 ? result.a / total : 0.0;
+    outColor = vec4(result.a > 0.00001 ? result.rgb / result.a : vec3(0.0), alpha);
 }`,
 
     // === Motion Blur ===
@@ -131,11 +232,16 @@ void main() {
         // on the two axes, so convert the horizontal reference distance back
         // through texelSize before sampling.
         vec2 offset = direction * t * u_intensity * 0.1 * u_resolution.x * texelSize;
-        result += texture(u_image, v_texCoord + offset);
+        vec4 sampleColor = texture(u_image, v_texCoord + offset);
+        result.rgb += sampleColor.rgb * sampleColor.a;
+        result.a += sampleColor.a;
         total += 1.0;
     }
     
-    outColor = total > 0.0 ? result / total : texture(u_image, v_texCoord);
+    float alpha = total > 0.0 ? result.a / total : 0.0;
+    outColor = total > 0.0
+        ? vec4(result.a > 0.00001 ? result.rgb / result.a : vec3(0.0), alpha)
+        : texture(u_image, v_texCoord);
 }`,
 
     // === Radial Blur ===
@@ -163,11 +269,16 @@ void main() {
         if (i >= u_samples) break;
         float t = float(i) / float(max(u_samples, 1));
         vec2 offset = direction * t * u_intensity * dist * 0.5 / u_resolution;
-        result += texture(u_image, v_texCoord + offset);
+        vec4 sampleColor = texture(u_image, v_texCoord + offset);
+        result.rgb += sampleColor.rgb * sampleColor.a;
+        result.a += sampleColor.a;
         total += 1.0;
     }
     
-    outColor = total > 0.0 ? result / total : texture(u_image, v_texCoord);
+    float alpha = total > 0.0 ? result.a / total : 0.0;
+    outColor = total > 0.0
+        ? vec4(result.a > 0.00001 ? result.rgb / result.a : vec3(0.0), alpha)
+        : texture(u_image, v_texCoord);
 }`,
 
     // === Glow/Bloom ===
@@ -198,7 +309,9 @@ void main() {
             float weight = exp(-0.5 * (x*x + y*y) / (u_radius * u_radius * 0.25));
             vec2 offset = vec2(x, y) * texelSize * u_radius * 0.5;
             vec4 sampleColor = texture(u_image, v_texCoord + offset);
-            float sampleLuminance = dot(sampleColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+            // Ignore hidden RGB in transparent texels. Otherwise transparent
+            // padding around a graphic can create a full-strength halo.
+            float sampleLuminance = dot(sampleColor.rgb, vec3(0.2126, 0.7152, 0.0722)) * sampleColor.a;
             float thresholdWidth = max(1.0 - u_threshold, 0.001);
             float highlight = clamp((sampleLuminance - u_threshold) / thresholdWidth, 0.0, 1.0);
             bloom += highlight * weight;
@@ -208,13 +321,15 @@ void main() {
     
     if (totalWeight > 0.0) bloom /= totalWeight;
 
-    // feMerge composites the flood colour over SourceGraphic; it does not
-    // add RGB energy to the original, which would clip and look harsher.
+    // Composite the flood colour over SourceGraphic in premultiplied-alpha
+    // space. The previous straight-RGB mix darkened semi-transparent pixels
+    // and let hidden RGB leak into transparent padding.
     // Registry and controls expose a 0–3 intensity range. Clamp the resulting
     // opacity, not the intensity, so values above 1 remain visibly stronger.
     float glowAlpha = clamp(bloom * clamp(u_intensity, 0.0, 3.0) * 0.7, 0.0, 1.0);
-    outColor = vec4(mix(original.rgb, u_color, glowAlpha),
-        original.a + glowAlpha * (1.0 - original.a));
+    float outputAlpha = original.a + glowAlpha * (1.0 - original.a);
+    vec3 outputPremultiplied = original.rgb * original.a * (1.0 - glowAlpha) + u_color * glowAlpha;
+    outColor = vec4(outputAlpha > 0.00001 ? outputPremultiplied / outputAlpha : vec3(0.0), outputAlpha);
 }`,
 
     // === Vignette ===
@@ -350,8 +465,11 @@ void main() {
         + (grainCoord.y + seed * 3.17) * 78.233 + frame * 37.719) * 43758.5453;
     float grain = (fract(hash) - 0.5) * 2.0;
     
-    // Apply grain
-    color.rgb += grain * u_intensity;
+    // Match the export compiler's normalized 8-bit noise range: an intensity
+    // of 1.0 spans roughly ±255 code values, or ±1.0 in this normalized shader.
+    // Keep fully transparent pixels untouched so hidden RGB cannot bleed into
+    // edges when the layer is resampled or composited later.
+    if (color.a > 0.0) color.rgb += grain * u_intensity;
     
     outColor = color;
 }`,
@@ -491,12 +609,38 @@ void main() {
 }`
 };
 
+const GPU_COMPOSITE_MODE_IDS = Object.freeze({
+    'source-over': 0,
+    multiply: 1,
+    screen: 2,
+    addition: 3,
+    overlay: 4,
+    darken: 5,
+    lighten: 6,
+    difference: 7,
+    'color-dodge': 8,
+    'color-burn': 9,
+    'hard-light': 10,
+    'soft-light': 11,
+    exclusion: 12,
+    hue: 13,
+    saturation: 14,
+    color: 15,
+    luminosity: 16,
+});
+
+/** Return the shader mode for a supported blend name, or null if unsupported. */
+export function resolveGpuCompositeModeId(mode) {
+    const key = String(mode ?? 'source-over').trim().toLowerCase();
+    return Object.hasOwn(GPU_COMPOSITE_MODE_IDS, key) ? GPU_COMPOSITE_MODE_IDS[key] : null;
+}
+
 // Public capability manifest used by registry validation and diagnostics.
 export const GPU_SHADER_TYPES = Object.freeze(Object.keys(SHADERS));
 // Some effects are authored as CPU effects because export uses FFmpeg, while
 // the equivalent preview shader already exists here. Keep this allowlist
 // explicit so a future same-named shader cannot silently change engine policy.
-const GPU_PREVIEW_CPU_EFFECT_TYPES = new Set(['fade_in', 'fade_out']);
+const GPU_PREVIEW_CPU_EFFECT_TYPES = new Set(['fade_in', 'fade_out', 'lut_apply']);
 
 // ============================================================================
 // GPU EFFECT ENGINE CLASS
@@ -651,9 +795,33 @@ export class GPUEffectEngine {
     // PROCESSING
     // ========================================================================
 
-    _ensureRenderTargets(width, height) {
-        if (this.targetWidth === width && this.targetHeight === height) return;
+    _ensureRenderTargetCount(count) {
+        const gl = this.gl;
+        while (this.textures.length < count) {
+            const texture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            const framebuffer = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+            if (this.targetWidth > 0 && this.targetHeight > 0) {
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.targetWidth, this.targetHeight, 0,
+                    gl.RGBA, gl.UNSIGNED_BYTE, null);
+            }
+            this.textures.push(texture);
+            this.framebuffers.push(framebuffer);
+        }
+    }
 
+    _ensureRenderTargets(width, height, targetCount = 2) {
+        this._ensureRenderTargetCount(Math.max(2, targetCount));
+        if (this.targetWidth === width && this.targetHeight === height) {
+            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+            return;
+        }
         const gl = this.gl;
         gl.activeTexture(gl.TEXTURE0);
         for (let i = 0; i < this.textures.length; i++) {
@@ -709,6 +877,12 @@ export class GPUEffectEngine {
             clipStart: context.clipStart ?? placement.startTime ?? placement.start ?? 0,
             clipDuration: context.clipDuration ?? placement.duration,
         });
+        const lutId = String(unwrapEffectParam(params, 'lutId', ''));
+        const lutFilter = context.lutPreviewFilters?.[lutId];
+        const lutMatrix = effect.type === 'lut_apply'
+            ? cssFilterToColorMatrix(scaleCssFilterIntensity(lutFilter, unwrapEffectParam(params, 'intensity', 1)))
+            : null;
+        if (effect.type === 'lut_apply' && !lutMatrix) return inputTexture;
 
         // Use framebuffer for output
         const fbIndex = Number.isInteger(context.fbIndex) ? context.fbIndex % this.framebuffers.length : 0;
@@ -718,7 +892,7 @@ export class GPUEffectEngine {
         const width = context.width || gl.drawingBufferWidth;
         const height = context.height || gl.drawingBufferHeight;
 
-        this._ensureRenderTargets(width, height);
+        this._ensureRenderTargets(width, height, fbIndex + (effect.type === 'blur_gaussian' ? 2 : 1));
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffers[fbIndex]);
         gl.viewport(0, 0, width, height);
@@ -756,6 +930,12 @@ export class GPUEffectEngine {
             gl.uniform3f(this._uniformLocation(gl, program, 'u_color'),
                 ...[0, 1, 2].map(index => Number.isFinite(Number(color[index])) ? Math.max(0, Math.min(1, Number(color[index]))) : 0));
         }
+        if (effect.type === 'lut_apply') {
+            for (let index = 0; index < 3; index++) {
+                gl.uniform4f(this._uniformLocation(gl, program, `u_lutRow${index}`), ...lutMatrix[index]);
+            }
+            gl.uniform1f(this._uniformLocation(gl, program, 'u_intensity'), 1);
+        }
 
         // Draw
         gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -791,6 +971,163 @@ export class GPUEffectEngine {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
         return outputTexture;
+    }
+
+    processComposite(effect, baseTexture, overlayTexture, time, context = {}) {
+        if (!this.initialized || !baseTexture || !overlayTexture) return baseTexture || overlayTexture;
+        const gl = this.gl;
+        const shaderInfo = this.programs.get('composite');
+        if (!shaderInfo) return baseTexture;
+        const fbIndex = Math.max(0, Math.floor(Number(context.fbIndex) || 0));
+        const width = context.width || gl.drawingBufferWidth;
+        const height = context.height || gl.drawingBufferHeight;
+        this._ensureRenderTargets(width, height, fbIndex + 1);
+        const { program, attributes } = shaderInfo;
+        const params = effect.getParamsAt(time, context);
+        const mode = resolveGpuCompositeModeId(params.mode);
+        // Do not silently render an unknown authored mode as source-over. The
+        // export worker rejects the same mode, so preview must preserve that
+        // failure instead of showing a result that export cannot reproduce.
+        if (mode == null) return baseTexture;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffers[fbIndex]);
+        gl.viewport(0, 0, width, height);
+        gl.useProgram(program);
+        gl.enableVertexAttribArray(attributes.position);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
+        gl.vertexAttribPointer(attributes.position, 2, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(attributes.texCoord);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
+        gl.vertexAttribPointer(attributes.texCoord, 2, gl.FLOAT, false, 0, 0);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, baseTexture);
+        gl.uniform1i(this._uniformLocation(gl, program, 'u_image'), 0);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, overlayTexture);
+        gl.uniform1i(this._uniformLocation(gl, program, 'u_overlay'), 1);
+        const opacity = Number(params.opacity);
+        gl.uniform1f(this._uniformLocation(gl, program, 'u_opacity'), Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : 1);
+        gl.uniform1i(this._uniformLocation(gl, program, 'u_mode'), mode);
+        gl.uniform1f(this._uniformLocation(gl, program, 'u_time'), Number(time) || 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.activeTexture(gl.TEXTURE0);
+        return this.textures[fbIndex];
+    }
+
+    processGraph(graph, inputTexture, time, context = {}, canProcess = () => true) {
+        const plan = graph.getExecutionPlan();
+        if (!plan.orderedNodes.length) return inputTexture;
+        if (!graph.connections.length) {
+            return this.processChain(plan.orderedNodes, inputTexture, time, context);
+        }
+        const outputById = new Map();
+        const outputSlotById = new Map();
+        const remainingUses = new Map(plan.orderedNodes.map(node => [node.id, graph.getOutputConnections(node.id).length]));
+        const slotReferences = this.framebuffers.map(() => 0);
+        // A graph may be chained from a texture produced by this same engine.
+        // Keep that framebuffer unavailable until its root has sampled it, or
+        // the allocator could create a WebGL read/write feedback loop.
+        const inputTextureSlot = this.textures.indexOf(inputTexture);
+        if (inputTextureSlot >= 0) slotReferences[inputTextureSlot] += 1;
+        const reservedSlots = new Set();
+        const width = context.width || this.gl.drawingBufferWidth;
+        const height = context.height || this.gl.drawingBufferHeight;
+
+        const ensureSlotCapacity = count => {
+            if (this.framebuffers.length < count) this._ensureRenderTargets(width, height, count);
+            while (slotReferences.length < this.framebuffers.length) slotReferences.push(0);
+        };
+        const acquireSlots = (count, contiguous = false) => {
+            let start = -1;
+            if (contiguous) {
+                for (let candidate = 0; candidate < slotReferences.length; candidate++) {
+                    let available = true;
+                    for (let offset = 0; offset < count; offset++) {
+                        const index = candidate + offset;
+                        if ((slotReferences[index] || 0) > 0 || reservedSlots.has(index)) { available = false; break; }
+                    }
+                    if (available) { start = candidate; break; }
+                }
+            } else {
+                for (let candidate = 0; candidate < slotReferences.length; candidate++) {
+                    if (!(slotReferences[candidate] > 0) && !reservedSlots.has(candidate)) { start = candidate; break; }
+                }
+            }
+            if (start < 0) {
+                start = slotReferences.length;
+            }
+            ensureSlotCapacity(start + count);
+            const slots = contiguous
+                ? Array.from({ length: count }, (_, offset) => start + offset)
+                : [start];
+            slots.forEach(index => reservedSlots.add(index));
+            return slots;
+        };
+        const releaseUse = nodeId => {
+            const remaining = (remainingUses.get(nodeId) || 0) - 1;
+            remainingUses.set(nodeId, remaining);
+            const slot = outputSlotById.get(nodeId);
+            if (slot != null) slotReferences[slot] = Math.max(0, slotReferences[slot] - 1);
+        };
+
+        for (const node of plan.orderedNodes) {
+            const incoming = graph.getInputConnections(node.id);
+            const input = incoming.length ? outputById.get(incoming[0].from) : inputTexture;
+            const outputCount = Math.max(1, graph.getOutputConnections(node.id).length);
+            let output;
+            let outputSlot = null;
+            let reservedOutput = null;
+            let reservedScratch = null;
+            if (node.type === 'composite') {
+                const ports = new Map(incoming.map(edge => [edge.port, outputById.get(edge.from)]));
+                const base = ports.get('base');
+                const overlay = ports.get('overlay');
+                if (!node.isActiveAt(time, context.placement) || !node.enabled) {
+                    output = base;
+                    outputSlot = incoming.find(edge => edge.port === 'base')
+                        ? outputSlotById.get(incoming.find(edge => edge.port === 'base').from) ?? null
+                        : null;
+                } else {
+                    [reservedOutput] = acquireSlots(1);
+                    output = this.processComposite(node, base, overlay, time, { ...context, fbIndex: reservedOutput });
+                    outputSlot = output === base
+                        ? (incoming.find(edge => edge.port === 'base') ? outputSlotById.get(incoming.find(edge => edge.port === 'base').from) ?? null : null)
+                        : output === overlay
+                            ? (incoming.find(edge => edge.port === 'overlay') ? outputSlotById.get(incoming.find(edge => edge.port === 'overlay').from) ?? null : null)
+                            : reservedOutput;
+                }
+            } else if (!node.enabled || !node.isActiveAt(time, context.placement) || !canProcess(node)) {
+                output = input;
+                outputSlot = incoming.length
+                    ? outputSlotById.get(incoming[0].from) ?? null
+                    : inputTextureSlot >= 0 ? inputTextureSlot : null;
+            } else {
+                const isBlur = node.type === 'blur_gaussian';
+                const slots = acquireSlots(isBlur ? 2 : 1, isBlur);
+                reservedOutput = isBlur ? slots[1] : slots[0];
+                reservedScratch = isBlur ? slots[0] : null;
+                output = this.processEffect(node, input, time, { ...context, fbIndex: isBlur ? reservedScratch : reservedOutput });
+                outputSlot = output === input
+                    ? (incoming.length
+                        ? outputSlotById.get(incoming[0].from) ?? null
+                        : inputTextureSlot >= 0 ? inputTextureSlot : null)
+                    : reservedOutput;
+            }
+
+            // Keep the new output alive before releasing consumed inputs; a
+            // bypassed node may alias its parent's texture and the graph may
+            // still have downstream readers of that same framebuffer.
+            if (outputSlot != null) slotReferences[outputSlot] += outputCount;
+            if (reservedOutput != null) reservedSlots.delete(reservedOutput);
+            if (reservedScratch != null) reservedSlots.delete(reservedScratch);
+            for (const edge of incoming) releaseUse(edge.from);
+            if (!incoming.length && inputTextureSlot >= 0) {
+                slotReferences[inputTextureSlot] = Math.max(0, slotReferences[inputTextureSlot] - 1);
+            }
+            outputById.set(node.id, output);
+            outputSlotById.set(node.id, outputSlot);
+        }
+        return outputById.get(plan.sinks[0].id) || inputTexture;
     }
 
     _setEffectUniforms(gl, program, type, params, time = 0) {
@@ -891,7 +1228,10 @@ export class GPUEffectEngine {
         let current = inputTexture;
 
         for (const effect of effects) {
-            if (effect.enabled && this.supportsPreviewEffect(effect) && effect.isActiveAt(time)) {
+            // The pipeline selects effects using the clip placement bounds.
+            // Rechecking without placement here can incorrectly drop effects
+            // whose start/end are inherited from their clip.
+            if (effect.enabled && this.supportsPreviewEffect(effect) && effect.isActiveAt(time, context.placement || null)) {
                 // Select a target different from the current input to avoid a
                 // WebGL feedback loop, including after multi-pass effects.
                 const fbIndex = current === this.textures[0] ? 1 : 0;

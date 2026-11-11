@@ -5,6 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { EffectNode } from '../client/src/effects/EffectNode.js';
 import { CPUEffectEngine } from '../client/src/effects/engines/CPUEffects.js';
+import { EffectPipeline } from '../client/src/effects/EffectPipeline.js';
 import ffmpeg from 'ffmpeg-static';
 
 const engine = new CPUEffectEngine();
@@ -26,6 +27,22 @@ const fade = engine.compileEffect(make('fade_in', { duration: 1, color: [1, 0.25
 assert.equal(fade, 'fade=t=in:st=2.000:d=1.000:color=0xff4000', 'fade color and effect start time are honored instead of the legacy registry shortcut');
 const denoise = engine.compileEffect(make('audio_denoise', { amount: 0.75 }));
 assert.equal(denoise, 'afftdn=nf=-35.0', 'audio denoise strength maps into FFmpeg’s legal noise floor range');
+
+const incompleteChain = engine.compileChain([
+  make('unimplemented_cpu_effect', { amount: 0.5 }),
+  make('lut_apply', { intensity: 0.8 }),
+  make('speed_change', { speed: 1 }),
+]);
+assert.deepEqual(incompleteChain.warnings.map(warning => [warning.effectType, warning.reason]), [
+  ['unimplemented_cpu_effect', 'effect_not_compiled'],
+  ['lut_apply', 'missing_lut_file'],
+], 'unrendered CPU effects are reported, while an authored identity speed change stays a quiet no-op');
+assert.equal(incompleteChain.hasVideo, false, 'a chain with only skipped effects is not reported as rendered video');
+
+const pipeline = new EffectPipeline();
+pipeline.addEffect(make('unimplemented_cpu_effect', { amount: 0.5 }, { targetId: 'clip-1' }));
+const finalPlan = await pipeline.processFinal('input.mp4', 'clip-1', 'output.mp4');
+assert.equal(finalPlan.warnings[0]?.reason, 'effect_not_compiled', 'the final pipeline carries skipped-effect warnings to its caller');
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibed-cpu-fx-'));
 try {

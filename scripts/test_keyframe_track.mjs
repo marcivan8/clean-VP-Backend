@@ -11,7 +11,7 @@ import { EffectNode } from '../client/src/effects/EffectNode.js';
 import { resolveEffectAtTime } from '../client/src/motion/EffectTiming.js';
 import { compilePath } from '../client/src/motion/SceneMotion.js';
 import { pointsToBezierSpline } from '../client/src/motion/SpatialMotion.js';
-import { animationsToParamTracks, paramTracksToAnimations } from '../client/src/motion/KeyframeBridge.js';
+import { animationsToParamTracks, paramTracksToAnimations, applyKeyframeOp, buildEditorModel } from '../client/src/motion/KeyframeBridge.js';
 import { appendMotionPathPoint, createMotionPath, MAX_MOTION_PATH_POINTS, removeMotionPathPoint, updateMotionPathPoint } from '../client/src/motion/MotionPath.js';
 import fs from 'node:fs';
 
@@ -195,6 +195,68 @@ assert.deepEqual(sampleAnimation(independentlyEasedAnimation, 0.5), { x: 2.5, y:
   'shared-time transform properties render with their independently authored easing curves');
 assert.deepEqual(animationsToParamTracks([independentlyEasedAnimation], 1), independentlyEasedTracks,
   'independent property easing survives a full editor bridge round trip');
+const stackedMotions = [
+  { id: 'move-in', anchor: 'in', duration: 2, easing: 'linear', keyframes: [
+    { time: 0, properties: { x: -20, scale: 1, opacity: 1 }, easing: 'ease-in' },
+    { time: 2, properties: { x: 0, scale: 1.2, opacity: 0.8 }, easing: 'ease-in' },
+  ] },
+  { id: 'emphasis', anchor: 'in', startTime: 0.4, duration: 1.2, easing: 'easeOutCubic', keyframes: [
+    { time: 0, properties: { x: 0, scale: 1, opacity: 1 } },
+    { time: 1.2, properties: { x: 12, scale: 1.15, opacity: 0.7 } },
+  ] },
+];
+const stackedTracks = animationsToParamTracks(stackedMotions, 2);
+assert.ok(stackedTracks.x.length > 4, 'stacked composed curves are sampled for truthful editing instead of exposing one source curve');
+assert.deepEqual(Object.keys(stackedTracks).sort(), ['opacity', 'scale', 'x'],
+  'stacked animations expose only properties that are actually animated');
+const stackedEdit = applyKeyframeOp({ id: 'stacked', duration: 2, animations: stackedMotions }, {
+  kind: 'add', param: 'x', time: 0.75, value: 8,
+});
+assert.equal(stackedEdit.animations.length, 1, 'editing stacked motions creates the documented single custom animation');
+const flattenedStack = { startTime: 0, duration: 2, animations: stackedEdit.animations };
+const originalStack = { startTime: 0, duration: 2, animations: stackedMotions };
+for (let i = 0; i <= 40; i++) {
+  const time = i / 20;
+  const before = resolveMotionAt(originalStack, time);
+  const after = resolveMotionAt(flattenedStack, time);
+  if (Math.abs(time - 0.75) > 1e-6) {
+    assert.ok(Math.abs(before.x - after.x) < 0.08, `editing X preserves the composed translation near ${time}s`);
+    assert.ok(Math.abs(before.scale - after.scale) < 0.08, `editing X preserves composed scale near ${time}s`);
+    assert.ok(Math.abs(before.opacity - after.opacity) < 0.01, `editing X preserves composed opacity near ${time}s`);
+  }
+}
+assert.equal(resolveMotionAt(flattenedStack, 0.75).x, 58, 'the newly authored X key is retained as a clip-relative offset');
+const steppedStack = [
+  { id: 'base-opacity', anchor: 'in', duration: 2, keyframes: [
+    { time: 0, properties: { opacity: 1 } }, { time: 2, properties: { opacity: 1 } },
+  ] },
+  { id: 'exit-pop', anchor: 'out', duration: 1, keyframes: [
+    { time: 0, properties: { opacity: 0.2 } }, { time: 1, properties: { opacity: 0 } },
+  ] },
+];
+const steppedEdit = applyKeyframeOp({ id: 'stepped', duration: 2, animations: steppedStack }, {
+  kind: 'add', param: 'x', time: 0.5, value: 4,
+});
+const steppedBefore = resolveMotionAt({ startTime: 0, duration: 2, animations: steppedEdit.animations }, 0.5);
+const steppedNear = resolveMotionAt({ startTime: 0, duration: 2, animations: steppedEdit.animations }, 0.999);
+const steppedAt = resolveMotionAt({ startTime: 0, duration: 2, animations: steppedEdit.animations }, 1);
+assert.ok(Math.abs(steppedBefore.opacity - 1) < 0.01 && Math.abs(steppedNear.opacity - 1) < 0.01,
+  'flattened out animations stay inactive before their authored start instead of fading early');
+assert.ok(Math.abs(steppedAt.opacity - 0.2) < 0.01,
+  'flattened out animation retains its authored non-neutral value at the exact start boundary');
+const legacyFadeClip = { id: 'legacy-fade', start: 0, duration: 2, animation: 'fade-in' };
+assert.ok(buildEditorModel(legacyFadeClip).effect.keyframes.opacity?.length >= 2,
+  'the keyframe editor shows the same legacy animation that playback resolves');
+const legacyFadeEdit = applyKeyframeOp(legacyFadeClip, { kind: 'add', param: 'x', time: 0.5, value: 8 });
+const legacyFadeLayerBefore = clipToMotionLayer(legacyFadeClip);
+const legacyFadeLayerAfter = clipToMotionLayer({ ...legacyFadeClip, ...legacyFadeEdit });
+assert.equal(legacyFadeEdit.animation, 'none', 'converting a legacy animation clears its old string representation');
+assert.ok(Math.abs(resolveMotionAt(legacyFadeLayerBefore, 0.25).opacity
+  - resolveMotionAt(legacyFadeLayerAfter, 0.25).opacity) < 0.01,
+  'adding a manual keyframe preserves the resolved legacy fade rather than discarding it');
+const stylePresetClip = { id: 'style-preset', duration: 2, captionStyle: { animationPreset: 'fade' } };
+assert.ok(buildEditorModel(stylePresetClip).effect.keyframes.opacity?.length >= 2,
+  'caption-style animation defaults are visible in the keyframe editor too');
 const transformPanelSource = fs.readFileSync(new URL('../client/src/components/TransformPanel.jsx', import.meta.url), 'utf8');
 assert.match(transformPanelSource, /getKeyframeState\('scaleX'\)/, 'transform inspector exposes horizontal scale keyframing');
 assert.match(transformPanelSource, /getKeyframeState\('scaleY'\)/, 'transform inspector exposes vertical scale keyframing');

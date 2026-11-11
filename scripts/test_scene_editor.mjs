@@ -933,7 +933,10 @@ await check('the scene editor is mounted in the Motion panel and wired to the st
     assert.doesNotMatch(ide, /'motion', 'scene', 'shorts'/, 'the scene tab should no longer be in the tab bar');
     for (const lang of ['en', 'fr']) {
         const words = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).scenePanel;
-        for (const key of ['title', 'empty', 'words', 'size', 'colour', 'across', 'down', 'seconds', 'footnote']) {
+        for (const key of ['title', 'empty', 'words', 'size', 'colour', 'across', 'down', 'seconds', 'textOnPath', 'svgPath', 'pathAlign', 'pathSide', 'pathOffset', 'footnote']) {
+            assert.ok(words?.[key], `${lang}.scenePanel.${key}`);
+        }
+        for (const key of ['pathAlign_start', 'pathAlign_center', 'pathAlign_end', 'pathSide_left', 'pathSide_right']) {
             assert.ok(words?.[key], `${lang}.scenePanel.${key}`);
         }
         assert.doesNotMatch(JSON.stringify(words), /—/, `${lang} has an em dash`);
@@ -943,6 +946,19 @@ await check('the scene editor is mounted in the Motion panel and wired to the st
     const registry = read('client/src/agent/CommandRegistry.js');
     assert.match(registry, /id: 'design_scene'/);
     assert.match(read('client/src/agent/CommandCompiler.js'), /\['design_scene'/);
+});
+
+await check('text-on-path can be authored and adjusted in the scene editor', () => {
+    const panel = read('client/src/components/ScenePanel.jsx');
+    assert.match(panel, /const supportsTextPath = node\.type === NODE_TYPES\.TEXT/);
+    assert.match(panel, /commit\(\{ textPath: \{ data, align: draft\.textPathAlign, side: draft\.textPathSide/);
+    assert.match(panel, /commit\(\{ textPath: \{ \.\.\.node\.textPath, data: event\.target\.value \} \}\)/);
+    assert.match(panel, /\['start', 'center', 'end'\]\.map/);
+    assert.match(panel, /\['left', 'right'\]\.map/);
+    assert.match(panel, /t\(`scenePanel\.pathAlign_\$\{value\}`\)/);
+    assert.match(panel, /t\(`scenePanel\.pathSide_\$\{value\}`\)/);
+    assert.match(panel, /textPath\?\.data/, 'undo and external path edits refresh the property editor');
+    assert.match(panel, /commit\(\{ textPath: null \}\)/, 'text returns to its normal layout when its path is disabled');
 });
 
 await check('3D procedural particle emitters and lifecycle controls are editable and localized', () => {

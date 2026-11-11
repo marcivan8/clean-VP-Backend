@@ -57,7 +57,7 @@ function makeSupabaseStub({ existingRow = null } = {}) {
 }
 
 function load(supabaseStub, { body = null, throwOnCall = false } = {}) {
-    const state = { calls: 0, lastPrompt: null };
+    const state = { calls: 0, lastPrompt: null, prompts: [] };
 
     require.cache[DB_PATH] = {
         id: DB_PATH, filename: DB_PATH, loaded: true,
@@ -71,6 +71,7 @@ function load(supabaseStub, { body = null, throwOnCall = false } = {}) {
                 chat: { completions: { create: async ({ messages }) => {
                     state.calls++;
                     state.lastPrompt = messages[0].content;
+                    state.prompts.push(messages[0].content);
                     if (throwOnCall) throw new Error('model unavailable');
                     return { choices: [{ message: { content: JSON.stringify(body) } }] };
                 } } },
@@ -308,6 +309,25 @@ async function main() {
         check('it demands real timestamps', /Give real start\/end seconds/.test(prompt));
     }
 
+    section('6b · Long cuts are analyzed in bounded batches without dropping later clips');
+    {
+        const { stub, calls } = makeSupabaseStub();
+        const { mod, state } = load(stub, { body: GOOD });
+        const si = new mod.StoryIntelligence();
+        const longCut = Array.from({ length: 75 }, (_, index) => ({
+            id: `long-${index + 1}`,
+            name: `clip-${index + 1}.mp4`,
+            start: index * 2,
+            duration: 2,
+            transcript: `This is a useful transcript for timeline clip number ${index + 1}.`,
+        }));
+        const map = await si.ensureMap({ projectId: 'long-project', userId: 'u1', clips: longCut });
+        check('the entire 75-clip cut is persisted', calls.upserts[0]?.row.clip_count === 75);
+        check('the long cut uses bounded model requests', state.calls === 2, `${state.calls} calls`);
+        check('the final clip is included in the last request', state.prompts.at(-1)?.includes('id:long-75'));
+        check('batch findings keep offsets in full-cut time', map.hook_at_sec === 12);
+    }
+
     section('7 · The Brain renders it and survives its absence');
     {
         const src = fs.readFileSync(
@@ -330,6 +350,8 @@ async function main() {
         check('a cut field is sent', /^\s*cut: \(\(\) =>/m.test(src));
         check('it is sorted by timeline position',
             /sort\(\(a, b\) => \(a\.start \?\? 0\) - \(b\.start \?\? 0\)\)/.test(src));
+        check('the client does not silently cap the cut at 60 clips',
+            !/\.slice\(0,\s*60\)/.test(src));
         check('per-clip transcript is sliced from the source window',
             /w\.start \?\? 0\) >= from/.test(src));
     }

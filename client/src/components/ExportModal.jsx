@@ -419,8 +419,8 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                         {['transparent-png-sequence', 'transparent-mov'].includes(settings.format) && (
                                             <p style={{ margin: 0, fontSize: 10, lineHeight: 1.4, color: 'var(--fg-3)' }}>
                                                 {settings.format === 'transparent-mov'
-                                                    ? 'Exports overlay layers as transparent ProRes 4444 video. The footage base, audio, and captions are excluded.'
-                                                    : 'Exports overlay layers as transparent PNG frames. The footage base, audio, and captions are excluded.'}
+                                                    ? 'Exports overlay layers and captions as transparent ProRes 4444 video. The footage base and audio are excluded.'
+                                                    : 'Exports overlay layers and captions as transparent PNG frames. The footage base and audio are excluded.'}
                                             </p>
                                         )}
                                     </div>

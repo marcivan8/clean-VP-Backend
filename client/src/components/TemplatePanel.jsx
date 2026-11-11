@@ -717,7 +717,7 @@ const TemplateEditor = ({ trackId, clip }) => {
                 </div>
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.particles')}</div>
                 <div className="grid grid-cols-3 gap-2">
-                    {number3D(t('templates.scene3d.particleCount'), scene3d.particles?.count ?? 0, value => update3DScene({ particles: { ...(scene3d.particles || {}), count: Math.max(0, Math.min(500, Math.round(value))) } }))}
+                    {number3D(t('templates.scene3d.particleCount'), scene3d.particles?.count ?? 0, value => update3DScene({ particles: { ...(scene3d.particles || {}), count: Math.max(0, Math.min(2_000, Math.round(value))) } }))}
                     {number3D(t('templates.scene3d.particleSize'), scene3d.particles?.size ?? 5, value => update3DScene({ particles: { ...(scene3d.particles || {}), size: value } }))}
                     {number3D(t('templates.scene3d.particleSpeed'), scene3d.particles?.speed ?? 0.18, value => update3DScene({ particles: { ...(scene3d.particles || {}), speed: value } }))}
                 </div>

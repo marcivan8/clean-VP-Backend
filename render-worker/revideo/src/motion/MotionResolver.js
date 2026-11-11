@@ -41,7 +41,44 @@ import { pointsToBezierSpline } from './SpatialMotion.js';
 import { applyAudioReactiveMotion } from './AudioReactive.js';
 
 const isTrackValue = value => Number.isFinite(value)
-    || (Array.isArray(value) && value.length > 0 && value.every(Number.isFinite));
+    || (Array.isArray(value) && value.length > 0 && value.some(Number.isFinite));
+
+function recoverVector(value, point, keyframes, fallback) {
+    if (!Array.isArray(value)) return value;
+    return value.map((channel, channelIndex) => {
+        if (Number.isFinite(channel)) return channel;
+        let nearest = null;
+        for (let index = 0; index < keyframes.length; index++) {
+            const candidate = keyframes[index];
+            const candidateTime = Number(candidate?.time);
+            const candidateValue = candidate?.value;
+            const candidateChannel = Array.isArray(candidateValue) ? candidateValue[channelIndex] : NaN;
+            if (!Number.isFinite(candidateTime) || !isTrackValue(candidateValue) || !Number.isFinite(candidateChannel)) continue;
+            // The old normalized track first collapsed duplicate timestamps,
+            // then recovered malformed vector channels from the remaining
+            // keys. Do not borrow a component from a duplicate that was
+            // superseded by a later authored, valid key at that same time.
+            let superseded = false;
+            for (let later = index + 1; later < keyframes.length; later++) {
+                const next = keyframes[later];
+                const nextTime = Number(next?.time);
+                const nextValue = Array.isArray(next?.value) ? next.value : Number(next?.value);
+                if (nextTime === candidateTime && isTrackValue(nextValue)) {
+                    superseded = true;
+                    break;
+                }
+            }
+            if (superseded) continue;
+            const distance = Math.abs(candidateTime - point.time);
+            if (!nearest || distance < nearest.distance
+                || (distance === nearest.distance && index > nearest.index)) {
+                nearest = { value: candidateChannel, distance, index };
+            }
+        }
+        const fallbackChannel = Array.isArray(fallback) ? fallback[channelIndex] : NaN;
+        return nearest?.value ?? (Number.isFinite(fallbackChannel) ? fallbackChannel : 0);
+    });
+}
 
 function interpolateTrackValue(from, to, progress) {
     if (Number.isFinite(from) && Number.isFinite(to)) return from + (to - from) * progress;
@@ -57,27 +94,46 @@ function interpolateTrackValue(from, to, progress) {
 /** Sample a scalar or numeric-vector track using the incoming key's easing. */
 export function sampleKeyframeTrack(keyframes, localTime, fallback = 0) {
     if (!Array.isArray(keyframes) || keyframes.length === 0) return fallback;
-    const track = keyframes.map((keyframe, index) => ({
-        time: Number(keyframe?.time), value: Array.isArray(keyframe?.value) ? [...keyframe.value] : Number(keyframe?.value), easing: keyframe?.easing, index,
-    })).filter(point => Number.isFinite(point.time) && isTrackValue(point.value))
-        .sort((a, b) => a.time - b.time || a.index - b.index);
-    if (!track.length) return fallback;
-    const unique = [];
-    for (const point of track) {
-        if (unique.at(-1)?.time === point.time) unique[unique.length - 1] = point;
-        else unique.push(point);
-    }
+    // Resolve neighboring keys in one pass instead of allocating, filtering,
+    // and sorting a new track for every property on every rendered frame.
+    // When times are duplicated, the last authored key wins, matching the
+    // stable-sort + deduplication behavior used by the previous sampler.
     const at = Number.isFinite(Number(localTime)) ? Number(localTime) : 0;
-    if (at <= unique[0].time) return unique[0].value;
-    const last = unique.at(-1);
-    if (at >= last.time) return last.value;
-    for (let i = 0; i < unique.length - 1; i++) {
-        const from = unique[i], to = unique[i + 1];
-        if (at < from.time || at >= to.time) continue;
-        const progress = (at - from.time) / (to.time - from.time);
-        return interpolateTrackValue(from.value, to.value, resolveEasing(to.easing || 'linear')(clamp(progress, 0, 1)));
+    let first = null, last = null, from = null, to = null;
+    for (let index = 0; index < keyframes.length; index++) {
+        const keyframe = keyframes[index];
+        const time = Number(keyframe?.time);
+        const rawValue = keyframe?.value;
+        const value = Array.isArray(rawValue) ? rawValue : Number(rawValue);
+        if (!Number.isFinite(time) || !isTrackValue(value)) continue;
+        const point = { time, value, easing: keyframe?.easing, index };
+        if (!first || time < first.time || (time === first.time && index > first.index)) first = point;
+        if (!last || time > last.time || (time === last.time && index > last.index)) last = point;
+        if (time <= at) {
+            if (!from || time > from.time || (time === from.time && index > from.index)) from = point;
+        } else if (!to || time < to.time || (time === to.time && index > to.index)) {
+            to = point;
+        }
     }
-    return last.value;
+    if (!first) return fallback;
+    if (at <= first.time) return recoverVector(first.value, first, keyframes, fallback);
+    if (at >= last.time) return recoverVector(last.value, last, keyframes, fallback);
+    if (!from || !to) return from ? recoverVector(from.value, from, keyframes, fallback) : fallback;
+    const progress = (at - from.time) / (to.time - from.time);
+    const eased = resolveEasing(to.easing || 'linear')(clamp(progress, 0, 1));
+    if (Array.isArray(from.value) || Array.isArray(to.value)) {
+        const fromValue = recoverVector(from.value, from, keyframes, fallback);
+        const toValue = recoverVector(to.value, to, keyframes, fallback);
+        // Dimension changes or malformed vector channels have no stable
+        // component mapping. Hold the nearest recovered authored vector;
+        // complete same-dimension vectors continue to interpolate.
+        const completeVectors = Array.isArray(from.value) && Array.isArray(to.value)
+            && from.value.length === to.value.length
+            && from.value.every(Number.isFinite) && to.value.every(Number.isFinite);
+        if (!completeVectors) return eased < 0.5 ? fromValue : toValue;
+        return interpolateTrackValue(fromValue, toValue, eased);
+    }
+    return interpolateTrackValue(from.value, to.value, eased);
 }
 
 /**
@@ -94,66 +150,60 @@ export function sampleAnimation(animation, localTime) {
     const kfs = animation?.keyframes;
     if (!Array.isArray(kfs) || kfs.length === 0) return {};
     const at = Number.isFinite(Number(localTime)) ? Number(localTime) : 0;
-
-    // Which properties does this animation address at all?
-    const touched = new Set();
-    for (const kf of kfs) {
-        if (!kf?.properties || typeof kf.properties !== 'object') continue;
-        for (const p of Object.keys(kf.properties || {})) touched.add(p);
-    }
-    if (touched.size === 0) return {};
-
-    const out = {};
-    for (const prop of touched) {
-        // Only keyframes that actually specify this property take part —
-        // a keyframe list is usually sparse per-property.
-        const track = [];
-        for (let index = 0; index < kfs.length; index++) {
-            const kf = kfs[index];
-            if (!kf?.properties || kf.properties[prop] === undefined || kf.properties[prop] === null || kf.properties[prop] === '') continue;
-            const time = Number(kf.time), value = Number(kf.properties[prop]);
-            if (!Number.isFinite(time) || !Number.isFinite(value)) continue;
-            track.push({ time, value, easing: kf.easingByProperty?.[prop] || kf.easing, index });
-        }
-        track.sort((a, b) => a.time - b.time || a.index - b.index);
-        if (track.length === 0) continue;
-
-        // A later-authored keyframe at the same timestamp deterministically
-        // replaces the earlier value instead of creating a zero-width segment.
-        const uniqueTrack = [];
-        for (const point of track) {
-            if (uniqueTrack.at(-1)?.time === point.time) uniqueTrack[uniqueTrack.length - 1] = point;
-            else uniqueTrack.push(point);
-        }
-
-        if (at <= uniqueTrack[0].time) {
-            out[prop] = uniqueTrack[0].value;
-            continue;
-        }
-        const last = uniqueTrack[uniqueTrack.length - 1];
-        if (at >= last.time) {
-            out[prop] = last.value;
-            continue;
-        }
-
-        // Find the bracketing pair.
-        let from = uniqueTrack[0];
-        let to = last;
-        for (let i = 0; i < uniqueTrack.length - 1; i++) {
-            if (at >= uniqueTrack[i].time && at <= uniqueTrack[i + 1].time) {
-                from = uniqueTrack[i];
-                to = uniqueTrack[i + 1];
-                break;
+    // Track each property's endpoints and neighbors while walking authored
+    // keys once. This avoids allocating and sorting a separate track for
+    // every animated property on every preview/export frame.
+    const tracks = new Map();
+    for (let index = 0; index < kfs.length; index++) {
+        const keyframe = kfs[index];
+        const properties = keyframe?.properties;
+        if (!properties || typeof properties !== 'object') continue;
+        const time = Number(keyframe.time);
+        if (!Number.isFinite(time)) continue;
+        for (const [property, rawValue] of Object.entries(properties)) {
+            if (rawValue === undefined || rawValue === null || rawValue === '') continue;
+            const value = Number(rawValue);
+            if (!Number.isFinite(value)) continue;
+            const point = {
+                time,
+                value,
+                easing: keyframe.easingByProperty?.[property] || keyframe.easing,
+                index,
+            };
+            let track = tracks.get(property);
+            if (!track) {
+                track = { first: point, last: point, from: null, to: null };
+                tracks.set(property, track);
+            }
+            if (time < track.first.time || (time === track.first.time && index > track.first.index)) track.first = point;
+            if (time > track.last.time || (time === track.last.time && index > track.last.index)) track.last = point;
+            if (time <= at) {
+                if (!track.from || time > track.from.time || (time === track.from.time && index > track.from.index)) track.from = point;
+            } else if (!track.to || time < track.to.time || (time === track.to.time && index > track.to.index)) {
+                track.to = point;
             }
         }
+    }
 
+    const out = {};
+    for (const [property, track] of tracks) {
+        if (at <= track.first.time) {
+            out[property] = track.first.value;
+            continue;
+        }
+        if (at >= track.last.time) {
+            out[property] = track.last.value;
+            continue;
+        }
+        const from = track.from, to = track.to;
+        if (!from || !to) continue;
         const span = to.time - from.time;
         const progress = span > 0 ? (at - from.time) / span : 1;
         // Per-keyframe easing wins over the animation's default — this is what
         // lets a single "pop" animation ease in fast and settle out slowly.
         const ease = resolveEasing(to.easing || animation.easing);
         const t = ease(clamp(progress, 0, 1));
-        out[prop] = from.value + (to.value - from.value) * t;
+        out[property] = from.value + (to.value - from.value) * t;
     }
     return out;
 }
@@ -243,8 +293,19 @@ export function resolveMotionAt(layer, absoluteTime, context = {}) {
     const end = start + duration;
     const visible = absoluteTime >= start && absoluteTime < end;
 
-    const animations = Array.isArray(layer.animations) ? layer.animations : [];
+    // Timeline legacy tracks store absolute transform values. Resolve them
+    // against clip-local time before applying Motion Animation deltas and
+    // procedural overrides, matching the editor's keyframe convention.
     const layerLocal = absoluteTime - start;
+    const legacyKeyframes = layer.legacyKeyframes && typeof layer.legacyKeyframes === 'object'
+        ? layer.legacyKeyframes : {};
+    for (const prop of ['x', 'y', 'scale', 'scaleX', 'scaleY', 'rotation', 'opacity']) {
+        if (!Array.isArray(legacyKeyframes[prop]) || legacyKeyframes[prop].length === 0) continue;
+        const value = sampleKeyframeTrack(legacyKeyframes[prop], layerLocal, base[prop]);
+        if (Number.isFinite(value)) base[prop] = prop === 'opacity' ? clamp(value, 0, 1) : value;
+    }
+
+    const animations = Array.isArray(layer.animations) ? layer.animations : [];
     const expressions = layer.expressions && typeof layer.expressions === 'object' ? layer.expressions : {};
     const expressionLayers = Array.isArray(layer.expressionLayers) ? layer.expressionLayers : [];
     if (animations.length === 0 && !Object.keys(expressions).length && !layer.motionPath && expressionLayers.length === 0 && !layer.audioReactive) return { ...base, visible };

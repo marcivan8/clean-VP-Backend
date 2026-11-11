@@ -32,6 +32,7 @@ export const EFFECT_DEFINITIONS = {
     // GPU EFFECTS (WebGL Shaders - Real-time)
     // ========================================================================
 
+
     // === Blur Effects ===
     blur_gaussian: {
         name: 'Gaussian Blur',

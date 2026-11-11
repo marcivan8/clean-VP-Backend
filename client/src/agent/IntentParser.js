@@ -427,6 +427,29 @@ export class IntentParser {
         const prompt = userPrompt.trim();
         const structuredContext = ContextGenerator.getStructuredContext();
 
+        // Auto mode can only execute a step when the parser gives it a
+        // concrete operation. Its default interview request is deliberately
+        // concise, but the API parser has sometimes treated "edit this
+        // interview video" as an underspecified question and returned a
+        // clarification instead of an edit. In this product, that exact
+        // request means the established interview clean-up playbook. Keep the
+        // match narrow so requests with additional instructions still go
+        // through the normal parser/planner path. The style guidance suffix is
+        // metadata added by StyleAutopilot, not part of the user's request.
+        if (/^edit this interview video\s*(?:\n\s*Editing style:\s*Interview\..*)?$/i.test(prompt)) {
+            return this.validateAndNormalize({
+                intent: 'long_form_build',
+                operation: 'long_form_edit',
+                parameters: {
+                    editMode: 'CLEAN_EDIT',
+                    actions: ['silence_removal', 'remove_filler_words', 'remove_repetition', 'enhance_audio'],
+                    reason: 'Default interview edit: clean pauses, filler words and repeated takes, then enhance the voice.',
+                },
+                confidence: 'HIGH',
+                missingParameters: [],
+            }, prompt);
+        }
+
         // R92: "what did you do / why did you cut that / explain the edits" is a
         // recap of the saved ledger. Checked first: those questions otherwise
         // read as chat, or as a cut command because they contain "cut".

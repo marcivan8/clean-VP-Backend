@@ -4,6 +4,7 @@ import { applyStyleToAnalysis } from './ContentAnalyzer.js';
 import { buildTimelineSourceMap } from '../timeline/targetRangeResolver.js';
 import { buildAssetManifest, manifestSummary } from './AssetManifest.js';
 import { buildStyleReferencePlan } from '../motion/StyleReferenceAdapter.js';
+import { isReferenceAsset } from '../utils/assetRoles.js';
 
 export class ContextGenerator {
     static getTimelineContext() {
@@ -36,8 +37,8 @@ export class ContextGenerator {
         if (editingStyle) displayStr += `- Editing style: ${editingStyle.id}; mode: ${editingStyle.mode}. Explicit user instructions override style defaults; use the style only for choices the user left open.\n`;
         const assetManifest = buildAssetManifest(assets);
         const editableAssets = assetManifest.filter(asset => asset.editable);
-        const styleReferenceAssets = (assets || []).filter(asset => asset?.assistantReference === true
-            && ['video', 'image'].includes(String(asset.type || '').toLowerCase()));
+        const styleReferenceAssets = (assets || []).filter(asset => isReferenceAsset(asset)
+            && /^(video|image)(\/|$)/i.test(String(asset.type || '')));
         const latestStyleReference = styleReferenceAssets[styleReferenceAssets.length - 1] || null;
         const referenceStyle = latestStyleReference
             ? buildStyleReferencePlan(latestStyleReference.visualStyleProfile)
@@ -51,13 +52,19 @@ export class ContextGenerator {
             displayStr += `- Style reference: ${latestStyleReference.name || 'Attached reference'}; analysis=${referenceAnalysisStatus}${referenceStyle ? `, confidence=${referenceStyle.confidence.toFixed(2)}, sampled=${referenceStyle.evidence.sampleCount ?? 'unknown'} frame(s)` : ''}. It is design guidance only, never an edit source.\n`;
             if (referenceStyle) displayStr += `  Supported visual guidance: ${JSON.stringify(referenceStyle)}\n`;
         }
-        if (editableAssets.length) {
-            displayStr += `- Editable media bin assets (${editableAssets.length}; complete inventory follows):\n`;
-            editableAssets.forEach(asset => {
-                const duration = asset.duration;
-                displayStr += `  ${asset.id}: ${asset.name} (${asset.type}, role=${asset.role}, analysis=${asset.analysisStatus}, confidence=${asset.confidence ?? 'unknown'}${Number.isFinite(duration) && duration > 0 ? `, ${duration.toFixed(1)}s` : ''})${asset.description ? ` — ${asset.description}` : ''}\n`;
-            });
-            displayStr += `Use only these editable media-bin assets as edit sources. Reference-only materials are excluded.\n`;
+        if (assetManifest.length) {
+            const roleCounts = assetManifest.reduce((counts, asset) => {
+                counts[asset.role] = (counts[asset.role] || 0) + 1;
+                return counts;
+            }, {});
+            const analysisCounts = assetManifest.reduce((counts, asset) => {
+                counts[asset.analysisStatus] = (counts[asset.analysisStatus] || 0) + 1;
+                return counts;
+            }, {});
+            const roles = Object.entries(roleCounts).map(([role, count]) => `${role}=${count}`).join(', ');
+            const analysis = Object.entries(analysisCounts).map(([status, count]) => `${status}=${count}`).join(', ');
+            displayStr += `- Media inventory: ${assetManifest.length} assets (${roles}); analysis status (${analysis}).\n`;
+            displayStr += `The complete named inventory, IDs, descriptions, roles, and analysis states are in structured assetManifest.assets. Use that complete manifest to identify edit sources; reference-only assets are guidance, never edit sources.\n`;
         }
         if (beatMarkers && beatMarkers.length > 0) {
             displayStr += `- Beat Markers Detected: ${beatMarkers.length}\n`;

@@ -32,6 +32,12 @@ import { buildPreset, LEGACY_ANIMATION_MAP } from './MotionPresets.js';
 // R81 — zero-cost bespoke-animation intensity scaling
 import { scaleAnimations } from './AnimationSynthesizer.js';
 
+const numberOrNull = value => {
+    if (value === null || value === undefined || value === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+};
+
 /** Map a legacy clip/track type onto a motion layer kind. */
 function inferKind(clip, trackType) {
     const t = clip?.type || trackType;
@@ -65,7 +71,7 @@ function inferKind(clip, trackType) {
  *   3. the clip's caption style pack's `animationPreset`
  * Returns [] when none apply, which resolves to a completely static layer.
  */
-function resolveAnimations(clip) {
+export function resolveClipAnimations(clip) {
     const own = Array.isArray(clip?.animations) ? clip.animations : [];
     // User authored animations still override the pack. Automatic moment and
     // caption-intelligence moves are additive so the style's entrance remains.
@@ -156,13 +162,16 @@ export function clipToMotionLayer(clip, track) {
     // text clips use. Numeric coords win when present; otherwise the enum is
     // translated to the same percentages TextOverlay and exportProcessor use,
     // so all three agree on where 'bottom' actually is.
-    let x = Number.isFinite(Number(clip.x)) ? Number(clip.x) : null;
-    let y = Number.isFinite(Number(clip.y)) ? Number(clip.y) : null;
+    let x = numberOrNull(clip.x);
+    let y = numberOrNull(clip.y);
     if (x === null || y === null) {
         if (clip.position === 'top')         { x = 50; y = 12; }
         else if (clip.position === 'bottom') { x = 50; y = 85; }
         else                                 { x = 50; y = 50; }
     }
+    const scale = numberOrNull(clip.scale) ?? 1;
+    const scaleX = numberOrNull(clip.scaleX);
+    const scaleY = numberOrNull(clip.scaleY);
 
     return createMotionLayer({
         id:        `motion-${clip.id}`,
@@ -174,12 +183,19 @@ export function clipToMotionLayer(clip, track) {
         duration:  Number(clip.duration) || 0,
         x,
         y,
-        scale:     Number.isFinite(Number(clip.scale)) ? Number(clip.scale) : 1,
-        scaleX:    Number.isFinite(Number(clip.scaleX)) ? Number(clip.scaleX) / (Number(clip.scale) || 1) : 1,
-        scaleY:    Number.isFinite(Number(clip.scaleY)) ? Number(clip.scaleY) / (Number(clip.scale) || 1) : 1,
-        rotation:  Number.isFinite(Number(clip.rotation)) ? Number(clip.rotation) : 0,
-        opacity:   Number.isFinite(Number(clip.opacity)) ? Number(clip.opacity) : 1,
-        animations: resolveAnimations(clip),
+        scale,
+        scaleX:    scaleX !== null ? scaleX / (scale || 1) : 1,
+        scaleY:    scaleY !== null ? scaleY / (scale || 1) : 1,
+        rotation:  numberOrNull(clip.rotation) ?? 0,
+        opacity:   numberOrNull(clip.opacity) ?? 1,
+        // VideoPlayer already evaluates base-video camera tracks in its own
+        // framing path. For text and overlay layers, pass the legacy absolute
+        // transform tracks into the shared resolver so preview and export
+        // evaluate them on the same clip-local clock.
+        legacyKeyframes: (track?.type === 'overlay' || clip.type !== 'video')
+            && clip.keyframes && typeof clip.keyframes === 'object' && !Array.isArray(clip.keyframes)
+            ? clip.keyframes : {},
+        animations: resolveClipAnimations(clip),
         audioReactive: clip.audioReactive && typeof clip.audioReactive === 'object' ? clip.audioReactive : null,
         motionPath: clip.motionPath && Array.isArray(clip.motionPath.points) ? clip.motionPath : null,
         expressions: clip.expressions && typeof clip.expressions === 'object' ? clip.expressions : {},
@@ -336,6 +352,7 @@ export function trackToMotionLayers(track) {
 
 export default {
     clipToMotionLayer,
+    resolveClipAnimations,
     motionLayerToClipUpdates,
     applyPresetToClip,
     trackToMotionLayers,

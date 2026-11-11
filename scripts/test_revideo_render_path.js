@@ -66,6 +66,24 @@ function loadESM(rel, extraExports) {
     return new Function(src)();
 }
 
+function loadWorkerMotionResolver() {
+    const easing = loadESM('render-worker/revideo/src/motion/Easing.js', 'resolveEasing, clamp');
+    const schema = loadESM('render-worker/revideo/src/motion/MotionSchema.js', 'ANIMATABLE_PROPS, COMPOSITION_RULES, IDENTITY');
+    const expressions = loadESM('render-worker/revideo/src/motion/MotionExpression.js', 'evaluateMotionExpression');
+    const spatial = loadESM('render-worker/revideo/src/motion/SpatialMotion.js', 'pointsToBezierSpline');
+    const audio = loadESM('render-worker/revideo/src/motion/AudioReactive.js', 'applyAudioReactiveMotion');
+    let src = read('render-worker/revideo/src/motion/MotionResolver.js')
+        .replace(/^\s*import\s+[^;]+;\s*$/gm, '')
+        .replace(/^\s*export\s+default\s+\{[\s\S]*?\};\s*$/gm, '')
+        .replace(/\bexport\s+(const|function|class|let)\b/g, '$1');
+    src += '\nreturn { resolveMotionAt };';
+    // eslint-disable-next-line no-new-func
+    return new Function('resolveEasing', 'clamp', 'ANIMATABLE_PROPS', 'COMPOSITION_RULES', 'IDENTITY',
+        'evaluateMotionExpression', 'pointsToBezierSpline', 'applyAudioReactiveMotion', src)(
+        easing.resolveEasing, easing.clamp, schema.ANIMATABLE_PROPS, schema.COMPOSITION_RULES, schema.IDENTITY,
+        expressions.evaluateMotionExpression, spatial.pointsToBezierSpline, audio.applyAudioReactiveMotion);
+}
+
 section('2 · RevideoLayerAdapter.js — resolution priority (CJS-strip-eval, resolved inline since it composes 3 sibling modules)');
 {
     // The adapter imports from MotionSchema.js and MotionPresets.js — rather
@@ -98,14 +116,62 @@ section('2 · RevideoLayerAdapter.js — resolution priority (CJS-strip-eval, re
     const layerPack = mod.clipToLayer({ id: 'c3', type: 'text', start: 0, duration: 2, captionStyle: { animationPreset: 'slide-up' } }, { type: 'text' });
     check('priority 3: captionStyle.animationPreset used when nothing else is set', layerPack.animations.length > 0 && layerPack.animations[0].presetId === 'slide-up');
 
+    const layerAutoWithLegacyStyle = mod.clipToLayer({
+        id: 'c-auto', type: 'text', duration: 2, animation: 'pop',
+        animations: [{ id: 'moment', source: 'auto-animate', type: 'move', duration: 0.5, keyframes: [] }],
+    }, { type: 'text' });
+    check('automatic moment animation keeps the legacy style entrance on export',
+        layerAutoWithLegacyStyle.animations.length === 2
+        && layerAutoWithLegacyStyle.animations[0].presetId === 'pop'
+        && layerAutoWithLegacyStyle.animations[1].id === 'moment');
+
+    const layerCaptionAuto = mod.clipToLayer({
+        id: 'c-caption-auto', type: 'text', duration: 2,
+        captionStyle: { animationPreset: 'slide-up' },
+        animations: [{ id: 'word-highlight', source: 'caption-intelligence', type: 'highlight', duration: 0.3, keyframes: [] }],
+    }, { type: 'text' });
+    check('caption-intelligence animation keeps the caption style entrance on export',
+        layerCaptionAuto.animations.length === 2
+        && layerCaptionAuto.animations[0].presetId === 'slide-up'
+        && layerCaptionAuto.animations[1].id === 'word-highlight');
+
+    const layerExplicitOverridesStyle = mod.clipToLayer({
+        id: 'c-explicit', type: 'text', duration: 2, animation: 'pop',
+        animations: [{ id: 'authored', source: 'user', type: 'fade', duration: 0.5, keyframes: [] }],
+    }, { type: 'text' });
+    check('user-authored animation replaces the style entrance on export',
+        layerExplicitOverridesStyle.animations.length === 1
+        && layerExplicitOverridesStyle.animations[0].id === 'authored');
+
     const layerNone = mod.clipToLayer({ id: 'c4', type: 'text', start: 0, duration: 2 }, { type: 'text' });
     check('no animation source → empty array, not a throw', Array.isArray(layerNone.animations) && layerNone.animations.length === 0);
     const layerReactive = mod.clipToLayer({ id: 'c5', type: 'text', audioReactive: { assetId: 'music-1', target: 'scale', amount: 0.5 } }, { type: 'text' });
     check('clip audio reactive settings survive worker adaptation', layerReactive.audioReactive?.assetId === 'music-1');
 
+    const nestedExpressionLayer = mod.clipToLayer({
+        id: 'c6', start: 3, duration: 4,
+        compositionStack: [{
+            id: 'parent', start: 1, duration: 8, originX: 50, originY: 50,
+            frameW: 1920, frameH: 1080,
+            transformExpressions: { x: '10 * sin(time)', rotation: '5' },
+        }],
+    }, { type: 'text' });
+    check('parent composition transform expressions survive worker adaptation',
+        nestedExpressionLayer.expressionLayers?.length === 1
+        && nestedExpressionLayer.expressionLayers[0].startTime === 1
+        && nestedExpressionLayer.expressionLayers[0].duration === 8
+        && nestedExpressionLayer.expressionLayers[0].expressions.x === '10 * sin(time)'
+        && nestedExpressionLayer.expressionLayers[0].originX === 50);
+    const resolvedNestedExpression = loadWorkerMotionResolver().resolveMotionAt(nestedExpressionLayer, 3.5);
+    check('worker resolver applies parent composition transform expressions at export time',
+        Math.abs(resolvedNestedExpression.x - (50 + 10 * Math.sin(2.5))) < 1e-8
+        && resolvedNestedExpression.rotation === 5,
+        JSON.stringify(resolvedNestedExpression));
+
     check('inferKind: caption when words present', mod.inferKind({ type: 'text', words: [{ text: 'hi', start: 0, end: 1 }] }, 'text') === 'caption');
     check('inferKind: plain text otherwise', mod.inferKind({ type: 'text' }, 'text') === 'text');
     check('inferKind: overlay clip with no own type defaults to image', mod.inferKind({}, 'overlay') === 'image');
+    check('inferKind: template components render as sticker-like layers', mod.inferKind({ type: 'template' }, 'overlay') === 'sticker');
 
     check('null clip does not throw', mod.clipToLayer(null, {}) === null);
 }
@@ -274,7 +340,7 @@ section('4b · render-worker/Dockerfile — real codec support');
     check('PUPPETEER_EXECUTABLE_PATH points at the installed Chrome binary', /PUPPETEER_EXECUTABLE_PATH=\/usr\/bin\/google-chrome-stable/.test(dockerfile));
 }
 
-section('5 · jobs/exportProcessor.js — opt-in wiring, mutual exclusion, fails open');
+section('5 · jobs/exportProcessor.js — opt-in text renderer and compositor-safe fallback');
 {
     const exp = read('jobs/exportProcessor.js');
     check('defines renderViaRevideoWorker', /async function renderViaRevideoWorker/.test(exp));
@@ -283,11 +349,12 @@ section('5 · jobs/exportProcessor.js — opt-in wiring, mutual exclusion, fails
     check('defines resolvePublicBackendUrl (reused, not re-derived)', /function resolvePublicBackendUrl/.test(exp));
     check('useRevideo is opt-in via REVIDEO_RENDER_ENABLED', /REVIDEO_RENDER_ENABLED.*===\s*'1'/.test(exp));
     check('useRevideo requires RENDER_WORKER_URL to be configured', /!!process\.env\.RENDER_WORKER_URL/.test(exp));
-    check('useRevideo requires an actual text or overlay track (no-op otherwise)', /revideoTextTracks\.length > 0 \|\| revideoOverlayTracks\.length > 0/.test(exp));
+    check('useRevideo requires a supported text track (no-op otherwise)', /revideoTextTracks\.length > 0/.test(exp));
 
-    check('STEP 2.5 (compositor) is skipped when useRevideo — no double-compositing', /rawPlan && \(rawPlan\.overlays \|\| \[\]\)\.length > 0 && process\.env\.COMPOSITOR_DISABLED !== '1' && !useRevideo/.test(exp));
+    check('STEP 2.5 composites visual layers independently of Revideo', /rawPlan && \(rawPlan\.overlays \|\| \[\]\)\.length > 0 && process\.env\.COMPOSITOR_DISABLED !== '1'/.test(exp));
+    check('Revideo receives text tracks only, leaving visual assets on the compositor path', /tracks: revideoTextTracks/.test(exp));
     check('STEP 4 (drawtext captions) is skipped only when Revideo succeeded — no double captions, no dropped captions (R92)', /textTracks\.length > 0 && !revideoSucceeded/.test(exp));
-    check('R92: worker health is checked before the compositor is skipped', /useRevideo && !\(await revideoWorkerHealthy\(\)\)/.test(exp) && /async function revideoWorkerHealthy/.test(exp));
+    check('worker health is checked before optional text rendering', /useRevideo && !\(await revideoWorkerHealthy\(\)\)/.test(exp) && /async function revideoWorkerHealthy/.test(exp));
 
     check('Revideo call is wrapped in try/catch (fails open)', /catch \(revideoErr\)/.test(exp));
     check('failure sets revideoWarning rather than throwing the whole export', /revideoWarning = revideoErr\.message/.test(exp));

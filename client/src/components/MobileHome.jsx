@@ -18,6 +18,12 @@ function formatDuration(secs) {
     return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+// Large mobile selections can contain dozens of long video files. Creating a
+// preview URL and asking Safari to inspect every video before upload adds work
+// without helping the user choose; keep previews for the first few items and
+// retain a lightweight file tile for every remaining selection.
+const MAX_SELECTION_PREVIEWS = 8;
+
 const iconBtn = {
     width: 44, height: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
     background: 'transparent', border: 0, borderRadius: 12, color: 'var(--fg-2)', padding: 0, flexShrink: 0,
@@ -101,11 +107,11 @@ export default function MobileHome({
     const appendSelectedFiles = (input) => {
         const files = Array.from(input.files || []);
         input.value = '';
-        if (files.length) setSelectedFiles(current => [...current, ...files].slice(0, 20));
+        if (files.length) setSelectedFiles(current => [...current, ...files]);
     };
 
     useEffect(() => {
-        const urls = selectedFiles.map(file => URL.createObjectURL(file));
+        const urls = selectedFiles.slice(0, MAX_SELECTION_PREVIEWS).map(file => URL.createObjectURL(file));
         setFilePreviews(urls);
         return () => urls.forEach(url => { if (url) URL.revokeObjectURL(url); });
     }, [selectedFiles]);
@@ -137,11 +143,11 @@ export default function MobileHome({
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: 'var(--f-mono)', fontSize: 10.5, letterSpacing: '.1em', color: 'var(--fg-3)' }}><span>{t('mobileHome.selected', 'SELECTED')}</span><span style={{ color: '#69e6ed' }}>{selectedFiles.length} {t('mobileHome.items', 'items')}</span></div>
                         <div style={{ display: 'flex', gap: 9, overflowX: 'auto', paddingBottom: 2 }}>
                             {selectedFiles.map((file, index) => <div key={`${file.name}-${file.lastModified}-${index}`} style={{ position: 'relative', width: 76, height: 112, flex: 'none', borderRadius: 13, overflow: 'hidden', border: '1px solid rgba(0,210,225,.55)', background: 'linear-gradient(145deg,#18242c,#24152d)', display: 'grid', placeItems: 'center' }}>
-                                {filePreviews[index] ? (file.type?.startsWith('image/') ? <img src={filePreviews[index]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <video src={filePreviews[index]} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />) : <span style={{ color: '#79eaf0' }}>{file.type?.startsWith('image/') ? <ImageIcon size={20} /> : <Camera size={20} />}</span>}
+                                {filePreviews[index] ? (file.type?.startsWith('image/') ? <img src={filePreviews[index]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <video src={filePreviews[index]} muted playsInline preload="none" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />) : <span style={{ color: '#79eaf0' }}>{file.type?.startsWith('image/') ? <ImageIcon size={20} /> : <Camera size={20} />}</span>}
                                 <button type="button" aria-label={`${t('mobileHome.removeFile', 'Remove')} ${file.name}`} onClick={() => setSelectedFiles(files => files.filter((_, i) => i !== index))} style={{ position: 'absolute', top: 5, right: 5, width: 23, height: 23, display: 'grid', placeItems: 'center', borderRadius: 99, border: '1px solid rgba(255,255,255,.4)', background: 'rgba(0,0,0,.7)', color: 'white' }}><X size={14} /></button>
                                 <span style={{ position: 'absolute', left: 5, right: 5, bottom: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '3px 5px', borderRadius: 6, background: 'rgba(0,0,0,.68)', color: 'white', fontSize: 9 }}>{file.name}</span>
                             </div>)}
-                            {selectedFiles.length < 20 && <label aria-label={t('mobileHome.addMore', 'Add more media')} style={{ position: 'relative', width: 76, height: 112, flex: 'none', display: 'grid', placeItems: 'center', borderRadius: 13, border: '1px dashed var(--line-strong)', background: 'rgba(255,255,255,.02)', color: 'var(--fg-3)', cursor: 'pointer' }}><Plus size={20} /><input type="file" accept="video/*,image/*" multiple aria-label={t('mobileHome.addMore', 'Add more media')} onChange={e => appendSelectedFiles(e.currentTarget)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }} /></label>}
+                            <label aria-label={t('mobileHome.addMore', 'Add more media')} style={{ position: 'relative', width: 76, height: 112, flex: 'none', display: 'grid', placeItems: 'center', borderRadius: 13, border: '1px dashed var(--line-strong)', background: 'rgba(255,255,255,.02)', color: 'var(--fg-3)', cursor: 'pointer' }}><Plus size={20} /><input type="file" accept="video/*,image/*" multiple aria-label={t('mobileHome.addMore', 'Add more media')} onChange={e => appendSelectedFiles(e.currentTarget)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }} /></label>
                         </div>
                     </>}
                     <button type="button" disabled={!selectedFiles.length || creating} onClick={() => onPickVideo(selectedFiles)} style={{ minHeight: 54, marginTop: 2, border: 0, borderRadius: 999, background: selectedFiles.length ? '#f7f8fb' : 'var(--bg-3)', color: selectedFiles.length ? '#090b10' : 'var(--fg-3)', fontSize: 16, fontWeight: 700, cursor: selectedFiles.length ? 'pointer' : 'default' }}>

@@ -20,6 +20,128 @@
 import { measureSingleLineWidth } from './TextMeasurement.js';
 import { resolveEasing, clamp } from './Easing.js';
 import { activeWordIndex, revealedWordCount } from './CaptionModel.js';
+import { drawSvgPath } from './VectorGraphics.js';
+
+function pathPolyline(pathData, curveSteps = 20) {
+    const subpaths = [];
+    let current = null;
+    const moveTo = (x, y) => { current = [[x, y]]; subpaths.push(current); };
+    const lineTo = (x, y) => {
+        if (!current) moveTo(x, y);
+        else current.push([x, y]);
+    };
+    const sampler = {
+        beginPath() {}, moveTo, lineTo,
+        bezierCurveTo(x1, y1, x2, y2, x3, y3) {
+            const start = current?.at(-1) || [0, 0];
+            for (let index = 1; index <= curveSteps; index++) {
+                const t = index / curveSteps, mt = 1 - t;
+                lineTo(mt ** 3 * start[0] + 3 * mt ** 2 * t * x1 + 3 * mt * t ** 2 * x2 + t ** 3 * x3,
+                    mt ** 3 * start[1] + 3 * mt ** 2 * t * y1 + 3 * mt * t ** 2 * y2 + t ** 3 * y3);
+            }
+        },
+        quadraticCurveTo(x1, y1, x2, y2) {
+            const start = current?.at(-1) || [0, 0];
+            for (let index = 1; index <= curveSteps; index++) {
+                const t = index / curveSteps, mt = 1 - t;
+                lineTo(mt * mt * start[0] + 2 * mt * t * x1 + t * t * x2,
+                    mt * mt * start[1] + 2 * mt * t * y1 + t * t * y2);
+            }
+        },
+        ellipse(cx, cy, rx, ry, rotation, start, end, anticlockwise = false) {
+            let delta = end - start;
+            if (anticlockwise && delta > 0) delta -= Math.PI * 2;
+            if (!anticlockwise && delta < 0) delta += Math.PI * 2;
+            const count = Math.max(curveSteps, Math.ceil(Math.abs(delta) * Math.max(rx, ry) / 5));
+            for (let index = 1; index <= count; index++) {
+                const angle = start + delta * index / count;
+                const ex = rx * Math.cos(angle), ey = ry * Math.sin(angle);
+                lineTo(cx + Math.cos(rotation) * ex - Math.sin(rotation) * ey,
+                    cy + Math.sin(rotation) * ex + Math.cos(rotation) * ey);
+            }
+        },
+        closePath() {
+            if (current?.length) lineTo(current[0][0], current[0][1]);
+        },
+    };
+    drawSvgPath(sampler, pathData);
+    return subpaths.find(points => points.length > 1) || [];
+}
+
+function measurePolyline(points) {
+    const distances = [0];
+    for (let index = 1; index < points.length; index++) {
+        distances.push(distances[index - 1] + Math.hypot(points[index][0] - points[index - 1][0], points[index][1] - points[index - 1][1]));
+    }
+    return { distances, length: distances.at(-1) || 0 };
+}
+
+function pointOnPolyline(points, distances, distance) {
+    const total = distances.at(-1) || 0;
+    const at = clamp(distance, 0, total);
+    let index = 1;
+    while (index < distances.length - 1 && distances[index] < at) index++;
+    const span = distances[index] - distances[index - 1];
+    const ratio = span > 0 ? (at - distances[index - 1]) / span : 0;
+    const a = points[index - 1], b = points[index];
+    return { x: a[0] + (b[0] - a[0]) * ratio, y: a[1] + (b[1] - a[1]) * ratio,
+        angle: Math.atan2(b[1] - a[1], b[0] - a[0]) };
+}
+
+function drawRichTextOnPath(ctx, layout, motionMap, unit, pathSpec) {
+    const points = pathPolyline(pathSpec?.data || pathSpec?.path || '');
+    const { distances, length } = measurePolyline(points);
+    if (points.length < 2 || length < 1) return false;
+    const glyphs = layout.glyphs || [];
+    const naturalWidth = glyphs.reduce((sum, glyph) => sum + Math.max(0, Number(glyph.width) || 0), 0);
+    if (!glyphs.length || naturalWidth < 1) return false;
+    const scaleToFit = Math.min(1, length / naturalWidth);
+    const occupied = naturalWidth * scaleToFit;
+    const align = ['start', 'center', 'end'].includes(pathSpec.align) ? pathSpec.align : 'center';
+    const start = align === 'start' ? 0 : align === 'end' ? length - occupied : (length - occupied) / 2;
+    const side = pathSpec.side === 'right' ? -1 : 1;
+    const offset = Number(pathSpec.offset) || 0;
+    let cursor = 0;
+    for (const glyph of glyphs) {
+        const glyphWidth = Math.max(0, Number(glyph.width) || 0);
+        const at = start + (cursor + glyphWidth / 2) * scaleToFit;
+        cursor += glyphWidth;
+        if (/^\s$/u.test(glyph.char)) continue;
+        const motionKey = unit === 'word' ? glyph.wordIndex : glyph.charIndex;
+        const motion = motionMap?.get(motionKey) || { scale: 1, opacity: 1, translateY: 0, translateX: 0 };
+        if (motion.opacity <= 0) continue;
+        const point = pointOnPolyline(points, distances, at);
+        const normalX = -Math.sin(point.angle) * side, normalY = Math.cos(point.angle) * side;
+        const tangentShift = Number(motion.translateX) || 0;
+        const normalShift = offset + (Number(motion.translateY) || 0);
+        const x = point.x + Math.cos(point.angle) * tangentShift + normalX * normalShift;
+        const y = point.y + Math.sin(point.angle) * tangentShift + normalY * normalShift;
+        ctx.save();
+        ctx.globalAlpha *= motion.opacity;
+        ctx.translate(x, y);
+        ctx.rotate(point.angle);
+        const animatedScale = Number.isFinite(Number(motion.scale)) ? Number(motion.scale) : 1;
+        ctx.scale(animatedScale * scaleToFit, animatedScale * scaleToFit);
+        ctx.font = `${glyph.run.fontStyle} ${glyph.run.fontWeight} ${glyph.run.fontSize}px "${glyph.run.fontFamily}", sans-serif`;
+        if (glyph.run.shadow) {
+            ctx.shadowColor = glyph.run.shadow.color || 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = Number(glyph.run.shadow.blur) || 8;
+            ctx.shadowOffsetX = Number(glyph.run.shadow.offsetX) || 0;
+            ctx.shadowOffsetY = Number(glyph.run.shadow.offsetY) || 2;
+        }
+        const baselineX = -glyphWidth / 2;
+        if (glyph.run.stroke && glyph.run.strokeWidth > 0) {
+            ctx.strokeStyle = glyph.run.stroke;
+            ctx.lineWidth = glyph.run.strokeWidth;
+            ctx.lineJoin = 'round';
+            ctx.strokeText(glyph.char, baselineX, 0);
+        }
+        ctx.fillStyle = glyph.run.color || '#FFFFFF';
+        ctx.fillText(glyph.char, baselineX, 0);
+        ctx.restore();
+    }
+    return true;
+}
 
 /**
  * Normalize an input (string, object, or runs array) into a standard array of text runs.
@@ -700,6 +822,9 @@ export function drawRichTextFrame(ctx, graphic = {}, localTime = 0, opts = {}) {
     const motionMap = animSpec?.preset
         ? sampleTypographyMotion(layout, animSpec, Math.max(0, Number(localTime) || 0), Number(opts.duration ?? opts.durationSec ?? graphic.duration) || 0)
         : null;
-    drawRichText(ctx, layout, { motionMap, unit });
+    const drawnOnPath = graphic.textPath
+        ? drawRichTextOnPath(ctx, layout, motionMap, unit, graphic.textPath)
+        : false;
+    if (!drawnOnPath) drawRichText(ctx, layout, { motionMap, unit });
     return layout;
 }

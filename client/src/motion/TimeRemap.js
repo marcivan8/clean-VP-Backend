@@ -1,6 +1,6 @@
 import { sampleKeyframeTrack } from './MotionResolver.js';
+import { clamp } from './Easing.js';
 
-const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const number = (value, fallback = 0) => value !== null && value !== undefined && value !== ''
     && Number.isFinite(Number(value)) ? Number(value) : fallback;
 
@@ -59,6 +59,45 @@ export function resolveSceneVideoSourceTime(object = {}, time = 0, duration = 1)
     // speeds while still clamping negative authored rates to the UI minimum.
     const videoSpeed = Math.max(0.05, Number(object.videoSpeed) || 1);
     return videoStart + Math.max(0, mappedTime) * videoSpeed;
+}
+
+/**
+ * Resolve an ordinary timeline video overlay's source clock. The legacy clip
+ * offset/speed model remains byte-for-byte compatible unless a source-time
+ * curve has been authored. Curve values are seconds relative to the clip's
+ * source in-point, matching the 3D scene time-remap contract.
+ */
+export function resolveOverlayVideoSourceTime(clip = {}, timelineTime = 0) {
+    const start = number(clip.start ?? clip.startTime, 0);
+    const elapsed = Math.max(0, number(timelineTime) - start);
+    const sourceOffset = Math.max(0, number(clip.offset, 0));
+    const legacySpeed = Number(clip.speed) > 0 ? Number(clip.speed) : 1;
+    const remap = clip.timeRemap && typeof clip.timeRemap === 'object' ? clip.timeRemap : null;
+    const hasCurve = Array.isArray(remap?.keyframes) && remap.keyframes.some(point =>
+        Number.isFinite(Number(point?.time)) && Number.isFinite(Number(point?.value)));
+    if (!hasCurve) return sourceOffset + elapsed * legacySpeed;
+
+    const duration = Math.max(0, number(clip.duration, 0));
+    const localSourceTime = remapSceneObjectTime(remap, elapsed, duration || 1);
+    // Native video playback cannot represent a negative playback rate reliably
+    // across browsers. Keep the mapped timestamp valid; callers resync it from
+    // the timeline clock while playing.
+    return sourceOffset + Math.max(0, localSourceTime);
+}
+
+/** Approximate the local playback rate for a keyframed overlay source clock. */
+export function resolveOverlayVideoPlaybackRate(clip = {}, timelineTime = 0) {
+    const remap = clip.timeRemap && typeof clip.timeRemap === 'object' ? clip.timeRemap : null;
+    const hasCurve = Array.isArray(remap?.keyframes) && remap.keyframes.some(point =>
+        Number.isFinite(Number(point?.time)) && Number.isFinite(Number(point?.value)));
+    if (!hasCurve) return Number(clip.speed) > 0 ? Number(clip.speed) : 1;
+    const start = number(clip.start ?? clip.startTime, 0);
+    const elapsed = Math.max(0, number(timelineTime) - start);
+    const duration = Math.max(0, number(clip.duration, 0)) || 1;
+    const step = 1 / 120;
+    const current = remapSceneObjectTime(remap, elapsed, duration);
+    const next = remapSceneObjectTime(remap, elapsed + step, duration);
+    return clamp(Math.abs(next - current) / step, 0.05, 8);
 }
 
 /** Largest source time the renderer requests across its output frames. */

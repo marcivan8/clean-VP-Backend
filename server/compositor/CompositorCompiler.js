@@ -39,6 +39,42 @@
 const hasNumericValue = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
 const SHAPE_MASKS = new Set(['ellipse', 'circle', 'rectangle', 'rounded-rectangle', 'capsule', 'callout', 'polygon', 'star', 'arrow']);
 
+/**
+ * Scene layers are flattened onto timeline tracks, so siblings in a nested
+ * composition can be separated in z-order by unrelated overlays. Reassemble
+ * each composition as an atomic layer at its first child's position before
+ * compiling its isolated buffer. Child ordering within each group stays stable.
+ */
+function orderCompositionOverlays(overlays, depth = 0) {
+    const source = Array.isArray(overlays) ? overlays : [];
+    const consumed = new Set();
+    const ordered = [];
+    for (let index = 0; index < source.length; index++) {
+        if (consumed.has(index)) continue;
+        const stack = Array.isArray(source[index]?.compositionStack) ? source[index].compositionStack : [];
+        const group = stack[depth];
+        if (!group?.id) {
+            consumed.add(index);
+            ordered.push(source[index]);
+            continue;
+        }
+        const parentPath = stack.slice(0, depth).map(item => item?.id);
+        const sceneId = source[index]?.sceneId ?? null;
+        const members = [];
+        for (let candidate = index; candidate < source.length; candidate++) {
+            if (consumed.has(candidate)) continue;
+            const candidateStack = Array.isArray(source[candidate]?.compositionStack) ? source[candidate].compositionStack : [];
+            if (candidateStack[depth]?.id !== group.id) continue;
+            if ((source[candidate]?.sceneId ?? null) !== sceneId) continue;
+            if (!parentPath.every((id, parentIndex) => candidateStack[parentIndex]?.id === id)) continue;
+            consumed.add(candidate);
+            members.push(source[candidate]);
+        }
+        ordered.push(...orderCompositionOverlays(members, depth + 1));
+    }
+    return ordered;
+}
+
 function polygonMaskExpression(mask, x, y, w, h) {
     const points = mask.shape === 'star'
         ? Math.max(2, Math.min(64, Math.round(Number(mask.points) || 5))) * 2
@@ -386,7 +422,52 @@ function compileOverlaySource(ov, inputIdx, label, frame, options = {}) {
     // play at 1x whatever the clip said). Its in-point is applied as an input
     // seek by exportProcessor (`-ss sourceOffset`), so PTS starts at 0 here.
     const ovSpeed = Number(ov.speed) > 0 ? Number(ov.speed) : 1;
-    if (ov.source?.type === 'video' && Math.abs(ovSpeed - 1) > 0.001) {
+    const sourceTimeMap = ov.source?.type === 'video' && Array.isArray(ov.sourceTimeMap)
+        ? ov.sourceTimeMap.filter(point => Number.isFinite(Number(point?.source)) && Number.isFinite(Number(point?.output)))
+        : [];
+    if (sourceTimeMap.length === 1) {
+        // A fully constant authored time curve is an intentional freeze frame.
+        // Input seek is already positioned at that source timestamp; retain
+        // its first decoded frame and repeat it through the overlay window.
+        parts.push('trim=end_frame=1');
+        parts.push('setpts=PTS-STARTPTS');
+        parts.push('loop=loop=-1:size=1:start=0');
+        parts.push(`setpts=PTS-STARTPTS+${n4(ov.outputStart)}/TB`);
+    } else if (sourceTimeMap.length > 1) {
+        const sourceDirection = Math.sign(Number(sourceTimeMap.at(-1).source) - Number(sourceTimeMap[0].source));
+        const reverse = sourceDirection < 0;
+        const sourceSpan = Math.max(1 / 120, Math.abs(Number(sourceTimeMap.at(-1).source) - Number(sourceTimeMap[0].source)));
+        // The worker seeks to the lower source bound. Reverse the trimmed
+        // source interval when the authored source clock runs backwards so
+        // FFmpeg still receives monotonically increasing frame timestamps.
+        const source = `(${n4(sourceTimeMap[0].source)}${reverse ? '-' : '+'}(PTS-STARTPTS)*TB)`;
+        let expression = n4(sourceTimeMap.at(-1).output);
+        for (let index = sourceTimeMap.length - 2; index >= 0; index--) {
+            const from = sourceTimeMap[index], to = sourceTimeMap[index + 1];
+            const deltaSource = Number(to.source) - Number(from.source);
+            if (Math.abs(deltaSource) <= 1e-7) {
+                // A repeated source coordinate represents a held frame over
+                // [from.output, to.output]. Give that frame the hold's first
+                // output timestamp; framesync retains it until the next
+                // decoded source frame jumps to the hold's end.
+                const holdBoundary = reverse
+                    ? `gte(${source},${n4(from.source)})`
+                    : `lte(${source},${n4(from.source)})`;
+                expression = `if(${holdBoundary},${n4(from.output)},${expression})`;
+                continue;
+            }
+            if (Math.sign(deltaSource) !== sourceDirection) continue;
+            const slope = (Number(to.output) - Number(from.output)) / deltaSource;
+            const segment = `${n4(from.output)}+(${source}-${n4(from.source)})*${n4(slope)}`;
+            expression = `if(${reverse ? 'gt' : 'lt'}(${source},${n4(to.source)}),${segment},${expression})`;
+        }
+        // Trim the unused tail of the source before remapping. At EOF FFmpeg's
+        // overlay framesync holds the final frame until the authored layer end.
+        parts.push(`trim=duration=${n4(sourceSpan)}`);
+        if (reverse) parts.push('reverse');
+        parts.push('setpts=PTS-STARTPTS');
+        parts.push(`setpts=(${expression.replace(/,/g, '\\,')})/TB+${n4(ov.outputStart)}/TB`);
+    } else if (ov.source?.type === 'video' && Math.abs(ovSpeed - 1) > 0.001) {
         parts.push(`setpts=(PTS-STARTPTS)/${n4(ovSpeed)}+${n4(ov.outputStart)}/TB`);
     } else {
         parts.push(`setpts=PTS-STARTPTS+${n4(ov.outputStart)}/TB`);
@@ -1280,7 +1361,7 @@ function compileCompositionPlan(plan, inputs, options = {}) {
     const drawable = plan.overlays
         .filter(ov => byId.has(ov.id) && Array.isArray(ov.geometry) && ov.geometry.length > 0)
         .sort((a, b) => a.zIndex - b.zIndex);
-    const visible = drawable.filter(ov => !ov.matteOnly);
+    const visible = orderCompositionOverlays(drawable.filter(ov => !ov.matteOnly));
 
     if (visible.length === 0) return null;
     const frame = {
@@ -1375,12 +1456,16 @@ function compileCompositionPlan(plan, inputs, options = {}) {
     // when every layer produced exactly one op.
     let groupOps = 0;
     let previousGroups = [];
+    let previousSceneId = null;
     for (const ov of visible) {
         const stack = Array.isArray(ov.compositionStack) ? ov.compositionStack : [];
         let shared = 0;
-        while (shared < previousGroups.length && shared < stack.length && previousGroups[shared]?.id === stack[shared]?.id) shared++;
+        if ((ov.sceneId ?? null) === previousSceneId) {
+            while (shared < previousGroups.length && shared < stack.length && previousGroups[shared]?.id === stack[shared]?.id) shared++;
+        }
         groupOps += stack.length - shared;
         previousGroups = stack;
+        previousSceneId = ov.sceneId ?? null;
     }
     const totalOps = visible.reduce((n, ov) => n + (ov.shadow ? 1 : 0) + overlayAlphaEffects(ov).length + overlayStrokeEffects(ov).length + motionBlurSampleCount(ov) + overlayTopEffects(ov).length, 0) + groupOps;
 
@@ -1390,12 +1475,12 @@ function compileCompositionPlan(plan, inputs, options = {}) {
     let opCount = 0;
     let groupSerial = 0;
     const groupStack = [];
-    const openGroup = group => {
+    const openGroup = (group, sceneId) => {
         const depth = groupStack.length;
         const canvas = `comp${groupSerial++}canvas`;
         const duration = Math.max(0.1, Number(plan.base?.totalDuration) || 0.1);
         const fps = Number(plan.fps) > 0 ? Number(plan.fps) : 30;
-        groupStack.push({ group, parentCurrent: current, parentIsRgb: currentIsRgb, canvas });
+        groupStack.push({ group, sceneId: sceneId ?? null, parentCurrent: current, parentIsRgb: currentIsRgb, canvas });
         chains.push(`color=c=black@0:s=${frame.width}x${frame.height}:r=${fps}:d=${n4(duration)},format=rgba[${canvas}]`);
         current = canvas;
         currentIsRgb = false;
@@ -1469,11 +1554,13 @@ function compileCompositionPlan(plan, inputs, options = {}) {
     };
     visible.forEach(ov => {
         const desiredGroups = Array.isArray(ov.compositionStack) ? ov.compositionStack : [];
+        const sceneId = ov.sceneId ?? null;
         let sharedDepth = 0;
         while (sharedDepth < groupStack.length && sharedDepth < desiredGroups.length
+            && groupStack[sharedDepth].sceneId === sceneId
             && groupStack[sharedDepth].group.id === desiredGroups[sharedDepth]?.id) sharedDepth++;
         while (groupStack.length > sharedDepth) closeGroup();
-        for (let depth = sharedDepth; depth < desiredGroups.length; depth++) openGroup(desiredGroups[depth]);
+        for (let depth = sharedDepth; depth < desiredGroups.length; depth++) openGroup(desiredGroups[depth], sceneId);
         const i = drawable.indexOf(ov);
         const samples = decimate(ov.geometry, MAX_GEOMETRY_SAMPLES);
         let xExpr = buildPiecewiseExpr(samples, 'x', frame.width);
@@ -1738,6 +1825,7 @@ function compileCompositionPlan(plan, inputs, options = {}) {
  */
 const SUPPORTED_PLAN_VERSION = 7;
 const BLEND_MODES = new Set(['multiply', 'screen', 'darken', 'lighten', 'difference', 'addition', 'overlay', 'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'exclusion', 'hue', 'saturation', 'color', 'luminosity']);
+const SUPPORTED_BLEND_MODE_KINDS = Object.freeze([...BLEND_MODES]);
 // Keep this list in lockstep with compileOverlaySource and its dedicated alpha,
 // top-effect, and stroke passes. Accepting an unknown kind here used to let the
 // main switch's default branch drop it silently, producing a successful export
@@ -2104,6 +2192,8 @@ module.exports = {
     // Exported for the regression suite.
     buildPiecewiseExpr,
     compileOverlaySource,
+    alphaBlendChannelExpression,
+    SUPPORTED_BLEND_MODE_KINDS,
     findFade,
     decimate,
     isAnimated,

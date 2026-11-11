@@ -54,7 +54,23 @@ const ASSET_ROLES = [
     'a_roll', 'b_roll', 'intro', 'outro', 'demo', 'cutaway', 'supporting',
 ];
 
-const MAX_ASSETS_IN_PROMPT = 40;
+const PROJECT_MAP_PROMPT_CHAR_BUDGET = 28_000;
+const PROJECT_MAP_ASSET_BATCH_SIZE = 24;
+const PROJECT_MAP_SUMMARY_BATCH_SIZE = 20;
+const PROJECT_MAP_BATCH_CONCURRENCY = 3;
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+    const results = new Array(items.length);
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(items.length, concurrency) }, async () => {
+        while (true) {
+            const index = next++;
+            if (index >= items.length) return;
+            results[index] = await mapper(items[index], index);
+        }
+    }));
+    return results;
+}
 
 class ProjectIntelligence {
 
@@ -165,10 +181,7 @@ class ProjectIntelligence {
         }
     }
 
-    /**
-     * One GPT call over the analysed bin. Returns the raw map fields.
-     * Separated from persistence so it can be tested without a database.
-     */
+    /** Derive the full map without sending an unbounded prompt to the model. */
     async deriveMap({ assets = [], clipCount = 0, platform = null, editingStyle = null }) {
         if (!assets.length) return null;
 
@@ -179,27 +192,135 @@ class ProjectIntelligence {
 
         const prompt = this.buildDerivationPrompt({ assets, clipCount, platform, editingStyle });
 
-        const completion = await openai.chat.completions.create({
-            // R84 missed this call site — hardcoded 'gpt-4o' worked fine while
-            // AI_PROVIDER was unset (openai is a no-op passthrough in
-            // resolveModel), but 404s under AI_PROVIDER=groq/gemini, neither of
-            // which serves anything literally named 'gpt-4o'. See
-            // EditorialBrain.js/ContentClassifier.js for the pattern this now matches.
-            model:           resolveModel('gpt-4o', 'chat'),
-            messages:        [{ role: 'user', content: prompt }],
-            response_format: { type: 'json_object' },
-            temperature:     0.15,
-            max_tokens:      1200,
-        });
+        if (prompt.length <= PROJECT_MAP_PROMPT_CHAR_BUDGET) {
+            return this.normalizeMap(await this._requestMapJSON(openai, prompt), assets);
+        }
 
+        const roleEntries = [];
+        let summaries = [];
+        const batches = [];
+        let batch = [];
+        for (const asset of assets) {
+            const candidate = [...batch, asset];
+            const candidatePrompt = this.buildDerivationPrompt({ assets: candidate, clipCount, platform, editingStyle });
+            if (batch.length && (candidate.length > PROJECT_MAP_ASSET_BATCH_SIZE || candidatePrompt.length > PROJECT_MAP_PROMPT_CHAR_BUDGET)) {
+                batches.push(batch);
+                batch = [asset];
+            } else {
+                batch = candidate;
+            }
+        }
+        if (batch.length) batches.push(batch);
+
+        const batchResults = await mapWithConcurrency(batches, PROJECT_MAP_BATCH_CONCURRENCY, async (assetBatch, batchIndex) => {
+            const batchPrompt = this.buildDerivationPrompt({ assets: assetBatch, clipCount, platform, editingStyle });
+            try {
+                const result = this.normalizeMap(await this._requestMapJSON(openai, batchPrompt), assetBatch);
+                return {
+                    roles: result.asset_roles,
+                    summary: {
+                        assetCount: assetBatch.length,
+                        project_type: result.project_type,
+                        through_line: result.through_line,
+                        target_audience: result.target_audience,
+                        tone: result.tone,
+                        coverage_gaps: result.coverage_gaps,
+                    },
+                };
+            } catch (error) {
+                // Keep every asset addressable if one provider batch fails;
+                // the top-level synthesis can still use the successful groups.
+                return {
+                    roles: assetBatch.filter(asset => asset?.id).map(asset => ({ assetId: asset.id, name: asset.name || null, role: 'supporting', serves: null })),
+                    summary: {
+                        assetCount: assetBatch.length,
+                        project_type: 'unknown',
+                        through_line: null,
+                        target_audience: null,
+                        tone: null,
+                        coverage_gaps: [],
+                        warning: `Asset group ${batchIndex + 1} could not be analyzed: ${error.message}`,
+                    },
+                };
+            }
+        });
+        for (const result of batchResults) {
+            roleEntries.push(...result.roles);
+            summaries.push(result.summary);
+        }
+
+        // Reduce summaries hierarchically so even very large bins stay inside
+        // the model's context budget without omitting any analyzed group.
+        while (summaries.length > PROJECT_MAP_SUMMARY_BATCH_SIZE) {
+            const next = [];
+            const summaryBatches = [];
+            for (let index = 0; index < summaries.length; index += PROJECT_MAP_SUMMARY_BATCH_SIZE) {
+                summaryBatches.push(summaries.slice(index, index + PROJECT_MAP_SUMMARY_BATCH_SIZE));
+            }
+            const reduced = await mapWithConcurrency(summaryBatches, PROJECT_MAP_BATCH_CONCURRENCY, summaryBatch =>
+                this._synthesizeMapSummaries(openai, summaryBatch, platform, editingStyle)
+                    .catch(() => this._fallbackMapSummary(summaryBatch)));
+            next.push(...reduced);
+            summaries = next;
+        }
+
+        const reconciled = await this._synthesizeMapSummaries(openai, summaries, platform, editingStyle)
+            .catch(() => this._fallbackMapSummary(summaries));
+        const roleByAssetId = new Map(roleEntries.map(role => [role.assetId, role]));
+        for (const asset of assets) {
+            if (asset?.id && !roleByAssetId.has(asset.id)) {
+                // A partial model response must not make an analyzed asset
+                // disappear from the map. Keep it addressable with a neutral role.
+                roleByAssetId.set(asset.id, {
+                    assetId: asset.id,
+                    name: asset.name || null,
+                    role: 'supporting',
+                    serves: null,
+                });
+            }
+        }
+        return {
+            ...this.normalizeMap(reconciled, assets),
+            // Only the per-asset pass may assign IDs; synthesis cannot drop or invent them.
+            asset_roles: [...roleByAssetId.values()],
+        };
+    }
+
+    async _requestMapJSON(openai, prompt, maxTokens = 1200) {
+        const completion = await openai.chat.completions.create({
+            model: resolveModel('gpt-4o', 'chat'),
+            messages: [{ role: 'user', content: prompt }],
+            response_format: { type: 'json_object' },
+            temperature: 0.15,
+            max_tokens: maxTokens,
+        });
         const raw = completion?.choices?.[0]?.message?.content;
         if (!raw) throw new Error('model returned no content');
-
-        let parsed;
-        try { parsed = JSON.parse(raw); }
+        try { return JSON.parse(raw); }
         catch { throw new Error('model returned malformed JSON'); }
+    }
 
-        return this.normalizeMap(parsed, assets);
+    async _synthesizeMapSummaries(openai, summaries, platform, editingStyle) {
+        const styleNote = projectMapStyleNote(editingStyle);
+        const prompt = `You are reconciling summaries from every analyzed group of assets in a video project.\n\n` +
+            `GROUP SUMMARIES (all groups are represented):\n${JSON.stringify(summaries)}\n\n` +
+            `Target platform: ${platform || 'not specified'}${styleNote ? `\n${styleNote}` : ''}\n\n` +
+            `Return one grounded project-level synthesis. Preserve uncertainty: use null when evidence is insufficient. ` +
+            `Merge duplicate coverage gaps and do not invent new gaps. Asset role assignments are handled separately.\n` +
+            `Return only JSON with project_type (${JSON.stringify(PROJECT_TYPES)}), through_line, target_audience, tone, ` +
+            `coverage_gaps [{gap, severity: low|medium|high, suggestion}].`;
+        return this._requestMapJSON(openai, prompt, 1200);
+    }
+
+    _fallbackMapSummary(summaries = []) {
+        const gaps = summaries.flatMap(summary => Array.isArray(summary.coverage_gaps) ? summary.coverage_gaps : []);
+        return {
+            project_type: summaries.map(summary => summary.project_type).find(type => PROJECT_TYPES.includes(type)) || 'unknown',
+            through_line: summaries.map(summary => summary.through_line).find(Boolean) || null,
+            target_audience: summaries.map(summary => summary.target_audience).find(Boolean) || null,
+            tone: summaries.map(summary => summary.tone).find(Boolean) || null,
+            coverage_gaps: gaps,
+        };
     }
 
     /**
@@ -209,27 +330,27 @@ class ProjectIntelligence {
      */
     buildDerivationPrompt({ assets = [], clipCount = 0, platform = null, editingStyle = null }) {
         const styleNote = projectMapStyleNote(editingStyle);
-        const shown = assets.slice(0, MAX_ASSETS_IN_PROMPT);
-        const omitted = assets.length - shown.length;
-
-        const assetLines = shown.map((a, i) => {
+        // Keep the AI's project-level map grounded in the same complete bin
+        // that the edit planner receives. A first-N cap caused later rushes to
+        // be invisible to role assignment and coverage analysis.
+        const assetLines = assets.map((a, i) => {
             const bits = [
-                a.scene_type && `scene: ${a.scene_type}`,
-                a.camera_angle && `framing: ${a.camera_angle}`,
+                a.scene_type && `scene: ${String(a.scene_type).slice(0, 60)}`,
+                a.camera_angle && `framing: ${String(a.camera_angle).slice(0, 60)}`,
                 typeof a.subject_count === 'number' && `${a.subject_count} on camera`,
                 a.is_broll && 'B-ROLL',
                 a.is_screen_recording && 'screen recording',
                 a.has_main_speaker && 'has a main speaker',
-                a.location_type && `location: ${a.location_type}`,
-                a.emotional_tone && `tone: ${a.emotional_tone}`,
+                a.location_type && `location: ${String(a.location_type).slice(0, 60)}`,
+                a.emotional_tone && `tone: ${String(a.emotional_tone).slice(0, 60)}`,
                 a.has_spoken_word === false && 'no speech',
             ].filter(Boolean).join(', ');
 
-            const transcript = (a.transcript_text || '').slice(0, 200).trim();
+            const transcript = String(a.transcript_text || '').slice(0, 120).trim();
 
             return [
-                `Asset ${i + 1} [id: ${a.id}] "${a.name || 'untitled'}"`,
-                a.content_description ? `  Describes : ${a.content_description}` : '',
+                `Asset ${i + 1} [id: ${String(a.id || '').slice(0, 100)}] "${String(a.name || 'untitled').slice(0, 120)}"`,
+                a.content_description ? `  Describes : ${String(a.content_description).slice(0, 240)}` : '',
                 bits ? `  Signals   : ${bits}` : '',
                 transcript ? `  Transcript: "${transcript}"` : '',
             ].filter(Boolean).join('\n');
@@ -240,7 +361,7 @@ class ProjectIntelligence {
 You are given every analysed clip in the media bin. Your job is to say what the
 PROJECT is — not to describe the clips again one by one.
 
-━━━ FOOTAGE (${assets.length} analysed asset${assets.length === 1 ? '' : 's'}${omitted > 0 ? `, showing first ${shown.length}` : ''}) ━━━
+━━━ FOOTAGE (${assets.length} analysed asset${assets.length === 1 ? '' : 's'}; complete inventory) ━━━
 ${assetLines}
 
 ━━━ TIMELINE ━━━

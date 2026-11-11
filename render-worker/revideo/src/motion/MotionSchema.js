@@ -194,6 +194,8 @@ export function createMotionLayer(overrides = {}) {
         rotation: Number.isFinite(Number(overrides.rotation)) ? Number(overrides.rotation) : 0,
         opacity:  Number.isFinite(Number(overrides.opacity)) ? clamp(overrides.opacity, 0, 1) : 1,
 
+        legacyKeyframes: overrides.legacyKeyframes && typeof overrides.legacyKeyframes === 'object' && !Array.isArray(overrides.legacyKeyframes)
+            ? { ...overrides.legacyKeyframes } : {},
         animations: Array.isArray(overrides.animations) ? overrides.animations : [],
         /** Asset-keyed amplitude modulation sampled by the shared resolver. */
         audioReactive: overrides.audioReactive && typeof overrides.audioReactive === 'object' && !Array.isArray(overrides.audioReactive)

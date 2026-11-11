@@ -14,7 +14,7 @@ const ffmpeg = spawnSync('ffmpeg', ['-version'], { encoding: 'utf8' }).status ==
 assert.ok(ffmpeg, 'FFmpeg is available for the export integration check');
 
 function loadCompositor() {
-    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'MotionPresets', 'MotionExpression', 'EffectTiming', 'CaptionModel', 'ClipAdapter', 'Compositor'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'TimeRemap', 'MotionPresets', 'MotionExpression', 'EffectTiming', 'CaptionModel', 'ClipAdapter', 'Compositor'];
     let combined = '';
     for (const name of order) {
         let source = fs.readFileSync(path.join(root, `client/src/motion/${name}.js`), 'utf8');

@@ -69,6 +69,7 @@ function loadModules() {
     combined += '\nreturn { resolveEasing, listEasingNames, EASING_FUNCTIONS, clamp,'
              + ' LAYER_KINDS, ANIMATION_TYPES, createKeyframe, createAnimation, createMotionLayer, validateMotionLayer,'
              + ' sampleAnimation, resolveMotionAt, sampleAudioEnvelope, applyAudioReactiveMotion,'
+             + ' sampleKeyframeTrack,'
              + ' MOTION_PRESETS, buildPreset, presetsForKind, LEGACY_ANIMATION_MAP,'
              + ' groupWordsIntoSegments, activeWordIndex, revealedWordCount, CAPTION_STYLE_PACKS, stylePackToClipFields,'
              + ' clipToMotionLayer, motionLayerToClipUpdates, applyPresetToClip,'
@@ -168,6 +169,29 @@ section('2 · Keyframe interpolation');
         { time: 2, properties: { x: 6 } }] };
     check('malformed keyframes are ignored without emitting NaN', near(M.sampleAnimation(malformed, 1).x, 4));
     check('invalid sample time falls back to the first finite keyframe', near(M.sampleAnimation(rawTrack, NaN).x, 0));
+
+    const vectorTrack = [
+        { time: 2, value: [20, NaN] },
+        { time: 0, value: [0, NaN] },
+        { time: 1, value: [10, 20] },
+    ];
+    const vectorSample = M.sampleKeyframeTrack(vectorTrack, 0.25, [0, 0]);
+    check('single-pass sampling recovers malformed vector channels without mutating the track',
+        vectorSample[0] === 0 && vectorSample[1] === 20 && Number.isNaN(vectorTrack[1].value[1]));
+    const duplicateVectorTrack = [
+        { time: 0, value: [0, 1] },
+        { time: 0, value: [2, NaN] },
+        { time: 1, value: [10, 20] },
+    ];
+    check('superseded duplicate keys do not leak vector channels during recovery',
+        M.sampleKeyframeTrack(duplicateVectorTrack, 0, [0, 4]).join(',') === '2,20');
+    const unsortedDuplicateTrack = [
+        { time: 2, value: 20 }, { time: 1, value: 10 },
+        { time: 1, value: 12 }, { time: 0, value: 0 },
+    ];
+    check('single-pass sampling preserves last-authored duplicate key semantics',
+        M.sampleKeyframeTrack(unsortedDuplicateTrack, 1) === 12
+        && M.sampleKeyframeTrack(unsortedDuplicateTrack, 1.5) === 16);
 }
 
 section('3 · Layer resolution composes animations correctly');
@@ -528,6 +552,29 @@ section('9 · The keyframe bridge round-trips (R61)');
     check('a round-trip collapses to ONE custom animation',
         back.length === 1 && back[0].id === M.CUSTOM_ANIMATION_ID,
         'two animations both driving scale have no sane representation in a flat per-parameter timeline');
+
+    const textFxTracks = M.animationsToParamTracks([{
+        id: 'text-fx', type: 'reveal', startTime: 0, duration: 2, easing: 'ease-in-out', anchor: 'in',
+        keyframes: [
+            { time: 0, properties: { glow: 0, reveal: 0 } },
+            { time: 2, properties: { glow: 24, reveal: 1 } },
+        ],
+    }], 2);
+    check('the keyframe editor exposes text glow and reveal channels',
+        Array.isArray(textFxTracks.glow) && Array.isArray(textFxTracks.reveal));
+    const textFxRoundTrip = M.animationsToParamTracks(M.paramTracksToAnimations(textFxTracks, 2), 2);
+    check('glow and reveal curves survive editor round-trip',
+        textFxRoundTrip.glow?.[1]?.value === 24 && textFxRoundTrip.reveal?.[0]?.value === 0);
+
+    const closeKeys = M.paramTracksToAnimations({ x: [
+        { time: 0.00001, value: 1, easing: 'linear' },
+        { time: 0.00004, value: 2, easing: 'easeOutCubic' },
+    ] }, 1);
+    const closeKeyTrack = M.animationsToParamTracks(closeKeys, 1).x || [];
+    check('sub-frame keyframe times remain distinct through editor round-trip',
+        closeKeyTrack.length === 2 && closeKeyTrack[0].time === 0.00001
+            && closeKeyTrack[1].time === 0.00004 && closeKeyTrack[1].easing === 'easeOutCubic',
+        'rounding distinct authored instants must not delete timing or easing data');
 
     // An 'out'-anchored animation must map to real clip-local time, not 0.
     const fadeClip = { id: 'c2', duration: 6, animations: M.buildPreset('fade', { duration: 6 }) };

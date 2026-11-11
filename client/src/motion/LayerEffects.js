@@ -14,6 +14,11 @@ export const GRAPHIC_EFFECT_KINDS = Object.freeze([
 ]);
 const GRAPHIC_EFFECT_KIND_SET = new Set(GRAPHIC_EFFECT_KINDS);
 const SHAPE_MASK_KINDS = new Set(['ellipse', 'circle', 'rectangle', 'rounded-rectangle', 'capsule', 'callout', 'polygon', 'star', 'arrow']);
+const PIXEL_EFFECT_KIND_SET = new Set([
+    'grain', 'film_grain', 'chromatic-aberration', 'rgb_split', 'motion-blur',
+    'blur_motion', 'blur_radial', 'distortion', 'stroke', 'inner-shadow',
+    'color_grade', 'vignette', 'glitch',
+]);
 
 const readNumber = (value, fallback = 0) => {
     const raw = value && typeof value === 'object' && 'value' in value ? value.value : value;
@@ -24,6 +29,31 @@ const clamp = (value, min, max) => Math.max(min, Math.min(max, readNumber(value)
 const hasNumericValue = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
 const layerCanvasCache = new WeakMap();
 const scratchCanvasCache = new WeakMap();
+const reportedPreviewFailures = new WeakMap();
+
+function reportLayerPreviewFailure(sourceCanvas, effectContext, effects, reason) {
+    const effectIds = effects.map(effect => effect.id || effect.kind || effect.type).filter(Boolean);
+    const key = `${reason}:${effectIds.join(',')}`;
+    const cacheableCanvas = sourceCanvas && (typeof sourceCanvas === 'object' || typeof sourceCanvas === 'function');
+    let reported = cacheableCanvas ? reportedPreviewFailures.get(sourceCanvas) : null;
+    if (!reported) {
+        reported = new Set();
+        if (cacheableCanvas) reportedPreviewFailures.set(sourceCanvas, reported);
+    }
+    if (reported.has(key)) return;
+    reported.add(key);
+    const warning = {
+        type: 'layer_effect_preview_unavailable',
+        effectIds,
+        message: `${reason} Effects were skipped in the preview: ${effects.map(effect => effect.name || effect.kind || effect.type).join(', ')}.`,
+        recoverable: true,
+    };
+    if (typeof effectContext?.onWarning === 'function') {
+        try { effectContext.onWarning(warning); } catch { /* A warning observer must not break drawing. */ }
+    } else if (typeof console !== 'undefined' && console.warn) {
+        console.warn('[LayerEffects]', warning.message, warning);
+    }
+}
 
 function sampleEffect(effect, timeSeconds, context = {}) {
     const params = effect?.params || {};
@@ -241,13 +271,17 @@ function applyCanvasEffect(layerCtx, scratchCtx, effect, timeSeconds = 0) {
 
 function applyPixelEffects(ctx, effects, timeSeconds = 0) {
     const requested = (effects || []).filter(e => ['grain', 'film_grain', 'chromatic-aberration', 'rgb_split', 'motion-blur', 'blur_motion', 'blur_radial', 'distortion', 'stroke', 'inner-shadow', 'color_grade', 'vignette', 'glitch'].includes(e?.kind));
-    if (!requested.length || !ctx.canvas?.width || !ctx.canvas?.height) return;
+    if (!requested.length || !ctx.canvas?.width || !ctx.canvas?.height) return true;
     try {
         const { width, height } = ctx.canvas;
         const image = ctx.getImageData(0, 0, width, height);
         const src = new Uint8ClampedArray(image.data);
         const out = image.data;
         for (const effect of requested) {
+            // Effects in a stack must consume the previous effect's result,
+            // while each individual effect still needs a stable source copy
+            // for spatial sampling. Refresh this reusable snapshot per stage.
+            src.set(out);
             const p = effect.params || {};
             if (effect.kind === 'grain' || effect.kind === 'film_grain') {
                 const intensity = readNumber(p.intensity, NaN);
@@ -323,17 +357,32 @@ function applyPixelEffects(ctx, effects, timeSeconds = 0) {
                         const ax = Math.max(0, Math.min(width - 1, Math.round(x - extentX))); const ay = Math.max(0, Math.min(height - 1, Math.round(y - extentY)));
                         const bx = Math.max(0, Math.min(width - 1, Math.round(x + extentX))); const by = Math.max(0, Math.min(height - 1, Math.round(y + extentY)));
                         const a = (ay * width + ax) * 4; const b = (by * width + bx) * 4;
-                        for (let c = 0; c < 4; c++) out[i + c] = (src[a + c] + src[i + c] * 2 + src[b + c]) / 4;
+                        const alpha = (src[a + 3] + src[i + 3] * 2 + src[b + 3]) / 4;
+                        out[i + 3] = alpha;
+                        for (let c = 0; c < 3; c++) {
+                            const premultiplied = (src[a + c] * src[a + 3]
+                                + src[i + c] * src[i + 3] * 2
+                                + src[b + c] * src[b + 3]) / 4;
+                            out[i + c] = alpha > 0 ? premultiplied / alpha : 0;
+                        }
                         continue;
                     }
-                    out[i] = out[i + 1] = out[i + 2] = out[i + 3] = 0;
+                    let alpha = 0, red = 0, green = 0, blue = 0;
                     for (let sample = 0; sample < samples; sample++) {
                         const progress = samples > 1 ? sample / (samples - 1) - 0.5 : 0;
                         const sx = Math.max(0, Math.min(width - 1, Math.round(x + extentX * progress)));
                         const sy = Math.max(0, Math.min(height - 1, Math.round(y + extentY * progress)));
                         const source = (sy * width + sx) * 4;
-                        for (let channel = 0; channel < 4; channel++) out[i + channel] += src[source + channel] / samples;
+                        const sampleAlpha = src[source + 3] / samples;
+                        alpha += sampleAlpha;
+                        red += src[source] * sampleAlpha;
+                        green += src[source + 1] * sampleAlpha;
+                        blue += src[source + 2] * sampleAlpha;
                     }
+                    out[i + 3] = alpha;
+                    out[i] = alpha > 0 ? red / alpha : 0;
+                    out[i + 1] = alpha > 0 ? green / alpha : 0;
+                    out[i + 2] = alpha > 0 ? blue / alpha : 0;
                 }
             } else if (effect.kind === 'blur_radial') {
                 const intensity = clamp(p.intensity ?? 0.3, 0, 1);
@@ -357,10 +406,12 @@ function applyPixelEffects(ctx, effects, timeSeconds = 0) {
                         const sx = Math.max(0, Math.min(width - 1, Math.round(x + (centerX - x) * t)));
                         const sy = Math.max(0, Math.min(height - 1, Math.round(y + (centerY - y) * t)));
                         const from = (sy * width + sx) * 4;
-                        r += src[from]; g += src[from + 1]; b += src[from + 2]; a += src[from + 3];
+                        const sampleAlpha = src[from + 3];
+                        r += src[from] * sampleAlpha; g += src[from + 1] * sampleAlpha; b += src[from + 2] * sampleAlpha; a += sampleAlpha;
                     }
-                    out[i] = r / samples; out[i + 1] = g / samples;
-                    out[i + 2] = b / samples; out[i + 3] = a / samples;
+                    const alpha = a / samples;
+                    out[i] = a > 0 ? r / a : 0; out[i + 1] = a > 0 ? g / a : 0;
+                    out[i + 2] = a > 0 ? b / a : 0; out[i + 3] = alpha;
                 }
             } else if (effect.kind === 'distortion') {
                 const amount = clamp(p.amount ?? 0.018, 0, 0.08);
@@ -478,10 +529,12 @@ function applyPixelEffects(ctx, effects, timeSeconds = 0) {
         }
         ctx.putImageData(image, 0, 0);
     } catch (error) {
-        // Cross-origin source pixels cannot be read; CSS/FFmpeg footage paths
-        // still apply their effects independently.
-        if (import.meta?.env?.DEV) console.warn('[LayerEffects] pixel effect skipped:', error?.message);
+        // Pixel effects cannot be applied to a tainted cross-origin surface.
+        // Let the caller report this through the same warning channel as other
+        // preview failures so the authored effect is never silently ignored.
+        return false;
     }
+    return true;
 }
 
 function applyGradientFill(ctx, effect, width, height) {
@@ -618,7 +671,23 @@ function applyFeatheredShapeMask(layerCtx, scratchCtx, mask, width, height, tran
 
 export function drawLayerWithEffects(ctx, effects, draw, mask = null, timeSeconds = 0, effectContext = {}) {
     if (!ctx || typeof draw !== 'function') return;
-    const stack = Array.isArray(effects) ? effects : [];
+    // The editor and FFmpeg compiler treat `order` as the authored stack
+    // order. Match that here so canvas previews and exports compose identically
+    // even when clips were reordered without also reordering their array.
+    const stack = (Array.isArray(effects) ? effects : [])
+        .map((effect, index) => ({ effect, index }))
+        .sort((a, b) => (Number(a.effect?.order) || 0) - (Number(b.effect?.order) || 0) || a.index - b.index)
+        .map(({ effect }) => effect);
+    const activeStack = stack.filter(effect => {
+        const hasStart = effect?.startTime !== null && effect?.startTime !== undefined && effect?.startTime !== '';
+        const hasEnd = effect?.endTime !== null && effect?.endTime !== undefined && effect?.endTime !== '';
+        const startTime = hasStart ? Number(effect.startTime) : -Infinity;
+        const endTime = hasEnd ? Number(effect.endTime) : Infinity;
+        return effect?.enabled !== false
+            && GRAPHIC_EFFECT_KIND_SET.has(effect?.kind || effect?.type)
+            && !(Number.isFinite(startTime) && timeSeconds < startTime)
+            && !(Number.isFinite(endTime) && timeSeconds >= endTime);
+    });
     // Effects are evaluated on an isolated surface, but the finished surface
     // still belongs to the caller's layer. Preserve its layer-level blend and
     // opacity at the final composite instead of silently making it opaque.
@@ -629,6 +698,15 @@ export function drawLayerWithEffects(ctx, effects, draw, mask = null, timeSecond
     const layerCtx = layerCanvas?.getContext?.('2d', { willReadFrequently: true });
     const scratchCanvas = layerCanvas ? getScratchCanvas(layerCanvas) : null;
     const scratchCtx = scratchCanvas?.getContext?.('2d');
+    if (!layerCtx && activeStack.length) {
+        reportLayerPreviewFailure(sourceCanvas, effectContext, activeStack, 'The isolated layer surface is unavailable.');
+    } else if (layerCtx && !scratchCtx) {
+        const scratchDependent = activeStack.filter(effect => (effect.kind || effect.type) !== 'gradient-fill'
+            && !PIXEL_EFFECT_KIND_SET.has(effect.kind || effect.type));
+        if (scratchDependent.length) {
+            reportLayerPreviewFailure(sourceCanvas, effectContext, scratchDependent, 'The layer effect scratch surface is unavailable.');
+        }
+    }
     // Isolate layer effects whenever an offscreen surface is available. This
     // prevents pixel effects from rewriting pixels belonging to earlier layers.
     const target = layerCtx || ctx;
@@ -652,6 +730,7 @@ export function drawLayerWithEffects(ctx, effects, draw, mask = null, timeSecond
 
         if (layerCtx && layerCtx !== ctx) {
             if (featheredMask) applyFeatheredShapeMask(layerCtx, scratchCtx, mask, width, height, transform);
+            const activeEffects = [];
             for (const authoredEffect of stack) {
                 const hasStart = authoredEffect?.startTime !== null && authoredEffect?.startTime !== undefined && authoredEffect?.startTime !== '';
                 const hasEnd = authoredEffect?.endTime !== null && authoredEffect?.endTime !== undefined && authoredEffect?.endTime !== '';
@@ -664,9 +743,33 @@ export function drawLayerWithEffects(ctx, effects, draw, mask = null, timeSecond
                 // Unknown effects are rejected by SceneValidator, but also
                 // fail closed here for callers that render clips directly.
                 if (!GRAPHIC_EFFECT_KIND_SET.has(effect.kind)) continue;
-                if (effect.kind === 'gradient-fill') applyGradientFill(layerCtx, effect, layerCanvas.width, layerCanvas.height);
-                else if (['grain', 'film_grain', 'chromatic-aberration', 'rgb_split', 'motion-blur', 'blur_motion', 'blur_radial', 'distortion', 'stroke', 'inner-shadow', 'color_grade', 'vignette', 'glitch'].includes(effect.kind)) applyPixelEffects(layerCtx, [effect], timeSeconds);
-                else if (scratchCtx) applyCanvasEffect(layerCtx, scratchCtx, effect, timeSeconds);
+                activeEffects.push(effect);
+            }
+            // Pixel effects are sequential but share a single ImageData buffer.
+            // Reading/copying an HD canvas once per effect caused a large
+            // synchronous cost when creative stacks contained several filters.
+            // Keep non-pixel effects as boundaries because their ordering is
+            // visually significant (for example, stroke before blur).
+            for (let index = 0; index < activeEffects.length;) {
+                const effect = activeEffects[index];
+                if (PIXEL_EFFECT_KIND_SET.has(effect.kind)) {
+                    const pixelStack = [];
+                    while (index < activeEffects.length && PIXEL_EFFECT_KIND_SET.has(activeEffects[index].kind)) {
+                        pixelStack.push(activeEffects[index++]);
+                    }
+                    if (!applyPixelEffects(layerCtx, pixelStack, timeSeconds)) {
+                        reportLayerPreviewFailure(sourceCanvas, effectContext, pixelStack,
+                            'The layer pixels cannot be read by the browser (often due to cross-origin media).');
+                    }
+                } else {
+                    if (effect.kind === 'gradient-fill') applyGradientFill(layerCtx, effect, layerCanvas.width, layerCanvas.height);
+                    else if (scratchCtx) {
+                        if (!applyCanvasEffect(layerCtx, scratchCtx, effect, timeSeconds)) {
+                            reportLayerPreviewFailure(sourceCanvas, effectContext, [effect], 'This effect is unavailable in the current canvas preview.');
+                        }
+                    }
+                    index++;
+                }
             }
         } // No offscreen surface means effects are skipped rather than applied to earlier layers.
     } catch (error) {

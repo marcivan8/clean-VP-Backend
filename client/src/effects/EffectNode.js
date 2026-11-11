@@ -11,6 +11,7 @@
 // ============================================================================
 import { resolveEasing } from '../motion/Easing.js';
 import { resolveEffectParameter } from '../motion/EffectTiming.js';
+import { sampleKeyframeTrack } from '../motion/MotionResolver.js';
 
 // ============================================================================
 // ENGINE TYPES
@@ -43,15 +44,14 @@ function isFiniteEffectValue(value) {
     return (typeof value === 'number' && Number.isFinite(value))
         || typeof value === 'boolean'
         || typeof value === 'string'
-        || (Array.isArray(value) && value.length > 0 && value.every(item => Number.isFinite(item)));
+        || (Array.isArray(value) && value.length > 0 && value.some(item => Number.isFinite(item)));
 }
 
 function isRecoverableEffectTrackValue(value) {
-    // Keep a partly malformed vector so its valid channels can still be used
-    // when sampling. Invalid channels are repaired from the nearest authored
-    // keyframe below; dropping the whole key would lose valid data.
-    return (Array.isArray(value) && value.length > 0 && value.some(Number.isFinite))
-        || isFiniteEffectValue(value);
+    // Keep a vector key if it has at least one usable channel. The shared
+    // sampler recovers missing components from the nearest finite authored
+    // channel, so one damaged component does not discard the rest of a key.
+    return isFiniteEffectValue(value);
 }
 
 // ============================================================================
@@ -215,26 +215,17 @@ export class EffectNode {
                 else unique.push(entry);
                 return unique;
             }, []);
-        const authoredVectors = sorted.filter(entry => Array.isArray(entry.value));
-        const authoredVectorValues = new Map(authoredVectors.map(entry => [entry, [...entry.value]]));
-        for (const entry of authoredVectors) {
-            if (entry.value.every(Number.isFinite)) continue;
-            entry.malformedVector = true;
-            entry.value = entry.value.map((component, componentIndex) => {
-                if (Number.isFinite(component)) return component;
-                const candidates = authoredVectors
-                    .filter(candidate => candidate !== entry && Number.isFinite(authoredVectorValues.get(candidate)[componentIndex]))
-                    .sort((a, b) => Math.abs(a.time - entry.time) - Math.abs(b.time - entry.time));
-                const baseComponent = Array.isArray(baseValue) ? baseValue[componentIndex] : undefined;
-                return (candidates.length ? authoredVectorValues.get(candidates[0])[componentIndex] : undefined)
-                    ?? (Number.isFinite(baseComponent) ? baseComponent : 0);
-            });
-        }
-        const normalized = sorted.map(entry => ({ ...entry.keyframe, value: entry.value, time: entry.time, malformedVector: entry.malformedVector }));
+        const normalized = sorted.map(entry => ({ ...entry.keyframe, value: entry.value, time: entry.time }));
         if (!normalized.length) return baseValue;
 
         const sampleTime = Number(time);
         if (!Number.isFinite(sampleTime)) return baseValue;
+
+        // Motion vectors and effect vectors share the same interpolation and
+        // malformed-channel recovery rules, keeping preview/export in parity.
+        if (normalized.some(entry => Array.isArray(entry.value))) {
+            return sampleKeyframeTrack(normalized, sampleTime, baseValue);
+        }
 
         // Before first keyframe
         if (sampleTime <= normalized[0].time) {
@@ -267,9 +258,6 @@ export class EffectNode {
         const easedProgress = easing(progress);
 
         // Interpolate value
-        if (fromKf.malformedVector || toKf.malformedVector) {
-            return easedProgress < 0.5 ? fromKf.value : toKf.value;
-        }
         return this._interpolateValue(fromKf.value, toKf.value, easedProgress);
     }
 

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { TIMELINE_EFFECTS, resolveTimelineEffectFilter, resolveTimelineEffectTransform, resolveTimelineFadeOpacity, resolveTimelineFadeOverlays, resolveTimelineSvgEffectParams, resolveTimelineSvgEffectInstances, resolveTimelineVignetteStyle } from '../client/src/motion/TimelineVisualEffects.js';
 import { resolveEffectAtTime } from '../client/src/motion/EffectTiming.js';
 import { matteFilterGraph } from '../client/src/motion/MatteSettings.js';
@@ -12,7 +14,7 @@ import { EffectPipeline } from '../client/src/effects/EffectPipeline.js';
 
 const require = createRequire(import.meta.url);
 const ffmpeg = require('ffmpeg-static');
-const { compileTimelineVisualEffects, compileTimelineVisualEffectGraph, compileTimelineAudioEffects, resolveTimelineSpeedEffect, buildSpeedRetimePlan, applyRetimeEasing, compileScalarEffectTrack, collectTimelineEffectWarnings } = require('../jobs/exportProcessor.js');
+const { compileTimelineVisualEffects, compileTimelineVisualEffectGraph, compileTimelineAudioEffects, compileWindowedTimelineAudioEffects, applyWindowedTimelineAudioEffectsToFile, resolveTimelineSpeedEffect, buildSpeedRetimePlan, applyRetimeEasing, compileScalarEffectTrack, collectTimelineEffectWarnings } = require('../jobs/exportProcessor.js');
 const { compileOverlaySource } = require('../server/compositor/CompositorCompiler.js');
 const timedEffect = { kind: 'contrast', params: { amount: 1 }, startTime: 4, endTime: 6, keyframes: { amount: [
   { time: 4, value: 1 }, { time: 6, value: 3, easing: 'linear' },
@@ -478,6 +480,25 @@ assert.deepEqual(resolveTimelineFadeOverlays(shortFadeWindow, 11.7, { clipStart:
   'fade-out preview stays inside the authored effect window when duration is longer');
 assert.equal(resolveTimelineFadeOverlays(shortFadeWindow, 11.9, { clipStart: 10, clipDuration: 2 })[0].opacity, 0.5,
   'fade-out duration is clipped to the effect window just like export');
+for (const [color, expected] of [
+  [[255, 128, 0], '0xff8000'],
+  [[1, 0.5, 0], '0xff8000'],
+  ['#f80', '0xff8800'],
+  ['#ff8000', '0xff8000'],
+  ['rgb(255, 128, 0)', '0xff8000'],
+]) {
+  const compiledFade = compileTimelineVisualEffects([{ kind: 'fade_in', params: { duration: 0.5, color } }]).join(',');
+  assert.ok(compiledFade.includes(`color=${expected}`), `fade export preserves RGB color ${JSON.stringify(color)}`);
+}
+const fadeColorFilter = compileTimelineVisualEffects([{ kind: 'fade_in', params: { duration: 0.5, color: [255, 128, 0] } }]).join(',');
+const fadeColorRender = spawnSync(ffmpeg, [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=white:s=2x2:r=1:d=1',
+  '-vf', fadeColorFilter, '-frames:v', '1', '-pix_fmt', 'rgb24', '-f', 'rawvideo', 'pipe:1',
+], { encoding: null, timeout: 20000 });
+assert.equal(fadeColorRender.status, 0,
+  `FFmpeg renders RGB-array fade colors: ${fadeColorRender.stderr?.toString() || fadeColorRender.error?.message || ''}`);
+assert.deepEqual([...fadeColorRender.stdout.subarray(0, 3)], [255, 128, 0],
+  'the exported first fade frame uses the same orange RGB color as preview');
 assert.deepEqual(resolveTimelineFadeOverlays([{ ...fadeIn[0], enabled: false }], 10.5, { clipStart: 10, clipDuration: 2 }), [],
   'disabled fade effects do not appear in preview');
 const graphicPreviewSource = readFileSync(new URL('../client/src/components/Player/GraphicOverlay.jsx', import.meta.url), 'utf8');
@@ -1115,6 +1136,70 @@ assert.deepEqual(collectTimelineEffectWarnings([{ name: 'Interview', start: 10, 
   { kind: 'glow', startTime: 11, endTime: 12 }, { kind: 'shake', startTime: 12, endTime: 13 },
 ] }]), [
 ], 'supported partial glow and shake effects do not produce false skipped-effect warnings');
+assert.deepEqual(collectTimelineEffectWarnings([{ name: 'Interview', start: 10, duration: 4, effects: [
+  { kind: 'audio_normalize', startTime: 11, endTime: 12 },
+  { kind: 'audio_denoise', startTime: 10, endTime: 12 },
+] }]), [
+], 'supported partial audio effects do not produce false export warnings');
+const windowedAudioGraph = compileWindowedTimelineAudioEffects('0:a', [
+  { kind: 'audio_normalize', startTime: 11, endTime: 12, params: { targetLevel: -6 } },
+  { kind: 'audio_denoise', startTime: 10, endTime: 12, params: { amount: 0.5 } },
+], 10, 4, 'audiofx');
+assert.match(windowedAudioGraph, /atrim=start=0\.000000:end=1\.000000/,
+  'windowed audio processing preserves the first untouched section');
+assert.match(windowedAudioGraph, /atrim=start=1\.000000:end=2\.000000/,
+  'audio effects are applied to the authored clip-local interval');
+assert.match(windowedAudioGraph, /atrim=start=2\.000000:end=4\.000000/,
+  'windowed audio processing preserves the trailing untouched section');
+assert.match(windowedAudioGraph, /loudnorm=I=-6/);
+assert.match(windowedAudioGraph, /afftdn=nf=-50\.0/);
+const windowedAudioRender = spawnSync(ffmpeg, [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100:duration=4',
+  '-filter_complex', windowedAudioGraph, '-map', '[audiofx]', '-f', 'null', '-',
+], { encoding: 'utf8', timeout: 20000 });
+assert.equal(windowedAudioRender.status, 0,
+  `FFmpeg executes the windowed audio effect graph: ${windowedAudioRender.stderr || windowedAudioRender.error?.message || ''}`);
+const audioWindowDir = mkdtempSync(join(tmpdir(), 'vibed-audio-window-'));
+try {
+  const audioWindowFile = join(audioWindowDir, 'windowed-audio.mp4');
+  const audioWindowSource = spawnSync(ffmpeg, [
+    '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=96x64:rate=4:duration=4',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100:duration=4',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', audioWindowFile,
+  ], { encoding: 'utf8', timeout: 20000 });
+  assert.equal(audioWindowSource.status, 0,
+    `FFmpeg creates the audio/video integration fixture: ${audioWindowSource.stderr || audioWindowSource.error?.message || ''}`);
+  assert.equal(await applyWindowedTimelineAudioEffectsToFile(audioWindowFile, {
+    effects: [
+      { kind: 'audio_normalize', startTime: 11, endTime: 12, params: { targetLevel: -6 } },
+      { kind: 'audio_denoise', startTime: 10, endTime: 12, params: { amount: 0.5 } },
+    ], clipStart: 10, duration: 4, hasVideo: true,
+  }), true, 'the export helper applies partial effects and keeps the video stream');
+  const audioWindowDecode = spawnSync(ffmpeg, [
+    '-hide_banner', '-loglevel', 'error', '-i', audioWindowFile,
+    '-map', '0:v:0', '-map', '0:a:0', '-f', 'null', '-',
+  ], { encoding: 'utf8', timeout: 20000 });
+  assert.equal(audioWindowDecode.status, 0,
+    `the rewritten export file retains decodable video and audio: ${audioWindowDecode.stderr || audioWindowDecode.error?.message || ''}`);
+  const audioOnlyFile = join(audioWindowDir, 'windowed-audio.m4a');
+  const audioOnlySource = spawnSync(ffmpeg, [
+    '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100:duration=4',
+    '-c:a', 'aac', audioOnlyFile,
+  ], { encoding: 'utf8', timeout: 20000 });
+  assert.equal(audioOnlySource.status, 0,
+    `FFmpeg creates the audio-only integration fixture: ${audioOnlySource.stderr || audioOnlySource.error?.message || ''}`);
+  assert.equal(await applyWindowedTimelineAudioEffectsToFile(audioOnlyFile, {
+    effects: [{ kind: 'audio_denoise', startTime: 11, endTime: 12, params: { amount: 0.5 } }],
+    clipStart: 10, duration: 4, hasVideo: false,
+  }), true, 'the export helper applies partial effects to an audio-only timeline clip');
+  const audioOnlyDecode = spawnSync(ffmpeg, [
+    '-hide_banner', '-loglevel', 'error', '-i', audioOnlyFile, '-map', '0:a:0', '-f', 'null', '-',
+  ], { encoding: 'utf8', timeout: 20000 });
+  assert.equal(audioOnlyDecode.status, 0,
+    `the rewritten audio-only export remains decodable: ${audioOnlyDecode.stderr || audioOnlyDecode.error?.message || ''}`);
+} finally {
+  rmSync(audioWindowDir, { recursive: true, force: true });
+}
 const windowedShake = compileTimelineVisualEffects([{
   kind: 'shake', startTime: 10.5, endTime: 11, params: { intensity: 40, frequency: 8, rotationAmount: 2, randomSeed: 11 },
 }], { width: 96, height: 64, clipStart: 10, duration: 1.5 });
@@ -1202,6 +1287,23 @@ const grainRms = Math.sqrt(grainOutput.stdout.reduce((sum, value, index) => {
 }, 0) / grainOutput.stdout.length);
 assert.ok(grainRms > 20 && grainRms < 40,
   `normalized intensity 0.2 produces shader-scale grain in export (expected 20–40 RGB RMS, received ${grainRms.toFixed(2)})`);
+const transparentGrainFixture = 'color=c=black@0:s=64x64:r=1:d=1,format=rgba,drawbox=x=16:y=16:w=32:h=32:color=red@1:t=fill';
+const transparentGrainBefore = spawnSync(ffmpeg, [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', transparentGrainFixture,
+  '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgba', 'pipe:1',
+], { encoding: null, timeout: 20000 });
+const transparentGrainAfter = spawnSync(ffmpeg, [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', transparentGrainFixture,
+  '-vf', staticGrain.join(','), '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgba', 'pipe:1',
+], { encoding: null, timeout: 20000 });
+assert.equal(transparentGrainBefore.status, 0, `FFmpeg creates a transparent grain fixture: ${transparentGrainBefore.stderr?.toString() || transparentGrainBefore.error?.message || ''}`);
+assert.equal(transparentGrainAfter.status, 0, `FFmpeg applies grain to transparent footage: ${transparentGrainAfter.stderr?.toString() || transparentGrainAfter.error?.message || ''}`);
+const transparentPixelOffset = (4 * 64 + 4) * 4;
+assert.deepEqual(
+  [...transparentGrainAfter.stdout.subarray(transparentPixelOffset, transparentPixelOffset + 4)],
+  [...transparentGrainBefore.stdout.subarray(transparentPixelOffset, transparentPixelOffset + 4)],
+  'film grain preserves fully transparent RGB and alpha during export',
+);
 const glitchExport = compileTimelineVisualEffects([{ kind: 'glitch', params: { intensity: { value: 0.5 }, blockSize: { value: 24 }, colorShift: { value: true }, scanlines: { value: true } } }]);
 assert.ok(glitchExport.some(filter => filter.includes('geq=') && filter.includes('floor(T*12)')), 'glitch exports timed horizontal displacement bands like the live preview');
 assert.ok(!glitchExport.some(filter => filter.startsWith('noise=') || filter.startsWith('chromashift=') || filter.startsWith('drawgrid=')), 'glitch does not substitute noise, RGB split, or scanlines for the preview effect');

@@ -46,7 +46,7 @@ const read = (rel) => {
 // approach as test_motion_engine.js. Exercises the REAL source; a hand-copied
 // duplicate would pass while the shipped file was broken.
 function loadModules() {
-    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionExpression', 'SpatialMotion', 'AudioReactive', 'MotionResolver', 'MotionPresets', 'EffectTiming', 'CaptionModel', 'ClipAdapter', 'Compositor'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionExpression', 'SpatialMotion', 'AudioReactive', 'MotionResolver', 'TimeRemap', 'MotionPresets', 'EffectTiming', 'CaptionModel', 'ClipAdapter', 'Compositor'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);

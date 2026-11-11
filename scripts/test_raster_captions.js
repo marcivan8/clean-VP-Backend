@@ -38,7 +38,7 @@ const read = (rel) => {
 function loadClientModules() {
     // TextCraft before CaptionCompiler: the compiler imports its highlight-ramp
     // rules, and this loader resolves imports by concatenation order.
-    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionExpression', 'SpatialMotion', 'AudioReactive', 'MotionResolver', 'MotionPresets', 'TextCraft', 'CaptionModel', 'ClipAdapter', 'Compositor', 'CaptionCompiler'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionExpression', 'SpatialMotion', 'AudioReactive', 'MotionResolver', 'MotionPresets', 'TextCraft', 'CaptionModel', 'ClipAdapter', 'Compositor', 'CompositionGrouping', 'CaptionCompiler'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);
@@ -158,6 +158,28 @@ section('4 · Server helpers');
     const dummyGraph = R.compileRasterOverlays(dummyPrep, { frameWidth: 1080, frameHeight: 1920, fps: 30 });
     check('compileRasterOverlays specifies fps=30 explicitly to prevent fps:default auto-insertion', dummyGraph.filterComplex.includes('[1:v]fps=30,setpts='));
     check('compileRasterOverlays specifies eof_action=pass on overlay', dummyGraph.filterComplex.includes('eof_action=pass:enable='));
+    const alphaCaptionGraph = R.compileRasterOverlays([], {
+        frameWidth: 1080, frameHeight: 1920, fps: 30,
+        drawtextGroups: [{ clipId: 'alpha-caption', filters: ['drawbox=x=0:y=0:w=2:h=2:color=red:t=fill'] }],
+        orderByClipId: new Map([['alpha-caption', 0]]),
+        inputLabel: 'alpha_base',
+    });
+    check('transparent caption graph can start from an isolated RGBA base',
+        alphaCaptionGraph.filterComplex === '[alpha_base]drawbox=x=0:y=0:w=2:h=2:color=red:t=fill[rcout]'
+            && alphaCaptionGraph.inputs.length === 0);
+    const isolatedGroup = R.compileRasterOverlays([], {
+        frameWidth: 16, frameHeight: 16, fps: 30, inputLabel: 'alpha_base',
+        drawtextGroups: [
+            { clipId: 'group-a', sceneId: 'scene-1', compositionStack: [{ id: 'precomp', opacity: 1, opacitySamples: [{ t: 0, value: 0.5 }] }], filters: ['drawbox=x=0:y=0:w=8:h=8:color=red:t=fill'] },
+            { clipId: 'group-b', sceneId: 'scene-1', compositionStack: [{ id: 'precomp', opacity: 1, opacitySamples: [{ t: 0, value: 0.5 }] }], filters: ['drawbox=x=4:y=0:w=8:h=8:color=blue:t=fill'] },
+        ],
+        orderByClipId: new Map([['group-a', 0], ['group-b', 1]]),
+    });
+    check('overlapping composition siblings render to one isolated canvas before parent opacity',
+        (isolatedGroup.filterComplex.match(/color=c=black@0/g) || []).length === 1
+        && (isolatedGroup.filterComplex.match(/colorchannelmixer=aa=0\.5/g) || []).length === 1
+        && isolatedGroup.filterComplex.indexOf('drawbox=x=0') < isolatedGroup.filterComplex.indexOf('colorchannelmixer=aa=0.5')
+        && isolatedGroup.filterComplex.indexOf('drawbox=x=4') < isolatedGroup.filterComplex.indexOf('colorchannelmixer=aa=0.5'));
     const animatedOpacityGraph = R.compileRasterOverlays([{
         ...dummyPrep[0], geometry: [
             { t: 0, x: 50, y: 50, scale: 1, rotation: 0, opacity: 0 },
@@ -169,6 +191,22 @@ section('4 · Server helpers');
     check('raster caption export evaluates the full opacity curve, including interior dips',
         /geq=r='r\(X,Y\)':g='g\(X,Y\)':b='b\(X,Y\)':a='clip\(alpha\(X,Y\)\*/.test(animatedOpacityGraph.filterComplex)
             && !animatedOpacityGraph.filterComplex.includes('fade=t=in:st=0'));
+    const rasterLayer = { ...dummyPrep[0], clipId: 'raster-bottom' };
+    const drawtextLayer = { clipId: 'drawtext-top', filters: ['drawbox=x=0:y=0:w=2:h=2:color=red:t=fill'] };
+    const rasterBelowText = R.compileRasterOverlays([rasterLayer], {
+        frameWidth: 1080, frameHeight: 1920, fps: 30,
+        drawtextGroups: [drawtextLayer],
+        orderByClipId: new Map([['raster-bottom', 0], ['drawtext-top', 1]]),
+    });
+    check('mixed raster and drawtext layers compile in timeline order',
+        rasterBelowText.filterComplex.indexOf('overlay=') < rasterBelowText.filterComplex.indexOf('drawbox='));
+    const textBelowRaster = R.compileRasterOverlays([{ ...rasterLayer, clipId: 'raster-top' }], {
+        frameWidth: 1080, frameHeight: 1920, fps: 30,
+        drawtextGroups: [{ ...drawtextLayer, clipId: 'drawtext-bottom' }],
+        orderByClipId: new Map([['drawtext-bottom', 0], ['raster-top', 1]]),
+    });
+    check('reversing the timeline layers reverses their composite order',
+        textBelowRaster.filterComplex.indexOf('drawbox=') < textBelowRaster.filterComplex.indexOf('overlay='));
 }
 
 section('5 · Real render through ffmpeg (decoded pixels)');
@@ -192,6 +230,53 @@ section('5 · Real render through ffmpeg (decoded pixels)');
         const base = path.join(tmp, 'base.mp4');
         spawnSync(ffmpeg, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', `color=c=0x203040:s=${W}x${H}:r=30:d=3`, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', base]);
 
+        const alphaCaption = R.compileRasterOverlays([], {
+            frameWidth: 96, frameHeight: 64, fps: 1,
+            drawtextGroups: [{ clipId: 'alpha-title', filters: [
+                `drawtext=fontfile=${font}:text=ALPHA:fontcolor=white:fontsize=24:x=8:y=18`,
+            ] }],
+            orderByClipId: new Map([['alpha-title', 0]]),
+            inputLabel: 'alpha_base',
+        });
+        const alphaRender = spawnSync(ffmpeg, [
+            '-hide_banner', '-loglevel', 'error',
+            '-f', 'lavfi', '-i', 'color=c=black@0:s=96x64:r=1:d=1,format=rgba',
+            '-filter_complex', `[0:v]format=rgba[alpha_base];${alphaCaption.filterComplex}`,
+            '-map', `[${alphaCaption.outputLabel}]`, '-frames:v', '1',
+            '-pix_fmt', 'rgba', '-f', 'rawvideo', '-',
+        ], { maxBuffer: 4 * 1024 * 1024 });
+        const alphaPixels = alphaRender.stdout || Buffer.alloc(0);
+        let visibleAlpha = 0;
+        for (let i = 3; i < alphaPixels.length; i += 4) if (alphaPixels[i] > 0) visibleAlpha++;
+        check('transparent RGBA export keeps untouched pixels clear and caption pixels visible',
+            alphaRender.status === 0 && alphaPixels.length === 96 * 64 * 4
+                && alphaPixels[3] === 0 && visibleAlpha > 10,
+            `${alphaRender.stderr?.toString().slice(-300) || ''} alpha=${visibleAlpha}`);
+
+        const sibling = (clipId, color) => ({
+            clipId, sceneId: 'opacity-test',
+            compositionStack: [{ id: 'isolated-text', opacity: 1, opacitySamples: [{ t: 0, value: 0.5 }] }],
+            filters: [`drawtext=fontfile=${font}:text=A:fontcolor=${color}:fontsize=40:x=0:y=0`],
+        });
+        const grouped = R.compileRasterOverlays([], {
+            frameWidth: 64, frameHeight: 64, fps: 1, duration: 1, inputLabel: 'group_base',
+            drawtextGroups: [sibling('red-bottom', 'red'), sibling('blue-top', 'blue')],
+            orderByClipId: new Map([['red-bottom', 0], ['blue-top', 1]]),
+        });
+        const groupedRender = spawnSync(ffmpeg, [
+            '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=64x64:r=1:d=1,format=rgba',
+            '-filter_complex', `[0:v]format=rgba[group_base];${grouped.filterComplex}`,
+            '-map', `[${grouped.outputLabel}]`, '-frames:v', '1', '-pix_fmt', 'rgba', '-f', 'rawvideo', '-',
+        ], { maxBuffer: 4 * 1024 * 1024 });
+        const groupedPixels = groupedRender.stdout || Buffer.alloc(0);
+        let strongestBlue = [0, 0];
+        for (let i = 0; i < groupedPixels.length; i += 4) {
+            if (groupedPixels[i + 2] > strongestBlue[1]) strongestBlue = [groupedPixels[i], groupedPixels[i + 2]];
+        }
+        check('overlapping caption siblings receive parent opacity once in rendered pixels',
+            groupedRender.status === 0 && strongestBlue[1] >= 120 && strongestBlue[1] <= 136 && strongestBlue[0] <= 2,
+            `red/blue=${strongestBlue.join('/')} ${groupedRender.stderr?.toString().slice(-250) || ''}`);
+
         const hlText = 'THIS CHANGED MY LIFE';
         const p = program([
             { id: 'a', content: hlText, start: 0, duration: 1.5, fontFamily: 'Anton', fontSize: 64, color: '#FFFFFF',
@@ -213,6 +298,51 @@ section('5 · Real render through ffmpeg (decoded pixels)');
         args.push('-filter_complex', g.filterComplex, '-map', `[${g.outputLabel}]`, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', out);
         const run = spawnSync(ffmpeg, args, { encoding: 'utf8' });
         check('ffmpeg accepts the graph and renders', run.status === 0, (run.stderr || '').slice(-400));
+
+        // A direct compositing regression: raster and text filters intentionally
+        // cover the same pixels. The top timeline layer must win whichever
+        // rendering path it uses.
+        const block = path.join(tmp, 'stack-block.png');
+        const blockCanvas = Canvas.createCanvas(60, 60);
+        const blockCtx = blockCanvas.getContext('2d');
+        blockCtx.fillStyle = '#00ff00';
+        blockCtx.fillRect(0, 0, 60, 60);
+        fs.writeFileSync(block, blockCanvas.toBuffer('image/png'));
+        const blockList = path.join(tmp, 'stack-block.ffconcat');
+        fs.writeFileSync(blockList, `ffconcat version 1.0\nfile '${block}'\nduration 3\nfile '${block}'\n`);
+        const rasterBlock = {
+            clipId: 'raster-layer', listPath: blockList, width: 60, height: 60, renderScale: 1,
+            outputStart: 0, outputEnd: 3,
+            geometry: [{ t: 0, x: 50, y: 50, scale: 1, rotation: 0, opacity: 1 }],
+        };
+        const redTextBox = { clipId: 'drawtext-layer', filters: [
+            "drawbox=x=240:y=450:w=60:h=60:color=red:t=fill:enable='between(t,0,3)'",
+        ] };
+        const renderStackPixel = (rasterTop, name) => {
+            const stack = R.compileRasterOverlays([rasterBlock], {
+                frameWidth: W, frameHeight: H, fps: 30,
+                drawtextGroups: [redTextBox],
+                orderByClipId: rasterTop
+                    ? new Map([['drawtext-layer', 0], ['raster-layer', 1]])
+                    : new Map([['raster-layer', 0], ['drawtext-layer', 1]]),
+            });
+            const output = path.join(tmp, `${name}.mp4`);
+            const stackArgs = ['-y', '-loglevel', 'error', '-i', base];
+            for (const inp of stack.inputs) stackArgs.push(...inp.inputOptions, '-i', inp.path);
+            stackArgs.push('-filter_complex', stack.filterComplex, '-map', `[${stack.outputLabel}]`, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', output);
+            const rendered = spawnSync(ffmpeg, stackArgs, { encoding: 'utf8' });
+            if (rendered.status !== 0) return { error: (rendered.stderr || '').slice(-300) };
+            const frame = spawnSync(ffmpeg, ['-loglevel', 'error', '-ss', '1', '-i', output,
+                '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 64 << 20 });
+            const pixel = ((H / 2 | 0) * W + (W / 2 | 0)) * 3;
+            return frame.status === 0 && frame.stdout?.length >= pixel + 3
+                ? { r: frame.stdout[pixel], g: frame.stdout[pixel + 1], b: frame.stdout[pixel + 2] }
+                : { error: `${frame.stderr?.toString().slice(-200) || 'frame decode failed'} (status ${frame.status}, bytes ${frame.stdout?.length || 0})` };
+        };
+        const textOnTop = renderStackPixel(false, 'text-on-top');
+        const rasterOnTop = renderStackPixel(true, 'raster-on-top');
+        check('a higher drawtext layer renders over raster pixels', textOnTop.r > textOnTop.g * 1.5, JSON.stringify(textOnTop));
+        check('a higher raster layer renders over drawtext pixels', rasterOnTop.g > rasterOnTop.r * 1.5, JSON.stringify(rasterOnTop));
 
         const frame = (t) => {
             const r = spawnSync(ffmpeg, ['-loglevel', 'error', '-ss', String(t), '-i', out, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 64 << 20 });
@@ -251,6 +381,17 @@ section('6 · Export wiring and fail-open fallback');
     check('prepared entries are removed from the drawtext program', /entries: scaledCaptionProgram\.entries\.filter\(e => !rasterIds\.has\(e\.clipId\)\)/.test(ep));
     check('RASTER_CAPTIONS_DISABLED kill switch', ep.includes("process.env.RASTER_CAPTIONS_DISABLED !== '1'"));
     check('overlay pass failure falls back to drawtext for the same entries', ep.includes('entries: rasterProgramEntries') && ep.includes('raster_fallback_filters.txt'));
+    check('raster and drawtext captions enter one timeline-ordered graph',
+        ep.includes('drawtextGroups: captionFilterGroups') && ep.includes('orderByClipId: captionOrder'));
+    check('alpha exports merge caption layers over the transparent overlay sequence',
+        ep.includes("inputLabel: 'alpha_base'") && ep.includes('transparent-graphics-with-captions')
+            && ep.includes('Captions are included when present.'));
+    check('alpha exports without graphics fail clearly instead of silently exporting blank frames',
+        ep.includes('if (!hasCaptions)') && ep.includes('Transparent graphics export needs at least one supported overlay or caption layer.'));
+    check('mixed-render fallback restarts from the pre-caption video and includes both render paths',
+        ep.includes('const captionSourcePath = finalVideoPath') &&
+        ep.includes('...captionFilterGroups') && ep.includes('...(fallback.groups || [])') &&
+        ep.includes("'-i', captionSourcePath, '-filter_script:v', fbScript"));
     check('a failed caption program also clears the raster state', /programClipIds\.clear\(\);[\s\S]{0,200}rasterPrepared = null;/.test(ep));
     const pkg = JSON.parse(read('package.json') || '{}');
     check('@napi-rs/canvas is a runtime dependency', !!(pkg.dependencies && pkg.dependencies['@napi-rs/canvas']));

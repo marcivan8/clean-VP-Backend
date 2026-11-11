@@ -133,7 +133,8 @@ const MIN_CLIPS_FOR_STORY = 2;
 /** Transcript characters below which any beat reading would be guesswork. */
 const MIN_TRANSCRIPT_CHARS = 120;
 
-const MAX_CLIPS_IN_PROMPT = 60;
+// Bound each model request while still covering every clip in a long edit.
+const MAX_CLIPS_PER_STORY_BATCH = 40;
 
 class StoryIntelligence {
 
@@ -279,7 +280,7 @@ class StoryIntelligence {
         ) / 10;
     }
 
-    /** One GPT call over the cut. Separated from persistence for testability. */
+    /** Analyze the complete cut in one or more bounded model requests. */
     async deriveMap({ clips = [], projectMap = null, platform = null, editingStyle = null }) {
         if (!clips.length) return null;
         if (!isAIConfigured()) {
@@ -289,8 +290,63 @@ class StoryIntelligence {
         const openai = getAIClient({ timeout: 60_000 });
         if (!openai) throw new Error('AI client unavailable');
 
-        const prompt = this.buildDerivationPrompt({ clips, projectMap, platform, editingStyle });
+        if (clips.length > MAX_CLIPS_PER_STORY_BATCH) {
+            return this._deriveMapInBatches({ clips, projectMap, platform, editingStyle, openai });
+        }
 
+        const parsed = await this._requestStoryMap(openai, this.buildDerivationPrompt({ clips, projectMap, platform, editingStyle }));
+        return this.normalizeMap(parsed, clips);
+    }
+
+    async _deriveMapInBatches({ clips, projectMap, platform, editingStyle, openai }) {
+        const maps = [];
+        let offsetSec = 0;
+        for (let index = 0; index < clips.length; index += MAX_CLIPS_PER_STORY_BATCH) {
+            const batch = clips.slice(index, index + MAX_CLIPS_PER_STORY_BATCH);
+            const parsed = await this._requestStoryMap(openai, this.buildDerivationPrompt({
+                clips: batch, projectMap, platform, editingStyle,
+            }));
+            const local = this.normalizeMap(parsed, batch);
+            maps.push({ map: local, offsetSec });
+            offsetSec += this._totalDuration(batch);
+        }
+
+        const shift = (value, offset) => value === null || value === undefined ? value : Math.round((value + offset) * 10) / 10;
+        const hookCandidates = maps.map(({ map, offsetSec }) => ({
+            atSec: shift(map.hook_at_sec, offsetSec),
+            strength: map.hook_strength,
+            note: map.hook_note,
+        })).filter(hook => hook.atSec !== null && hook.strength !== 'absent');
+        // A short-form hook is an opening event, so retain the first grounded
+        // hook across the complete cut rather than letting later batches replace it.
+        const hook = hookCandidates.sort((a, b) => a.atSec - b.atSec)[0]
+            || { atSec: null, strength: 'absent', note: null };
+
+        const merged = {
+            beats: maps.flatMap(({ map, offsetSec }) => map.beats.map(beat => ({
+                ...beat,
+                startSec: shift(beat.startSec, offsetSec),
+                endSec: shift(beat.endSec, offsetSec),
+            }))),
+            hook,
+            sagWindows: maps.flatMap(({ map, offsetSec }) => map.sag_windows.map(sag => ({
+                ...sag,
+                startSec: shift(sag.startSec, offsetSec),
+                endSec: shift(sag.endSec, offsetSec),
+            }))),
+            deliversThroughLine: maps.some(({ map }) => map.delivers_through_line === false)
+                ? false
+                : maps.every(({ map }) => map.delivers_through_line === true) ? true : null,
+            throughLineNote: maps.map(({ map }) => map.through_line_note).filter(Boolean).join(' '),
+            issues: maps.flatMap(({ map, offsetSec }) => map.issues.map(issue => ({
+                ...issue,
+                atSec: shift(issue.atSec, offsetSec),
+            }))),
+        };
+        return this.normalizeMap(merged, clips);
+    }
+
+    async _requestStoryMap(openai, prompt) {
         const completion = await openai.chat.completions.create({
             // R84 missed this call site (same bug as ProjectIntelligence.js) —
             // hardcoded 'gpt-4o' 404s under AI_PROVIDER=groq/gemini. Route
@@ -326,7 +382,7 @@ class StoryIntelligence {
         try { parsed = JSON.parse(raw); }
         catch { throw new Error('model returned malformed JSON'); }
 
-        return this.normalizeMap(parsed, clips);
+        return parsed;
     }
 
     /**
@@ -336,11 +392,8 @@ class StoryIntelligence {
      */
     buildDerivationPrompt({ clips = [], projectMap = null, platform = null, editingStyle = null }) {
         const styleNote = storyMapStyleNote(editingStyle);
-        const shown   = clips.slice(0, MAX_CLIPS_IN_PROMPT);
-        const omitted = clips.length - shown.length;
-
         let cursor = 0;
-        const lines = shown.map((c, i) => {
+        const lines = clips.map((c, i) => {
             const start = Math.round(cursor * 10) / 10;
             cursor += (c.duration || 0);
             const transcript = (c.transcript || '').trim().slice(0, 220);
@@ -368,7 +421,7 @@ Type:         ${projectType}
 Through-line: ${throughLine}
 Platform:     ${platform || 'not specified'}${styleNote ? `
 ${styleNote}` : ''}
-Total length: ${this._totalDuration(clips)}s across ${clips.length} clip(s)${omitted > 0 ? ` (showing first ${shown.length})` : ''}
+Total length: ${this._totalDuration(clips)}s across ${clips.length} clip(s)
 
 ━━━ THE CUT, IN ORDER ━━━
 ${lines}

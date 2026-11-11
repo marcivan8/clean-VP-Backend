@@ -43,6 +43,8 @@ import { STYLE_RECIPES, recipeTransitionForCut, pickTransitionCuts } from '../mo
 import { TRANSITION_DEFAULT_DURATION } from '../motion/TransitionFX.js';
 import { autoEmphasizeCaptions } from '../utils/captionEmphasis.js';
 import { mapTranscriptToTimeline, listMainTrackSources, resolveClipSourcePath } from '../timeline/transcriptMap.js';
+import { isReferenceAsset } from '../utils/assetRoles.js';
+import { transcriptForAssetRange } from '../timeline/assetTranscript.js';
 import { transcriptionManager } from './TranscriptionManager.js';
 // R68 — AI Animation Intelligence. `animate_automatically` applies the
 // server's resolved plan (AnimationKnowledgeGraph.js) the exact same way
@@ -82,7 +84,7 @@ async function styleReferenceProfileFor(state, visualProfiles = [], signal) {
     // to an older conversation. The most recently attached reference is the
     // best match for the current edit unless the caller supplied a cached
     // profile explicitly.
-    const references = (state?.assets || []).filter(asset => asset?.assistantReference === true).reverse();
+    const references = (state?.assets || []).filter(isReferenceAsset).reverse();
     const ids = new Set(references.map(asset => String(asset.id)));
     const cached = visualProfiles.find(profile =>
         profile?.isReference && ids.has(String(profile.assetId)) && profile?.visualStyleProfile
@@ -105,7 +107,7 @@ async function styleReferenceProfileFor(state, visualProfiles = [], signal) {
 /** Resolve the editable source path while making assistant references unusable as footage. */
 function editableUploadPathFor(state) {
     const assets = state?.assets || [];
-    const references = assets.filter(asset => asset?.assistantReference === true);
+    const references = assets.filter(isReferenceAsset);
     const isReferenceValue = value => typeof value === 'string' && (
         value.startsWith('references/') || references.some(asset =>
             [asset.gcsPath, asset.sourceUrl, asset.proxyUrl, asset.name, asset.file?.name]
@@ -113,7 +115,7 @@ function editableUploadPathFor(state) {
         )
     );
     let path = isReferenceValue(state?.uploadedFilePath) ? null : state?.uploadedFilePath;
-    const sourceAsset = assets.find(asset => asset?.type === 'video' && asset.assistantReference !== true);
+    const sourceAsset = assets.find(asset => asset?.type === 'video' && !isReferenceAsset(asset));
     if (!path && sourceAsset) {
         path = sourceAsset.gcsPath || sourceAsset.sourceUrl || sourceAsset.proxyUrl || null;
         if (typeof path === 'string') {
@@ -547,10 +549,10 @@ export class MediaExecutionEngine {
             } else if (val === '$uploaded_file') {
                 // Prefer the server-side path stored after proxy upload
                 let serverPath = editableUploadPathFor(store);
-                const referenceFile = (store.assets || []).some(asset => asset?.assistantReference === true
+                const referenceFile = (store.assets || []).some(asset => isReferenceAsset(asset)
                     && (asset.name === store.uploadedFile?.name || asset.file?.name === store.uploadedFile?.name));
                 const fileName = !serverPath && !referenceFile ? store.uploadedFile?.name : null;
-                const editableVideo = (store.assets || []).find(a => a.type === 'video' && a.assistantReference !== true);
+                const editableVideo = (store.assets || []).find(a => a.type === 'video' && !isReferenceAsset(a));
 
                 // Fallback: recover GCS raw path from any URL format stored on the asset.
                 if (!serverPath && editableVideo) {
@@ -1871,7 +1873,7 @@ export class MediaExecutionEngine {
                 let referenceStyle = null;
                 let referenceAnalysisStatus = 'not_attached';
                 const recipeState = useTimelineStore.getState();
-                const hasReference = (recipeState.assets || []).some(asset => asset?.assistantReference);
+                const hasReference = (recipeState.assets || []).some(isReferenceAsset);
                 if (hasReference) {
                     referenceAnalysisStatus = 'analyzing';
                     let profiles = [];
@@ -2248,7 +2250,7 @@ export class MediaExecutionEngine {
                 let plan = null;
                 let scenePlan = null;
                 let referenceStyleProfile = null;
-                const hasStyleReference = (st.assets || []).some(asset => asset?.assistantReference === true && ['video', 'image'].includes(asset.type));
+                const hasStyleReference = (st.assets || []).some(asset => isReferenceAsset(asset) && ['video', 'image'].includes(asset.type));
                 let referenceAnalysisStatus = hasStyleReference ? 'awaiting_analysis' : 'not_attached';
                 const text = words.slice(0, 400).map(w => String(w.word ?? w.text ?? '')).join(' ');
                 if (text) {
@@ -2966,7 +2968,7 @@ export class MediaExecutionEngine {
             case 'split_speakers': {
                 const spStore      = useTimelineStore.getState();
                 const uploadedPath = editableUploadPathFor(spStore);
-                const videoAsset   = (spStore.assets || []).find(a => a.type === 'video' && a.assistantReference !== true);
+                const videoAsset   = (spStore.assets || []).find(a => a.type === 'video' && !isReferenceAsset(a));
 
                 if (!uploadedPath) {
                     return { action, success: false, message: 'No uploaded file path found. Re-upload the video and try again.' };
@@ -3464,7 +3466,7 @@ export class MediaExecutionEngine {
                 // ── Step 1: place any unplaced bin assets on the timeline ────────
                 // Broad type match: accept 'video', 'Video', or anything that includes 'video'
                 const readyAssets = ocAssets.filter(
-                    a => !a.isProxying && typeof a.type === 'string' && a.type.toLowerCase().includes('video')
+                    a => !isReferenceAsset(a) && !a.isProxying && typeof a.type === 'string' && a.type.toLowerCase().includes('video')
                 );
                 const timelineAssetIds = new Set(allClips.map(c => c.assetId));
                 const unplacedAssets   = readyAssets.filter(a => !timelineAssetIds.has(a.id));
@@ -3510,15 +3512,23 @@ export class MediaExecutionEngine {
 
                 const captions   = ocStore.captions ?? [];
                 const uploadedFP = editableUploadPathFor(ocStore);
+                const uniqueSourceAssetIds = new Set(allClips.map(clip => clip.assetId).filter(Boolean));
 
                 const clipPayload = allClips.map(clip => {
                     const asset      = ocAssets.find(a => a.id === clip.assetId);
                     const assetName  = asset?.name || clip.name || null;
                     const clipOffset = clip.offset ?? 0;
-                    const clipEnd    = clipOffset + (clip.duration ?? 0);
-                    const transcript = captions
-                        .filter(w => w.start >= clipOffset - 0.1 && w.end <= clipEnd + 0.1)
-                        .map(w => w.word).join(' ').trim().slice(0, 300);
+                    const transcript = transcriptForAssetRange({
+                        assetId: clip.assetId,
+                        offset: clipOffset,
+                        duration: clip.duration,
+                        diarizationByAsset: ocStore.diarizationByAsset,
+                        captions,
+                        // The legacy transcript is only safe when the timeline
+                        // contains one distinct source. In a multi-rush edit,
+                        // unknown transcript ownership must remain unknown.
+                        allowUnscopedCaptions: uniqueSourceAssetIds.size <= 1,
+                    });
 
                     return {
                         id:         clip.id,
@@ -4533,7 +4543,7 @@ export class MediaExecutionEngine {
 
                 // Fallback for page reloads where store.uploadedFilePath was lost
                 if (!serverPath && store.assets) {
-                    const videoAsset = store.assets.find(a => a.type === 'video' && a.assistantReference !== true);
+                    const videoAsset = store.assets.find(a => a.type === 'video' && !isReferenceAsset(a));
                     if (videoAsset) {
                         // Prefer the asset's own gcsPath field — set directly at upload
                         // time (IDELayout.jsx: updateAsset(assetId, { gcsPath })) and
@@ -4562,7 +4572,7 @@ export class MediaExecutionEngine {
                     }
                 }
 
-                const isReferenceFile = (store.assets || []).some(asset => asset?.assistantReference === true
+                const isReferenceFile = (store.assets || []).some(asset => isReferenceAsset(asset)
                     && (asset.name === store.uploadedFile?.name || asset.file?.name === store.uploadedFile?.name));
                 resolvedPayload[key] = serverPath || (!isReferenceFile ? store.uploadedFile?.name : null) || 'video.mp4';
                 console.log(`[MediaExecutionEngine] Resolved $uploaded_file → "${resolvedPayload[key]}"`);

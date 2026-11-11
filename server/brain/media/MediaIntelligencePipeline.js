@@ -29,6 +29,7 @@ const {
     ASSET_ANALYSIS_PROCESSING,
     ASSET_ANALYSIS_FAILED,
 } = require('./analysisStatus');
+const { readAllRows } = require('./readAllRows');
 
 class MediaIntelligencePipeline {
 
@@ -409,12 +410,11 @@ class MediaIntelligencePipeline {
     async _maybeRunBinClassification(userId, projectId) {
         if (!projectId) return;
         try {
-            const { data: assets, error } = await supabaseAdmin
+            const assets = await readAllRows(() => supabaseAdmin
                 .from('media_assets')
-                .select('analysis_status')
-                .eq('project_id', projectId);
-
-            if (error || !assets) return;
+                .select('id, analysis_status')
+                .eq('project_id', projectId)
+                .eq('user_id', userId));
 
             // Previously this required assets.every(status === DONE) — a single
             // asset that never finished (a crashed worker leaving the row at
@@ -446,13 +446,14 @@ class MediaIntelligencePipeline {
      */
     async runBinClassification(userId, projectId) {
         try {
-            const { data: assets, error } = await supabaseAdmin
+            const assets = await readAllRows(() => supabaseAdmin
                 .from('media_assets')
                 .select('*')
                 .eq('project_id', projectId)
-                .eq('analysis_status', ASSET_ANALYSIS_DONE);
+                .eq('user_id', userId)
+                .eq('analysis_status', ASSET_ANALYSIS_DONE));
 
-            if (error || !assets?.length) return;
+            if (!assets.length) return;
 
             const classification = await this.contentClassifier.classifyBin(assets);
 

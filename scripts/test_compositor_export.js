@@ -54,7 +54,7 @@ const { compileTimelineVisualEffects } = require(path.join(ROOT, 'jobs/exportPro
 // Build plans with the REAL client Compositor, so this exercises the true
 // client→worker path rather than a hand-written plan that could drift from it.
 function loadCompositor() {
-    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionExpression', 'SpatialMotion', 'AudioReactive', 'MotionResolver', 'MotionPresets', 'EffectTiming', 'CaptionModel', 'ClipAdapter', 'Compositor'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionExpression', 'SpatialMotion', 'AudioReactive', 'MotionResolver', 'TimeRemap', 'MotionPresets', 'EffectTiming', 'CaptionModel', 'ClipAdapter', 'Compositor'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);
@@ -238,6 +238,89 @@ section('3 · Compilation produces a sane filter graph');
         !/scale=w='/.test(compiled.filterComplex),
         'a static overlay should not pay for per-frame expression evaluation');
 
+    const retimedPlan = planFor([vclip({ id: 'retimed-video', start: 0, duration: 2, extra: {
+        timeRemap: { duration: 2, keyframes: [
+            { time: 0, value: 0, easing: 'linear' },
+            { time: 2, value: 1, easing: 'linear' },
+        ] },
+    } })]);
+    const retimedOverlay = retimedPlan.overlays[0];
+    const retimedGraph = compileCompositionPlan(retimedPlan, [{ overlayId: retimedOverlay.id, inputIndex: 1 }]);
+    check('the client plan samples an authored video source-time curve for export',
+        retimedOverlay.sourceTimeMap?.length > 1
+            && retimedOverlay.sourceTimeMap[0].source === 0
+            && retimedOverlay.sourceTimeMap.at(-1).source === 1,
+        JSON.stringify(retimedOverlay.sourceTimeMap?.slice(0, 3)));
+    check('the export graph trims and retimes the source stream using the sampled curve',
+        /trim=duration=/.test(retimedGraph.filterComplex)
+            && /setpts=\(if\(lt\(/.test(retimedGraph.filterComplex),
+        retimedGraph.filterComplex);
+    const reversePlan = planFor([vclip({ id: 'reverse-retimed-video', start: 0, duration: 2, extra: {
+        timeRemap: { duration: 2, keyframes: [
+            { time: 0, value: 1, easing: 'linear' },
+            { time: 2, value: 0, easing: 'linear' },
+        ] },
+    } })]);
+    const reverseOverlay = reversePlan.overlays[0];
+    const reverseGraph = compileCompositionPlan(reversePlan, [{ overlayId: reverseOverlay.id, inputIndex: 1 }]);
+    check('a monotonically reversed source-time curve is planned instead of dropped',
+        reverseOverlay.sourceTimeMap?.length > 1
+            && reverseOverlay.sourceTimeMap[0].source > reverseOverlay.sourceTimeMap.at(-1).source
+            && !reverseOverlay.sourceTimeMapWarning);
+    check('reverse retiming seeks from the lower source bound and reverses the trimmed input before mapping',
+        reverseGraph.filterComplex.includes('reverse,')
+            && reverseGraph.filterComplex.includes('trim=duration=')
+            && /setpts=\(if\(gt\(/.test(reverseGraph.filterComplex), reverseGraph.filterComplex);
+    const freezePlan = planFor([vclip({ id: 'freeze-frame-video', start: 0, duration: 2, extra: {
+        timeRemap: { duration: 2, keyframes: [
+            { time: 0, value: 0.5, easing: 'linear' },
+            { time: 2, value: 0.5, easing: 'linear' },
+        ] },
+    } })]);
+    const freezeOverlay = freezePlan.overlays[0];
+    const freezeGraph = compileCompositionPlan(freezePlan, [{ overlayId: freezeOverlay.id, inputIndex: 1 }]);
+    check('a fully constant source-time curve is represented as an authored freeze frame',
+        freezeOverlay.sourceTimeMap?.length === 1
+            && freezeOverlay.sourceTimeMap[0].source === 0.5
+            && !freezeOverlay.sourceTimeMapWarning);
+    check('export holds the selected source frame for the complete output window',
+        /trim=end_frame=1[^;]*loop=loop=-1:size=1:start=0/.test(freezeGraph.filterComplex), freezeGraph.filterComplex);
+    const holdPlan = planFor([vclip({ id: 'held-source-video', start: 0, duration: 2, extra: {
+        timeRemap: { duration: 2, keyframes: [
+            { time: 0, value: 0, easing: 'linear' },
+            { time: 0.5, value: 0.5, easing: 'linear' },
+            { time: 1.25, value: 0.5, easing: 'linear' },
+            { time: 2, value: 1, easing: 'linear' },
+        ] },
+    } })]);
+    const holdOverlay = holdPlan.overlays[0];
+    const holdGraph = compileCompositionPlan(holdPlan, [{ overlayId: holdOverlay.id, inputIndex: 1 }]);
+    check('a monotonic source curve preserves an authored held-frame interval',
+        holdOverlay.sourceTimeMap?.some((point, index, points) => index > 0
+            && point.source === points[index - 1].source
+            && point.output > points[index - 1].output)
+            && !holdOverlay.sourceTimeMapWarning);
+    check('the export PTS map holds that source frame until the next retimed frame',
+        /if\(lte\(/.test(holdGraph.filterComplex), holdGraph.filterComplex);
+    const directionChangePlan = planFor([vclip({ id: 'direction-change-video', start: 0, duration: 2, extra: {
+        timeRemap: { duration: 2, keyframes: [
+            { time: 0, value: 0, easing: 'linear' },
+            { time: 0.75, value: 0.75, easing: 'linear' },
+            { time: 1.25, value: 0.25, easing: 'linear' },
+            { time: 2, value: 1, easing: 'linear' },
+        ] },
+    } })]);
+    const directionOverlays = directionChangePlan.overlays;
+    const directionGraph = compileCompositionPlan(directionChangePlan,
+        directionOverlays.map((overlay, index) => ({ overlayId: overlay.id, inputIndex: index + 1 })));
+    check('a direction-changing source-time curve is split into renderable monotonic layers',
+        directionOverlays.length === 3
+            && new Set(directionOverlays.map(overlay => overlay.id)).size === 3
+            && directionOverlays.every(overlay => overlay.sourceTimeMap?.length > 1 && !overlay.sourceTimeMapWarning));
+    check('direction-change layers have continuous output windows and compile as a shared composite',
+        directionOverlays.slice(1).every((overlay, index) =>
+            Math.abs(overlay.outputStart - directionOverlays[index].outputEnd) <= 0.0001)
+            && directionGraph.used === 3, JSON.stringify(directionOverlays.map(overlay => [overlay.outputStart, overlay.outputEnd])));
     const mirrorPlan = planFor([vclip({ id: 'mirrored-static', start: 0.5, duration: 1,
         extra: { scaleX: -1, scaleY: 1 } })]);
     const mirrorGraph = compileCompositionPlan(mirrorPlan, [{ overlayId: mirrorPlan.overlays[0].id, inputIndex: 1 }]);
@@ -595,16 +678,20 @@ function makeSources(dir) {
         path.join(dir, 'ov.mp4')], { timeout: 60_000 });
 }
 
-function runGraph(dir, compiled, outName) {
+function runGraph(dir, compiled, outName, inputFiles = [path.join(dir, 'base.mp4'), path.join(dir, 'ov.mp4')]) {
     const out = path.join(dir, outName);
-    const r = spawnSync(FFMPEG, [
-        '-hide_banner', '-loglevel', 'error',
-        '-i', path.join(dir, 'base.mp4'),
-        '-i', path.join(dir, 'ov.mp4'),
+    const args = ['-hide_banner', '-loglevel', 'error'];
+    inputFiles.forEach(input => {
+        const file = typeof input === 'string' ? input : input.file;
+        if (typeof input === 'object' && Number(input.seek) > 0) args.push('-ss', String(input.seek));
+        args.push('-i', file);
+    });
+    args.push(
         '-filter_complex', compiled.filterComplex,
         '-map', `[${compiled.outputLabel}]`,
         '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', out,
-    ], { encoding: 'utf8', timeout: 120_000 });
+    );
+    const r = spawnSync(FFMPEG, args, { encoding: 'utf8', timeout: 120_000 });
     return { r, out };
 }
 
@@ -674,6 +761,62 @@ if (!FFMPEG) {
     check('the composited frame DIFFERS from the base inside the overlay window',
         !!baseMid && !!compMid && !baseMid.equals(compMid),
         'a graph that runs and composites nothing is the same as no compositor at all');
+
+    const retimedPlan = planFor([vclip({ id: 'retimed-video-runtime', start: 0, duration: 2, extra: {
+        timeRemap: { duration: 2, keyframes: [
+            { time: 0, value: 0, easing: 'linear' },
+            { time: 2, value: 1, easing: 'linear' },
+        ] },
+    } })]);
+    const retimedGraph = compileCompositionPlan(retimedPlan,
+        [{ overlayId: retimedPlan.overlays[0].id, inputIndex: 1 }]);
+    const retimedRender = runGraph(dir, retimedGraph, 'retimed-overlay.mp4');
+    check('FFmpeg executes a keyframed video overlay retime graph',
+        retimedRender.r.status === 0 && fs.existsSync(retimedRender.out),
+        String(retimedRender.r.stderr || '').slice(-1200));
+    check('the retimed overlay remains visible at the middle of its output window',
+        !!regionColor(retimedRender.out, 1, { x: 250, y: 170, w: 12, h: 12 }),
+        'the remapped source must reach the same compositor output as ordinary footage');
+
+    const directionSource = path.join(dir, 'direction-source.mp4');
+    const sourceColors = ['red', 'green', 'blue', 'yellow'];
+    const sourceArgs = ['-hide_banner', '-loglevel', 'error'];
+    sourceColors.forEach(color => sourceArgs.push('-f', 'lavfi', '-i', `color=c=${color}:s=200x200:r=15:d=0.5`));
+    sourceArgs.push('-filter_complex', '[0:v][1:v][2:v][3:v]concat=n=4:v=1:a=0,format=yuv420p',
+        '-t', '2', '-an', '-y', directionSource);
+    const sourceResult = spawnSync(FFMPEG, sourceArgs, { encoding: 'utf8', timeout: 60_000 });
+    const directionRuntimePlan = planFor([vclip({ id: 'direction-change-runtime', start: 0, duration: 2, extra: {
+        timeRemap: { duration: 2, keyframes: [
+            { time: 0, value: 0, easing: 'linear' },
+            { time: 0.75, value: 1.5, easing: 'linear' },
+            { time: 1.25, value: 0.5, easing: 'linear' },
+            { time: 2, value: 2, easing: 'linear' },
+        ] },
+    } })]);
+    const directionRuntimeOverlays = directionRuntimePlan.overlays;
+    const directionRuntimeGraph = compileCompositionPlan(directionRuntimePlan,
+        directionRuntimeOverlays.map((overlay, index) => ({ overlayId: overlay.id, inputIndex: index + 1 })));
+    const directionRender = runGraph(dir, directionRuntimeGraph, 'direction-change.mp4', [
+        path.join(dir, 'base.mp4'),
+        ...directionRuntimeOverlays.map(overlay => ({
+            file: directionSource,
+            // ExportProcessor seeks each decoded overlay to its lowest source
+            // timestamp before the compiler applies the local retime map.
+            seek: Math.min(...overlay.sourceTimeMap.map(point => Number(point.source) || 0)),
+        })),
+    ]);
+    const sampleDirection = (time) => regionColor(directionRender.out, time, { x: 314, y: 174, w: 12, h: 12 });
+    const directionSampleTimes = [0.25, 0.6, 0.9, 1.1, 1.4, 1.6, 1.9];
+    const directionSamples = directionSampleTimes.map(sampleDirection);
+    // The yuv420p encode turns pure green into roughly RGB (1,128,1), so use
+    // its decoded reference value rather than nominal full-intensity green.
+    const expectedDirectionColors = ['018001', '0000ff', '0000ff', '018001', '018001', '0000ff', 'ffff00'];
+    check('a direction-changing retime renders each split segment without FFmpeg errors',
+        sourceResult.status === 0 && directionRender.r.status === 0 && fs.existsSync(directionRender.out),
+        String(directionRender.r.stderr || sourceResult.stderr || '').slice(-1200));
+    check('exported pixels follow forward, reverse, and forward source-time motion',
+        directionSamples.every((sample, index) => colorDist(sample, expectedDirectionColors[index]) < 45),
+        `times=${JSON.stringify(directionSampleTimes)} actual=${JSON.stringify(directionSamples)} expected=${JSON.stringify(expectedDirectionColors)}`);
 
     const pattern = path.join(dir, 'mirror-pattern.mp4');
     const patternResult = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i',
@@ -745,6 +888,36 @@ if (!FFMPEG) {
     const pixel = regionColor(out, 1.5, { x: 315, y: 175, w: 12, h: 12 });
     check('overlapping opaque children receive group opacity once, not once per child',
         colorDist(pixel, 'c04040') < 24, `expected ~c04040, got ${pixel}`);
+
+    const separatedGroup = [{ id: 'separated-comp', type: 'composition', opacity: 1,
+        blendMode: 'source-over', effects: [{ kind: 'contrast', params: { amount: 1.4 } }] }];
+    const separatedPlan = planFor([
+        vclip({ id: 'separated-child-a', start: 0, duration: 3, extra: { x: 50, y: 50, compositionStack: separatedGroup } }),
+        vclip({ id: 'between-group-child', start: 0, duration: 3, extra: { x: 50, y: 50 } }),
+        vclip({ id: 'separated-child-b', start: 0, duration: 3, extra: { x: 50, y: 50, compositionStack: separatedGroup } }),
+    ]);
+    const separatedGraph = compileCompositionPlan(separatedPlan, separatedPlan.overlays.map((overlay, index) => ({ overlayId: overlay.id, inputIndex: index + 1 })));
+    check('non-adjacent composition children share one isolated export buffer',
+        (separatedGraph.filterComplex.match(/color=c=black@0/g) || []).length === 1
+            && separatedGraph.filterComplex.includes('eq=contrast=1.4'),
+        'expected the separated siblings to be gathered into one effected group');
+
+    const reusedSceneGroup = (opacity, contrast) => [{
+        id: 'scene-local-group', type: 'composition', opacity, blendMode: 'source-over',
+        effects: [{ kind: 'contrast', params: { amount: contrast } }],
+    }];
+    const reusedIdPlan = planFor([
+        vclip({ id: 'scene-a-child', start: 0, duration: 3, extra: { sceneId: 'scene-a', x: 50, y: 50,
+            opacity: 0.5, compositionStack: reusedSceneGroup(0.5, 1.2) } }),
+        vclip({ id: 'scene-b-child', start: 0, duration: 3, extra: { sceneId: 'scene-b', x: 50, y: 50,
+            opacity: 0.25, compositionStack: reusedSceneGroup(0.25, 1.6) } }),
+    ]);
+    const reusedIdGraph = compileCompositionPlan(reusedIdPlan, reusedIdPlan.overlays.map((overlay, index) => ({ overlayId: overlay.id, inputIndex: index + 1 })));
+    check('scene-local composition IDs retain separate opacity and effects in export',
+        (reusedIdGraph.filterComplex.match(/color=c=black@0/g) || []).length === 2
+            && reusedIdGraph.filterComplex.includes('eq=contrast=1.2')
+            && reusedIdGraph.filterComplex.includes('eq=contrast=1.6'),
+        'expected each scene to open its own isolated buffer despite reusing the composition ID');
 
     const glowStack = [{ id: 'glow-comp', type: 'composition', opacity: 1, blendMode: 'source-over', effects: [{
         kind: 'glow', params: { threshold: 0.01, intensity: 1, radius: 20, color: '#00ff00' },

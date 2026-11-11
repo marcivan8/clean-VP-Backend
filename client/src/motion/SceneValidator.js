@@ -253,6 +253,20 @@ function checkContent(entry, issues) {
     if ((node.type === NODE_TYPES.TEXT || node.type === NODE_TYPES.CAPTION) && !String(node.content ?? '').trim() && !hasRuns) {
         issues.push(issue(ISSUE_CODES.EMPTY_CONTENT, SEVERITY.ERROR, node, 'This text layer has nothing in it, so nothing will show.'));
     }
+    if (node.type === NODE_TYPES.TEXT && node.textPath) {
+        const data = node.textPath.data || node.textPath.path;
+        const validation = validateSvgPathData(data);
+        if (!validation.valid) issues.push(issue(ISSUE_CODES.INVALID_VECTOR_PATH, SEVERITY.ERROR, node,
+            `This text path is invalid (${validation.reason}); glyphs cannot follow it.`));
+        if (node.textPath.align != null && !['start', 'center', 'end'].includes(node.textPath.align)) {
+            issues.push(issue(ISSUE_CODES.INVALID_VECTOR_PATH, SEVERITY.WARN, node,
+                'Text path alignment must be start, center or end; center will be used.'));
+        }
+        if (node.textPath.side != null && !['left', 'right'].includes(node.textPath.side)) {
+            issues.push(issue(ISSUE_CODES.INVALID_VECTOR_PATH, SEVERITY.WARN, node,
+                'Text path side must be left or right; left will be used.'));
+        }
+    }
 }
 
 function checkTiming(scene, entry, issues) {
@@ -454,7 +468,7 @@ function checkVectorMorph(entry, issues) {
         && interpolateSvgPaths(motion.pathFrom, motion.pathTo, 0.5);
     if (!compatible) {
         issues.push(issue(ISSUE_CODES.UNSUPPORTED_VECTOR_MORPH, SEVERITY.WARN, node,
-            'This path pair cannot be morphed by the vector renderer. The original path will remain visible; use paths with matching contour counts and open or closed contours.',
+            'This path pair cannot be morphed by the vector renderer. The original path will remain visible; use supported SVG path commands and compatible contour counts.',
             { kind: 'path-morph' }));
     }
 }

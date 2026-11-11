@@ -212,7 +212,7 @@ export function buildWordStates(clip, layer, timeMap, tokenCount, highlight, fps
  * SAME Douglas-Peucker reduction the compositor uses for overlay geometry
  * (`Compositor.simplifySamples`) — not a second, potentially-diverging copy.
  */
-function sampleChannel(layer, timeMap, keys, fps = 30, audioWaveformsByAsset = {}) {
+function sampleChannel(layer, timeMap, keys, fps = 30, audioWaveformsByAsset = {}, opacityAtTime = null) {
     const start = Number(layer.startTime) || 0;
     const duration = Number(layer.duration) || 0;
     const end = start + duration;
@@ -222,7 +222,12 @@ function sampleChannel(layer, timeMap, keys, fps = 30, audioWaveformsByAsset = {
         const m = resolveMotionAt(layer, tTimeline, { audioWaveformsByAsset });
         const tOut = timelineToOutputTime(timeMap, tTimeline);
         const point = { t: Number(tOut.toFixed(4)) };
-        for (const k of keys) point[k] = Number.isFinite(m[k]) ? m[k] : 0;
+        for (const k of keys) {
+            const value = Number.isFinite(m[k]) ? m[k] : 0;
+            point[k] = k === 'opacity' && typeof opacityAtTime === 'function'
+                ? value * opacityAtTime(tTimeline)
+                : value;
+        }
         const prev = samples[samples.length - 1];
         if (prev && keys.every(k => Math.abs(prev[k] - point[k]) < 1e-4)) return;
         samples.push(point);
@@ -331,7 +336,29 @@ export function buildCaptionProgram(tracks, baseClips, opts = {}) {
             const text = clip.captionStyle?.uppercase ? rawText.toUpperCase() : rawText;
             const tokens = text.split(' ').filter(Boolean);
 
-            const geometry = sampleChannel(layer, timeMap, ['x', 'y', 'scale', 'opacity', 'glow', 'rotation'], fps, opts.audioWaveformsByAsset);
+            const geometry = sampleChannel(layer, timeMap, ['x', 'y', 'scale', 'opacity', 'glow', 'rotation'], fps,
+                opts.audioWaveformsByAsset);
+
+            // Keep parent opacity out of each child layer. The raster export
+            // compositor applies it once after siblings have been isolated,
+            // matching the preview's composition-group semantics.
+            const compositionStack = (Array.isArray(clip.compositionStack) ? clip.compositionStack : []).map(group => {
+                const duration = Math.max(0, Number(group?.duration) || 0);
+                const start = Number(group?.start) || 0;
+                const step = sampleStepForFps(fps);
+                const times = new Set([start, start + duration]);
+                for (let time = start + step; time < start + duration; time += step) times.add(time);
+                const opacitySamples = [...times].sort((a, b) => a - b).map(time => {
+                    const motion = resolveMotionAt({
+                        startTime: start, duration, opacity: 1,
+                        animations: group?.opacityAnimations || [],
+                        expressions: group?.opacityExpression ? { opacity: group.opacityExpression } : {},
+                    }, time);
+                    return { t: Number(timelineToOutputTime(timeMap, time).toFixed(4)), value: Math.max(0, Math.min(1,
+                        (Number(group?.opacity ?? 1) || 0) * (Number(motion.opacity) || 0))) };
+                });
+                return { id: String(group?.id || ''), opacity: 1, opacitySamples: simplifySamples(opacitySamples, 0.001, ['value']) };
+            });
 
             // Effect keyframes are authored in clip-local time. Ship sampled
             // values in output time so export follows the same time map as the
@@ -401,6 +428,7 @@ export function buildCaptionProgram(tracks, baseClips, opts = {}) {
             entries.push({
                 clipId: clip.id,
                 trackId: track.id,
+                sceneId: clip.sceneId ?? null,
                 text,
                 tokens,
                 outputStart: Number(outputStart.toFixed(4)),
@@ -416,6 +444,7 @@ export function buildCaptionProgram(tracks, baseClips, opts = {}) {
                     backgroundPadding: Number(clip.backgroundPadding) || 0,
                 },
                 geometry,       // [{t, x, y, scale, opacity, glow, rotation}] in OUTPUT time
+                compositionStack,
                 revealSteps,    // [{prefixCount, fromOutput, toOutput}] | null — null means render `text` whole
                 ...(raster ? {
                     raster: {
@@ -480,6 +509,26 @@ export function validateCaptionProgram(program) {
                 if (!Number.isFinite(g[key])) errors.push(`entries[${i}].geometry[${k}]: ${key} is not finite`);
             }
         });
+        if (e.compositionStack != null) {
+            if (!Array.isArray(e.compositionStack) || e.compositionStack.length > 16) {
+                errors.push(`entries[${i}]: compositionStack must be an array of at most 16 groups`);
+            } else {
+                e.compositionStack.forEach((group, depth) => {
+                    if (!group || typeof group.id !== 'string' || !group.id
+                        || !Number.isFinite(group.opacity) || group.opacity < 0 || group.opacity > 1) {
+                        errors.push(`entries[${i}].compositionStack[${depth}]: invalid identity or opacity`);
+                        return;
+                    }
+                    const samples = group.opacitySamples;
+                    if (samples != null && (!Array.isArray(samples) || samples.length === 0 || samples.length > 12000
+                        || samples.some((sample, index) => !sample || !Number.isFinite(sample.t) || sample.t < 0
+                            || !Number.isFinite(sample.value) || sample.value < 0 || sample.value > 1
+                            || (index > 0 && sample.t <= samples[index - 1].t)))) {
+                        errors.push(`entries[${i}].compositionStack[${depth}]: invalid opacity samples`);
+                    }
+                });
+            }
+        }
     });
 
     return { valid: errors.length === 0, errors };

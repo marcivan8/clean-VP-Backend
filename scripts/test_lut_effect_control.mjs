@@ -29,6 +29,13 @@ const lutEffects = [{ type: 'lut_apply', enabled: true, params: { lutId: 'lut-a'
 assert.equal(resolveTimelineLutPreviewFilter(lutEffects, { 'lut-a': 'brightness(1.2) saturate(1.4) hue-rotate(20deg)' }),
   'brightness(1.1) saturate(1.2) hue-rotate(10deg)',
   'clip LUT preview blends supported CSS grade values by the authored effect intensity');
+assert.equal(resolveTimelineLutPreviewFilter(lutEffects, { 'lut-a': 'brightness(1.2)' }, 0, {
+  gpuPreview: true, gpuSupportedEffectTypes: ['lut_apply'],
+}), '', 'CSS LUT approximation is suppressed when the WebGL footage pipeline supports it');
+assert.equal(resolveTimelineLutPreviewFilter([{ ...lutEffects[0], params: { lutId: 'lut-a', intensity: 1 } }], {
+  'lut-a': 'blur(1px)',
+}, 0, { gpuPreview: true, gpuSupportedEffectTypes: ['lut_apply'] }), 'blur(1px)',
+  'unsupported LUT preview filters retain the CSS fallback even when the LUT shader is available');
 assert.equal(resolveTimelineLutPreviewFilter(lutEffects, {}), '',
   'missing LUT previews do not leave stale or fabricated color filters');
 assert.equal(resolveTimelineLutPreviewFilter([{ ...lutEffects[0], enabled: false }], { 'lut-a': 'brightness(1.2)' }), '',

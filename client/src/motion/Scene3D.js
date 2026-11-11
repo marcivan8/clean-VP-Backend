@@ -29,9 +29,12 @@ const n = (v, d = 0) => Number.isFinite(Number(v)) ? Number(v) : d;
 // protect the renderer from pathological imported scenes while allowing
 // realistic nested compositions to inherit their complete transform stack.
 const MAX_SCENE_OBJECT_PARENT_DEPTH = 128;
-export const MAX_SCENE_OBJECTS = 80;
+export const MAX_SCENE_OBJECTS = 256;
 export const MAX_SCENE_LIGHTS = 8;
-export const MAX_SCENE_PARTICLES = 500;
+// Particle sprites do not expand into mesh triangles, so their population has
+// its own bound. Keep the cap high enough for layered atmosphere while staying
+// comfortably below the 16-bit depth-owner index range used by the compositor.
+export const MAX_SCENE_PARTICLES = 2_000;
 export const MAX_MESH_VERTICES = 5000;
 export const MAX_MESH_FACES = 5000;
 // Bound per-frame geometry work. A single authored n-gon can expand into many
@@ -58,26 +61,69 @@ export function getScene3DRenderLimitWarnings(scene = {}) {
         .map(([label, actual, limit]) => ({ label, actual, limit }));
     let sceneTriangles = 0;
     for (const object of objects.slice(0, MAX_SCENE_OBJECTS)) {
-        if (object?.type !== 'mesh') continue;
+        if (object?.visible === false) continue;
         const vertices = Array.isArray(object.vertices) ? object.vertices.length : 0;
         const faces = Array.isArray(object.faces) ? object.faces : [];
-        const validFaces = faces.slice(0, MAX_MESH_FACES).filter(face => Array.isArray(face)
-            && face.length >= 3 && face.length <= 64
-            && face.every(index => Number.isInteger(index) && index >= 0 && index < Math.min(vertices, MAX_MESH_VERTICES)));
-        const triangles = validFaces.reduce((total, face) => total + face.length - 2, 0);
-        const name = object.name || object.id || 'unnamed';
-        const meshLimits = [
-            [`vertices on mesh “${name}”`, vertices, MAX_MESH_VERTICES],
-            [`faces on mesh “${name}”`, faces.length, MAX_MESH_FACES],
-            [`triangles on mesh “${name}”`, triangles, MAX_MESH_TRIANGLES],
-        ];
-        for (const [label, actual, limit] of meshLimits) {
-            if (actual > limit) warnings.push({ label, actual, limit, objectId: object.id || null });
+        let triangles;
+        if (object?.type === 'mesh') {
+            const validFaces = faces.slice(0, MAX_MESH_FACES).filter(face => Array.isArray(face)
+                && face.length >= 3 && face.length <= 64
+                && face.every(index => Number.isInteger(index) && index >= 0 && index < Math.min(vertices, MAX_MESH_VERTICES)));
+            triangles = validFaces.reduce((total, face) => total + face.length - 2, 0);
+            const name = object.name || object.id || 'unnamed';
+            const meshLimits = [
+                [`vertices on mesh “${name}”`, vertices, MAX_MESH_VERTICES],
+                [`faces on mesh “${name}”`, faces.length, MAX_MESH_FACES],
+                [`triangles on mesh “${name}”`, triangles, MAX_MESH_TRIANGLES],
+            ];
+            for (const [label, actual, limit] of meshLimits) {
+                if (actual > limit) warnings.push({ label, actual, limit, objectId: object.id || null });
+            }
+            triangles = Math.min(triangles, MAX_MESH_TRIANGLES);
+        } else if (object?.type === 'text') {
+            // 3D text contributes one depth-tested render face; its extrusion
+            // is drawn on that face and is not tessellated into scene triangles.
+            triangles = 1;
+        } else {
+            // Built-in primitives have their own tessellation. Count their
+            // actual normalized faces too, or dense torus/sphere scenes can
+            // hit the global frame budget without a pre-render warning.
+            triangles = normalizeSceneMesh(object).faces.reduce((total, face) => total + face.length - 2, 0);
         }
-        sceneTriangles += Math.min(triangles, MAX_MESH_TRIANGLES);
+        sceneTriangles += triangles;
     }
+    // Particles share the same bounded face buffer as triangles, despite
+    // rendering as point sprites. Include them so geometry plus particles
+    // cannot silently overrun the renderer's global face budget.
+    sceneTriangles += Math.min(particles, MAX_SCENE_PARTICLES);
     if (sceneTriangles > MAX_SCENE_TRIANGLES) {
-        warnings.push({ label: 'triangles in the 3D scene', actual: sceneTriangles, limit: MAX_SCENE_TRIANGLES });
+        warnings.push({ label: 'triangles and particle sprites in the 3D scene', actual: sceneTriangles, limit: MAX_SCENE_TRIANGLES });
+    }
+    // The renderer appends projected shadows to the same bounded face list
+    // after geometry. Each viable caster/light/receiver combination needs at
+    // least one triangle. This lower-bound check avoids warning on merely
+    // possible extra tessellation while catching the case where geometry has
+    // already consumed all capacity and authored shadows must disappear.
+    if (scene.shadows?.enabled !== false) {
+        const casters = objects.slice(0, MAX_SCENE_OBJECTS).filter(object =>
+            object?.visible !== false && object?.castsShadow !== false && object?.type !== 'plane');
+        const shadowLights = lights.slice(0, MAX_SCENE_LIGHTS).reduce((count, light) => {
+            if (light?.castsShadow === false || n(light?.intensity, 0.8) <= 0) return count;
+            return count + (light?.type === 'area' ? 4 : 1);
+        }, 0);
+        const authoredReceiver = scene.shadows?.receiverPlane && typeof scene.shadows.receiverPlane === 'object' ? 1 : 0;
+        const objectReceivers = objects.slice(0, MAX_SCENE_OBJECTS).filter(object =>
+            object?.type === 'plane' && object.receivesShadow === true && object.visible !== false).length;
+        const receiverCount = Math.min(MAX_SCENE_SHADOW_RECEIVERS, Math.max(1, authoredReceiver + objectReceivers));
+        const minimumShadowTriangles = casters.length * shadowLights * receiverCount;
+        const remainingTriangleCapacity = Math.max(0, MAX_SCENE_TRIANGLES - Math.min(sceneTriangles, MAX_SCENE_TRIANGLES));
+        if (minimumShadowTriangles > remainingTriangleCapacity) {
+            warnings.push({
+                label: 'minimum projected shadow triangles that may be omitted',
+                actual: minimumShadowTriangles,
+                limit: remainingTriangleCapacity,
+            });
+        }
     }
     return warnings.map(warning => ({ ...warning,
         message: `This 3D scene has ${warning.actual} ${warning.label}; the renderer supports ${warning.limit}, so the extra content will not appear.` }));
@@ -101,7 +147,35 @@ export function getScene3DCompatibilityWarnings(scene = {}) {
         const name = object?.name || object?.id || 'unnamed';
         const owner = { objectId: object?.id || null, messageOwner: `3D object “${name}”` };
         if (object && Object.hasOwn(object, 'type') && object.type !== undefined && !supportedObjects.has(object.type)) {
-            warnings.push({ objectId: object.id || null, message: `3D object “${name}” uses unsupported type “${object.type}”; it will render as a box.` });
+            warnings.push({ objectId: object.id || null, message: `3D object “${name}” uses unsupported type “${object.type}”; it will be skipped.` });
+        }
+        if (object?.type === 'mesh') {
+            const vertices = Array.isArray(object.vertices) ? object.vertices : null;
+            const faces = Array.isArray(object.faces) ? object.faces : null;
+            if (!vertices || !faces) {
+                warnings.push({ objectId: object.id || null,
+                    message: `3D mesh “${name}” is missing its vertex or face array and will not render.` });
+            } else {
+                const usableVertexCount = Math.min(vertices.length, MAX_MESH_VERTICES);
+                const invalidVertices = vertices.slice(0, MAX_MESH_VERTICES).filter(vertex =>
+                    !vertex || ![vertex.x, vertex.y, vertex.z].every(value => Number.isFinite(Number(value))));
+                if (invalidVertices.length) {
+                    warnings.push({ objectId: object.id || null,
+                        message: `3D mesh “${name}” has ${invalidVertices.length} vertex(es) with invalid coordinates; those coordinates will use zero.` });
+                }
+                const validFace = face => Array.isArray(face) && face.length >= 3 && face.length <= 64
+                    && face.every(index => Number.isInteger(index) && index >= 0 && index < usableVertexCount);
+                const consideredFaces = faces.slice(0, MAX_MESH_FACES);
+                const invalidFaces = consideredFaces.filter(face => !validFace(face));
+                if (invalidFaces.length) {
+                    warnings.push({ objectId: object.id || null,
+                        message: `3D mesh “${name}” has ${invalidFaces.length} malformed face(s); those faces will be skipped.` });
+                }
+                if (!consideredFaces.some(validFace)) {
+                    warnings.push({ objectId: object.id || null,
+                        message: `3D mesh “${name}” has no valid faces and will not render.` });
+                }
+            }
         }
         if (object?.material && Object.hasOwn(object.material, 'side') && object.material.side !== undefined && !supportedSides.has(object.material.side)) {
             warnings.push({ objectId: object.id || null, message: `3D object “${name}” uses unsupported material side “${object.material.side}”; it will render as front-sided.` });
@@ -374,7 +448,8 @@ export function normalizeSceneMesh(object) {
     // User-provided meshes can be edited in place, so keep normalizing those
     // from their current data. Built-in primitive topology only depends on a
     // small set of dimensions and is identical across animation frames.
-    if (object?.type === 'mesh' && Array.isArray(object.vertices) && Array.isArray(object.faces)) {
+    if (object?.type === 'mesh') {
+        if (!Array.isArray(object.vertices) || !Array.isArray(object.faces)) return { vertices: [], faces: [] };
         const size = object.size || {};
         const vertices = object.vertices.slice(0, MAX_MESH_VERTICES).map(p => V(
             n(p?.x) * n(size.x, 1), n(p?.y) * n(size.y, 1), n(p?.z) * n(size.z, 1),
@@ -399,7 +474,12 @@ export function normalizeSceneMesh(object) {
             : null;
         return { vertices, faces, ...(uvs?.every(Boolean) ? { uvs } : {}) };
     }
-    const type = object?.type || 'box';
+    const type = object && Object.hasOwn(object, 'type') ? object.type : 'box';
+    // An unknown authored primitive must not be presented as a box. That
+    // changes the user's design while looking like a successful render. The
+    // compatibility preflight reports the skipped object; returning empty
+    // topology keeps preview and export behavior deterministic.
+    if (!Object.hasOwn(SCENE3D_PRIMITIVES, type)) return { vertices: [], faces: [] };
     const size = object?.size || {};
     const radius = type === 'torus' ? clamp(n(object?.radius, 0.8), 0.02, 10) : clamp(n(object?.radius, 0.65), 0.02, 10);
     const height = clamp(n(object?.height, 1.5), 0.02, 20);
@@ -699,7 +779,7 @@ function rasterizeDepthBuffer(ctx, faces, logicalWidth, logicalHeight, depthOfFi
         return false;
     }
 
-    // Scene order is bounded to 80 objects plus 500 particles, so a 16-bit
+    // Scene order is bounded to 256 objects plus 2,000 particles, so a 16-bit
     // owner index is sufficient. The sentinel sorts after every valid owner
     // and halves this per-pixel buffer at 4K (16 MB saved).
     const { depths, owners } = depthBuffersFor(canvas, pixelWidth * pixelHeight);

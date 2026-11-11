@@ -749,6 +749,8 @@ function prepareRasterCaptions(entries, opts) {
 
             out.items.push({
                 clipId: entry.clipId,
+                compositionStack: Array.isArray(entry.compositionStack) ? entry.compositionStack : [],
+                sceneId: entry.sceneId ?? null,
                 listPath,
                 width: W,
                 height: H,
@@ -778,7 +780,9 @@ function prepareRasterCaptions(entries, opts) {
  */
 function compileRasterOverlays(items, opts) {
     const list = Array.isArray(items) ? items : [];
-    if (list.length === 0) return null;
+    const drawtextGroups = (Array.isArray(opts.drawtextGroups) ? opts.drawtextGroups : [])
+        .filter(group => Array.isArray(group?.filters) && group.filters.length > 0);
+    if (list.length === 0 && drawtextGroups.length === 0) return null;
     const W = Number(opts.frameWidth) || 1080;
     const H = Number(opts.frameHeight) || 1920;
     const fps = Number(opts.fps) > 0 ? Number(opts.fps) : 30;
@@ -786,9 +790,65 @@ function compileRasterOverlays(items, opts) {
 
     const chains = [];
     const inputs = [];
-    let current = '0:v';
+    // Callers that already have an isolated transparent RGBA base can seed
+    // the caption graph from that label; the normal export path still starts
+    // from its input video exactly as before.
+    const inputLabel = opts.inputLabel || '0:v';
+    const order = opts.orderByClipId instanceof Map
+        ? opts.orderByClipId
+        : new Map(Object.entries(opts.orderByClipId || {}));
+    const layers = [
+        ...list.map((item, index) => ({ kind: 'raster', item, clipId: item.clipId, index })),
+        ...drawtextGroups.map((group, index) => ({ kind: 'drawtext', group, clipId: group.clipId, index: list.length + index })),
+    ].sort((a, b) => Number(order.get(a.clipId) ?? Number.MAX_SAFE_INTEGER)
+        - Number(order.get(b.clipId) ?? Number.MAX_SAFE_INTEGER) || a.index - b.index);
 
-    list.forEach((it, i) => {
+    let serial = 0;
+    const label = prefix => `${prefix}${serial++}`;
+    const duration = Math.max(0.1, Number(opts.duration) || 0,
+        ...layers.map(layer => Number(layer.item?.outputEnd) || 0));
+
+    // Reconstruct composition ancestry before rendering. Siblings can be
+    // separated in the flattened list by other tracks; they still share one
+    // isolated canvas and receive the parent alpha once when that group closes.
+    const buildTree = (source, depth = 0) => {
+        const consumed = new Set();
+        const output = [];
+        for (let index = 0; index < source.length; index++) {
+            if (consumed.has(index)) continue;
+            const layer = source[index];
+            const stack = Array.isArray(layer.compositionStack) ? layer.compositionStack : [];
+            const group = stack[depth];
+            if (!group?.id) {
+                consumed.add(index);
+                output.push({ type: 'layer', layer });
+                continue;
+            }
+            const sceneId = layer.sceneId ?? null;
+            const parentPath = stack.slice(0, depth).map(item => item?.id);
+            const members = [];
+            for (let candidate = index; candidate < source.length; candidate++) {
+                if (consumed.has(candidate)) continue;
+                const candidateStack = Array.isArray(source[candidate].compositionStack) ? source[candidate].compositionStack : [];
+                if (candidateStack[depth]?.id !== group.id || (source[candidate].sceneId ?? null) !== sceneId) continue;
+                if (!parentPath.every((id, parentIndex) => candidateStack[parentIndex]?.id === id)) continue;
+                consumed.add(candidate);
+                members.push(source[candidate]);
+            }
+            output.push({ type: 'composition', group, sceneId, children: buildTree(members, depth + 1) });
+        }
+        return output;
+    };
+
+    const renderLayer = (layer, current, requestedOutLabel = null) => {
+        const outLabel = requestedOutLabel || label('rcb');
+        if (layer.kind === 'drawtext') {
+            const filters = Array.isArray(layer.group.filters) ? layer.group.filters : [];
+            if (!filters.length) return current;
+            chains.push(`[${current}]${filters.join(',')}[${outLabel}]`);
+            return outLabel;
+        }
+        const it = layer.item;
         const samples = it.geometry;
         const s0 = samples[0] || { scale: 1, rotation: 0, opacity: 1 };
         const rotAnimated = isAnimated(samples, 'rotation');
@@ -798,7 +858,6 @@ function compileRasterOverlays(items, opts) {
         const opacityAnimated = isAnimated(samples, 'opacity');
         // Sparse streams (one frame per state) are enough unless something
         // changes every frame; then densify to the output frame rate.
-        const dense = rotAnimated || scaleAnimated || opacityAnimated;
 
         const parts = [];
         // Explicitly set the stream fps to match the target frame rate. Concat demuxer
@@ -838,20 +897,60 @@ function compileRasterOverlays(items, opts) {
             parts.push(`colorchannelmixer=aa=${n4(Math.max(0, Math.min(1, Number(s0.opacity))))}`);
         }
 
-        const inputIdx = first + i;
+        const inputIdx = first + inputs.length;
         inputs.push({ path: it.listPath, inputOptions: ['-f', 'concat', '-safe', '0'] });
-        chains.push(`[${inputIdx}:v]${parts.join(',')}[rc${i}]`);
+        const captionLabel = label('rc');
+        chains.push(`[${inputIdx}:v]${parts.join(',')}[${captionLabel}]`);
 
         // x/y are the caption box CENTRE in percent (TextOverlay convention).
         const xExpr = buildPiecewiseExpr(samples, 'x', W / 100);
         const yExpr = buildPiecewiseExpr(samples, 'y', H / 100);
-        const outLabel = i === list.length - 1 ? 'rcout' : `rcb${i}`;
         chains.push(
-            `[${current}][rc${i}]overlay=x='${xExpr}-overlay_w/2':y='${yExpr}-overlay_h/2'` +
+            `[${current}][${captionLabel}]overlay=x='${xExpr}-overlay_w/2':y='${yExpr}-overlay_h/2'` +
             `:eval=frame:eof_action=pass:enable='between(t,${n4(it.outputStart)},${n4(it.outputEnd)})'[${outLabel}]`
         );
-        current = outLabel;
-    });
+        return outLabel;
+    };
+
+    const renderNodes = (nodes, current, terminal = false) => {
+        for (let nodeIndex = 0; nodeIndex < nodes.length; nodeIndex++) {
+            const node = nodes[nodeIndex];
+            const isTerminal = terminal && nodeIndex === nodes.length - 1;
+            if (node.type === 'layer') {
+                current = renderLayer(node.layer, current, isTerminal ? 'rcout' : null);
+                continue;
+            }
+            const inner = label('comp');
+            chains.push(`color=c=black@0:s=${W}x${H}:r=${fps}:d=${n4(duration)},format=rgba[${inner}]`);
+            const groupContent = renderNodes(node.children, inner);
+            const samples = Array.isArray(node.group.opacitySamples) ? node.group.opacitySamples : [];
+            const cleanSamples = samples.filter(sample => Number.isFinite(Number(sample?.t)) && Number.isFinite(Number(sample?.value)));
+            const min = cleanSamples.length ? Math.min(...cleanSamples.map(sample => Math.max(0, Math.min(1, Number(sample.value))))) : 1;
+            const max = cleanSamples.length ? Math.max(...cleanSamples.map(sample => Math.max(0, Math.min(1, Number(sample.value))))) : 1;
+            let processed = groupContent;
+            if (Math.abs(max - min) > 1e-5 && cleanSamples.length > 1) {
+                const expr = buildPiecewiseExpr(cleanSamples, 'value').replace(/\bt\b/g, 'T').replace(/,/g, '\\,');
+                const alpha = label('compalpha');
+                chains.push(`[${processed}]format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='clip(alpha(X,Y)*(${expr}),0,255)'[${alpha}]`);
+                processed = alpha;
+            } else {
+                const opacity = cleanSamples.length ? Math.max(0, Math.min(1, Number(cleanSamples[0].value))) : Math.max(0, Math.min(1, Number(node.group.opacity ?? 1)));
+                if (opacity < 0.999) {
+                    const alpha = label('compalpha');
+                    chains.push(`[${processed}]format=rgba,colorchannelmixer=aa=${n4(opacity)}[${alpha}]`);
+                    processed = alpha;
+                }
+            }
+            const composed = isTerminal ? 'rcout' : label('compout');
+            chains.push(`[${current}][${processed}]overlay=x=0:y=0:format=auto:shortest=1:eof_action=pass[${composed}]`);
+            current = composed;
+        }
+        return current;
+    };
+
+    const tree = buildTree(layers.map(layer => ({ ...layer, compositionStack: layer.kind === 'raster'
+        ? layer.item.compositionStack : layer.group.compositionStack })));
+    const final = renderNodes(tree, inputLabel, true);
 
     return { filterComplex: chains.join(';'), outputLabel: 'rcout', inputs };
 }

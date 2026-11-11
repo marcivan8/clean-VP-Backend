@@ -144,7 +144,7 @@ await check('chat references use isolated storage and are never treated as edita
     assert.match(proxyService, /\/api\/assets\/complete-reference-upload/);
     assert.match(uploadRoute, /references\/\$\{userId\}\/\$\{assetId\}/);
     assert.match(uploadRoute, /is_reference: true/);
-    assert.match(engine, /assistantReference !== true/);
+    assert.match(engine, /isReferenceAsset\(asset\)/);
     assert.match(engine, /value\.startsWith\('references\/'\)/);
     assert.match(timelineStore, /Ignored attempt to set an assistant reference as the editable source/);
     assert.match(timelineStore, /editableUploadPath\(projectData\.uploadedFilePath, updates\.assets\)/);

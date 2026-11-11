@@ -4,6 +4,7 @@ const { analyzeStructure } = require('../viralEngine/structure.js');
 
 // R91 — editing styles accepted in ProjectContext.editingStyle (client: agent/EditingStyles.js).
 const { EDITING_STYLE_IDS } = require('../server/brain/editingStyles');
+const { buildAssetInventoryText } = require('../server/brain/EditorialBrain');
 
 const openai = getAIClient();
 
@@ -1666,6 +1667,64 @@ const agentPlanHandler = async (req, res) => {
             });
         }
 
+        const manifestAssets = Array.isArray(context?.assetManifest?.assets) ? context.assetManifest.assets : [];
+        const editableAssets = Array.isArray(context?.mediaBin) ? context.mediaBin : [];
+        const allAssets = manifestAssets.length ? manifestAssets : editableAssets;
+        const inventory = buildAssetInventoryText({ binItems: allAssets }, prompt || '');
+        const visibleAssetIds = new Set(inventory.visibleIds);
+        const searchedAssetResults = (Array.isArray(context?.assetSearchFindings) ? context.assetSearchFindings : [])
+            .flatMap(finding => Array.isArray(finding?.results) ? finding.results : []);
+        for (const asset of searchedAssetResults) {
+            // A retrieved item is eligible only if it exists in the complete
+            // project manifest and the search result does not mark it as a
+            // reference. Search output alone cannot introduce arbitrary IDs.
+            const id = String(asset?.id || '');
+            const manifestAsset = allAssets.find(item => String(item?.id || item?.assetId || '') === id);
+            if (!id || !manifestAsset || asset.editable === false || asset.role === 'reference'
+                || manifestAsset.editable === false || manifestAsset.role === 'reference'
+                || manifestAsset.is_reference === true || manifestAsset.isReference === true
+                || manifestAsset.assistantReference === true) continue;
+            visibleAssetIds.add(id);
+        }
+        const visibleEditableAssets = editableAssets.filter(asset => visibleAssetIds.has(String(asset.id)));
+        const visibleManifest = allAssets.filter(asset => visibleAssetIds.has(String(asset.id))).map(asset => ({
+            id: asset.id,
+            name: asset.name,
+            type: asset.type,
+            role: asset.role,
+            editable: asset.editable !== false && asset.role !== 'reference',
+            analysisStatus: asset.analysisStatus,
+        }));
+        const manifestRoleCounts = manifestAssets.length ? (context?.assetManifest?.byRole || {})
+            : editableAssets.reduce((counts, asset) => {
+                const role = asset.role || 'source';
+                counts[role] = (counts[role] || 0) + 1;
+                return counts;
+            }, {});
+        const plannerContext = {
+            ...context,
+            // `display` and `clips` duplicate the structured tracks, and the
+            // full upload manifest may be far larger than the model window.
+            // Keep the canonical timeline and a prompt-ranked asset shortlist.
+            display: undefined,
+            clips: undefined,
+            mediaBin: visibleEditableAssets,
+            assetManifest: {
+                total: allAssets.length,
+                byRole: manifestRoleCounts,
+                assets: visibleManifest,
+            },
+            assetContextCoverage: {
+                complete: inventory.omittedCount === 0,
+                available: inventory.visibleIds.length,
+                total: inventory.total,
+                omitted: inventory.omittedCount,
+                policy: inventory.omittedCount
+                    ? 'This is a prompt-ranked shortlist, not the complete bin. Do not claim to have reviewed omitted assets. Search omitted footage before choosing specific sources; when the user asks to use every eligible asset, prefer an operation that processes the full bin internally. If no such operation exists, return no edit plan rather than silently creating a partial edit.'
+                    : 'Every project asset is represented in this planning context.',
+            },
+        };
+
         const systemPrompt = `You are an Autonomous Video Editor Agent. 
 You will receive a description of the current timeline (Context) and a User Prompt.
 You have access to a set of TOOLS.
@@ -1677,15 +1736,16 @@ RULES:
 1. ONLY use the tools provided in the tool definitions.
 2. If the user asks for something impossible, return an empty action list.
 3. Be precise with timestamps.
-4. Return a JSON object with:
+4. The context is JSON. Only use asset IDs present in context.mediaBin for editable footage. References are guidance, never footage. When omitted assets could affect this request, return one or more read-only search_uploaded_assets actions ONLY, with no edit actions in the same plan. The client will search the full local bin and ask you to plan again with the findings. Use assetSearchFindings before searching again; use its nextOffset to inspect another page when needed. If the requested operation explicitly applies to every eligible asset, prefer a tool that operates on the full bin internally rather than enumerating IDs. Never silently create a partial edit when required assets remain undiscovered.
+5. Return a JSON object with:
    - "thought": Your reasoning.
    - "actions": Array of tool calls. Each call has "name" (tool name) and "args" (parameters).
 
 TOOLS DEFINITIONS:
 ${JSON.stringify(tools, null, 2)}`;
 
-        const userMsg = `CONTEXT:
-${context}
+        const userMsg = `CONTEXT (JSON):
+${JSON.stringify(plannerContext)}
 
 USER PROMPT:
 "${prompt}"`;

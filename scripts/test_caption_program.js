@@ -44,6 +44,7 @@ const read = (rel) => {
 
 const {
     compileCaptionProgram,
+    mergeCaptionFilterGroups,
     compileCaptionEntry,
     validateCaptionProgramShape,
     parseColor,
@@ -56,7 +57,7 @@ const {
 function loadClientModules() {
     // TextCraft before CaptionCompiler: the compiler imports its highlight-ramp
     // rules, and this loader resolves imports by concatenation order.
-    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'SpatialMotion', 'AudioReactive', 'MotionResolver', 'MotionPresets', 'TextCraft', 'CaptionModel', 'ClipAdapter', 'Compositor', 'CaptionCompiler'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'SpatialMotion', 'AudioReactive', 'MotionResolver', 'CompositionGrouping', 'MotionPresets', 'TextCraft', 'CaptionModel', 'ClipAdapter', 'Compositor', 'CaptionCompiler'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);
@@ -126,6 +127,23 @@ section('2b · Audio-reactive caption motion samples exported geometry');
     check('caption export geometry carries the audio-driven scale peak', !!midpoint && Math.abs(midpoint.scale - 1.5) < 0.01);
 }
 
+section('2c · Nested composition opacity reaches caption export geometry');
+{
+    const grouped = textTrack([{ id: 'grouped-caption', type: 'text', content: 'Grouped', start: 0, duration: 2, opacity: 0.5,
+        compositionStack: [{ id: 'caption-precomp', start: 0, duration: 2, opacity: 0.8,
+            opacityAnimations: [{ type: 'fade', startTime: 0, duration: 2,
+                keyframes: [{ time: 0, properties: { opacity: 0 } }, { time: 2, properties: { opacity: 1 } }] }] }] }]);
+    const program = CLIENT.buildCaptionProgram([baseTrack(3), grouped], baseTrack(3).clips);
+    const geometry = program.entries[0]?.geometry || [];
+    const groupSamples = program.entries[0]?.compositionStack?.[0]?.opacitySamples || [];
+    const groupFirst = groupSamples[0], groupLast = groupSamples.at(-1);
+    check('child clip opacity stays on the child geometry', geometry.length > 0
+        && geometry.every(point => Math.abs(Number(point.opacity) - 0.5) < 0.02), `geometry=${JSON.stringify(geometry)}`);
+    check('animated parent opacity is exported separately for isolated group compositing', groupSamples.length >= 2
+        && Math.abs(Number(groupFirst?.value)) < 0.02 && Math.abs(Number(groupLast?.value) - 0.8) < 0.02,
+        `groupSamples=${JSON.stringify(groupSamples)}`);
+}
+
 section('3 · Anything animated, shadowed, or uppercased DOES produce an entry');
 {
     const animated = textTrack([{
@@ -168,6 +186,12 @@ section("5 · The server validator rejects programs it must not execute");
         validateCaptionProgramShape({ version: 1, entries: [{ ...good.entries[0], outputEnd: 0 }] }).length > 0);
     check('missing geometry is refused',
         validateCaptionProgramShape({ version: 1, entries: [{ ...good.entries[0], geometry: [] }] }).length > 0);
+    const grouped = { ...good, entries: [{ ...good.entries[0], compositionStack: [{ id: 'g', opacity: 1,
+        opacitySamples: [{ t: 0, value: 0.2 }, { t: 1, value: 1 }] }] }] };
+    check('a valid isolated composition opacity curve is accepted', validateCaptionProgramShape(grouped).length === 0);
+    check('malformed composition opacity samples are rejected', validateCaptionProgramShape({ ...grouped,
+        entries: [{ ...grouped.entries[0], compositionStack: [{ id: 'g', opacity: 1,
+            opacitySamples: [{ t: 1, value: 0.2 }, { t: 0, value: 1 }] }] }] }).length > 0);
     check('garbage never throws',
         validateCaptionProgramShape(null).length > 0 && validateCaptionProgramShape(7).length > 0);
 }
@@ -452,6 +476,30 @@ section("10c · exportProcessor.js actually wires the animated path's fallbacks 
     check('font fallbacks from the animated path feed the SAME fontFallbackWarnings set the static loop uses',
         /for \(const \{ requestedFamily \} of \(compiledCaptionProgram\.fontFallbacks \|\| \[\]\)\)/.test(src) &&
         /fontFallbackWarnings\.add\(/.test(src));
+}
+
+section('10d · static and animated caption layers retain timeline stacking order');
+{
+    const groups = [
+        { clipId: 'animated-top', filters: ['shadow-top', 'glow-top', 'text-top'] },
+        { clipId: 'static-bottom', filters: ['text-bottom'] },
+        { clipId: 'animated-middle', filters: ['shadow-middle', 'text-middle'] },
+    ];
+    const merged = mergeCaptionFilterGroups(groups, new Map([
+        ['static-bottom', 0], ['animated-middle', 1], ['animated-top', 2],
+    ]));
+    check('caption groups are ordered by their original timeline layer',
+        merged.join('|') === 'text-bottom|shadow-middle|text-middle|shadow-top|glow-top|text-top',
+        `got ${merged.join('|')}`);
+    check('the internal shadow/glow/text order of each animated caption stays intact',
+        merged.indexOf('shadow-top') < merged.indexOf('glow-top') && merged.indexOf('glow-top') < merged.indexOf('text-top'));
+
+    const src = read('jobs/exportProcessor.js');
+    check('export builds a stable clip rank from text track and clip order',
+        /captionOrder\.set\(clip\.id, captionOrderIndex\+\+\)/.test(src));
+    check('export merges static and animated groups before constructing the FFmpeg chain',
+        /mergeCaptionFilterGroups\(captionFilterGroups, captionOrder\)/.test(src) &&
+        src.indexOf('mergeCaptionFilterGroups(captionFilterGroups, captionOrder)') < src.indexOf('const vfChain = textFilters.join'));
 }
 
 section('11 · Wired into the export job, guarded and fail-open');

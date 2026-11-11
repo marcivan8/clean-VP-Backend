@@ -17,7 +17,7 @@ assert.ok(ffmpeg, 'FFmpeg is available for the 3D export integration check');
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 function loadCompositor() {
-    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'MotionPresets', 'MotionExpression', 'EffectTiming', 'CaptionModel', 'ClipAdapter', 'Compositor'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'TimeRemap', 'MotionPresets', 'MotionExpression', 'EffectTiming', 'CaptionModel', 'ClipAdapter', 'Compositor'];
     let combined = '';
     for (const name of order) {
         let source = fs.readFileSync(path.join(root, `client/src/motion/${name}.js`), 'utf8');
@@ -67,7 +67,9 @@ try {
     for (let index = 0; index < 2; index++) {
         const canvas = Canvas.createCanvas(32, 32);
         const context = canvas.getContext('2d');
-        context.fillStyle = '#ff2020';
+        // Distinct frames prove the decoded texture changes with scene time,
+        // rather than merely proving that FFmpeg can write PNG files.
+        context.fillStyle = index === 0 ? '#ff2020' : '#20e040';
         context.fillRect(8, 8, 16, 16);
         fs.writeFileSync(path.join(alphaSequenceDir, `source-${String(index + 1).padStart(2, '0')}.png`), canvas.toBuffer('image/png'));
     }
@@ -89,6 +91,38 @@ try {
     assert.equal(alphaContext.getImageData(2, 2, 1, 1).data[3], 0, 'transparent source-video pixels stay transparent in extracted frames');
     const extractedOpaquePixel = [...alphaContext.getImageData(480, 240, 1, 1).data];
     assert.ok(extractedOpaquePixel[3] > 100, `source-video content remains visible in extracted frames: ${extractedOpaquePixel} (${alphaFrame.width}x${alphaFrame.height})`);
+
+    const videoTextureTemplate = {
+        kind: '3d-scene',
+        params: {
+            w: 360, h: 360,
+            scene: {
+                camera: { z: 7, fov: 780 }, ambient: 1, shadows: { enabled: false },
+                objects: [{ id: 'decoded-video-plane', type: 'video', videoTextureKey: 'decoded-video',
+                    size: { x: 4, y: 4, z: 0.1 }, videoStart: 0, videoSpeed: 1, videoLoop: false,
+                    castsShadow: false }],
+            },
+        },
+    };
+    const renderedVideoTexture = await renderTemplateFrames(videoTextureTemplate, {
+        durationSec: 0.5, fps, widthPx: 360, tmpDir: path.join(tmp, 'video-texture-render'), name: 'video-texture',
+        videoFrameFiles: { 'decoded-video': { frames: [
+            path.join(alphaFramesDir, 'frame-000001.png'), path.join(alphaFramesDir, 'frame-000002.png'),
+        ], startTime: 0 } },
+    });
+    assert.equal(renderedVideoTexture.frames, 2, 'video-textured 3D scene renders each timeline frame');
+    const videoTextureSamples = [];
+    for (const framePath of renderedVideoTexture.files) {
+        const frameImage = await Canvas.loadImage(framePath);
+        const frameCanvas = Canvas.createCanvas(frameImage.width, frameImage.height);
+        const frameContext = frameCanvas.getContext('2d');
+        frameContext.drawImage(frameImage, 0, 0);
+        videoTextureSamples.push([...frameContext.getImageData(frameImage.width / 2, frameImage.height / 2, 1, 1).data]);
+    }
+    assert.ok(videoTextureSamples[0][0] > videoTextureSamples[0][1] * 1.5,
+        `the first 3D texture frame displays its red source frame: ${videoTextureSamples[0]}`);
+    assert.ok(videoTextureSamples[1][1] > videoTextureSamples[1][0] * 1.5,
+        `the next 3D texture frame displays its green source frame: ${videoTextureSamples[1]}`);
 
     const frames = await renderTemplateFrames(overlay.source.template, {
         durationSec: overlay.outputEnd - overlay.outputStart,

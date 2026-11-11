@@ -216,7 +216,7 @@ function compileCaptionEntry(entry, ctx) {
  *          with zero signal that anything had been substituted at all.
  */
 function compileCaptionProgram(program, opts) {
-    const out = { filters: [], tempFiles: [], skipped: [], fontFallbacks: [] };
+    const out = { filters: [], groups: [], tempFiles: [], skipped: [], fontFallbacks: [] };
     if (!program || !Array.isArray(program.entries) || program.entries.length === 0) return out;
 
     for (const entry of program.entries) {
@@ -234,10 +234,24 @@ function compileCaptionProgram(program, opts) {
             escapePath: opts.escapePath,
         });
         out.filters.push(...filters);
+        out.groups.push({ clipId: entry.clipId, filters, compositionStack: entry.compositionStack || [], sceneId: entry.sceneId ?? null });
         out.tempFiles.push(...tempFiles);
     }
 
     return out;
+}
+
+/** Merge caption render paths in their original timeline track/clip order. */
+function mergeCaptionFilterGroups(groups, orderByClipId) {
+    const order = orderByClipId instanceof Map ? orderByClipId : new Map(Object.entries(orderByClipId || {}));
+    return (Array.isArray(groups) ? groups : [])
+        .map((group, index) => ({
+            order: Number(order.get(group.clipId) ?? Number.MAX_SAFE_INTEGER),
+            index,
+            filters: Array.isArray(group.filters) ? group.filters : [],
+        }))
+        .sort((a, b) => a.order - b.order || a.index - b.index)
+        .flatMap(group => group.filters);
 }
 
 /**
@@ -272,6 +286,27 @@ function validateCaptionProgramShape(program) {
                 break;
             }
         }
+        if (e.compositionStack != null) {
+            if (!Array.isArray(e.compositionStack) || e.compositionStack.length > 16) {
+                errors.push(`entries[${i}] has an invalid composition stack`);
+            } else {
+                e.compositionStack.forEach((group, depth) => {
+                    if (!group || typeof group.id !== 'string' || !group.id
+                        || !Number.isFinite(Number(group.opacity)) || Number(group.opacity) < 0 || Number(group.opacity) > 1) {
+                        errors.push(`entries[${i}].compositionStack[${depth}] has invalid identity or opacity`);
+                        return;
+                    }
+                    const samples = group.opacitySamples;
+                    if (samples != null && (!Array.isArray(samples) || samples.length === 0 || samples.length > 12000
+                        || samples.some((sample, index) => !sample
+                            || !Number.isFinite(Number(sample.t)) || Number(sample.t) < 0
+                            || !Number.isFinite(Number(sample.value)) || Number(sample.value) < 0 || Number(sample.value) > 1
+                            || (index > 0 && Number(sample.t) <= Number(samples[index - 1]?.t))))) {
+                        errors.push(`entries[${i}].compositionStack[${depth}] has invalid opacity samples`);
+                    }
+                });
+            }
+        }
     });
 
     return errors;
@@ -279,6 +314,7 @@ function validateCaptionProgramShape(program) {
 
 module.exports = {
     compileCaptionProgram,
+    mergeCaptionFilterGroups,
     validateCaptionProgramShape,
     SUPPORTED_PROGRAM_VERSION,
     // Exported for the regression suite.

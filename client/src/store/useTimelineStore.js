@@ -49,6 +49,7 @@ import { mapTranscriptToTimeline } from '../timeline/transcriptMap.js';
 import { LEGACY_PACK_MOTION } from '../motion/CaptionModel.js';
 import { retimeWordsForText, splitCaption, mergeCaptions, shiftWords as shiftCaptionWords } from '../motion/captionEdits.js';
 import { contentEndOf, visualEndOf } from '../timeline/contentEnd.js';
+import { isReferenceAsset } from '../utils/assetRoles.js';
 
 // Same breakpoint as hooks/useDeviceType.js (isMobile = width < 768). Used by
 // deleteClipWithMagnet: the main-track magnet is always on for mobile.
@@ -127,14 +128,14 @@ try {
 
 function isAssistantReferencePath(value, assets = []) {
     if (typeof value !== 'string' || !value) return false;
-    return value.startsWith('references/') || (assets || []).some(asset => asset?.assistantReference === true
+    return value.startsWith('references/') || (assets || []).some(asset => isReferenceAsset(asset)
         && [asset.gcsPath, asset.sourceUrl, asset.proxyUrl, asset.name, asset.file?.name]
             .filter(Boolean).some(ref => ref === value || ref.endsWith(`/${value}`) || value.endsWith(`/${ref}`)));
 }
 
 function editableUploadPath(value, assets = []) {
     if (!isAssistantReferencePath(value, assets)) return value || null;
-    const source = (assets || []).find(asset => asset?.type === 'video' && asset.assistantReference !== true);
+    const source = (assets || []).find(asset => asset?.type === 'video' && !isReferenceAsset(asset));
     return source?.gcsPath || source?.sourcePath || null;
 }
 
@@ -676,7 +677,7 @@ const useTimelineStore = create(
                     assets: fresh.length ? [...state.assets, ...fresh] : state.assets,
                     // A reference video is never the active source video for the
                     // project. Preserve the real source when a chat reference arrives.
-                    uploadedFile: incoming.find(a => a.type === 'video' && a.assistantReference !== true)?.file || state.uploadedFile
+                    uploadedFile: incoming.find(a => a.type === 'video' && !isReferenceAsset(a))?.file || state.uploadedFile
                 };
             }),
             // ── FIX: Cascade-remove clips that reference the deleted asset ────────
@@ -723,7 +724,7 @@ const useTimelineStore = create(
             addAssetToTimeline: (asset) => {
                 // Assistant reference assets are context for the edit only. Keep
                 // them in project state for style analysis, but never create a clip.
-                if (!asset || asset.assistantReference === true) return false;
+                if (!asset || isReferenceAsset(asset)) return false;
                 const tracks = timelineManager.toLegacyTracks();
                 
                 // Find target track (first video track for video/image, first audio for audio)
@@ -1125,7 +1126,7 @@ const useTimelineStore = create(
             addClip: (trackId, clip, options = {}) => {
                 // Central guard covers direct UI actions and AI execution paths.
                 // References may inform an edit, but can never become timeline media.
-                if (clip?.assetId && get().assets.some(asset => asset.id === clip.assetId && asset.assistantReference === true)) {
+                if (clip?.assetId && get().assets.some(asset => asset.id === clip.assetId && isReferenceAsset(asset))) {
                     console.warn('[Timeline] Rejected placement of assistant reference asset:', clip.assetId);
                     return false;
                 }

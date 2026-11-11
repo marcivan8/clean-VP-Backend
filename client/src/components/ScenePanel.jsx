@@ -166,6 +166,10 @@ function NodeEditor({ sceneId, node, t }) {
     // the assistant, undo) remounts this with fresh values.
     const [draft, setDraft] = useState({
         content: node.content ?? '',
+        textPathData: node.textPath?.data || node.textPath?.path || '',
+        textPathAlign: node.textPath?.align || 'center',
+        textPathSide: node.textPath?.side || 'left',
+        textPathOffset: node.textPath?.offset ?? 0,
         fontSize: node.style?.fontSize ?? '',
         color: node.style?.color ?? '#ffffff',
         x: node.transform?.x ?? 50,
@@ -192,6 +196,7 @@ function NodeEditor({ sceneId, node, t }) {
     }, [sceneId, node.id, t]);
 
     const isText = node.type === NODE_TYPES.TEXT || node.type === NODE_TYPES.CAPTION;
+    const supportsTextPath = node.type === NODE_TYPES.TEXT;
     const supportsMask = [NODE_TYPES.SHAPE, NODE_TYPES.IMAGE, NODE_TYPES.VIDEO, NODE_TYPES.STICKER].includes(node.type);
     const supportsTemporalBlur = isText || (node.type === NODE_TYPES.SHAPE && !!(node.vector
         || (node.template && node.template.kind !== '3d-scene')));
@@ -217,6 +222,64 @@ function NodeEditor({ sceneId, node, t }) {
                         onChange={e => setDraft({ ...draft, content: e.target.value })}
                         onBlur={e => commit({ content: e.target.value })} />
                 </label>
+            )}
+            {supportsTextPath && (
+                <div className="space-y-2 border-t border-border/60 pt-2">
+                    <label className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                        <input type="checkbox" checked={!!node.textPath}
+                            onChange={event => {
+                                if (!event.target.checked) {
+                                    commit({ textPath: null });
+                                    return;
+                                }
+                                const data = draft.textPathData.trim()
+                                    || 'M 80 240 C 280 60 800 60 1000 240';
+                                setDraft(current => ({ ...current, textPathData: data }));
+                                commit({ textPath: { data, align: draft.textPathAlign, side: draft.textPathSide,
+                                    offset: Number(draft.textPathOffset) || 0 } });
+                            }} />
+                        {t('scenePanel.textOnPath')}
+                    </label>
+                    {node.textPath && <>
+                        <label className="block space-y-1">
+                            <span className={label}>{t('scenePanel.svgPath')}</span>
+                            <textarea rows={2} className={field} value={draft.textPathData}
+                                placeholder="M 80 240 C 280 60 800 60 1000 240"
+                                onChange={event => setDraft(current => ({ ...current, textPathData: event.target.value }))}
+                                onBlur={event => commit({ textPath: { ...node.textPath, data: event.target.value } })} />
+                        </label>
+                        <div className="grid grid-cols-3 gap-2">
+                            <label className="block space-y-1">
+                                <span className={label}>{t('scenePanel.pathAlign')}</span>
+                                <select className={field} value={draft.textPathAlign}
+                                    onChange={event => {
+                                        const align = event.target.value;
+                                        setDraft(current => ({ ...current, textPathAlign: align }));
+                                        commit({ textPath: { ...node.textPath, align } });
+                                    }}>
+                                    {['start', 'center', 'end'].map(value => <option key={value} value={value}>{t(`scenePanel.pathAlign_${value}`)}</option>)}
+                                </select>
+                            </label>
+                            <label className="block space-y-1">
+                                <span className={label}>{t('scenePanel.pathSide')}</span>
+                                <select className={field} value={draft.textPathSide}
+                                    onChange={event => {
+                                        const side = event.target.value;
+                                        setDraft(current => ({ ...current, textPathSide: side }));
+                                        commit({ textPath: { ...node.textPath, side } });
+                                    }}>
+                                    {['left', 'right'].map(value => <option key={value} value={value}>{t(`scenePanel.pathSide_${value}`)}</option>)}
+                                </select>
+                            </label>
+                            <label className="block space-y-1">
+                                <span className={label}>{t('scenePanel.pathOffset')}</span>
+                                <input className={field} type="number" step="1" value={draft.textPathOffset}
+                                    onChange={event => setDraft(current => ({ ...current, textPathOffset: event.target.value }))}
+                                    onBlur={event => commitNumber(event.target.value, offset => ({ textPath: { ...node.textPath, offset } }))} />
+                            </label>
+                        </div>
+                    </>}
+                </div>
             )}
             <div className="grid grid-cols-2 gap-2">
                 {isText && (
@@ -584,7 +647,7 @@ export default function ScenePanel() {
                     </div>
 
                     {selected && !CONTAINER_TYPES.includes(selected.type) && (
-                        <NodeEditor key={`${sceneId}:${selected.id}:${selected.content}:${selected.style?.fontSize}:${selected.transform?.x}:${selected.transform?.y}:${selected.duration}:${selected.motionBlur?.enabled}:${selected.motionBlur?.samples}:${selected.motionBlur?.shutterAngle}`}
+                        <NodeEditor key={`${sceneId}:${selected.id}:${selected.content}:${selected.style?.fontSize}:${selected.transform?.x}:${selected.transform?.y}:${selected.duration}:${selected.motionBlur?.enabled}:${selected.motionBlur?.samples}:${selected.motionBlur?.shutterAngle}:${selected.textPath?.data}:${selected.textPath?.align}:${selected.textPath?.side}:${selected.textPath?.offset}`}
                             sceneId={sceneId} node={selected} t={t} />
                     )}
 

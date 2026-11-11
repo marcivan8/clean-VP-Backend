@@ -33,7 +33,15 @@ const SS = await import('../client/src/motion/SceneSchema.js');
 const SV = await import('../client/src/motion/SceneValidator.js');
 const CM = await import('../client/src/motion/Compositor.js');
 const CL = await import('../client/src/motion/ComponentLibrary.js');
-const { SCENE3D_TEXTURE_MASK_SHAPES } = await import('../client/src/motion/Scene3D.js');
+const {
+    SCENE3D_TEXTURE_MASK_SHAPES,
+    MAX_SCENE_OBJECTS,
+    MAX_SCENE_LIGHTS,
+    MAX_SCENE_PARTICLES,
+    MAX_SCENE_TRIANGLES,
+    MAX_MESH_VERTICES,
+    MAX_MESH_FACES,
+} = await import('../client/src/motion/Scene3D.js');
 const PP = await import('../client/src/agent/PlatformProfiles.js');
 
 const { NODE_TYPES } = SS;
@@ -365,16 +373,16 @@ await check('a well-made scene reports nothing that matters', () => {
 });
 
 await check('3D scenes warn before renderer object, receiver, light, particle and mesh limits silently omit content', () => {
-    const mesh = { id: 'oversized-mesh', name: 'Oversized mesh', type: 'mesh', vertices: Array(5001).fill({ x: 0, y: 0, z: 0 }), faces: Array(5001).fill([0, 0, 0]) };
+    const mesh = { id: 'oversized-mesh', name: 'Oversized mesh', type: 'mesh', vertices: Array(MAX_MESH_VERTICES + 1).fill({ x: 0, y: 0, z: 0 }), faces: Array(MAX_MESH_FACES + 1).fill([0, 0, 0]) };
     const scene = SS.normalizeScene(SS.createScene({
         duration: 2,
         nodes: [SS.createNode(NODE_TYPES.SHAPE, {
             id: 'scene-3d', duration: 2,
             template: { kind: '3d-scene', params: { scene: {
-                objects: [...Array(17)].map((_, index) => ({ id: `receiver-${index}`, type: 'plane', receivesShadow: true }))
-                    .concat([...Array(62)].map((_, index) => ({ id: `object-${index}`, type: 'box' })), mesh, { id: 'object-overflow', type: 'box' }),
-                lights: Array(9).fill({ type: 'point' }),
-                particles: { count: 501 },
+                objects: [mesh, ...Array(17)].map((object, index) => object || ({ id: `receiver-${index}`, type: 'plane', receivesShadow: true }))
+                    .concat(Array.from({ length: MAX_SCENE_OBJECTS - 17 }, (_, index) => ({ id: `object-${index}`, type: 'box' })), { id: 'object-overflow', type: 'box' }),
+                lights: Array(MAX_SCENE_LIGHTS + 1).fill({ type: 'point' }),
+                particles: { count: MAX_SCENE_PARTICLES + 1 },
             } } },
         })],
     }));
@@ -400,6 +408,31 @@ await check('3D mesh validation reports expanded polygon work before the rendere
     const issues = SV.validateScene(scene).issues.filter(issue => issue.code === SV.ISSUE_CODES.SCENE_RENDER_LIMIT);
     assert.ok(issues.some(issue => issue.detail.label === 'triangles on mesh “Polygon heavy”' && issue.detail.actual === 12400),
         'the report counts n-gon expansion, rather than treating 200 authored faces as cheap');
+});
+
+await check('3D global face budget includes built-in primitive tessellation and particle sprites', () => {
+    const scene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [SS.createNode(NODE_TYPES.SHAPE, {
+        id: 'dense-primitive-scene', duration: 2,
+        template: { kind: '3d-scene', params: { scene: {
+            objects: Array.from({ length: 105 }, (_, index) => ({ id: `torus-${index}`, type: 'torus' })),
+        } } },
+    })] }));
+    const warning = SV.validateScene(scene).issues.find(issue => issue.code === SV.ISSUE_CODES.SCENE_RENDER_LIMIT
+        && issue.detail.label === 'triangles and particle sprites in the 3D scene');
+    assert.ok(warning, 'the renderer drops excess primitive triangles, so validation must warn');
+    assert.equal(warning.detail.actual, MAX_SCENE_TRIANGLES + 400);
+    assert.equal(warning.detail.limit, MAX_SCENE_TRIANGLES);
+
+    const mixedScene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [SS.createNode(NODE_TYPES.SHAPE, {
+        id: 'primitive-particle-scene', duration: 2,
+        template: { kind: '3d-scene', params: { scene: {
+            objects: Array.from({ length: 102 }, (_, index) => ({ id: `torus-${index}`, type: 'torus' })),
+            particles: { count: MAX_SCENE_PARTICLES },
+        } } },
+    })] }));
+    assert.ok(SV.validateScene(mixedScene).issues.some(issue => issue.code === SV.ISSUE_CODES.SCENE_RENDER_LIMIT
+        && issue.detail.label === 'triangles and particle sprites in the 3D scene'
+        && issue.detail.actual === 50_960), 'particle sprites also consume the global scene face budget');
 });
 
 await check('unsupported masks on 3D media planes are reported instead of silently ignored', () => {

@@ -180,6 +180,8 @@ function buildJudgePrompt(candidates, context = {}) {
             + (x.reasons && x.reasons.length ? ` [planner said: ${x.reasons.join(' ')}]` : '')),
         '',
         'Return a verdict for EVERY candidate id above, and no other id.',
+        'Return one JSON object with this exact shape; every score is a number from 0 to 5:',
+        '{"verdicts":[{"id":"candidate_id","serves_through_line":2,"right_for_style":2,"evidence_is_real":2,"right_moment":2,"why":"brief reason"}]}',
     );
 
     return lines.join('\n');
@@ -223,9 +225,9 @@ async function scoreWithRubric({
     const allowed = ids instanceof Set ? ids : new Set(ids || []);
     if (allowed.size === 0) return null;
 
-    let client, model;
+    let client, model, provider;
     try {
-        ({ client, model } = getAIFor('judge', 'gpt-4o-mini'));
+        ({ client, model, provider } = getAIFor('judge', 'gpt-4o-mini'));
     } catch (err) {
         console.warn(`[${tag}] no judge client:`, err.message);
         return null;
@@ -233,12 +235,22 @@ async function scoreWithRubric({
     if (!client) return null;
 
     try {
+        // Groq's Llama 3.3 model supports JSON Object Mode, but not Groq's
+        // schema-constrained output models. Sending json_schema makes its
+        // best-effort JSON generator occasionally reject otherwise valid
+        // judge prompts with HTTP 400. The rubric prompt includes the full
+        // output shape and this function still validates candidate IDs and
+        // clamps every score, so JSON Object Mode is safe for this optional
+        // ranking hint.
+        const responseFormat = provider === 'groq'
+            ? { type: 'json_object' }
+            : schema;
         const reply = await client.chat.completions.create({
             model,
             // Judgement, not invention: near-deterministic.
             temperature: 0.1,
             max_tokens: maxTokens,
-            response_format: schema,
+            response_format: responseFormat,
             messages: [
                 { role: 'system', content: system },
                 { role: 'user', content: prompt },

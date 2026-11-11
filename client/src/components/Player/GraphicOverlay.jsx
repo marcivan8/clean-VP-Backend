@@ -2,6 +2,7 @@ import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../../store/useTimelineStore';
 import { getVisualTrackRoles } from '../../motion/Compositor.js';
+import { groupCompositionEntries, resolveCompositionOpacity } from '../../motion/CompositionGrouping.js';
 // R62 — Graphics/Overlay track. Same motion engine as captions (R58): a
 // GraphicOverlay clip is a MotionLayer view (see motion/ClipAdapter) resolved
 // through the SAME resolveMotionAt() that drives TextOverlay and the
@@ -26,6 +27,7 @@ import { vectorMatteDataUrl } from '../../motion/VectorGraphics.js';
 import { sceneMaskCss } from '../../motion/SceneMask.js';
 import { drawRadialBlur, previewCanvasSize } from '../../motion/RadialBlurPreview.js';
 import { drawMaskedGradient, drawTemporalMotionBlur, relativeMotionTransform } from '../../motion/TemporalMotionBlur.js';
+import { resolveOverlayVideoPlaybackRate, resolveOverlayVideoSourceTime } from '../../motion/TimeRemap.js';
 // R92 round C: alignment guides while dragging
 import { computeSnap, measureOthers } from '../../motion/SnapGuides.js';
 import { useSnapGuides } from './SnapGuidesLayer.jsx';
@@ -33,43 +35,33 @@ import WaveformEngine from '../../services/WaveformEngine.js';
 
 function renderGroupedOverlayEntries(clips, elements, timeKey, currentTime, depth = 0) {
     const entries = clips.map((item, index) => ({ clip: item.clip, element: elements[index] }));
-    const output = [];
-    for (let i = 0; i < entries.length;) {
-        const stack = entries[i]?.clip?.compositionStack || [];
-        const group = stack[depth];
-        if (!group) {
-            if (entries[i]?.element) output.push(entries[i].element);
-            i++;
-            continue;
-        }
-        let end = i + 1;
-        while (end < entries.length && entries[end]?.clip?.compositionStack?.[depth]?.id === group.id) end++;
-        const children = renderGroupedOverlayEntries(entries.slice(i, end).map(item => ({ clip: item.clip })), entries.slice(i, end).map(item => item.element), timeKey, currentTime, depth + 1);
-        const groupClip = { id: `composition-${group.id}`, start: Number(group.start) || 0, duration: Number(group.duration) || 0, effects: group.effects || [] };
-        const groupFilter = overlayFilterCss(0, null, group.effects, groupClip.id, currentTime, groupClip);
-        const groupMotion = resolveMotionAt({
-            startTime: groupClip.start,
-            duration: groupClip.duration,
-            opacity: 1,
-            animations: group.opacityAnimations || [],
-            expressions: group.opacityExpression ? { opacity: group.opacityExpression } : {},
-        }, currentTime);
-        const groupOpacity = Math.max(0, Math.min(1, Number(group.opacity ?? 1) * groupMotion.opacity));
-        output.push(<div key={`scene-comp-${group.id}-${depth}-${timeKey}`} aria-label={undefined} style={{
-            position: 'absolute', inset: 0, pointerEvents: 'none',
-            opacity: groupOpacity,
-            isolation: 'isolate',
-            ...(group.blendMode && group.blendMode !== 'source-over'
-                ? { mixBlendMode: group.blendMode === 'addition' ? 'plus-lighter' : group.blendMode }
-                : {}),
-            ...(groupFilter ? { filter: groupFilter } : {}),
-        }}>
-            <LayerEffectFilters clip={groupClip} currentTime={currentTime} />
-            {children}
-        </div>);
-        i = end;
-    }
-    return output;
+    return renderGroupedCompositionNodes(groupCompositionEntries(entries, depth), timeKey, currentTime, depth);
+}
+
+function renderGroupedCompositionNodes(nodes, timeKey, currentTime, depth) {
+    return (nodes || []).map(item => item.type === 'layer'
+        ? item.entry.element || null
+        : <CompositionGroup key={`scene-comp-${item.key}-${depth}-${timeKey}`} group={item.group}
+            children={renderGroupedCompositionNodes(item.children, timeKey, currentTime, depth + 1)}
+            timeKey={timeKey} currentTime={currentTime} depth={depth} />);
+}
+
+function CompositionGroup({ group, children, timeKey, currentTime, depth }) {
+    const groupClip = { id: `composition-${group.id}`, start: Number(group.start) || 0, duration: Number(group.duration) || 0, effects: group.effects || [] };
+    const groupFilter = overlayFilterCss(0, null, group.effects, groupClip.id, currentTime, groupClip);
+    const groupOpacity = resolveCompositionOpacity([group], currentTime);
+    return <div key={`scene-comp-${group.id}-${depth}-${timeKey}`} aria-label={undefined} style={{
+        position: 'absolute', inset: 0, pointerEvents: 'none',
+        opacity: groupOpacity,
+        isolation: 'isolate',
+        ...(group.blendMode && group.blendMode !== 'source-over'
+            ? { mixBlendMode: group.blendMode === 'addition' ? 'plus-lighter' : group.blendMode }
+            : {}),
+        ...(groupFilter ? { filter: groupFilter } : {}),
+    }}>
+        <LayerEffectFilters clip={groupClip} currentTime={currentTime} />
+        {children}
+    </div>;
 }
 
 /**
@@ -308,8 +300,8 @@ function MotionBlurVideoCanvas({ clip, src, style, currentTime, isPlaying, motio
     const canvasRef = React.useRef(null);
     const scratchRef = React.useRef(null);
     const paintRef = React.useRef(null);
-    const speed = Number(clip.speed) > 0 ? Number(clip.speed) : 1;
-    const target = (Number(clip.offset) || 0) + Math.max(0, currentTime - (Number(clip.start) || 0)) * speed;
+    const speed = resolveOverlayVideoPlaybackRate(clip, currentTime);
+    const target = resolveOverlayVideoSourceTime(clip, currentTime);
     const [aspect, setAspect] = React.useState(null);
     const stateRef = React.useRef(null);
     stateRef.current = { clip, currentTime, motionContext };
@@ -377,8 +369,8 @@ function MotionBlurVideoCanvas({ clip, src, style, currentTime, isPlaying, motio
 
 const OverlayVideo = ({ clip, src, currentTime, isPlaying, style, motionContext = null }) => {
     const ref = React.useRef(null);
-    const speed = Number(clip.speed) > 0 ? Number(clip.speed) : 1;
-    const target = (Number(clip.offset) || 0) + Math.max(0, currentTime - (Number(clip.start) || 0)) * speed;
+    const speed = resolveOverlayVideoPlaybackRate(clip, currentTime);
+    const target = resolveOverlayVideoSourceTime(clip, currentTime);
     const effectContext = { clipStart: Number(clip.start ?? clip.startTime) || 0, clipDuration: Number(clip.duration) || 0 };
     const gradients = (Array.isArray(clip.effects) ? clip.effects : [])
         .map(effect => resolveEffectAtTime(effect, currentTime, effectContext))
@@ -993,7 +985,7 @@ function resolveShakeTransform(effects, currentTime, clip, scale) {
         : undefined;
 }
 
-const GraphicOverlay = ({ placementFilter = 'all' }) => {
+const GraphicOverlay = ({ placementFilter = 'all', onWarning = null }) => {
     const containerRef = React.useRef(null);
     const gestureRef = React.useRef({});
     const clipElRefs = React.useRef({});
@@ -1363,6 +1355,7 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
                         {isTemplate
                             ? <TemplateCanvas clip={clip} currentTime={currentTime}
                                 motionBlurMotion={transformBlurContext}
+                                onWarning={onWarning}
                                 style={{ opacity: transformBlurContext ? alphaFade : motion.opacity * alphaFade, pointerEvents: 'none', ...(shakeTransform ? { transform: shakeTransform, transformOrigin: 'center' } : {}), ...(overlayFilter ? { filter: overlayFilter } : {}) }} />
                             : isVideo
                             ? <OverlayVideo clip={clip} src={src} currentTime={currentTime} isPlaying={isPlaying} style={mediaStyle} motionContext={transformBlurContext} />

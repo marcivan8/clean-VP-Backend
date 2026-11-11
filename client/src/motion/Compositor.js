@@ -59,6 +59,7 @@ import { clipToMotionLayer } from './ClipAdapter.js';
 import { resolveMotionAt } from './MotionResolver.js';
 import { resolveEffectParameter } from './EffectTiming.js';
 import { LAYER_KINDS } from './MotionSchema.js';
+import { remapSceneObjectTime } from './TimeRemap.js';
 
 // Same test as LayoutPresets.hasLayoutFrame (R88). Inlined rather than
 // imported: the regression suites load this file by concatenating a fixed list
@@ -597,6 +598,29 @@ export function simplifySamples(samples, tolerance = 0.0015, keys = ['x', 'y', '
  * @param {object} opts        `{ width, height, fps }` of the export target
  * @returns {object} a serialisable plan; `overlays` is empty when nothing composites
  */
+function simplifySourceTimeMap(points, tolerance) {
+    if (!Array.isArray(points) || points.length <= 2) return points || [];
+    const keep = new Set([0, points.length - 1]);
+    const visit = (first, last) => {
+        const a = points[first], b = points[last];
+        const span = Number(b.source) - Number(a.source);
+        if (!(span > 1e-8)) return;
+        let maxError = tolerance, maxIndex = -1;
+        for (let index = first + 1; index < last; index++) {
+            const progress = (Number(points[index].source) - Number(a.source)) / span;
+            const expected = Number(a.output) + (Number(b.output) - Number(a.output)) * progress;
+            const error = Math.abs(Number(points[index].output) - expected);
+            if (error > maxError) { maxError = error; maxIndex = index; }
+        }
+        if (maxIndex < 0) return;
+        keep.add(maxIndex);
+        visit(first, maxIndex);
+        visit(maxIndex, last);
+    };
+    visit(0, points.length - 1);
+    return [...keep].sort((a, b) => a - b).map(index => points[index]);
+}
+
 export function buildCompositionPlan(tracks, opts = {}) {
     const frame = {
         width:  Number(opts.width)  > 0 ? Math.round(Number(opts.width))  : 1080,
@@ -651,6 +675,80 @@ export function buildCompositionPlan(tracks, opts = {}) {
             // while still costing a full pass.
             if (!(endOut > startOut)) continue;
 
+            // Ordinary video overlays can carry the same authored source-time
+            // curve used by scene video. Sample that shared mapping in output
+            // time so export can compile a bounded inverse PTS map. The map is
+            // omitted for legacy clips, preserving their constant-speed path.
+            let sourceTimeMap = null;
+            let sourceTimeSegments = null;
+            let sourceTimeMapWarning = null;
+            if (clip.type === 'video' && Array.isArray(clip.timeRemap?.keyframes) && clip.timeRemap.keyframes.length) {
+                const duration = Math.max(0, Number(clip.duration) || 0);
+                const sampleCount = Math.max(2, Math.min(1800, Math.ceil(duration * fps)));
+                const sampled = Array.from({ length: sampleCount + 1 }, (_, index) => {
+                    const localTime = duration * index / sampleCount;
+                    return {
+                        source: remapSceneObjectTime(clip.timeRemap, localTime, duration || 1),
+                        output: timelineToOutputTime(timeMap, layer.startTime + localTime) - startOut,
+                    };
+                }).filter(point => Number.isFinite(point.source) && Number.isFinite(point.output));
+                const direction = Math.sign(sampled.at(-1)?.source - sampled[0]?.source);
+                const monotonic = sampled.every((point, index) => index === 0
+                    || (point.output >= sampled[index - 1].output - 1e-7
+                        && (direction < 0
+                            ? point.source <= sampled[index - 1].source + 1e-7
+                            : point.source >= sampled[index - 1].source - 1e-7)));
+                if (!monotonic) {
+                    const ranges = [];
+                    let segmentStart = 0;
+                    let currentDirection = 0;
+                    for (let index = 1; index < sampled.length; index++) {
+                        const delta = Number(sampled[index].source) - Number(sampled[index - 1].source);
+                        const nextDirection = Math.abs(delta) <= 1e-7 ? 0 : Math.sign(delta);
+                        if (nextDirection && currentDirection && nextDirection !== currentDirection) {
+                            ranges.push(sampled.slice(segmentStart, index));
+                            segmentStart = index - 1;
+                        }
+                        if (nextDirection) currentDirection = nextDirection;
+                    }
+                    ranges.push(sampled.slice(segmentStart));
+                    if (ranges.length > 24) {
+                        sourceTimeMapWarning = `source-time curve changes direction too often to export safely (${ranges.length} segments; limit 24)`;
+                    } else {
+                        sourceTimeSegments = ranges.filter(segment => segment.length > 1
+                            && Number(segment.at(-1).output) > Number(segment[0].output))
+                            .map(segment => {
+                                const points = segment.map(point => ({
+                                    source: Number(point.source.toFixed(6)),
+                                    output: Number((point.output - segment[0].output).toFixed(6)),
+                                }));
+                                const hasMovement = points.some(point => Math.abs(point.source - points[0].source) > 1e-7);
+                                return {
+                                    outputStart: Number(segment[0].output.toFixed(6)),
+                                    outputEnd: Number(segment.at(-1).output.toFixed(6)),
+                                    sourceTimeMap: hasMovement
+                                        ? simplifySourceTimeMap(points, 0.5 / fps)
+                                        : [{ source: points[0].source, output: 0 }],
+                                };
+                            });
+                        if (!sourceTimeSegments.length) sourceTimeMapWarning = 'source-time curve could not be divided into renderable segments';
+                    }
+                } else {
+                    // Preserve duplicate source coordinates: they encode a
+                    // deliberate hold interval in output time. The worker
+                    // turns that vertical segment into a timestamp jump so
+                    // FFmpeg's framesync holds the selected source frame.
+                    const points = sampled.map(point => ({
+                        source: Number(point.source.toFixed(6)),
+                        output: Number(point.output.toFixed(6)),
+                    }));
+                    const hasMovement = points.some(point => Math.abs(point.source - points[0].source) > 1e-7);
+                    sourceTimeMap = hasMovement
+                        ? simplifySourceTimeMap(points, 0.5 / fps)
+                        : [{ source: points[0].source, output: 0 }];
+                }
+            }
+
             let geometry = sampleGeometry(layer, frame, timeMap, fps, opts.audioWaveformsByAsset);
 
             // R88 layout presets: the clip sits in a fixed box (frame
@@ -670,27 +768,28 @@ export function buildCompositionPlan(tracks, opts = {}) {
                 };
             }
 
-            overlays.push({
+            const overlayPlan = {
                 id: `ov-${clip.id}`,
                 clipId: clip.id,
                 trackId: track.id,
                 ...(clip.sceneId ? { sceneId: clip.sceneId } : {}),
                 ...(clip.sceneNodeId ? { sceneNodeId: clip.sceneNodeId } : {}),
                 ...(Array.isArray(clip.compositionStack) && clip.compositionStack.length
-                    ? { compositionStack: clip.compositionStack.map(group => {
-                        let opacitySamples = compositionOpacityCache.get(group.id);
+                    ? { compositionStack: clip.compositionStack.map((group, groupIndex) => {
+                        const groupCacheKey = `${clip.sceneId || 'no-scene'}:${clip.compositionStack.slice(0, groupIndex).map(parent => parent?.id).join('/')}:${group.id}`;
+                        let opacitySamples = compositionOpacityCache.get(groupCacheKey);
                         if (opacitySamples === undefined) {
                             opacitySamples = sampleCompositionOpacity(group, timeMap, fps);
-                            compositionOpacityCache.set(group.id, opacitySamples);
+                            compositionOpacityCache.set(groupCacheKey, opacitySamples);
                         }
                         const { opacityAnimations: _opacityAnimations, opacityExpression: _opacityExpression, ...serializableGroup } = group;
-                        let sampledEffects = compositionEffectCache.get(group.id);
+                        let sampledEffects = compositionEffectCache.get(groupCacheKey);
                         if (sampledEffects === undefined) {
                             sampledEffects = sampleEffectTracks(group.effects, {
                                 startTime: Number(group.start) || 0,
                                 duration: Math.max(0, Number(group.duration) || 0),
                             }, timeMap);
-                            compositionEffectCache.set(group.id, sampledEffects);
+                            compositionEffectCache.set(groupCacheKey, sampledEffects);
                         }
                         return {
                             ...serializableGroup,
@@ -719,6 +818,8 @@ export function buildCompositionPlan(tracks, opts = {}) {
                 // Where in the SOURCE file this clip starts, and how fast it runs.
                 sourceOffset: Number(clip.offset) || 0,
                 speed: Number(clip.speed) > 0 ? Number(clip.speed) : 1,
+                ...(sourceTimeMap ? { sourceTimeMap } : {}),
+                ...(sourceTimeMapWarning ? { sourceTimeMapWarning } : {}),
                 // Output-time window — what the worker gates `enable=` on.
                 outputStart: Number(startOut.toFixed(4)),
                 outputEnd: Number(endOut.toFixed(4)),
@@ -756,7 +857,18 @@ export function buildCompositionPlan(tracks, opts = {}) {
                     };
                 }) } : {}),
                 ...(clip.sceneMask ? { sceneMask: { ...clip.sceneMask } } : {}),
-            });
+            };
+            if (sourceTimeSegments) {
+                sourceTimeSegments.forEach((segment, segmentIndex) => overlays.push({
+                    ...overlayPlan,
+                    id: `${overlayPlan.id}-retime-${segmentIndex + 1}`,
+                    sourceTimeMap: segment.sourceTimeMap,
+                    outputStart: Number((startOut + segment.outputStart).toFixed(4)),
+                    outputEnd: Number((startOut + segment.outputEnd).toFixed(4)),
+                }));
+            } else {
+                overlays.push(overlayPlan);
+            }
         }
     }
 

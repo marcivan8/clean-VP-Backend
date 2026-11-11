@@ -39,7 +39,7 @@ import { resolveSceneVideoSourceTime } from '../../motion/Scene3D.js';
 import useTimelineStore from '../../store/useTimelineStore.js';
 import WaveformEngine from '../../services/WaveformEngine.js';
 
-const TemplateCanvas = ({ clip, currentTime, style, motionBlurMotion = null }) => {
+const TemplateCanvas = ({ clip, currentTime, style, motionBlurMotion = null, onWarning = null }) => {
     const ref = React.useRef(null);
     const [, bump] = React.useReducer(x => x + 1, 0);
     const isVector = clip?.type === 'vector' || !!clip?.vector;
@@ -69,7 +69,11 @@ const TemplateCanvas = ({ clip, currentTime, style, motionBlurMotion = null }) =
     // the compositor plan. Keep preview sampling on that same clock; the
     // template animation callbacks below still receive clip-local time.
     const effectTime = (Number(clip?.start) || 0) + localT;
-    const effectContext = { clipStart: Number(clip?.start) || 0, clipDuration: Number(clip?.duration) || 0 };
+    const effectContext = {
+        clipStart: Number(clip?.start) || 0,
+        clipDuration: Number(clip?.duration) || 0,
+        onWarning: warning => onWarning?.({ ...warning, clipId: clip?.id || null }),
+    };
     const waveformCache = useTimelineStore(state => state.waveformsByAsset || {});
     const assetCatalog = useTimelineStore(state => state.assets || []);
     const assetById = new Map(assetCatalog.filter(asset => asset?.id).map(asset => [asset.id, asset]));

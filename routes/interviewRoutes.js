@@ -34,6 +34,9 @@ const { aiGate }     = require('../middleware/usageGate');
 const { audioQueue } = require('../queue/queues');
 const storageConfig  = require('../config/storage');
 const { soloAngleForChunk } = require('./virtualMulticamAngles');
+const { mapWithConcurrency } = require('../server/brain/media/mapWithConcurrency');
+const { chunkItems, completeOrder, mergeGroupOrders } = require('../server/brain/media/organizeBatching');
+const { readRowsByIds } = require('../server/brain/media/readRowsByIds');
 
 let ffmpegPath = null;
 try {
@@ -41,6 +44,8 @@ try {
 } catch (_) {}
 const FFMPEG_BIN = ffmpegPath || 'ffmpeg';
 const VIRTUAL_MULTICAM_PLANNER_VERSION = 2;
+const ORGANIZE_ANALYSIS_CONCURRENCY = 3;
+const ORGANIZE_FRAME_CONCURRENCY = 4;
 
 // ── Host-side detection helpers ───────────────────────────────────────────────
 
@@ -1213,15 +1218,14 @@ async function fetchAssetProfiles(assetIds, requestUserId) {
         const { supabaseAdmin } = require('../config/database');
         if (!supabaseAdmin) return {};
 
-        const { data, error } = await supabaseAdmin
+        const rows = await readRowsByIds(ids, batch => supabaseAdmin
             .from('media_assets')
             .select(ASSET_PROFILE_COLUMNS)
             .eq('user_id', requestUserId)
-            .in('id', ids);
-        if (error) throw error;
+            .in('id', batch));
 
         const byId = {};
-        for (const row of data || []) {
+        for (const row of rows) {
             if (row && row.analysis_status === ASSET_ANALYSIS_DONE) byId[row.id] = row;
         }
         return byId;
@@ -1503,12 +1507,12 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
                 // two writers against the same row and risks an interleaved result.
                 let statusById = {};
                 if (supabaseAdmin && UUID_RE.test(String(requestUserId || ''))) {
-                    const { data } = await supabaseAdmin
+                    const rows = await readRowsByIds(ids, batch => supabaseAdmin
                         .from('media_assets')
                         .select('id, analysis_status')
                         .eq('user_id', requestUserId)
-                        .in('id', ids);
-                    (data || []).forEach(r => { statusById[r.id] = r.analysis_status; });
+                        .in('id', batch));
+                    rows.forEach(r => { statusById[r.id] = r.analysis_status; });
                 }
 
                 const toTrigger = ids.filter(id => statusById[id] !== ASSET_ANALYSIS_PROCESSING);
@@ -1522,12 +1526,12 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
                 // Fires each asset's analysis and fails open per-asset — analyzeAsset()
                 // already never throws past its own try/catch (sets 'failed' instead),
                 // so a single bad file can't abort the rest of the batch.
-                await Promise.all(toTrigger.map(id => {
+                await mapWithConcurrency(toTrigger, ORGANIZE_ANALYSIS_CONCURRENCY, id => {
                     const a = needsAnalysis.get(id);
                     return mediaIntel
                         .analyzeAsset(id, a.gcsPath, projectId, requestUserId, a.name)
                         .catch(err => console.warn(`[interviewRoutes] organize-clips: analyzeAsset(${id}) failed —`, err.message));
-                }));
+                });
 
                 // Poll whatever's still pending (just-triggered above, or was
                 // already running before this request) until it settles. organize
@@ -1537,11 +1541,12 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
                 if (pendingIds.length > 0 && supabaseAdmin) {
                     const deadline = Date.now() + 45_000;
                     while (Date.now() < deadline) {
-                        const { data } = await supabaseAdmin
+                        const rows = await readRowsByIds(pendingIds, batch => supabaseAdmin
                             .from('media_assets')
                             .select('id, analysis_status')
-                            .in('id', pendingIds);
-                        const stillGoing = (data || []).some(r => r.analysis_status === ASSET_ANALYSIS_PROCESSING);
+                            .eq('user_id', requestUserId)
+                            .in('id', batch));
+                        const stillGoing = rows.some(r => r.analysis_status === ASSET_ANALYSIS_PROCESSING);
                         if (!stillGoing) break;
                         await new Promise(r => setTimeout(r, 1500));
                     }
@@ -1602,7 +1607,7 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
 
         // Extract 3 frames per clip at 15 %, 45 %, 75 % of its range in the source.
         const clipFrameMap = {}; // clipId → string[] (base64 or empty)
-        await Promise.all(needFrames.map(async (clip) => {
+        await mapWithConcurrency(needFrames, ORGANIZE_FRAME_CONCURRENCY, async clip => {
             const key       = clip.assetId || clip.gcsPath || clip.assetName || clip.filePath || String(clip.id);
             const inputArg  = sourceByAsset[key];
             const offset    = clip.offset   ?? 0;
@@ -1610,7 +1615,7 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
             const positions = [0.15, 0.45, 0.75].map(p => offset + dur * p);
             const frames    = await Promise.all(positions.map(t => extractFrame(inputArg, t)));
             clipFrameMap[clip.id] = frames.filter(Boolean);
-        }));
+        });
 
         const framedClips = needFrames.filter(c => (clipFrameMap[c.id] || []).length > 0);
         const blindClips  = needFrames.filter(c => (clipFrameMap[c.id] || []).length === 0);
@@ -1755,6 +1760,146 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
             if (lines.length === 0) return '';
             return `\n\n━━━ STORY GUIDANCE (from a prior read of this project) ━━━\n${lines.join('\n')}\n`;
         })();
+
+        // ── 6. Large-bin hierarchical ordering ───────────────────────────────
+        // One huge prompt can exceed provider context limits and silently lose
+        // clips. Order bounded batches, then order their narrative summaries;
+        // every clip is still analysed and every returned ID is validated.
+        const ORGANIZE_SINGLE_CALL_LIMIT = 60;
+        // Vision payloads carry base64 frames, so keep image-bearing batches
+        // smaller to avoid request-size spikes on large unanalysed bins.
+        const ORGANIZE_BATCH_SIZE = imageDescriptors.length > 0 ? 12 : 40;
+        if (clips.length > ORGANIZE_SINGLE_CALL_LIMIT) {
+            const descriptorById = new Map(descriptors.map(d => [String(d.id), d]));
+            const imageById = new Map(imageDescriptors.map(d => [String(d.id), d]));
+            const clipGroups = chunkItems(clips, ORGANIZE_BATCH_SIZE).map((groupClips, index) => ({
+                id: `group-${index + 1}`,
+                clips: groupClips,
+                descriptors: groupClips.map(clip => descriptorById.get(String(clip.id))).filter(Boolean),
+                images: groupClips.map(clip => imageById.get(String(clip.id))).filter(Boolean),
+            }));
+            const hasImageGroups = clipGroups.some(group => group.images.length > 0);
+            const hasTextGroups = clipGroups.some(group => group.images.length === 0);
+            const { client: visionClient, model: visionModel } = hasImageGroups
+                ? getAIFor('vision', 'gpt-4o-mini', { timeout: 60_000 })
+                : {};
+            const { client: textClient, model: textModel } = hasTextGroups
+                ? getAIFor('chat', 'gpt-4o', { timeout: 60_000 })
+                : {};
+            if (hasImageGroups && !visionClient) return res.status(503).json({ error: 'No vision provider configured on the server.' });
+            if (hasTextGroups && !textClient) return res.status(503).json({ error: 'No AI provider configured on the server.' });
+
+            // Each group is independent at this stage. Run a small bounded
+            // number concurrently so a large bin does not turn into hundreds
+            // of serial model round trips and exceed the client's tool timeout.
+            // mapWithConcurrency preserves input order; group IDs are still
+            // validated against their own source clips before the merge.
+            const groupResults = await mapWithConcurrency(clipGroups, ORGANIZE_ANALYSIS_CONCURRENCY, async group => {
+                const hasImages = group.images.length > 0;
+                const batchClient = hasImages ? visionClient : textClient;
+                const batchModel = hasImages ? visionModel : textModel;
+
+                const batchPrompt = `You are ordering one batch of ${group.clips.length} clips from a larger edit. Use only IDs in this batch. Each description includes its evidence source. Prefer a clear hook, group related topics, place illustrative B-roll near the speech it supports, and end with a natural conclusion. This is a local ordering pass; the complete edit order will be decided after all batches are summarized. ${unanalysedIds.length ? `${unanalysedIds.length} clips in the full project lack analysis; do not invent their content.` : ''}${storyGuidanceBlock}\n\nCLIPS:\n${group.descriptors.map(d => d.text).join('\n\n')}\n\nReturn JSON: {"orderedIds":[...],"clipMeta":[{"id":"...","narrative_role":"...","summary":"..."}],"rationale":"brief batch summary describing topic and narrative role"}`;
+                const content = [{ type: 'text', text: batchPrompt }];
+                for (const frame of group.images) {
+                    content.push({ type: 'text', text: `\n[frame for clip id: ${frame.id}]` });
+                    content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frame.frame}`, detail: 'low' } });
+                }
+                const completion = await batchClient.chat.completions.create({
+                    model: batchModel,
+                    messages: [{ role: 'user', content }],
+                    response_format: { type: 'json_object' },
+                    temperature: 0.15,
+                    max_tokens: 3000,
+                });
+                let parsed;
+                try { parsed = JSON.parse(completion.choices[0].message.content); }
+                catch { throw new Error(`Could not parse organizer batch ${group.id}. No timeline order was applied.`); }
+                return {
+                    ...group,
+                    orderedIds: completeOrder(group.clips.map(c => c.id), parsed.orderedIds),
+                    clipMeta: (parsed.clipMeta || parsed.clips || []).filter(m => m && group.clips.some(c => String(c.id) === String(m.id))),
+                    summary: String(parsed.rationale || group.descriptors.map(d => d.text).join(' ').slice(0, 320)).slice(0, 320),
+                };
+            });
+
+            // Reduce summaries hierarchically too: even the merge prompt stays
+            // bounded when bins contain thousands of clips.
+            const { client: mergeClient, model: mergeModel } = getAIFor('chat', 'gpt-4o', { timeout: 60_000 });
+            if (!mergeClient) return res.status(503).json({ error: 'No AI provider configured on the server.' });
+            const orderGroupLevel = async (groups, level) => {
+                const chunks = chunkItems(groups, 40);
+                const orderedChunks = await mapWithConcurrency(chunks, ORGANIZE_ANALYSIS_CONCURRENCY, async (chunk, index) => {
+                    if (chunk.length === 1) return chunk[0];
+                    const groupPrompt = `Order these ${chunk.length} already-organized clip groups into one coherent edit. Each group's internal clip order is fixed. Compare all summaries, respect the overall narrative and story guidance, and return every group ID exactly once.\n${storyGuidanceBlock}\n\nGROUPS:\n${chunk.map(g => `${g.id}: ${g.summary}`).join('\n')}\n\nReturn JSON: {"orderedGroupIds":[...],"rationale":"Briefly explain the story arc across these groups."}`;
+                    const merged = await mergeClient.chat.completions.create({
+                        model: mergeModel,
+                        messages: [{ role: 'user', content: groupPrompt }],
+                        response_format: { type: 'json_object' },
+                        temperature: 0.15,
+                        max_tokens: 1200,
+                    });
+                    let parsed;
+                    try { parsed = JSON.parse(merged.choices[0].message.content); }
+                    catch { throw new Error(`Could not parse organizer merge level ${level}, group ${index + 1}.`); }
+                    return {
+                        id: `merge-${level}-${index + 1}`,
+                        orderedIds: mergeGroupOrders(chunk, parsed.orderedGroupIds),
+                        summary: String(parsed.rationale || chunk.map(g => g.summary).join(' ').slice(0, 320)).slice(0, 320),
+                    };
+                });
+                return orderedChunks;
+            };
+
+            let mergeLevel = 1;
+            let mergeGroups = groupResults;
+            try {
+                while (mergeGroups.length > 40) {
+                    mergeGroups = await orderGroupLevel(mergeGroups, mergeLevel++);
+                }
+            } catch (mergeErr) {
+                console.warn('[interviewRoutes] organize-clips: hierarchical merge failed —', mergeErr.message);
+                return res.status(502).json({ error: 'Could not complete the large-bin ordering pass. No timeline order was applied.' });
+            }
+            const finalMergeGroups = mergeGroups;
+            let finalResult;
+            try {
+                finalResult = finalMergeGroups.length === 1
+                    ? { orderedGroupIds: [finalMergeGroups[0].id], rationale: finalMergeGroups[0].summary }
+                    : await orderGroupLevel(finalMergeGroups, mergeLevel);
+            } catch (mergeErr) {
+                console.warn('[interviewRoutes] organize-clips: final merge failed —', mergeErr.message);
+                return res.status(502).json({ error: 'Could not complete the final large-bin ordering pass. No timeline order was applied.' });
+            }
+            // orderGroupLevel returns one or more groups. Its flattened IDs are
+            // the final sequence; if there were <=40 leaf batches, it ran once.
+            const orderedIds = finalMergeGroups.length === 1
+                ? (finalMergeGroups[0].orderedIds || [])
+                : finalResult.flatMap(group => group.orderedIds || []);
+            const allBatchMeta = groupResults.flatMap(group => group.clipMeta || []);
+            const clipMeta = allBatchMeta.map(m => {
+                const clip = clips.find(c => String(c.id) === String(m.id));
+                const profile = clip?.assetId ? profilesById[clip.assetId] : null;
+                return {
+                    ...(mlById[m.id] || {}),
+                    ...(profile ? { clip_type: profile.scene_type, energy: profile.emotional_tone, summary: profile.content_description } : {}),
+                    ...m,
+                    signal: (descriptorById.get(String(m.id)) || {}).source || 'none',
+                };
+            });
+            return res.json({
+                clipMeta,
+                orderedIds,
+                rationale: finalMergeGroups.length === 1
+                    ? finalMergeGroups[0].summary
+                    : 'Clips were analyzed in bounded batches and the resulting narrative groups were arranged hierarchically.',
+                pipeline,
+                coverage,
+                unanalyzedIds: unanalysedIds,
+                storyGuidanceApplied: !!storyHints,
+                batching: { enabled: true, batchCount: groupResults.length, batchSize: ORGANIZE_BATCH_SIZE, total: clips.length },
+            });
+        }
 
         // ── 6. Single ordering call ────────────────────────────────────────────
         // Text-only (GPT-4o) when every clip already has a written description;
