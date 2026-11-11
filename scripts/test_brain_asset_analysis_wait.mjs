@@ -16,6 +16,7 @@ assert.deepEqual(visualAnalysisAssetIds([
     { id: 'audio-1', type: 'audio' },
     { id: 'large-image', type: 'image', visualAnalysisRequested: false },
     { id: 'video-1', type: 'video/mp4' },
+    { id: 'reference-1', type: 'video', role: 'reference' },
 ]), ['video-1', 'image-1']);
 
 let now = 0;

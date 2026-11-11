@@ -203,6 +203,58 @@ check('the working view reports grounded progress stages without inventing step 
     assert.ok(/t\(`mobileFlow\.\$\{stage\}`/.test(flow));
 });
 
+check('mobile Auto starts with exportable footage and cannot report a visual-less edit as finished', () => {
+    assert.ok(/async function ensureMobileSourceFootage\(prompt, outcomeId\)/.test(flow), 'mobile creation plans source footage before Auto runs');
+    assert.ok(/await ensureMobileSourceFootage\(request, id\)/.test(flow), 'the run must stop if source footage cannot be placed');
+    assert.ok(/planMobileVisualAssets\(state\.assets, prompt, outcomeId, profiles\)/.test(flow), 'asset planning receives the whole bin and available visual profiles');
+    assert.ok(/if \(!hasExportableVisualTimeline\(\)\)[\s\S]{0,220}restoreCheckpoint\(checkpoint\)/.test(flow),
+        'a run that removes its visual media must restore the seeded source timeline');
+    assert.ok(/if \(!hasExportableVisualTimeline\(\)\)[\s\S]{0,180}noVisualResult/.test(flow),
+        'a visual-less result must be reported as a failure');
+});
+
+check('mobile source planning keeps speaker edits and visual sequences distinct', async () => {
+    const { planMobileVisualAssets } = await import('../client/src/agent/mobileAssetPlan.js');
+    const assets = [
+        { id: 'event', name: 'event.mp4', type: 'video', url: '/event', duration: 90 },
+        { id: 'speaker', name: 'speaker.mp4', type: 'video', url: '/speaker', duration: 24 },
+        { id: 'reference', name: 'reference.mp4', type: 'video', url: '/reference', assistantReference: true },
+        { id: 'still', name: 'poster.jpg', type: 'image', url: '/poster' },
+    ];
+    const profiles = [
+        { assetId: 'event', isBroll: true, hasMainSpeaker: false, sceneType: 'event crowd' },
+        { assetId: 'speaker', isBroll: false, hasMainSpeaker: true, sceneType: 'talking head' },
+    ];
+    const talk = planMobileVisualAssets(assets, 'Create a reel with captions', 'reel', profiles);
+    assert.equal(talk.primary.id, 'speaker');
+    assert.deepEqual(talk.sequence.map(asset => asset.id), ['speaker']);
+    assert.deepEqual(talk.supporting.map(asset => asset.id), ['event', 'still']);
+    const collage = planMobileVisualAssets(assets, 'Make a photo collage', 'photo_collage', profiles);
+    assert.deepEqual(collage.sequence.map(asset => asset.id), ['event', 'speaker', 'still']);
+    const incomplete = planMobileVisualAssets(assets, 'Make a talking head reel', 'reel', []);
+    assert.equal(incomplete.primary.id, 'speaker', 'clear speaker cues in the filename still help when server analysis is pending');
+    const unknown = planMobileVisualAssets([
+        { id: 'first', name: 'rush-01.mp4', type: 'video', url: '/first' },
+        { id: 'second', name: 'rush-02.mp4', type: 'video', url: '/second' },
+    ], 'Make a reel', 'reel', []);
+    assert.equal(unknown.mode, 'ambiguous', 'without semantic evidence, ask before choosing among several possible main clips');
+    assert.equal(unknown.primary, null);
+    const single = planMobileVisualAssets([
+        { id: 'only', name: 'rush.mp4', type: 'video', url: '/only' },
+    ], 'Make a reel', 'reel', []);
+    assert.equal(single.primary.id, 'only', 'a single video is a safe fallback without analysis');
+});
+
+check('mobile waits briefly for upload analysis before ranking primary and cutaway footage', () => {
+    assert.match(flow, /visualAnalysisAssetIds\(state\.assets\)/, 'all eligible uploads enter the analysis readiness check');
+    assert.match(flow, /fetchProjectAssetAnalysisStatuses\(state\.projectId, ids\)/, 'analysis status is read from the project-scoped endpoint');
+    assert.match(flow, /timeoutMs: 12_000, intervalMs: 1_000, retryOnError: true/, 'analysis waiting is bounded and retries transient failures');
+    assert.match(flow, /try \{ profiles = await fetchProfiles\(\); \} catch \{ \/\* Ambiguity is handled without guessing\. \*\//, 'profiles are refreshed after analysis settles');
+    const wait = read('client/src/agent/assetAnalysisWait.js');
+    assert.match(wait, /i \+= 200/, 'large bins are split to respect the status endpoint limit');
+    assert.match(wait, /Promise\.all\(batches/, 'large-bin status batches are checked concurrently');
+});
+
 check('the step list is announced to a screen reader', () => {
     assert.ok(/aria-live="polite"/.test(flow));
 });

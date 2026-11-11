@@ -1248,6 +1248,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                                             ? `[IDELayout] 🧠 media intelligence queued (parallel with proxy) for "${file.name}"`
                                             : `[IDELayout] asset analysis not queued (${resp.status}) — Brain advice stays generic for "${file.name}"`);
                                     } catch (e) {
+                                        setVisualAnalysisRequested(false);
                                         console.warn('[IDELayout] asset analysis request failed (non-critical):', e.message);
                                     }
                                 })();

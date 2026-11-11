@@ -148,6 +148,7 @@ section('2 · buildBrollCandidates — R78 follow-up: media-BIN presence (not ti
         { id: 'a-equipment' },
         { id: 'a-photo' },
         { id: 'a-unplaced-broll' }, // in the bin, never dragged onto any track
+        { id: 'a-reference', role: 'reference' },
     ];
     const profiles = [
         { assetId: 'a-interview', contentDescription: 'Man talking to camera', hasMainSpeaker: true },
@@ -156,6 +157,7 @@ section('2 · buildBrollCandidates — R78 follow-up: media-BIN presence (not ti
         { assetId: 'a-unplaced-broll', contentDescription: 'Walking outside near the workspace entrance', hasMainSpeaker: false },
         { assetId: 'a-never-uploaded', contentDescription: 'Not in the bin at all', hasMainSpeaker: false },
         { assetId: 'a-no-keywords', contentDescription: '', hasMainSpeaker: false },
+        { assetId: 'a-reference', contentDescription: 'Outdoor event footage', hasMainSpeaker: false },
     ];
 
     const candidates = buildBrollCandidates(profiles, assets);
@@ -167,6 +169,7 @@ section('2 · buildBrollCandidates — R78 follow-up: media-BIN presence (not ti
     check('includes a b-roll asset in the bin', ids.includes('a-equipment'));
     check('includes a still IMAGE in the bin', ids.includes('a-photo'));
     check('R78 fix: includes an analyzed asset that was NEVER placed on any track — only in the bin', ids.includes('a-unplaced-broll'));
+    check('reference assets cannot be ranked as source cutaways', !ids.includes('a-reference'));
     check('non-array profiles/assets returns []', buildBrollCandidates(null, assets).length === 0 && buildBrollCandidates(profiles, null).length === 0);
 }
 
@@ -383,6 +386,8 @@ section('10 · R78 — client upload flow queues image analysis (IDELayout.jsx)'
             && ideSrc.includes("authFetch('/api/brain/analyze-asset'"));
     check('oversized images are skipped with a warning rather than sent (named byte cap, not silently truncated)',
         /MAX_IMAGE_ANALYSIS_BYTES/.test(ideSrc) && /too large for automatic content analysis/.test(ideSrc));
+    check('failed upload-time analysis requests opt out of mobile analysis waiting',
+        /catch \(e\) \{\s*setVisualAnalysisRequested\(false\);\s*console\.warn\('\[IDELayout\] asset analysis request failed \(non-critical\):/.test(ideSrc));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

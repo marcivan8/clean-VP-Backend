@@ -1592,6 +1592,7 @@
     "uploadNote": "Votre demande est gardée ici. Le montage démarre quand les fichiers sont prêts.",
     "uploadFailedNote": "Un fichier n’a pas été envoyé. Réessayez avant de créer votre short.",
     "waitingForUploads": "Préparation de vos vidéos…",
+    "analyzingFootage": "Analyse de vos vidéos…",
     "createShort": "Créer mon short",
     "promptLabel": "Décrivez votre short",
     "promptPlaceholder": "Fais un reel de 30 secondes avec mes clips, une musique entraînante et des sous-titres",
@@ -1617,6 +1618,9 @@
     "applyingChange": "Application de votre modification",
     "changeFailed": "La modification n’a pas pu être appliquée.",
     "changeNotApplied": "Roka n’a pas modifié la vidéo. Décrivez la modification souhaitée.",
+    "noSourceTimeline": "Je n’ai pas pu placer votre vidéo sur la timeline. Votre import est toujours dans la médiathèque ; réessayez de l’ajouter.",
+    "chooseMainFootage": "Je n’ai pas pu déterminer avec certitude quelle vidéo est la principale. Indiquez son nom de fichier dans votre demande, ou demandez un montage pour utiliser tous les clips. Vos fichiers n’ont pas été modifiés.",
+    "noVisualResult": "Le montage n’a conservé aucune vidéo ni image. J’ai restauré vos rushes d’origine sur la timeline ; essayez une demande plus simple.",
     "editFailed": "Le montage n’a pas pu être terminé.",
     "outcome": {
       "talking_head": "Face caméra",

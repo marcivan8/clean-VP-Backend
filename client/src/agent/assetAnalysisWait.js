@@ -4,6 +4,8 @@
  * finished summaries are read.
  */
 
+import { authFetch } from '../utils/authFetch.js';
+
 // Status is a cheap DB read, but several Brain triggers can wait at once.
 // Five seconds still notices uploads promptly without producing a request
 // burst during a slow vision job.
@@ -19,8 +21,35 @@ const isVisualAsset = (asset) => {
 /** Visual assets queued for Gemini analysis (oversized/unsupported uploads opt out). */
 export function visualAnalysisAssetIds(mediaBin = []) {
     return [...new Set((Array.isArray(mediaBin) ? mediaBin : [])
-        .filter(asset => asset?.id && isVisualAsset(asset) && asset.visualAnalysisRequested !== false)
+        .filter(asset => asset?.id && isVisualAsset(asset) && asset.assistantReference !== true
+            && asset.isReference !== true && asset.role !== 'reference' && asset.visualAnalysisRequested !== false)
         .map(asset => String(asset.id)))];
+}
+
+/** Fetch all visual-analysis states, chunking the Brain route's 200-id limit. */
+export async function fetchProjectAssetAnalysisStatuses(projectId, assetIds, { timeoutMs = 5_000 } = {}) {
+    const ids = [...new Set((assetIds || []).map(String).filter(Boolean))];
+    const batches = [];
+    for (let i = 0; i < ids.length; i += 200) batches.push(ids.slice(i, i + 200));
+    const responses = await Promise.all(batches.map(async batch => {
+        const params = new URLSearchParams({ projectId: String(projectId), assetIds: batch.join(',') });
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const response = await authFetch(`/api/brain/analysis-status?${params}`, { signal: controller.signal });
+            if (!response.ok) {
+                const error = new Error(`Asset analysis status failed (${response.status})`);
+                const retryAfterSeconds = Number(response.headers?.get?.('Retry-After'));
+                if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) error.retryAfterMs = retryAfterSeconds * 1000;
+                throw error;
+            }
+            const data = await response.json();
+            return data.statuses || [];
+        } finally {
+            clearTimeout(timeout);
+        }
+    }));
+    return Object.fromEntries(responses.flat().map(item => [String(item.assetId), item.status]));
 }
 
 /**

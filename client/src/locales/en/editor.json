@@ -1592,6 +1592,7 @@
     "uploadNote": "Your prompt is saved here. You can create your short when the uploads are ready.",
     "uploadFailedNote": "An upload needs attention. Retry it before creating your short.",
     "waitingForUploads": "Preparing your footage…",
+    "analyzingFootage": "Checking your footage…",
     "createShort": "Create my short",
     "promptLabel": "Describe your short",
     "promptPlaceholder": "Make a 30 second reel from my clips with upbeat music and captions",
@@ -1617,6 +1618,9 @@
     "applyingChange": "Apply your change",
     "changeFailed": "The change could not be applied.",
     "changeNotApplied": "Roka did not apply an edit. Try describing the change you want to make.",
+    "noSourceTimeline": "I could not place your footage on the timeline. Your upload is still in the media bin; try adding it again.",
+    "chooseMainFootage": "I could not confidently tell which clip is the main video. Add its filename to your prompt, or ask for a montage to use all clips. Your uploads are unchanged.",
+    "noVisualResult": "The edit did not keep any video or image footage. I restored your original footage on the timeline; try a simpler prompt.",
     "editFailed": "The edit could not be completed.",
     "outcome": {
       "talking_head": "Talking head",

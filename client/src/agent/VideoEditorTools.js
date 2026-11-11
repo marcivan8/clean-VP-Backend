@@ -793,7 +793,9 @@ export function buildBrollCandidates(profiles, assets) {
         // References are inspiration/context, never timeline footage. Filter
         // them here as well as at placement time so they cannot rank as a
         // local cutaway candidate.
-        if (asset?.id && asset.assistantReference !== true) editableAssetsById.set(asset.id, asset);
+        if (asset?.id && asset.assistantReference !== true && asset.isReference !== true && asset.role !== 'reference') {
+            editableAssetsById.set(asset.id, asset);
+        }
     }
 
     return profiles

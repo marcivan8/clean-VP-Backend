@@ -12,6 +12,8 @@ import { EventBus, EVENT_TYPES } from '../agent/EventBus';
 import { contentEnd, togglePreview } from '../timeline/previewPlayback.js';
 import { summarizeUploads } from '../lib/uploadProgress.js';
 import { trackEvent } from '../utils/trackEvent.js';
+import { planMobileVisualAssets } from '../agent/mobileAssetPlan.js';
+import { fetchProjectAssetAnalysisStatuses, visualAnalysisAssetIds, waitForAssetAnalysisStatus } from '../agent/assetAnalysisWait.js';
 
 /* The flow covers the editor while it is open; the editor keeps running
    underneath, which is what makes "Skip" instant. */
@@ -44,6 +46,66 @@ const fmt = (secs) => {
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 
+/** A mobile edit is not a finished video unless exportable visual media stays on the timeline. */
+function hasExportableVisualTimeline() {
+    const state = useTimelineStore.getState();
+    const assets = state.assets || [];
+    return (state.tracks || []).some(track => ['video', 'image'].includes(track.type)
+        && (track.clips || []).some(clip => {
+            if (!['video', 'image'].includes(clip.type)) return false;
+            const asset = assets.find(item => item.id === clip.assetId);
+            if (clip.assistantReference || asset?.assistantReference || asset?.isReference || asset?.role === 'reference') return false;
+            return Boolean(clip.url || clip.sourceUrl || clip.proxyUrl
+                || asset?.url || asset?.proxyUrl || asset?.sourceUrl || asset?.gcsPath || asset?.storagePath);
+        }));
+}
+
+/** The guided upload keeps media in the bin; seed the main edit before Auto starts. */
+async function ensureMobileSourceFootage(prompt, outcomeId) {
+    const state = useTimelineStore.getState();
+    if (hasExportableVisualTimeline()) return true;
+    let profiles = [];
+    if (state.projectId) {
+        const fetchProfiles = async () => {
+            const { fetchShortVisualContext } = await import('../agent/shortFinisher.js');
+            return fetchShortVisualContext(state.projectId);
+        };
+        try { profiles = await fetchProfiles(); } catch { /* Retry after the readiness window. */ }
+        const analyzedIds = new Set(profiles.map(profile => String(profile.assetId || profile.id || '')));
+        const visualIds = visualAnalysisAssetIds(state.assets).filter(id => !analyzedIds.has(id));
+        if (visualIds.length) {
+            try {
+                await waitForAssetAnalysisStatus(
+                    visualIds,
+                    async ids => {
+                        const statuses = await fetchProjectAssetAnalysisStatuses(state.projectId, ids);
+                        // Upload analysis is queued asynchronously when the
+                        // source reaches storage. A missing row can briefly be
+                        // that race, so give it the same bounded mobile window.
+                        for (const id of ids) if (!(id in statuses)) statuses[id] = 'pending';
+                        return statuses;
+                    },
+                    { timeoutMs: 12_000, intervalMs: 1_000, retryOnError: true },
+                );
+            } catch { /* Continue with the best available local evidence. */ }
+        }
+        try { profiles = await fetchProfiles(); } catch { /* Ambiguity is handled without guessing. */ }
+    }
+    const plan = planMobileVisualAssets(state.assets, prompt, outcomeId, profiles);
+    if (plan.mode === 'ambiguous') return 'ambiguous';
+    const sources = plan.mode === 'sequence' ? plan.sequence : [plan.primary].filter(Boolean);
+    for (const asset of sources) {
+        // addAssetToTimeline reads `url`; mobile uploads may have a proxy URL
+        // before that field is hydrated, so provide its strongest live source.
+        state.addAssetToTimeline?.({
+            ...asset,
+            url: asset.url || asset.proxyUrl || asset.sourceUrl || null,
+            sourceUrl: asset.sourceUrl || asset.proxyUrl || asset.url || null,
+        });
+    }
+    return hasExportableVisualTimeline();
+}
+
 function outcomeFromPrompt(prompt, fallback) {
     const text = String(prompt || '').toLowerCase();
     if (/photo\s*(?:collage|montage)|collage\s*(?:of\s*)?photos?|montage\s*photo/.test(text)) return 'photo_collage';
@@ -58,6 +120,8 @@ function outcomeFromPrompt(prompt, fallback) {
 /* ── What are you making? ─────────────────────────────────────────────────── */
 
 function OutcomeStep() {
+    const creationInFlight = useRef(false);
+    const [isPreparing, setIsPreparing] = React.useState(false);
     const { t } = useTranslation('editor');
     const choose = useMobileFlowStore(s => s.choose);
     const beginProgress = useMobileFlowStore(s => s.beginProgress);
@@ -77,42 +141,64 @@ function OutcomeStep() {
     const failedAssets = editableAssets.filter(asset => asset.uploadError);
     const canCreate = hasVisualAssets && pendingAssets.length === 0 && failedAssets.length === 0;
 
-    const create = () => {
-        if (!canCreate) return;
-        const id = outcomeFromPrompt(request, selectedOutcome);
-        const asksForMusic = /\b(music|soundtrack|song|background track)\b/i.test(request)
-            && !/\b(?:no|without|remove|mute)\s+(?:any\s+)?(?:background\s+)?(?:music|soundtrack|song)\b/i.test(request);
-        if (asksForMusic) {
-            const live = useTimelineStore.getState();
-            const placedAssetIds = new Set((live.tracks || []).flatMap(track => (track.clips || []).map(clip => clip.assetId)));
-            // Audio stays in the bin until the user asks for it. At that point,
-            // add their uploaded track to the edit before the playbook runs.
-            editableAssets
-                .filter(asset => asset.type === 'audio' && !placedAssetIds.has(asset.id))
-                .forEach(asset => live.addAssetToTimeline?.(asset));
+    const create = async () => {
+        if (!canCreate || creationInFlight.current) return;
+        creationInFlight.current = true;
+        setIsPreparing(true);
+        let checkpoint = null;
+        try {
+            const id = outcomeFromPrompt(request, selectedOutcome);
+            const sourceResult = await ensureMobileSourceFootage(request, id);
+            if (sourceResult !== true) {
+                throw new Error(sourceResult === 'ambiguous'
+                    ? t('mobileFlow.chooseMainFootage', 'I could not confidently tell which clip is the main video. Add its filename to your prompt, or ask for a montage to use all clips. Your uploads are unchanged.')
+                    : t('mobileFlow.noSourceTimeline', 'I could not place your footage on the timeline. Your upload is still in the media bin; try adding it again.'));
+            }
+            // If any Auto step removes the only visual media, put the seeded edit
+            // back and report a failure instead of presenting a black, unexportable result.
+            checkpoint = useVersionsStore.getState().checkpoint();
+            const asksForMusic = /\b(music|soundtrack|song|background track)\b/i.test(request)
+                && !/\b(?:no|without|remove|mute)\s+(?:any\s+)?(?:background\s+)?(?:music|soundtrack|song)\b/i.test(request);
+            if (asksForMusic) {
+                const live = useTimelineStore.getState();
+                const placedAssetIds = new Set((live.tracks || []).flatMap(track => (track.clips || []).map(clip => clip.assetId)));
+                // Audio stays in the bin until the user asks for it. At that point,
+                // add their uploaded track to the edit before the playbook runs.
+                editableAssets
+                    .filter(asset => asset.type === 'audio' && !placedAssetIds.has(asset.id))
+                    .forEach(asset => live.addAssetToTimeline?.(asset));
+            }
+            trackEvent('mobile_short_creation_started', {
+                outcome: id,
+                has_prompt: Boolean(request.trim()),
+                asset_count: editableAssets.length,
+            });
+            setIsPreparing(false);
+            choose(id);
+            const result = await startOutcome(id, {
+                request: request.trim(),
+                onPlan: beginProgress,
+                onStep: ({ index, state, message }) => updateProgress(index, state, message),
+            });
+            if (!result?.success) throw new Error(result?.message || t('mobileFlow.editFailed', 'The edit could not be completed.'));
+            if (!hasExportableVisualTimeline()) {
+                useVersionsStore.getState().restoreCheckpoint(checkpoint);
+                throw new Error(t('mobileFlow.noVisualResult', 'The edit did not keep any video or image footage. I restored your original footage on the timeline; try a simpler prompt.'));
+            }
+            // A version per finished run is what makes "go back" possible
+            // without asking a beginner to count undo steps.
+            useVersionsStore.getState().capture(t(`mobileFlow.outcome.${id}`, id));
+            trackEvent('mobile_short_preview_ready', { outcome: id });
+            useMobileFlowStore.getState().finished();
+        } catch (err) {
+            if (checkpoint && !hasExportableVisualTimeline()) {
+                useVersionsStore.getState().restoreCheckpoint(checkpoint);
+            }
+            useMobileFlowStore.getState().failed(err?.message);
+        } finally {
+            if (useMobileFlowStore.getState().step === 'outcome') setIsPreparing(false);
+            creationInFlight.current = false;
         }
-        trackEvent('mobile_short_creation_started', {
-            outcome: id,
-            has_prompt: Boolean(request.trim()),
-            asset_count: editableAssets.length,
-        });
-        choose(id);
-        // The run is fired and watched here rather than in the store: a store
-        // that starts work is a store you cannot reason about in a test.
-        startOutcome(id, {
-            request: request.trim(),
-            onPlan: beginProgress,
-            onStep: ({ index, state, message }) => updateProgress(index, state, message),
-        })
-            .then((result) => {
-                if (!result?.success) throw new Error(result?.message || t('mobileFlow.editFailed', 'The edit could not be completed.'));
-                // A version per finished run is what makes "go back" possible
-                // without asking a beginner to count undo steps.
-                useVersionsStore.getState().capture(t(`mobileFlow.outcome.${id}`, id));
-                trackEvent('mobile_short_preview_ready', { outcome: id });
-                useMobileFlowStore.getState().finished();
-            })
-            .catch((err) => useMobileFlowStore.getState().failed(err?.message));
     };
 
     return (
@@ -196,10 +282,12 @@ function OutcomeStep() {
             <button
                 type="button"
                 onClick={create}
-                disabled={!canCreate}
-                style={{ margin: '0 20px 24px', minHeight: 54, border: 0, borderRadius: 999, background: 'var(--fg)', color: 'var(--bg)', fontSize: 16, fontWeight: 700, fontFamily: 'var(--f-sans)', opacity: canCreate ? 1 : .45, cursor: canCreate ? 'pointer' : 'not-allowed' }}
+                disabled={!canCreate || isPreparing}
+                style={{ margin: '0 20px 24px', minHeight: 54, border: 0, borderRadius: 999, background: 'var(--fg)', color: 'var(--bg)', fontSize: 16, fontWeight: 700, fontFamily: 'var(--f-sans)', opacity: canCreate && !isPreparing ? 1 : .6, cursor: canCreate && !isPreparing ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9 }}
             >
-                {pendingAssets.length ? t('mobileFlow.waitingForUploads', 'Preparing your footage…') : t('mobileFlow.createShort', 'Create my short')}
+                {pendingAssets.length || isPreparing
+                    ? <><Loader2 size={17} className={isPreparing ? 'animate-spin' : undefined} /> {isPreparing ? t('mobileFlow.analyzingFootage', 'Checking your footage…') : t('mobileFlow.waitingForUploads', 'Preparing your footage…')}</>
+                    : t('mobileFlow.createShort', 'Create my short')}
             </button>
         </div>
     );
@@ -497,6 +585,9 @@ function ChangeStep() {
                 if (!result?.success) throw new Error(result?.message || t('mobileFlow.changeFailed', 'The change could not be applied.'));
                 if (['chat', 'query_session_summary'].includes(result.operation)) {
                     throw new Error(t('mobileFlow.changeNotApplied', 'Roka did not apply an edit. Try describing the change you want to make.'));
+                }
+                if (!hasExportableVisualTimeline()) {
+                    throw new Error(t('mobileFlow.noVisualResult', 'The edit did not keep any video or image footage. I restored your original footage on the timeline; try a simpler prompt.'));
                 }
                 updateProgress(0, 'done', result.message || null);
                 useVersionsStore.getState().capture(label || text);
