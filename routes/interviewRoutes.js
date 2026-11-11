@@ -28,7 +28,8 @@ const { sanitizeEditingStyle, rhythmZoomStyle, keepsRecordedOrder } = require('.
 const router         = express.Router();
 const path           = require('path');
 const fs             = require('fs');
-const { execSync, spawn } = require('child_process');
+const { execFileSync, spawn } = require('child_process');
+const crypto          = require('crypto');
 const { authenticateUser, optionalAuth } = require('../middleware/auth');
 const { aiGate }     = require('../middleware/usageGate');
 const { audioQueue } = require('../queue/queues');
@@ -43,9 +44,26 @@ try {
     ffmpegPath = require('ffmpeg-static');
 } catch (_) {}
 const FFMPEG_BIN = ffmpegPath || 'ffmpeg';
-const VIRTUAL_MULTICAM_PLANNER_VERSION = 2;
+const VIRTUAL_MULTICAM_PLANNER_VERSION = 3;
 const ORGANIZE_ANALYSIS_CONCURRENCY = 3;
 const ORGANIZE_FRAME_CONCURRENCY = 4;
+const FFMPEG_INPUT_CACHE_TTL_MS = 15 * 60 * 1000;
+const ffmpegInputCache = new Map();
+const ffmpegInputDownloads = new Map();
+
+function rememberFfmpegInput(cacheKey, localPath) {
+    const previous = ffmpegInputCache.get(cacheKey);
+    if (previous?.timer) clearTimeout(previous.timer);
+    const entry = { localPath, expiresAt: Date.now() + FFMPEG_INPUT_CACHE_TTL_MS, timer: null };
+    entry.timer = setTimeout(() => {
+        if (ffmpegInputCache.get(cacheKey) !== entry) return;
+        ffmpegInputCache.delete(cacheKey);
+        fs.promises.rm(localPath, { force: true }).catch(() => {});
+    }, FFMPEG_INPUT_CACHE_TTL_MS);
+    entry.timer.unref?.();
+    ffmpegInputCache.set(cacheKey, entry);
+    return localPath;
+}
 
 // ── Host-side detection helpers ───────────────────────────────────────────────
 
@@ -126,10 +144,12 @@ function pathOwnedBy(gcsPath, requestUserId) {
 
 /**
  * Resolve a GCS-relative path (or bare filename) to something ffmpeg can read
- * directly as an -i argument: a short-lived signed URL when GCS is configured,
- * or a local file path in local-storage/dev mode. Returns null if the file
- * can't be located. Shared by extractVideoFrame() and refine-cut-frames below
- * so both use the exact same resolution rules.
+ * as a local -i argument. Remote MOV/MP4 files are materialized from the GCS
+ * SDK first: FFmpeg's HTTP range seeking is unreliable when the moov atom is
+ * at the end of phone-recorded MOVs, which made frame analysis silently fall
+ * back to wide shots. Downloads are cached briefly and shared by concurrent
+ * frame extraction in the same process. Returns null if the file can't be
+ * located. Shared by extractVideoFrame() and refine-cut-frames below.
  *
  * `requestUserId` (resolveRequestUserId(req)) is REQUIRED for every caller
  * that received gcsPath from client input — this is the IDOR fix: without it,
@@ -150,15 +170,52 @@ async function resolveFfmpegInputArg(gcsPath, requestUserId) {
         return null;
     }
     if (storageConfig.bucket && !storageConfig.useLocalStorage) {
+        const source = storageConfig.bucket.file(cleanPath);
         try {
-            const [signedUrl] = await storageConfig.bucket.file(cleanPath).getSignedUrl({
-                version: 'v4',
-                action:  'read',
-                expires: Date.now() + 5 * 60 * 1000,
-            });
-            return signedUrl;
-        } catch (signErr) {
-            console.warn(`[interviewRoutes] resolveFfmpegInputArg: cannot sign ${cleanPath} (${signErr.message})`);
+            const [metadata] = await source.getMetadata();
+            const generation = metadata.generation || metadata.updated || 'current';
+            const cacheKey = `${cleanPath}:${generation}`;
+            const cached = ffmpegInputCache.get(cacheKey);
+            if (cached && Date.now() < cached.expiresAt && fs.existsSync(cached.localPath)) {
+                return cached.localPath;
+            }
+            const pending = ffmpegInputDownloads.get(cacheKey);
+            if (pending) return await pending;
+
+            const uploadsDir = path.resolve(__dirname, '../uploads');
+            const cacheDir = path.join(uploadsDir, 'temp', 'interview-ffmpeg');
+            const ext = path.extname(cleanPath).replace(/[^.a-z0-9]/gi, '').toLowerCase() || '.media';
+            const cacheId = crypto.createHash('sha256').update(cacheKey).digest('hex');
+            const localPath = path.join(cacheDir, `${cacheId}${ext}`);
+            const expectedSize = Number(metadata.size);
+
+            if (fs.existsSync(localPath)) {
+                const stat = fs.statSync(localPath);
+                if (!expectedSize || stat.size === expectedSize) {
+                    return rememberFfmpegInput(cacheKey, localPath);
+                }
+            }
+
+            const download = (async () => {
+                await fs.promises.mkdir(cacheDir, { recursive: true });
+                const partialPath = `${localPath}.${process.pid}.${Date.now()}.part`;
+                try {
+                    await source.download({ destination: partialPath });
+                    await fs.promises.rename(partialPath, localPath);
+                } catch (error) {
+                    await fs.promises.rm(partialPath, { force: true }).catch(() => {});
+                    throw error;
+                }
+                return rememberFfmpegInput(cacheKey, localPath);
+            })();
+            ffmpegInputDownloads.set(cacheKey, download);
+            try {
+                return await download;
+            } finally {
+                ffmpegInputDownloads.delete(cacheKey);
+            }
+        } catch (downloadErr) {
+            console.warn(`[interviewRoutes] resolveFfmpegInputArg: cannot prepare ${path.basename(cleanPath)} (${downloadErr.message})`);
             return null;
         }
     }
@@ -188,16 +245,25 @@ async function extractVideoFrame(gcsPath, timestampSec, requestUserId) {
         const inputArg = await resolveFfmpegInputArg(gcsPath, requestUserId);
         if (!inputArg) return null;
 
-        // -ss before -i = fast seek; -vframes 1 = single frame; pipe: = stdout
-        const cmd = `"${FFMPEG_BIN}" -ss ${timestampSec.toFixed(2)} -i "${inputArg}" -vframes 1 -f image2pipe -vcodec mjpeg -q:v 5 pipe:1`;
-        const buf = execSync(cmd, {
+        // Use argv (no shell). The input is materialized locally above, so fast
+        // input seeking works even when a phone MOV stores its moov atom at EOF.
+        const buf = execFileSync(FFMPEG_BIN, [
+            '-ss', Math.max(0, Number(timestampSec) || 0).toFixed(2),
+            '-i', inputArg,
+            '-vframes', '1',
+            '-f', 'image2pipe',
+            '-vcodec', 'mjpeg',
+            '-q:v', '5',
+            'pipe:1',
+        ], {
             maxBuffer: 8 * 1024 * 1024,
             timeout:   20000,
-            stdio:     ['pipe', 'pipe', 'ignore'],
+            stdio:     ['ignore', 'pipe', 'pipe'],
         });
         return buf.toString('base64');
     } catch (err) {
-        console.warn(`[virtual-multicam] extractVideoFrame @${timestampSec.toFixed(1)}s failed:`, err.message);
+        const diagnostic = err.stderr?.toString().trim().slice(-500) || err.message;
+        console.warn(`[virtual-multicam] extractVideoFrame @${Number(timestampSec).toFixed(1)}s failed:`, diagnostic);
         return null;
     }
 }

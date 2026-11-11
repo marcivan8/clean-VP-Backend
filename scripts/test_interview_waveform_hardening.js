@@ -60,7 +60,7 @@ async function run() {
             /spawn\(FFMPEG_BIN,\s*args/.test(interviewSrc), true);
 
         ok('interviewRoutes extractVideoFrame uses FFMPEG_BIN',
-            /\$\{FFMPEG_BIN\}/.test(interviewSrc), true);
+            /execFileSync\(FFMPEG_BIN/.test(interviewSrc), true);
 
         ok('classify-pauses has editorial heuristics fallback',
             /function classifyPausesHeuristically/.test(interviewSrc), true);
