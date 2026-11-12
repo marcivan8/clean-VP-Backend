@@ -619,7 +619,7 @@
     {
       "id": "sync_cutaways",
       "executes": "sync_cutaways",
-      "phrase": "sync b roll to the words",
+      "phrase": "sync the b roll and number pops to the words",
       "category": "edit",
       "registryDeclared": true,
       "label": "Sync cutaways to the words",

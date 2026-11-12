@@ -34,7 +34,7 @@ export const COMMAND_PHRASE = Object.freeze({
     "semantic_cut": "remove the part where",
     "silence_removal": "Remove silences",
     "split_by_speaker": "split at speaker changes",
-    "sync_cutaways": "sync b roll to the words",
+    "sync_cutaways": "sync the b roll and number pops to the words",
     "queue_export": "Export",
     "apply_style_recipe": "Apply a style recipe",
     "macro_clean_and_polish": "clean it up and make it dynamic",
