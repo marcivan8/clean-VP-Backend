@@ -1,17 +1,28 @@
 /** Resolve effect activity against source timeline bounds or compositor output windows. */
+const numeric = (value, fallback = NaN) => {
+    if (value === null || value === undefined || typeof value === 'boolean' || (typeof value === 'string' && value.trim() === '')) return fallback;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+};
+
 export function isEffectActiveAt(effect, clipStart, duration, time) {
     if (!effect || effect.enabled === false) return false;
+    const startTime = numeric(clipStart, 0);
+    const currentTime = numeric(time);
+    if (!Number.isFinite(currentTime)) return false;
     if (Array.isArray(effect.outputWindows)) {
-        const localTime = Number(time) - (Number(clipStart) || 0);
-        return effect.outputWindows.some(window => Number.isFinite(Number(window?.start))
-            && Number.isFinite(Number(window?.end))
-            && Number(window.start) <= localTime && localTime < Number(window.end));
+        const localTime = currentTime - startTime;
+        return effect.outputWindows.some(window => {
+            const start = numeric(window?.start), end = numeric(window?.end);
+            return Number.isFinite(start) && Number.isFinite(end) && start <= localTime && localTime < end;
+        });
     }
-    const start = effect.startTime == null || effect.startTime === '' ? Number(clipStart) || 0 : Number(effect.startTime);
-    const end = effect.endTime == null || effect.endTime === ''
-        ? (Number(clipStart) || 0) + (Number(duration) || Infinity)
-        : Number(effect.endTime);
-    return (!Number.isFinite(start) || Number(time) >= start) && (!Number.isFinite(end) || Number(time) < end);
+    const rawStart = numeric(effect.startTime);
+    const rawEnd = numeric(effect.endTime);
+    const clipDuration = numeric(duration, 0);
+    const start = Number.isFinite(rawStart) ? rawStart : startTime;
+    const end = Number.isFinite(rawEnd) ? rawEnd : startTime + (clipDuration || Infinity);
+    return currentTime >= start && currentTime < end;
 }
 
 export default { isEffectActiveAt };

@@ -19,6 +19,12 @@
 
 import { resolveEasing } from './Easing.js';
 
+/** Vector primitives supported by preview and export renderers. */
+export const VECTOR_SHAPE_KINDS = Object.freeze([
+    'rect', 'circle', 'ellipse', 'capsule', 'callout', 'polygon', 'star', 'arrow', 'path',
+]);
+const VECTOR_SHAPE_KIND_SET = new Set(VECTOR_SHAPE_KINDS);
+
 // ── SVG Path Parser & Path Operations ────────────────────────────────────────
 
 export const MAX_VECTOR_PATH_CHARS = 100_000;
@@ -80,6 +86,26 @@ export function validateSvgPathData(data) {
         if (!groups) return { valid: false, reason: 'missing_arguments' };
     }
     return hasMove ? { valid: true, commands: count } : { valid: false, reason: 'missing_move' };
+}
+
+function validateVectorPathCommands(commands) {
+    if (!Array.isArray(commands) || !commands.length) return false;
+    const arity = { M: 2, L: 2, H: 1, V: 1, C: 6, S: 4, Q: 4, T: 2, A: 7 };
+    let hasMove = false;
+    for (const command of commands) {
+        const type = typeof command?.type === 'string' ? command.type.toUpperCase() : '';
+        const args = command?.args;
+        if (type === 'Z') {
+            if (!hasMove || !Array.isArray(args) || args.length !== 0) return false;
+            continue;
+        }
+        if (!(type in arity) || !Array.isArray(args) || args.length !== arity[type]
+            || !args.every(Number.isFinite)) return false;
+        if (!hasMove && type !== 'M') return false;
+        if (type === 'M') hasMove = true;
+        if (type === 'A' && (![0, 1].includes(args[3]) || ![0, 1].includes(args[4]))) return false;
+    }
+    return hasMove;
 }
 
 /**
@@ -1112,6 +1138,7 @@ export function vectorMatteDataUrl(vector = {}, fallbackWidth = 100, fallbackHei
         const tailWidth = Number(vector.tailWidth) || headWidth * 0.35;
         shape = `<path d="M ${bx} ${cy - tailWidth / 2} H ${bx + bw - headLength} V ${cy - headWidth / 2} L ${bx + bw} ${cy} L ${bx + bw - headLength} ${cy + headWidth / 2} V ${cy + tailWidth / 2} H ${bx} Z" fill="white" transform="rotate(${Number(vector.rotation) || 0} ${cx} ${cy})"/>`;
     } else if (kind === 'path' && typeof vector.pathData === 'string' && vector.pathData.trim()) {
+        if (!validateSvgPathData(vector.pathData).valid) return null;
         const d = vector.pathData.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         shape = `<path d="${d}" fill="white" fill-rule="${vector.fillRule === 'evenodd' ? 'evenodd' : 'nonzero'}"/>`;
     } else {
@@ -1151,7 +1178,7 @@ export function vectorMatteDataUrl(vector = {}, fallbackWidth = 100, fallbackHei
  */
 export function drawVectorGraphic(ctx, shape = {}) {
     if (!ctx) return;
-    const {
+    let {
         kind = 'rect',
         x = 0, y = 0, w = 100, h = 100,
         fill, stroke, strokeWidth = 0,
@@ -1160,6 +1187,25 @@ export function drawVectorGraphic(ctx, shape = {}) {
         shadow, blendMode, opacity = 1,
         rotation = 0, scale = 1,
     } = shape;
+    // The composition planner and export worker preserve legacy empty-kind
+    // shapes as rectangles. Keep preview on that same default contract.
+    if (kind == null || kind === '') kind = 'rect';
+
+    // Missing kind retains the documented rectangle default. An explicit
+    // unsupported kind must fail closed instead of silently drawing a rect.
+    if (!VECTOR_SHAPE_KIND_SET.has(kind)) return;
+    // drawSvgPath deliberately leaves invalid authored data untouched. Reject
+    // it before drawing so fill/stroke cannot accidentally reuse the previous
+    // Canvas current path (the current path is not part of save/restore state).
+    let pathCommands = null;
+    if (kind === 'path') {
+        if (typeof shape.pathData === 'string') {
+            if (!validateSvgPathData(shape.pathData).valid) return;
+            pathCommands = parseSvgPath(shape.pathData);
+        } else if (validateVectorPathCommands(shape.pathData)) {
+            pathCommands = shape.pathData;
+        } else return;
+    }
 
     ctx.save();
 
@@ -1231,7 +1277,7 @@ export function drawVectorGraphic(ctx, shape = {}) {
             break;
 
         case 'path':
-            if (shape.pathData) drawSvgPath(ctx, shape.pathData);
+            drawSvgPath(ctx, pathCommands);
             break;
 
         case 'rect':

@@ -23,7 +23,7 @@
 
 import { measureTextBounds, fitTextToBox, reserveSlotWidth } from './TextMeasurement.js';
 import { contrastRatio, luminance } from './ColorTheory.js';
-import { interpolateSvgPaths, validateSvgPathData } from './VectorGraphics.js';
+import { interpolateSvgPaths, validateSvgPathData, VECTOR_SHAPE_KINDS } from './VectorGraphics.js';
 import { TEMPLATE_KINDS, SHAPE_KINDS } from './TemplateGraphics.js';
 import { auditScene as auditTextCraft, ruleById as craftRuleById } from './TextCraft.js';
 import { getScene3DRenderLimitWarnings, getScene3DCompatibilityWarnings, SCENE3D_TEXTURE_MASK_SHAPES } from './Scene3D.js';
@@ -58,6 +58,7 @@ export const ISSUE_CODES = {
     UNSUPPORTED_BLEND_MODE: 'unsupported_blend_mode',
     UNSUPPORTED_VECTOR_MORPH: 'unsupported_vector_morph',
     INVALID_VECTOR_PATH: 'invalid_vector_path',
+    UNSUPPORTED_VECTOR_SHAPE: 'unsupported_vector_shape',
     UNKNOWN_TEMPLATE:     'unknown_template',
     UNSUPPORTED_MASK:     'unsupported_mask',
     ZERO_DURATION:        'zero_duration',
@@ -67,7 +68,6 @@ export const ISSUE_CODES = {
     LOW_CONTRAST:         'low_contrast',
     SCENE_RENDER_LIMIT:   'scene_render_limit',
     SCENE_COMPATIBILITY:  'scene_compatibility',
-    ANIMATION_RENDER_LIMIT: 'animation_render_limit',
     // R107 - the text-craft rules whose symptom is visible before render.
     READ_HOLD:            'read_hold',
     SWAP_DWELL:           'swap_dwell',
@@ -94,10 +94,10 @@ const GRAPHIC_EFFECT_KIND_SET = new Set(GRAPHIC_EFFECT_KINDS);
 const MEDIA_EFFECT_KINDS = new Set([
     // The compositor renders alpha-based shadow/glow in dedicated branches
     // (including the video glow pass), so validation must preserve them.
-    'shadow', 'glow', 'gradient-fill', 'blur', 'blur_gaussian', 'blur_radial', 'blur_motion', 'shake', 'fade_in', 'fade_out',
+    'shadow', 'drop-shadow', 'glow', 'gradient-fill', 'blur', 'blur_gaussian', 'blur_radial', 'blur_motion', 'shake', 'fade_in', 'fade_out',
     'stroke',
-    'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate',
-    'color_grade', 'grain', 'film_grain', 'chromatic-aberration', 'rgb_split',
+    'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate', 'grayscale', 'sepia',
+    'color_grade', 'grain', 'film_grain', 'film-grain', 'chromatic-aberration', 'rgb_split',
     'motion-blur', 'distortion', 'vignette', 'glitch', 'inner-shadow',
 ]);
 
@@ -484,6 +484,15 @@ function checkVectorPath(entry, issues) {
         { reason: validation.reason }));
 }
 
+function checkVectorKind(entry, issues) {
+    const { node } = entry;
+    const vector = node?.vector;
+    if (!vector || vector.kind == null || vector.kind === '' || VECTOR_SHAPE_KINDS.includes(vector.kind)) return;
+    issues.push(issue(ISSUE_CODES.UNSUPPORTED_VECTOR_SHAPE, SEVERITY.ERROR, node,
+        `The vector shape "${vector.kind}" is unsupported and will not render. Choose a supported vector shape.`,
+        { kind: vector.kind, supported: VECTOR_SHAPE_KINDS }));
+}
+
 function checkVectorBlendMode(entry, issues) {
     const { node } = entry;
     const mode = node?.vector?.blendMode;
@@ -518,24 +527,6 @@ function check3DRenderLimits(entry, issues) {
         issues.push(issue(ISSUE_CODES.UNSUPPORTED_MASK, SEVERITY.WARN, node,
             `The 3D ${object.type} “${object.name || object.id || 'unnamed'}” uses the “${object.maskShape}” mask, which the 3D renderer cannot draw. The mask will be ignored.`,
             { objectId: object.id || null, shape: object.maskShape, supported: [...supportedPlaneMasks] }));
-    });
-}
-
-/** Animation sanitization caps work defensively; report authored tracks that
- * exceed those caps so keyframes are never silently discarded at render. */
-function checkAnimationRenderLimits(entry, issues) {
-    const node = entry?.node;
-    const animations = Array.isArray(node?.animations) ? node.animations : [];
-    const addLimit = (label, actual, limit) => {
-        if (actual <= limit) return;
-        issues.push(issue(ISSUE_CODES.ANIMATION_RENDER_LIMIT, SEVERITY.WARN, node,
-            `This layer has ${actual} ${label}; the renderer supports ${limit}, so the extra animation data will not appear.`,
-            { label, actual, limit }));
-    };
-    addLimit('animation tracks', animations.length, 16);
-    animations.forEach((animation, index) => {
-        const count = Array.isArray(animation?.keyframes) ? animation.keyframes.length : 0;
-        addLimit(`keyframes in animation ${index + 1}`, count, 24);
     });
 }
 
@@ -640,12 +631,12 @@ export function validateScene(scene, opts = {}) {
         checkText(scene, entry, issues, opts);
         checkPlacement(scene, entry, issues, opts);
         checkSource(entry, issues, opts);
+        checkVectorKind(entry, issues);
         checkVectorPath(entry, issues);
         checkVectorMorph(entry, issues);
         checkVectorBlendMode(entry, issues);
         checkEffects(entry, issues, leaves);
         check3DRenderLimits(entry, issues);
-        checkAnimationRenderLimits(entry, issues);
         checkTextCraft(entry, issues);
     }
     if (!opts.skipCollisions) checkCollisions(leaves, issues);

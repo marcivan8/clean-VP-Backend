@@ -244,6 +244,13 @@ section('3 · Layer resolution composes animations correctly');
         near(M.resolveMotionAt(pathLayer, 5.6).x, 60) && near(M.resolveMotionAt(pathLayer, 5.6).y, 70));
     check('motion paths validate finite points and require at least two', M.validateMotionLayer(pathLayer).valid
         && !M.validateMotionLayer({ ...pathLayer, motionPath: { points: [[0, NaN]] } }).valid);
+    const cleanPathLayer = M.createMotionLayer({ startTime: 4, duration: 3, x: 40, y: 60,
+        motionPath: { points: [[0, 0], [20, 10]], startTime: 0.5, duration: 1, easing: 'linear' } });
+    const malformedPathLayer = { ...cleanPathLayer, motionPath: { ...cleanPathLayer.motionPath,
+        points: [[0, 0], [null, 100], [20, 10], { x: false, y: 50 }, { x: ' ', y: 30 }] } };
+    check('invalid motion-path waypoints are ignored instead of being coerced to the origin',
+        near(M.resolveMotionAt(malformedPathLayer, 5).x, M.resolveMotionAt(cleanPathLayer, 5).x)
+        && near(M.resolveMotionAt(malformedPathLayer, 5).y, M.resolveMotionAt(cleanPathLayer, 5).y));
     const curvedPath = M.createMotionLayer({ startTime: 0, duration: 1, x: 0, y: 0,
         motionPath: { points: [[0, 0], [100, 0], [100, 100]], duration: 1, easing: 'linear', arcLength: true } });
     const arcSamples = [0, 0.25, 0.5, 0.75, 1].map(time => M.resolveMotionAt(curvedPath, time));
@@ -329,6 +336,29 @@ section('4b · Motion validation rejects non-finite transforms and keyframes');
     check('a non-finite keyframe value is rejected', M.validateMotionLayer(invalidFrame).errors.some(error => error.includes('finite number')));
     const duplicateAnimations = { ...valid, animations: [valid.animations[0], { ...valid.animations[0] }] };
     check('duplicate animation IDs are rejected', M.validateMotionLayer(duplicateAnimations).errors.some(error => error.includes('duplicate animation id')));
+
+    const malformedKeyframe = M.createKeyframe(null, { x: null, y: true, scale: '' });
+    check('motion keyframes do not coerce null or empty times to zero', Number.isNaN(malformedKeyframe.time));
+    check('motion keyframes omit null, boolean, and blank transform values', Object.keys(malformedKeyframe.properties).length === 0);
+    const malformedLayer = M.createMotionLayer({ startTime: false, duration: null, endTime: 10,
+        x: null, y: ' ', scale: false, opacity: null,
+        expressionLayers: [
+            { startTime: false, expressions: { x: '1' } },
+            { startTime: '2', duration: false, originX: null, frameW: ' ', expressions: { x: '1' } },
+        ],
+    });
+    check('invalid layer timing falls back to valid endTime without coercing booleans',
+        malformedLayer.startTime === 0 && malformedLayer.duration === 10 && malformedLayer.endTime === 10);
+    check('invalid base transforms use neutral layer defaults',
+        malformedLayer.x === 50 && malformedLayer.y === 50 && malformedLayer.scale === 1 && malformedLayer.opacity === 1);
+    check('expression layers reject invalid starts and omit malformed optional dimensions',
+        malformedLayer.expressionLayers.length === 1 && malformedLayer.expressionLayers[0].startTime === 2
+        && malformedLayer.expressionLayers[0].duration === 0
+        && !('originX' in malformedLayer.expressionLayers[0]) && !('frameW' in malformedLayer.expressionLayers[0]));
+    check('finite numeric strings remain compatible in motion-layer imports',
+        M.createMotionLayer({ startTime: '1.5', duration: '2', x: '12' }).startTime === 1.5
+        && M.createMotionLayer({ startTime: '1.5', duration: '2', x: '12' }).duration === 2
+        && M.createMotionLayer({ x: '12' }).x === 12);
 }
 
 section('5 · Caption model preserves word timings (the R58 core fix)');

@@ -6,27 +6,29 @@ import { resolveEffectParameter } from './EffectTiming.js';
 // renderer's executable set prevents scenes from being declared valid for an
 // effect that this Canvas path would silently ignore.
 export const GRAPHIC_EFFECT_KINDS = Object.freeze([
-    'shadow', 'glow', 'blur', 'blur_gaussian', 'blur_radial', 'blur_motion',
+    'shadow', 'drop-shadow', 'glow', 'blur', 'blur_gaussian', 'blur_radial', 'blur_motion',
     'shake', 'grain', 'gradient-fill', 'stroke', 'inner-shadow',
-    'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate',
-    'chromatic-aberration', 'rgb_split', 'film_grain', 'motion-blur',
-    'distortion', 'color_grade', 'vignette', 'glitch',
+    'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate', 'grayscale', 'sepia',
+    'chromatic-aberration', 'rgb_split', 'film_grain', 'film-grain', 'motion-blur',
+    'distortion', 'color_grade', 'vignette', 'glitch', 'fade_in', 'fade_out',
 ]);
 const GRAPHIC_EFFECT_KIND_SET = new Set(GRAPHIC_EFFECT_KINDS);
 const SHAPE_MASK_KINDS = new Set(['ellipse', 'circle', 'rectangle', 'rounded-rectangle', 'capsule', 'callout', 'polygon', 'star', 'arrow']);
 const PIXEL_EFFECT_KIND_SET = new Set([
-    'grain', 'film_grain', 'chromatic-aberration', 'rgb_split', 'motion-blur',
+    'grain', 'film_grain', 'film-grain', 'chromatic-aberration', 'rgb_split', 'motion-blur',
     'blur_motion', 'blur_radial', 'distortion', 'stroke', 'inner-shadow',
     'color_grade', 'vignette', 'glitch',
 ]);
 
+const finiteNumber = value => value !== null && value !== undefined && typeof value !== 'boolean'
+    && !(typeof value === 'string' && value.trim() === '') && Number.isFinite(Number(value))
+    ? Number(value) : null;
 const readNumber = (value, fallback = 0) => {
-    const raw = value && typeof value === 'object' && 'value' in value ? value.value : value;
-    const number = Number(raw);
-    return Number.isFinite(number) ? number : fallback;
+    const raw = value && typeof value === 'object' && !Array.isArray(value) && 'value' in value ? value.value : value;
+    return finiteNumber(raw) ?? fallback;
 };
-const clamp = (value, min, max) => Math.max(min, Math.min(max, readNumber(value)));
-const hasNumericValue = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+const clamp = (value, min, max, fallback = 0) => Math.max(min, Math.min(max, readNumber(value, fallback)));
+const hasNumericValue = value => finiteNumber(value) !== null;
 const layerCanvasCache = new WeakMap();
 const scratchCanvasCache = new WeakMap();
 const reportedPreviewFailures = new WeakMap();
@@ -165,18 +167,29 @@ function applyCanvasEffect(layerCtx, scratchCtx, effect, timeSeconds = 0) {
     let filter = null, shadow = null;
     switch (effect?.kind) {
         case 'blur': case 'blur_gaussian': filter = `blur(${clamp(p.radius ?? p.amount, 0, 40)}px)`; break;
-        case 'brightness': filter = `brightness(${clamp(p.amount ?? p.value ?? 1, 0, 4)})`; break;
-        case 'contrast': filter = `contrast(${clamp(p.amount ?? p.value ?? 1, 0, 4)})`; break;
-        case 'saturation': case 'saturate': filter = `saturate(${clamp(p.amount ?? p.value ?? 1, 0, 5)})`; break;
+        case 'brightness': filter = `brightness(${clamp(p.amount ?? p.value ?? 1, 0, 4, 1)})`; break;
+        case 'contrast': filter = `contrast(${clamp(p.amount ?? p.value ?? 1, 0, 4, 1)})`; break;
+        case 'saturation': case 'saturate': filter = `saturate(${clamp(p.amount ?? p.value ?? 1, 0, 5, 1)})`; break;
         case 'hue': case 'hue-rotate': filter = `hue-rotate(${clamp(p.degrees ?? p.amount, -360, 360)}deg)`; break;
-        case 'shadow': shadow = { color: p.color || 'rgba(0,0,0,.55)', blur: clamp(p.blur ?? 12, 0, 100), x: clamp(p.x ?? p.offsetX, -200, 200), y: clamp(p.y ?? p.offsetY, -200, 200) }; break;
+        case 'grayscale': filter = `grayscale(${clamp(p.amount ?? p.value ?? 1, 0, 1, 1)})`; break;
+        case 'sepia': filter = `sepia(${clamp(p.amount ?? p.value ?? 1, 0, 1, 1)})`; break;
+        case 'shadow': case 'drop-shadow': {
+            const [red, green, blue] = parseEffectColor(layerCtx, p.color || '#000000');
+            shadow = {
+                color: `rgba(${red},${green},${blue},${clamp(p.opacity, 0, 1, 0.55)})`,
+                blur: clamp(p.blur ?? 12, 0, 100, 12),
+                x: clamp(p.x ?? p.offsetX, -200, 200, 0),
+                y: clamp(p.y ?? p.offsetY, -200, 200, 0),
+            };
+            break;
+        }
         case 'shake': {
-            const time = Math.max(0, Number(timeSeconds) || 0);
-            const frequency = clamp(p.frequency ?? 10, 1, 60);
+            const time = Math.max(0, readNumber(timeSeconds, 0));
+            const frequency = clamp(p.frequency ?? 10, 1, 60, 10);
             const seed = clamp(p.randomSeed ?? p.seed ?? 0, 0, 1000);
             const phase = seed * 0.61803398875;
             const scale = layerCtx.canvas.width / 1080;
-            const intensity = clamp(p.intensity ?? 5, 0, 50) * scale;
+            const intensity = clamp(p.intensity ?? 5, 0, 50, 5) * scale;
             const rotation = clamp(p.rotationAmount ?? 0, 0, 180) * Math.PI / 180;
             const x = Math.sin(2 * Math.PI * time * frequency + phase) * intensity;
             const y = Math.cos(2 * Math.PI * time * frequency * 0.83 + phase + 1.7) * intensity;
@@ -222,8 +235,8 @@ function applyCanvasEffect(layerCtx, scratchCtx, effect, timeSeconds = 0) {
             const bloom = layerCtx.createImageData(original.width, original.height);
             bloom.data.set(original.data);
             const threshold = clamp(p.threshold ?? 0.7, 0, 1);
-            const intensity = clamp(p.intensity ?? 1, 0, 3);
-            const radius = clamp(p.radius ?? 10, 1, 50);
+            const intensity = clamp(p.intensity ?? 1, 0, 3, 1);
+            const radius = clamp(p.radius ?? 10, 1, 50, 10);
             const color = parseEffectColor(layerCtx, p.color || '#FFFFFF');
             for (let i = 0; i < bloom.data.length; i += 4) {
                 const sourceAlpha = original.data[i + 3] / 255;
@@ -270,7 +283,7 @@ function applyCanvasEffect(layerCtx, scratchCtx, effect, timeSeconds = 0) {
 }
 
 function applyPixelEffects(ctx, effects, timeSeconds = 0) {
-    const requested = (effects || []).filter(e => ['grain', 'film_grain', 'chromatic-aberration', 'rgb_split', 'motion-blur', 'blur_motion', 'blur_radial', 'distortion', 'stroke', 'inner-shadow', 'color_grade', 'vignette', 'glitch'].includes(e?.kind));
+    const requested = (effects || []).filter(e => ['grain', 'film_grain', 'film-grain', 'chromatic-aberration', 'rgb_split', 'motion-blur', 'blur_motion', 'blur_radial', 'distortion', 'stroke', 'inner-shadow', 'color_grade', 'vignette', 'glitch'].includes(e?.kind));
     if (!requested.length || !ctx.canvas?.width || !ctx.canvas?.height) return true;
     try {
         const { width, height } = ctx.canvas;
@@ -283,15 +296,15 @@ function applyPixelEffects(ctx, effects, timeSeconds = 0) {
             // for spatial sampling. Refresh this reusable snapshot per stage.
             src.set(out);
             const p = effect.params || {};
-            if (effect.kind === 'grain' || effect.kind === 'film_grain') {
+            if (effect.kind === 'grain' || effect.kind === 'film_grain' || effect.kind === 'film-grain') {
                 const intensity = readNumber(p.intensity, NaN);
-                const amount = clamp(effect.kind === 'film_grain'
+                const amount = clamp(effect.kind === 'film_grain' || effect.kind === 'film-grain'
                     ? (Number.isFinite(intensity) ? intensity * 48 : 7.2)
                     : (p.amount ?? 8), 0, 48);
                 const baseSeed = readNumber(p.seed, 941) >>> 0;
-                if (effect.kind === 'film_grain') {
+                if (effect.kind === 'film_grain' || effect.kind === 'film-grain') {
                     const animated = p.animated?.value ?? p.animated;
-                    const frameIndex = animated === false ? 0 : Math.floor(Math.max(0, Number(timeSeconds) || 0) * 30);
+                    const frameIndex = animated === false ? 0 : Math.floor(Math.max(0, readNumber(timeSeconds, 0)) * 30);
                     const size = clamp(p.size ?? 1.5, 0.5, 5);
                     for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
                         const i = (y * width + x) * 4;
@@ -304,7 +317,7 @@ function applyPixelEffects(ctx, effects, timeSeconds = 0) {
                         out[i] = src[i] + noise; out[i + 1] = src[i + 1] + noise; out[i + 2] = src[i + 2] + noise;
                     }
                 } else {
-                    const frameIndex = Math.floor(Math.max(0, Number(timeSeconds) || 0) * 1000);
+                    const frameIndex = Math.floor(Math.max(0, readNumber(timeSeconds, 0)) * 1000);
                     let seed = (baseSeed ^ Math.imul(frameIndex + 1, 0x9e3779b1)) >>> 0;
                     for (let i = 0; i < out.length; i += 4) {
                         seed = (seed * 1664525 + 1013904223) >>> 0;
@@ -457,7 +470,7 @@ function applyPixelEffects(ctx, effects, timeSeconds = 0) {
                 }
             } else if (effect.kind === 'glitch') {
                 const amount = clamp(p.amount ?? readNumber(p.intensity, 0.2) * 40, 0, 32);
-                const frame = Math.floor(Math.max(0, Number(timeSeconds) || 0) * 12);
+                const frame = Math.floor(Math.max(0, readNumber(timeSeconds, 0)) * 12);
                 const seed = readNumber(p.seed, 17);
                 for (let y = 0; y < height; y++) {
                     const wave = Math.sin(y * 12.9898 + frame * 78.233 + seed * 0.17);
@@ -564,16 +577,16 @@ function traceShapeMask(ctx, mask, width, height) {
     if (mask?.kind !== 'shape' || !SHAPE_MASK_KINDS.has(mask.shape)) return;
     const inset = clamp(mask.inset ?? 0, 0, 0.45);
     const hasX = hasNumericValue(mask.x), hasY = hasNumericValue(mask.y);
-    const x = hasX ? Number(mask.x) * width : width * inset;
-    const y = hasY ? Number(mask.y) * height : height * inset;
-    const w = hasNumericValue(mask.w) ? Number(mask.w) * width : width - x - (hasX ? 0 : width * inset);
-    const h = hasNumericValue(mask.h) ? Number(mask.h) * height : height - y - (hasY ? 0 : height * inset);
+    const x = hasX ? finiteNumber(mask.x) * width : width * inset;
+    const y = hasY ? finiteNumber(mask.y) * height : height * inset;
+    const w = hasNumericValue(mask.w) ? finiteNumber(mask.w) * width : width - x - (hasX ? 0 : width * inset);
+    const h = hasNumericValue(mask.h) ? finiteNumber(mask.h) * height : height - y - (hasY ? 0 : height * inset);
     if (mask.shape === 'ellipse' || mask.shape === 'circle') {
         ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
     } else if (mask.shape === 'rounded-rectangle' || mask.shape === 'capsule') {
         const radius = mask.shape === 'capsule'
             ? Math.min(w, h) / 2
-            : Math.max(0, Math.min(0.5, Number(mask.radius ?? mask.roundness ?? 0.12))) * Math.min(w, h);
+            : Math.max(0, Math.min(0.5, readNumber(mask.radius ?? mask.roundness, 0.12))) * Math.min(w, h);
         if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, radius);
         else {
             const r = Math.min(radius, w / 2, h / 2);
@@ -591,7 +604,7 @@ function traceShapeMask(ctx, mask, width, height) {
         ctx.lineTo(x, y + radius); ctx.quadraticCurveTo(x, y, x + radius, y);
     } else if (mask.shape === 'polygon' || mask.shape === 'star' || mask.shape === 'arrow') {
         const cx = x + w / 2, cy = y + h / 2;
-        const rotation = (Number(mask.rotation) || 0) * Math.PI / 180 - Math.PI / 2;
+        const rotation = readNumber(mask.rotation, 0) * Math.PI / 180 - Math.PI / 2;
         let vertices;
         if (mask.shape === 'arrow') {
             const points = [
@@ -604,10 +617,10 @@ function traceShapeMask(ctx, mask, width, height) {
             });
         } else {
             const count = mask.shape === 'star'
-                ? Math.max(2, Math.min(64, Math.round(Number(mask.points) || 5))) * 2
-                : Math.max(3, Math.min(128, Math.round(Number(mask.sides) || 5)));
-            const outerRatio = Math.max(0.01, Math.min(0.5, Number(mask.outerRadius ?? mask.radius ?? 0.5)));
-            const innerRatio = Math.max(0.005, Math.min(outerRatio, Number(mask.innerRadius ?? outerRatio * 0.5)));
+                ? Math.max(2, Math.min(64, Math.round(readNumber(mask.points, 5)))) * 2
+                : Math.max(3, Math.min(128, Math.round(readNumber(mask.sides, 5))));
+            const outerRatio = Math.max(0.01, Math.min(0.5, readNumber(mask.outerRadius ?? mask.radius, 0.5)));
+            const innerRatio = Math.max(0.005, Math.min(outerRatio, readNumber(mask.innerRadius, outerRatio * 0.5)));
             const outer = Math.min(w, h) * outerRatio, inner = Math.min(w, h) * innerRatio;
             vertices = Array.from({ length: count }, (_, index) => {
                 const radius = mask.shape === 'star' && index % 2 ? inner : outer;
@@ -693,6 +706,23 @@ export function drawLayerWithEffects(ctx, effects, draw, mask = null, timeSecond
     // opacity at the final composite instead of silently making it opaque.
     const compositeAlpha = ctx.globalAlpha;
     const compositeOperation = ctx.globalCompositeOperation;
+    const clipStart = finiteNumber(effectContext.clipStart) ?? 0;
+    const clipDuration = finiteNumber(effectContext.clipDuration) ?? 0;
+    let fadeAlpha = 1;
+    for (const effect of activeStack) {
+        const kind = effect?.kind || effect?.type;
+        if (kind !== 'fade_in' && kind !== 'fade_out') continue;
+        const start = finiteNumber(effect.startTime) ?? clipStart;
+        const end = finiteNumber(effect.endTime) ?? (clipDuration > 0 ? clipStart + clipDuration : Infinity);
+        if (!(end > start)) continue;
+        const rawDuration = resolveEffectParameter(effect, 'duration', 0.5, timeSeconds, effectContext);
+        const duration = Math.max(0.05, Math.min(5, Number(rawDuration) || 0.5, end - start));
+        if (kind === 'fade_in') {
+            fadeAlpha *= Math.max(0, Math.min(1, (timeSeconds - start) / duration));
+        } else if (Number.isFinite(end)) {
+            fadeAlpha *= Math.max(0, Math.min(1, (end - timeSeconds) / duration));
+        }
+    }
     const sourceCanvas = ctx.canvas;
     const layerCanvas = getEffectCanvas(sourceCanvas);
     const layerCtx = layerCanvas?.getContext?.('2d', { willReadFrequently: true });
@@ -720,7 +750,7 @@ export function drawLayerWithEffects(ctx, effects, draw, mask = null, timeSecond
     const width = (ctx.canvas?.width || 0) / (Math.hypot(transform?.a || 0, transform?.b || 0) || 1);
     const height = (ctx.canvas?.height || 0) / (Math.hypot(transform?.c || 0, transform?.d || 0) || 1);
     const validMask = mask?.kind === 'shape' && SHAPE_MASK_KINDS.has(mask.shape);
-    const featheredMask = !!(layerCtx && validMask && Number(mask.feather) > 0);
+    const featheredMask = !!(layerCtx && validMask && readNumber(mask.feather) > 0);
     if (!featheredMask) applyShapeMask(target, mask, width, height);
     let targetRestored = false;
     try {
@@ -743,6 +773,9 @@ export function drawLayerWithEffects(ctx, effects, draw, mask = null, timeSecond
                 // Unknown effects are rejected by SceneValidator, but also
                 // fail closed here for callers that render clips directly.
                 if (!GRAPHIC_EFFECT_KIND_SET.has(effect.kind)) continue;
+                // Fades modulate the isolated layer's final alpha below; they
+                // are compositing operations, not pixel filters.
+                if (effect.kind === 'fade_in' || effect.kind === 'fade_out') continue;
                 activeEffects.push(effect);
             }
             // Pixel effects are sequential but share a single ImageData buffer.
@@ -779,7 +812,7 @@ export function drawLayerWithEffects(ctx, effects, draw, mask = null, timeSecond
     if (layerCtx) {
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.globalAlpha = compositeAlpha;
+        ctx.globalAlpha = compositeAlpha * fadeAlpha;
         ctx.globalCompositeOperation = compositeOperation;
         ctx.drawImage(layerCanvas, 0, 0);
         ctx.restore();

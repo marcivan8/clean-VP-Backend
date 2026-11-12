@@ -57,9 +57,10 @@
 
 import { clipToMotionLayer } from './ClipAdapter.js';
 import { resolveMotionAt } from './MotionResolver.js';
-import { resolveEffectParameter } from './EffectTiming.js';
+import { getEffectKeyframeTrack, resolveEffectParameter } from './EffectTiming.js';
 import { LAYER_KINDS } from './MotionSchema.js';
 import { remapSceneObjectTime } from './TimeRemap.js';
+import { MAX_MOTION_BLUR_SAMPLES } from './MotionLimits.js';
 
 // Same test as LayoutPresets.hasLayoutFrame (R88). Inlined rather than
 // imported: the regression suites load this file by concatenating a fixed list
@@ -73,7 +74,7 @@ function hasLayoutFrame(clip) {
 }
 
 /** Bump when the plan shape changes so a worker can reject one it can't execute. */
-export const COMPOSITION_PLAN_VERSION = 7;
+export const COMPOSITION_PLAN_VERSION = 8;
 const hasNumericValue = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
 
 /** How finely animated overlay geometry is sampled, in seconds. */
@@ -275,6 +276,7 @@ function resolveGeometry(layer, timelineTime, frame, audioWaveformsByAsset) {
         opacity: Math.abs(scaleX) < 1e-8 || Math.abs(scaleY) < 1e-8
             ? 0 : (Number.isFinite(m.opacity) ? m.opacity : 1),
         blur: Number(m.blur) || 0,
+        reveal: Number.isFinite(m.reveal) ? Math.max(0, Math.min(1, m.reveal)) : 1,
         flipH: scaleX < 0 ? 1 : 0,
         flipV: scaleY < 0 ? 1 : 0,
     };
@@ -309,6 +311,7 @@ function roundGeometry(g) {
         rotation: Math.round(g.rotation * 1000) / 1000,
         opacity: Math.round(g.opacity * 1000) / 1000,
         blur: Math.round(g.blur * 1000) / 1000,
+        reveal: Math.round(g.reveal * 1000) / 1000,
         flipH: g.flipH ? 1 : 0,
         flipV: g.flipV ? 1 : 0,
     };
@@ -321,6 +324,7 @@ function sameGeometry(a, b) {
         && Math.abs(a.rotation - b.rotation) < 1e-3
         && Math.abs(a.opacity - b.opacity) < 2e-3
         && Math.abs(a.blur - b.blur) < 1e-2
+        && Math.abs(a.reveal - b.reveal) < 1e-3
         && a.flipH === b.flipH && a.flipV === b.flipV;
 }
 
@@ -442,7 +446,7 @@ function reduceEffectSampleRows(rows, keys, protectedTimes, max = 60) {
 }
 
 /** Sample keyed effect parameters onto the same output-time clock as geometry. */
-function sampleEffectTracks(effects, layer, timeMap, { clipLocalOutputTime = false } = {}) {
+function sampleEffectTracks(effects, layer, timeMap, { clipLocalOutputTime = false, fps = 30 } = {}) {
     return (Array.isArray(effects) ? effects : []).map((effect, effectIndex) => {
         // Empty inputs are the editor's representation of an unset boundary.
         // Number('') is 0, so coercing before checking emptiness accidentally
@@ -472,7 +476,7 @@ function sampleEffectTracks(effects, layer, timeMap, { clipLocalOutputTime = fal
         }) : undefined;
         const params = effect?.params || {};
         const tracks = Object.fromEntries(Object.entries(params).flatMap(([key, raw]) => {
-            const track = effect?.keyframes?.[key] || raw?.keyframes;
+            const track = getEffectKeyframeTrack(effect, key, raw);
             return Array.isArray(track) && track.length ? [[key, track]] : [];
         }));
         for (const [key, track] of Object.entries(effect?.keyframes || {})) {
@@ -489,7 +493,12 @@ function sampleEffectTracks(effects, layer, timeMap, { clipLocalOutputTime = fal
         const duration = Math.max(0, Number(layer.duration) || 0);
         const localTimes = new Set([0, duration]);
         const protectedTimes = new Set([0, duration]);
-        for (let at = 0.1; at < duration; at += 0.1) localTimes.add(Number(at.toFixed(4)));
+        const sampleRate = Math.max(1, Math.min(120, Number(fps) || 30));
+        const frameCount = Math.ceil(duration * sampleRate);
+        for (let frame = 1; frame < frameCount; frame++) {
+            const at = frame / sampleRate;
+            if (at < duration) localTimes.add(Number(at.toFixed(6)));
+        }
         for (const track of Object.values(tracks)) for (const point of track) {
             // Effect controls author keyframes at the project playhead, so
             // their times are timeline seconds (unlike clip-local motion
@@ -788,7 +797,7 @@ export function buildCompositionPlan(tracks, opts = {}) {
                             sampledEffects = sampleEffectTracks(group.effects, {
                                 startTime: Number(group.start) || 0,
                                 duration: Math.max(0, Number(group.duration) || 0),
-                            }, timeMap);
+                            }, timeMap, { fps });
                             compositionEffectCache.set(groupCacheKey, sampledEffects);
                         }
                         return {
@@ -836,12 +845,12 @@ export function buildCompositionPlan(tracks, opts = {}) {
                 ...(clip.shadow ? { shadow: normalizeShadow(clip.shadow) } : {}),
                 ...(clip.motionBlur?.enabled ? { motionBlur: {
                     enabled: true,
-                    samples: Math.max(2, Math.min(15, Math.round(Number(clip.motionBlur.samples) || 5))),
+                    samples: Math.max(2, Math.min(MAX_MOTION_BLUR_SAMPLES, Math.round(Number(clip.motionBlur.samples) || 5))),
                     shutterAngle: Math.max(0, Math.min(360, Number.isFinite(Number(clip.motionBlur.shutterAngle)) ? Number(clip.motionBlur.shutterAngle) : 180)),
                     frameRate: Math.max(1, Math.min(120, Number(clip.motionBlur.frameRate) || 30)),
                 } } : {}),
                 ...(clip.blendMode && clip.blendMode !== 'source-over' ? { blendMode: clip.blendMode } : {}),
-                ...(Array.isArray(clip.effects) && clip.effects.length ? { effects: sampleEffectTracks(clip.effects, layer, timeMap).map(effect => {
+                ...(Array.isArray(clip.effects) && clip.effects.length ? { effects: sampleEffectTracks(clip.effects, layer, timeMap, { fps }).map(effect => {
                     const { type: _legacyType, ...preserved } = effect;
                     return {
                         ...preserved,
@@ -898,7 +907,7 @@ export function buildCompositionPlan(tracks, opts = {}) {
             || Object.values(effect?.params || {}).some(param => typeof param?.expression === 'string' && param.expression.trim()))) return [];
         const layer = clipToMotionLayer(clip, baseTrack);
         if (!layer) return [];
-        const effects = sampleEffectTracks(authored, layer, timeMap, { clipLocalOutputTime: true })
+        const effects = sampleEffectTracks(authored, layer, timeMap, { clipLocalOutputTime: true, fps })
             .filter(effect => Object.keys(effect?.expressions || {}).length
                 || Object.values(effect?.params || {}).some(param => typeof param?.expression === 'string' && param.expression.trim()));
         return effects.length ? [{ clipId: clip.id, effects }] : [];

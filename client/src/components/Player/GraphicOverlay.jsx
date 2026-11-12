@@ -179,9 +179,11 @@ function RadialBlurVideoCanvas({ clip, src, target, isPlaying, speed, style, rad
         const video = videoRef.current;
         if (!video) return;
         try {
-            video.playbackRate = speed;
-            if (Math.abs((video.currentTime || 0) - target) > (isPlaying ? 0.25 : 0.04)) video.currentTime = target;
-            if (isPlaying) video.play().catch(() => {}); else video.pause();
+            const nativePlayback = isPlaying && speed > 0;
+            video.playbackRate = Math.max(0.05, Math.abs(speed));
+            const syncThreshold = nativePlayback ? 0.25 : (isPlaying ? 1 / 60 : 0.04);
+            if (Math.abs((video.currentTime || 0) - target) > syncThreshold) video.currentTime = target;
+            if (nativePlayback) video.play().catch(() => {}); else video.pause();
             if (!isPlaying) paintRef.current?.();
         } catch { /* Media may not be seekable before metadata is ready. */ }
     }, [target, isPlaying, speed]);
@@ -340,9 +342,11 @@ function MotionBlurVideoCanvas({ clip, src, style, currentTime, isPlaying, motio
         const video = videoRef.current;
         if (!video) return;
         try {
-            video.playbackRate = speed;
-            if (Math.abs((video.currentTime || 0) - target) > (isPlaying ? 0.25 : 0.04)) video.currentTime = target;
-            if (isPlaying) video.play().catch(() => {}); else video.pause();
+            const nativePlayback = isPlaying && speed > 0;
+            video.playbackRate = Math.max(0.05, Math.abs(speed));
+            const syncThreshold = nativePlayback ? 0.25 : (isPlaying ? 1 / 60 : 0.04);
+            if (Math.abs((video.currentTime || 0) - target) > syncThreshold) video.currentTime = target;
+            if (nativePlayback) video.play().catch(() => {}); else video.pause();
             if (!isPlaying) paintRef.current?.();
         } catch { /* The source may not be seekable until metadata arrives. */ }
     }, [target, isPlaying, speed]);
@@ -380,14 +384,15 @@ const OverlayVideo = ({ clip, src, currentTime, isPlaying, style, motionContext 
         const v = ref.current;
         if (!v) return;
         try {
-            v.playbackRate = speed;
+            const nativePlayback = isPlaying && speed > 0;
+            v.playbackRate = Math.max(0.05, Math.abs(speed));
             const drift = Math.abs((v.currentTime || 0) - target);
-            if (isPlaying) {
+            if (nativePlayback) {
                 if (drift > 0.25) v.currentTime = target;
                 if (v.paused) v.play().catch(() => { /* autoplay refusal: stays on the seeked frame */ });
             } else {
                 if (!v.paused) v.pause();
-                if (drift > 0.04) v.currentTime = target;
+                if (drift > (isPlaying ? 1 / 60 : 0.04)) v.currentTime = target;
             }
         } catch (err) {
             console.warn('[GraphicOverlay] overlay video sync failed:', err?.message);
@@ -495,7 +500,7 @@ function LayerEffectFilters({ clip, scale = 1, currentTime = 0 }) {
         return { effect: sampled ? { ...sampled, kind: effect.kind || effect.type } : null, index };
     })
         .filter(({ effect }) => effect)
-        .filter(({ effect }) => effect && effect.enabled !== false && ['inner-shadow', 'grain', 'film_grain', 'chromatic-aberration', 'rgb_split', 'motion-blur', 'blur_motion', 'distortion', 'glitch', 'glow'].includes(effect.kind));
+        .filter(({ effect }) => effect && effect.enabled !== false && ['inner-shadow', 'grain', 'film_grain', 'film-grain', 'chromatic-aberration', 'rgb_split', 'motion-blur', 'blur_motion', 'distortion', 'glitch', 'glow'].includes(effect.kind));
     if (!effects.length) return null;
     return (
         <svg aria-hidden="true" width="0" height="0" style={{ position: 'absolute', overflow: 'hidden' }}>
@@ -505,7 +510,7 @@ function LayerEffectFilters({ clip, scale = 1, currentTime = 0 }) {
                     const raw = p[key]?.value ?? p[key];
                     return Number.isFinite(Number(raw)) ? Number(raw) : fallback;
                 };
-                const grainFallback = effect.kind === 'film_grain' ? n('intensity', 0.15) * 48 : 8;
+                const grainFallback = effect.kind === 'film_grain' || effect.kind === 'film-grain' ? n('intensity', 0.15) * 48 : 8;
                 const amount = Math.max(0, n('amount', effect.kind === 'rgb_split' ? 5 : effect.kind === 'chromatic-aberration' ? 2 : effect.kind === 'motion-blur' ? 2 : effect.kind === 'distortion' ? 0.018 : grainFallback));
                 const blur = Math.max(0, Math.min(16, n('blur', n('radius', 0)))) * scale;
                 const x = Math.max(-80, Math.min(80, n('x', n('offsetX', 0)))) * scale;
@@ -528,7 +533,7 @@ function LayerEffectFilters({ clip, scale = 1, currentTime = 0 }) {
                         <feMerge><feMergeNode in="SourceGraphic" /><feMergeNode in="colored-bloom" /></feMerge>
                     </filter>;
                 }
-                if (effect.kind === 'grain' || effect.kind === 'film_grain') {
+                if (effect.kind === 'grain' || effect.kind === 'film_grain' || effect.kind === 'film-grain') {
                     const intensity = Math.min(0.48, amount / 8 * 0.16);
                     const frequency = Math.max(0.1, Math.min(1.5, 0.2 + amount / 48));
                     return (
@@ -672,11 +677,13 @@ function overlayFilterCss(motionBlur, clipShadow, effects = [], clipId = 'layer'
             case 'brightness': parts.push(`brightness(${clampValue(value('amount', value('value', 1)), 0, 4)})`); break;
             case 'contrast': parts.push(`contrast(${clampValue(value('amount', value('value', 1)), 0, 4)})`); break;
             case 'saturation': case 'saturate': parts.push(`saturate(${clampValue(value('amount', value('value', 1)), 0, 5)})`); break;
+            case 'grayscale': parts.push(`grayscale(${clampValue(value('amount', value('value', 1)), 0, 1)})`); break;
+            case 'sepia': parts.push(`sepia(${clampValue(value('amount', value('value', 1)), 0, 1)})`); break;
             case 'hue': case 'hue-rotate': parts.push(`hue-rotate(${clampValue(value('degrees', value('amount', 0)), -360, 360)}deg)`); break;
             case 'color_grade':
                 parts.push(`brightness(${clampValue(value('brightness', 100) / 100, 0, 2)}) contrast(${clampValue(value('contrast', 100) / 100, 0, 2)}) saturate(${clampValue(value('saturation', 100) / 100, 0, 2)})`);
                 break;
-            case 'grain': case 'film_grain': case 'chromatic-aberration': case 'rgb_split': case 'motion-blur': case 'distortion': case 'glitch': case 'glow':
+            case 'grain': case 'film_grain': case 'film-grain': case 'chromatic-aberration': case 'rgb_split': case 'motion-blur': case 'distortion': case 'glitch': case 'glow':
                 parts.push(`url(#${effectFilterId(clipId, effectIndex)})`); break;
             case 'shadow': parts.push(`drop-shadow(${value('x', value('offsetX', 0))}px ${value('y', value('offsetY', 0))}px ${clampValue(value('blur', 12), 0, 100)}px ${p.color || 'rgba(0,0,0,.55)'})`); break;
             case 'inner-shadow': parts.push(`url(#${effectFilterId(clipId, effectIndex)})`); break;
@@ -1266,6 +1273,9 @@ const GraphicOverlay = ({ placementFilter = 'all', onWarning = null }) => {
                     `scaleX(${motion.scaleX ?? 1})`,
                     `scaleY(${motion.scaleY ?? 1})`,
                 ].filter(Boolean).join(' ');
+                const revealClip = Number.isFinite(motion.reveal) && motion.reveal < 0.999
+                    ? `inset(0 ${(1 - Math.max(0, Math.min(1, motion.reveal))) * 100}% 0 0)`
+                    : undefined;
 
                 const isVideo = (clip.type || trackType) === 'video';
                 const handlers = {
@@ -1301,7 +1311,7 @@ const GraphicOverlay = ({ placementFilter = 'all', onWarning = null }) => {
                         data-snap-id={clip.id}
                             {...handlers}
                             className={`absolute select-none ${isActive ? 'ring-1 ring-primary ring-inset' : ''}`}
-                            style={{ ...css.box, ...sceneMaskCss(clip.sceneMask), ...matteStyle, ...(clip.blendMode && clip.blendMode !== 'source-over' ? { mixBlendMode: clip.blendMode === 'addition' ? 'plus-lighter' : clip.blendMode } : {}), pointerEvents: 'auto', touchAction: 'none', cursor: isActive ? 'grab' : 'pointer' }}
+                            style={{ ...css.box, ...sceneMaskCss(clip.sceneMask), ...(revealClip ? { clipPath: revealClip } : {}), ...matteStyle, ...(clip.blendMode && clip.blendMode !== 'source-over' ? { mixBlendMode: clip.blendMode === 'addition' ? 'plus-lighter' : clip.blendMode } : {}), pointerEvents: 'auto', touchAction: 'none', cursor: isActive ? 'grab' : 'pointer' }}
                         >
                             <LayerEffectFilters clip={clip} scale={shadowScale} currentTime={currentTime} />
                             {isVideo
@@ -1344,6 +1354,7 @@ const GraphicOverlay = ({ placementFilter = 'all', onWarning = null }) => {
                             width: `${DEFAULT_WIDTH_FRACTION * (Number.isFinite(motion.scale) ? motion.scale : 1)}%`,
                             transform,
                             ...sceneMaskCss(clip.sceneMask),
+                            ...(revealClip ? { clipPath: revealClip } : {}),
                             ...matteStyle,
                             ...(clip.blendMode && clip.blendMode !== 'source-over' ? { mixBlendMode: clip.blendMode === 'addition' ? 'plus-lighter' : clip.blendMode } : {}),
                             pointerEvents: 'auto',

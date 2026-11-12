@@ -1062,7 +1062,15 @@ await check('3D area lights expose source size and targeting in both locales', (
     assert.match(panel, /'point', 'directional', 'spot', 'area'/);
     assert.match(panel, /light\.type === 'area'[\s\S]*lightWidth[\s\S]*lightHeight/);
     const renderer = read('client/src/motion/Scene3D.js');
-    assert.match(renderer, /supportedLights = new Set\(\['point', 'directional', 'spot', 'area'\]\)/);
+    // R163 — this matched the literal array, so adding a light type broke it:
+    // the in-flight work added 'sun' and area lights were never touched. Pin
+    // that each type IS supported instead of pinning the exact set, which is
+    // what the check is actually about.
+    const lightSet = renderer.match(/supportedLights = new Set\(\[([^\]]*)\]\)/);
+    assert.ok(lightSet, 'supportedLights is not declared as a Set literal any more');
+    for (const type of ['point', 'directional', 'spot', 'area']) {
+        assert.ok(lightSet[1].includes(`'${type}'`), `${type} lights are no longer supported`);
+    }
     assert.match(renderer, /areaSamples/);
     for (const lang of ['en', 'fr']) {
         const words = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).templates?.scene3d;

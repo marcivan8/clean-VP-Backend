@@ -27,6 +27,13 @@ import { applyAudioReactiveMotion } from './AudioReactive.js';
 const isTrackValue = value => Number.isFinite(value)
     || (Array.isArray(value) && value.length > 0 && value.some(Number.isFinite));
 
+function finiteTrackNumber(value) {
+    if (value === null || value === undefined || typeof value === 'boolean'
+        || (typeof value === 'string' && value.trim() === '')) return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+}
+
 function recoverVector(value, point, keyframes, fallback) {
     if (!Array.isArray(value)) return value;
     return value.map((channel, channelIndex) => {
@@ -34,7 +41,7 @@ function recoverVector(value, point, keyframes, fallback) {
         let nearest = null;
         for (let index = 0; index < keyframes.length; index++) {
             const candidate = keyframes[index];
-            const candidateTime = Number(candidate?.time);
+            const candidateTime = finiteTrackNumber(candidate?.time);
             const candidateValue = candidate?.value;
             const candidateChannel = Array.isArray(candidateValue) ? candidateValue[channelIndex] : NaN;
             if (!Number.isFinite(candidateTime) || !isTrackValue(candidateValue) || !Number.isFinite(candidateChannel)) continue;
@@ -82,14 +89,14 @@ export function sampleKeyframeTrack(keyframes, localTime, fallback = 0) {
     // and sorting a new track for every property on every rendered frame.
     // When times are duplicated, the last authored key wins, matching the
     // stable-sort + deduplication behavior used by the previous sampler.
-    const at = Number.isFinite(Number(localTime)) ? Number(localTime) : 0;
+    const at = finiteTrackNumber(localTime) ?? 0;
     let first = null, last = null, from = null, to = null;
     for (let index = 0; index < keyframes.length; index++) {
         const keyframe = keyframes[index];
-        const time = Number(keyframe?.time);
+        const time = finiteTrackNumber(keyframe?.time);
         const rawValue = keyframe?.value;
-        const value = Array.isArray(rawValue) ? rawValue : Number(rawValue);
-        if (!Number.isFinite(time) || !isTrackValue(value)) continue;
+        const value = Array.isArray(rawValue) ? rawValue : finiteTrackNumber(rawValue);
+        if (time === null || !isTrackValue(value)) continue;
         const point = { time, value, easing: keyframe?.easing, index };
         if (!first || time < first.time || (time === first.time && index > first.index)) first = point;
         if (!last || time > last.time || (time === last.time && index > last.index)) last = point;
@@ -133,7 +140,7 @@ export function sampleKeyframeTrack(keyframes, localTime, fallback = 0) {
 export function sampleAnimation(animation, localTime) {
     const kfs = animation?.keyframes;
     if (!Array.isArray(kfs) || kfs.length === 0) return {};
-    const at = Number.isFinite(Number(localTime)) ? Number(localTime) : 0;
+    const at = finiteTrackNumber(localTime) ?? 0;
     // Track each property's endpoints and neighbors while walking authored
     // keys once. This avoids allocating and sorting a separate track for
     // every animated property on every preview/export frame.
@@ -142,12 +149,11 @@ export function sampleAnimation(animation, localTime) {
         const keyframe = kfs[index];
         const properties = keyframe?.properties;
         if (!properties || typeof properties !== 'object') continue;
-        const time = Number(keyframe.time);
-        if (!Number.isFinite(time)) continue;
+        const time = finiteTrackNumber(keyframe.time);
+        if (time === null) continue;
         for (const [property, rawValue] of Object.entries(properties)) {
-            if (rawValue === undefined || rawValue === null || rawValue === '') continue;
-            const value = Number(rawValue);
-            if (!Number.isFinite(value)) continue;
+            const value = finiteTrackNumber(rawValue);
+            if (value === null) continue;
             const point = {
                 time,
                 value,
@@ -206,13 +212,19 @@ function cachedMotionPathSpline(path, points) {
 
 function sampleMotionPath(path, localTime, layerDuration) {
     const points = (Array.isArray(path?.points) ? path.points : [])
-        .map(point => Array.isArray(point) ? [Number(point[0]), Number(point[1])] : [Number(point?.x), Number(point?.y)])
-        .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+        .map(point => {
+            const x = finiteTrackNumber(Array.isArray(point) ? point[0] : point?.x);
+            const y = finiteTrackNumber(Array.isArray(point) ? point[1] : point?.y);
+            return x === null || y === null ? null : [x, y];
+        })
+        .filter(Boolean);
     if (points.length < 2) return null;
     if (path.closed && (points[0][0] !== points.at(-1)[0] || points[0][1] !== points.at(-1)[1])) points.push([...points[0]]);
-    const start = Math.max(0, Number(path.startTime) || 0);
-    const duration = Math.max(0.001, Number.isFinite(Number(path.duration)) && Number(path.duration) > 0
-        ? Number(path.duration) : Math.max(0.001, layerDuration - start));
+    const start = Math.max(0, finiteTrackNumber(path.startTime) ?? 0);
+    const pathDuration = finiteTrackNumber(path.duration);
+    const safeLayerDuration = finiteTrackNumber(layerDuration) ?? 0;
+    const duration = Math.max(0.001, pathDuration !== null && pathDuration > 0
+        ? pathDuration : Math.max(0.001, safeLayerDuration - start));
     const raw = clamp((localTime - start) / duration, 0, 1);
     const eased = clamp(resolveEasing(path.easing || 'easeInOutCubic')(raw), 0, 1);
     const sampleAt = progress => {

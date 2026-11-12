@@ -1,3 +1,5 @@
+import { MAX_MOTION_BLUR_SAMPLES } from './MotionLimits.js';
+
 /**
  * client/src/motion/SceneSchema.js
  *
@@ -70,6 +72,13 @@ export const NODE_TYPES = {
 const NODE_TYPE_LIST = Object.values(NODE_TYPES);
 export const MAX_SCENE_DEPTH = 8;
 
+function hasFiniteAnimationNumber(value) {
+    return value !== null && value !== undefined
+        && !(typeof value === 'string' && value.trim() === '')
+        && typeof value !== 'boolean'
+        && Number.isFinite(Number(value));
+}
+
 function animationWithoutOpacity(animation) {
     if (!animation || !Array.isArray(animation.keyframes)) return animation;
     const keyframes = animation.keyframes.map(keyframe => {
@@ -100,9 +109,9 @@ const BLEND_MODE_SET = new Set(BLEND_MODE_KINDS);
 
 /** Effects declared across the graphic-layer and footage-overlay renderers. */
 export const EFFECT_KINDS = [
-    'shadow', 'glow', 'blur', 'blur_gaussian', 'blur_radial', 'blur_motion', 'shake', 'fade_in', 'fade_out',
-    'grain', 'film_grain', 'gradient-fill', 'stroke', 'inner-shadow',
-    'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate',
+    'shadow', 'drop-shadow', 'glow', 'blur', 'blur_gaussian', 'blur_radial', 'blur_motion', 'shake', 'fade_in', 'fade_out',
+    'grain', 'film_grain', 'film-grain', 'gradient-fill', 'stroke', 'inner-shadow',
+    'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate', 'grayscale', 'sepia',
     'chromatic-aberration', 'rgb_split', 'motion-blur', 'distortion', 'vignette',
     'glitch', 'color_grade',
 ];
@@ -240,7 +249,7 @@ export function createNode(type, overrides = {}) {
         motionBlur: overrides.motionBlur && typeof overrides.motionBlur === 'object'
             ? {
                 enabled: !!overrides.motionBlur.enabled,
-                samples: Math.max(2, Math.min(15, Math.round(num(overrides.motionBlur.samples, 5)))),
+                samples: Math.max(2, Math.min(MAX_MOTION_BLUR_SAMPLES, Math.round(num(overrides.motionBlur.samples, 5)))),
                 shutterAngle: Math.max(0, Math.min(360, num(overrides.motionBlur.shutterAngle, 180))),
                 frameRate: Math.max(1, Math.min(120, num(overrides.motionBlur.frameRate, 30))),
             }
@@ -390,11 +399,11 @@ function normalizeAnimations(animations) {
         .filter(a => a && typeof a === 'object' && Array.isArray(a.keyframes) && a.keyframes.length > 0)
         .map(a => {
             const keyframes = a.keyframes
-                .filter(k => k && Number.isFinite(Number(k.time)))
+                .filter(k => k && hasFiniteAnimationNumber(k.time))
                 .map(k => {
                     const props = {};
                     for (const p of ANIMATABLE_PROPS) {
-                        if (k.properties?.[p] !== undefined && Number.isFinite(Number(k.properties[p]))) props[p] = Number(k.properties[p]);
+                        if (hasFiniteAnimationNumber(k.properties?.[p])) props[p] = Number(k.properties[p]);
                     }
                     return { ...k, time: Math.max(0, Number(k.time)), properties: props };
                 })

@@ -29,9 +29,15 @@ for (const [kind, vector, expected] of [
     assert.ok(url?.startsWith('data:image/svg+xml,'), `${kind} matte returns an SVG data URL`);
     assert.ok(decodeURIComponent(url.split(',')[1]).includes(expected), `${kind} matte contains the expected SVG geometry`);
 }
-const escapedMatte = decodeURIComponent(vectorMatteDataUrl({ kind: 'path', pathData: 'M0 0"/><script>alert(1)</script>' }).split(',')[1]);
-assert.ok(escapedMatte.includes('&quot;') && !escapedMatte.includes('<script>'), 'custom path data cannot inject SVG elements into the matte');
+assert.equal(vectorMatteDataUrl({ kind: 'path', pathData: 'M0 0"/><script>alert(1)</script>' }), null,
+    'invalid custom path data cannot enter a generated SVG matte');
 assert.equal(vectorMatteDataUrl({ kind: 'unsupported-shape' }), null, 'unknown vector mattes fail closed');
+const stalePathCanvas = Canvas.createCanvas(24, 24);
+const stalePathContext = stalePathCanvas.getContext('2d');
+drawVectorGraphic(stalePathContext, { kind: 'rect', x: 2, y: 2, w: 20, h: 20 });
+drawVectorGraphic(stalePathContext, { kind: 'path', pathData: 'M0 0 A10 10 0 2 0 20 20', fill: '#FFFFFF' });
+assert.equal(stalePathContext.getImageData(12, 12, 1, 1).data[3], 0,
+    'an invalid vector path cannot fill the prior Canvas current path');
 assert.deepEqual(parseSvgPath('M0 0 Z 1 2'), [{ type: 'M', args: [0, 0] }, { type: 'Z', args: [] }],
     'stray numbers after close-path are ignored instead of reusing Z indefinitely');
 assert.deepEqual(parseSvgPath('M0 0 C1 2 nope 4 5 6 L7 8'), [

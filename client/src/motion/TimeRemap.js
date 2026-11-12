@@ -1,8 +1,13 @@
 import { sampleKeyframeTrack } from './MotionResolver.js';
 import { clamp } from './Easing.js';
+import { MAX_MOTION_BLUR_SAMPLES } from './MotionLimits.js';
 
-const number = (value, fallback = 0) => value !== null && value !== undefined && value !== ''
+const number = (value, fallback = 0) => value !== null && value !== undefined
+    && typeof value !== 'boolean' && !(typeof value === 'string' && value.trim() === '')
     && Number.isFinite(Number(value)) ? Number(value) : fallback;
+const validCurveNumber = value => value !== null && value !== undefined
+    && typeof value !== 'boolean' && !(typeof value === 'string' && value.trim() === '')
+    && Number.isFinite(Number(value));
 
 /** Return the exact scene-owned shutter timestamps used for one output frame. */
 export function getSceneShutterSampleTimes(frame, duration = 1, fps = 30, motionBlur = {}) {
@@ -14,13 +19,15 @@ export function getSceneShutterSampleTimes(frame, duration = 1, fps = 30, motion
         const resolved = number(value, fallback);
         return zeroFallsBack && resolved === 0 ? fallback : resolved;
     };
-    const samples = Math.round(clamp(setting(motionBlur.samples, 3, true), 2, 5));
+    const samples = Math.round(clamp(setting(motionBlur.samples, 3, true), 2, MAX_MOTION_BLUR_SAMPLES));
     const shutterFps = clamp(setting(motionBlur.frameRate, 30, true), 1, 120);
     const angle = clamp(setting(motionBlur.shutterAngle, 180), 0, 360);
     const exposure = angle / (360 * shutterFps);
+    const sceneDuration = Math.max(0, number(duration));
     return Array.from({ length: samples }, (_, index) => {
         const offset = ((index + 0.5) / samples - 0.5) * exposure;
-        return Math.max(0, baseTime + offset);
+        const sampleTime = Math.max(0, baseTime + offset);
+        return sceneDuration > 0 ? Math.min(sceneDuration, sampleTime) : sampleTime;
     });
 }
 
@@ -37,10 +44,11 @@ export function remapSceneObjectTime(remap = {}, time = 0, duration = 1) {
     // An authored curve maps composition-local time directly to source seconds
     // and takes precedence over the simpler speed and offset controls.
     const keyframes = Array.isArray(remap.keyframes) ? remap.keyframes : [];
-    const hasTimeCurve = keyframes.some(point => Number.isFinite(Number(point?.time))
-        && Number.isFinite(Number(point?.value)));
+    const hasTimeCurve = keyframes.some(point => validCurveNumber(point?.time)
+        && validCurveNumber(point?.value));
     let localTime = hasTimeCurve
-        ? sampleKeyframeTrack(keyframes, number(time), number(keyframes.find(point => Number.isFinite(Number(point?.value)))?.value))
+        ? sampleKeyframeTrack(keyframes, number(time), number(keyframes.find(point => validCurveNumber(point?.time)
+            && validCurveNumber(point?.value))?.value))
         : number(time) * speed + number(remap.offset, defaultOffset);
     if (span > 0 && remap.mode === 'loop') localTime = ((localTime % span) + span) % span;
     else if (span > 0 && remap.mode === 'ping-pong') {
@@ -74,7 +82,7 @@ export function resolveOverlayVideoSourceTime(clip = {}, timelineTime = 0) {
     const legacySpeed = Number(clip.speed) > 0 ? Number(clip.speed) : 1;
     const remap = clip.timeRemap && typeof clip.timeRemap === 'object' ? clip.timeRemap : null;
     const hasCurve = Array.isArray(remap?.keyframes) && remap.keyframes.some(point =>
-        Number.isFinite(Number(point?.time)) && Number.isFinite(Number(point?.value)));
+        validCurveNumber(point?.time) && validCurveNumber(point?.value));
     if (!hasCurve) return sourceOffset + elapsed * legacySpeed;
 
     const duration = Math.max(0, number(clip.duration, 0));
@@ -89,15 +97,29 @@ export function resolveOverlayVideoSourceTime(clip = {}, timelineTime = 0) {
 export function resolveOverlayVideoPlaybackRate(clip = {}, timelineTime = 0) {
     const remap = clip.timeRemap && typeof clip.timeRemap === 'object' ? clip.timeRemap : null;
     const hasCurve = Array.isArray(remap?.keyframes) && remap.keyframes.some(point =>
-        Number.isFinite(Number(point?.time)) && Number.isFinite(Number(point?.value)));
+        validCurveNumber(point?.time) && validCurveNumber(point?.value));
     if (!hasCurve) return Number(clip.speed) > 0 ? Number(clip.speed) : 1;
     const start = number(clip.start ?? clip.startTime, 0);
     const elapsed = Math.max(0, number(timelineTime) - start);
     const duration = Math.max(0, number(clip.duration, 0)) || 1;
     const step = 1 / 120;
     const current = remapSceneObjectTime(remap, elapsed, duration);
-    const next = remapSceneObjectTime(remap, elapsed + step, duration);
-    return clamp(Math.abs(next - current) / step, 0.05, 8);
+    let next = remapSceneObjectTime(remap, elapsed + step, duration);
+    let slope = (next - current) / step;
+    const span = Math.max(0, number(remap.duration, duration));
+    // Modulo wraps create a large apparent jump with the opposite sign. Use
+    // the two samples after the boundary to recover the authored local
+    // direction, so forward and reverse loops remain smooth in preview.
+    if (remap.mode === 'loop' && span > 0 && Math.abs(next - current) > span / 2) {
+        const after = remapSceneObjectTime(remap, elapsed + step * 2, duration);
+        slope = (after - next) / step;
+    }
+    // HTMLMediaElement cannot play backwards. Preserve the sign so preview
+    // renderers can pause native playback and seek each timeline frame to the
+    // authored source time instead of incorrectly playing a reverse curve
+    // forwards. A true hold is zero speed; don't let the media creep at 0.05x.
+    if (!Number.isFinite(slope) || Math.abs(slope) < 1e-4) return 0;
+    return Math.sign(slope) * clamp(Math.abs(slope), 0.05, 8);
 }
 
 /** Largest source time the renderer requests across its output frames. */
@@ -115,8 +137,9 @@ export function maxSceneObjectSourceTime(remap = {}, duration = 1, fps = 30, ext
     // beyond the final regular output frame. Include those exact timestamps
     // when export sizes its extracted source sequence.
     for (const sampleTime of Array.isArray(extraSampleTimes) ? extraSampleTimes : []) {
-        if (!Number.isFinite(Number(sampleTime))) continue;
-        maxTime = Math.max(maxTime, remapSceneObjectTime(remap, Math.max(0, Number(sampleTime)), safeDuration));
+        const time = number(sampleTime, NaN);
+        if (!Number.isFinite(time)) continue;
+        maxTime = Math.max(maxTime, remapSceneObjectTime(remap, Math.max(0, time), safeDuration));
     }
     return maxTime;
 }

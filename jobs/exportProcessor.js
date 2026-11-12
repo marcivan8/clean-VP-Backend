@@ -84,15 +84,15 @@ const gcsBucket = storageConfig.bucket;
 const isServerUsableUrl = (u) => u && !u.startsWith('blob:');
 
 /**
- * The opt-in Revideo worker currently draws plain text and static image
- * overlays with transform/opacity motion. It does not apply effect stacks,
+ * The opt-in Revideo worker draws plain text and static image overlays with
+ * transform/opacity motion, CSS filters, and node shadows. It does not apply
  * masks, blend modes, vector/template layers, or media overlays. Keep those
  * projects on the complete FFmpeg compositor path until the worker implements
  * those capabilities, rather than claiming success after dropping features.
  */
 const REVVIDEO_SUPPORTED_EFFECTS = new Set([
     'blur', 'blur_gaussian', 'brightness', 'contrast', 'saturation', 'saturate',
-    'hue', 'hue-rotate', 'grayscale', 'sepia',
+    'hue', 'hue-rotate', 'grayscale', 'sepia', 'shadow', 'drop-shadow',
 ]);
 const REVVIDEO_EFFECT_ANIMATABLE_PARAMS = {
     blur: new Set(['radius', 'amount']), blur_gaussian: new Set(['radius', 'amount']),
@@ -100,6 +100,8 @@ const REVVIDEO_EFFECT_ANIMATABLE_PARAMS = {
     saturation: new Set(['amount', 'value']), saturate: new Set(['amount', 'value']),
     hue: new Set(['degrees', 'amount']), 'hue-rotate': new Set(['degrees', 'amount']),
     grayscale: new Set(['amount', 'value']), sepia: new Set(['amount', 'value']),
+    shadow: new Set(['blur', 'opacity', 'x', 'y', 'offsetX', 'offsetY']),
+    'drop-shadow': new Set(['blur', 'opacity', 'x', 'y', 'offsetX', 'offsetY']),
 };
 
 function isRevideoEffectAnimationSupported(effect) {
@@ -112,6 +114,15 @@ function isRevideoEffectAnimationSupported(effect) {
         ...Object.keys(params).filter(key => Array.isArray(params[key]?.keyframes) || typeof params[key]?.expression === 'string'),
     ]);
     return [...animated].every(key => supported.has(key));
+}
+
+function isRevideoShadowStackSupported(effects) {
+    // Revideo Node exposes one shadow channel. The adapter can merge multiple
+    // shadows into that channel, but doing so collapses distinct colors and
+    // blur radii and changes the look. Keep stacked shadows on the full
+    // compositor path until the Revideo adapter can render each independently.
+    return (Array.isArray(effects) ? effects : []).filter(effect => effect
+        && effect.enabled !== false && ['shadow', 'drop-shadow'].includes(effect.kind || effect.type)).length <= 1;
 }
 
 function isRevideoTextStyleSupported(clip) {
@@ -164,6 +175,7 @@ function isRevideoTrackSupported(track, audioWaveformsByAsset = {}) {
         }
         if (!clip || (clip.effects || []).some(effect => effect && effect.enabled !== false
             && !REVVIDEO_SUPPORTED_EFFECTS.has(effect.kind || effect.type))) return false;
+        if (!isRevideoShadowStackSupported(clip.effects)) return false;
         if ((clip.effects || []).some(effect => effect && effect.enabled !== false && !isRevideoEffectAnimationSupported(effect))) return false;
         if ((clip.effects || []).some(effect => effect && effect.enabled !== false
             && effect.outputWindows != null && (!Array.isArray(effect.outputWindows)
@@ -537,7 +549,7 @@ function zoomEaseExpr(easing, u) {
         case 'easeout': case 'ease-out': return `(${u}*(2-${u}))`;
         case 'ease': case 'easeinout': case 'ease-in-out': return `if(lt(${u},0.5),2*${u}*${u},-1+(4-2*${u})*${u})`;
         case 'stepstart': case 'step-start': return `if(gte(${u},1),1,1)`;
-        case 'stepend': case 'step-end': return `if(gte(${u},1),1,0)`;
+        case 'stepend': case 'step-end': case 'hold': return `if(gte(${u},1),1,0)`;
         default: return u;
     }
 }
@@ -1234,7 +1246,7 @@ function compileScalarEffectTrack(track) {
         const raw = String(easing || '').trim();
         const named = raw.toLowerCase().replace(/[-_\s]/g, '');
         if (named === 'stepstart') return `if(gte(${u},1),1,1)`;
-        if (named === 'stepend') return `if(gte(${u},1),1,0)`;
+        if (named === 'stepend' || named === 'hold') return `if(gte(${u},1),1,0)`;
         const match = /^steps\s*\(\s*(\d+)\s*(?:,\s*(jump-start|jump-end|jump-none|jump-both|start|end)\s*)?\)$/i.exec(raw);
         if (!match) return null;
         const count = Number(match[1]);
@@ -1556,7 +1568,7 @@ function applyRetimeEasing(name, progress) {
         springstiff: [210, 20, 1], springslow: [280, 60, 1], springsnappy: [400, 28, 1],
         springbouncy: [180, 12, 1], springsmooth: [200, 28.284, 1], springheavy: [140, 25, 2],
     };
-    const alias = { ease: 'easeinout', back: 'backout', anticipate: 'backin', wobbly: 'springwobbly',
+    const alias = { ease: 'easeinout', back: 'backout', anticipate: 'backin', hold: 'stepend', wobbly: 'springwobbly',
         snappy: 'springsnappy', bouncy: 'springbouncy', smooth: 'springsmooth', heavy: 'springheavy' }[key] || key;
     const springArgs = springMatch ? springMatch[1].split(',').map(Number) : springPresets[alias];
     if (springArgs && springArgs.length >= 2 && springArgs.slice(0, 2).every(Number.isFinite)) {
@@ -1715,7 +1727,7 @@ function renderRetimeAudio(source, outputPath, retime, { offset = 0, duration, c
 
 const EXPORTABLE_TIMELINE_EFFECTS = new Set([
     'blur', 'blur_gaussian', 'blur_radial', 'blur_motion', 'motion-blur',
-    'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate', 'color_grade',
+    'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate', 'color_grade', 'grayscale', 'sepia',
     'grain', 'film_grain', 'film-grain', 'chromatic-aberration', 'rgb_split', 'distortion', 'vignette',
     'glow', 'fade_in', 'fade_out', 'glitch', 'shake', 'speed_change', 'lut_apply',
     'audio_normalize', 'audio_denoise',
@@ -1955,6 +1967,19 @@ function compileTimelineVisualEffects(effects = [], { width = 1080, height = 192
                 case 'saturation': case 'saturate': {
                     const value = animated('amount', amount, 0, 5) || Math.max(0, Math.min(5, Number.isFinite(amount) ? amount : 1));
                     filters.push(`eq=saturation='${value}':eval=frame`);
+                    break;
+                }
+                case 'grayscale': {
+                    const value = animated('amount', amount, 0, 1);
+                    const strength = value ? `(1-(${value}))` : (1 - Math.max(0, Math.min(1, amount))).toFixed(4);
+                    filters.push(`eq=saturation='${strength}':eval=frame`);
+                    break;
+                }
+                case 'sepia': {
+                    const value = animated('amount', amount, 0, 1);
+                    const strength = String(value || Math.max(0, Math.min(1, amount)).toFixed(4)).replace(/\bt\b/g, 'T');
+                    const channel = (name, red, green, blue) => `clip((1-(${strength}))*${name}(X,Y)+(${strength})*(${red}*r(X,Y)+${green}*g(X,Y)+${blue}*b(X,Y)),0,255)`;
+                    filters.push(`format=rgba,geq=r='${channel('r', '0.393', '0.769', '0.189')}':g='${channel('g', '0.349', '0.686', '0.168')}':b='${channel('b', '0.272', '0.534', '0.131')}':a='alpha(X,Y)'`);
                     break;
                 }
                 case 'hue': case 'hue-rotate': {

@@ -5,6 +5,7 @@ import path from 'node:path';
 import Canvas from '@napi-rs/canvas';
 import { createNode, createScene, flattenScene, nodeFromClip, NODE_TYPES } from '../client/src/motion/SceneSchema.js';
 import { drawMaskedGradient, drawTemporalMotionBlur, relativeMotionTransform } from '../client/src/motion/TemporalMotionBlur.js';
+import { MAX_MOTION_BLUR_SAMPLES } from '../client/src/motion/MotionLimits.js';
 import { buildCompositionPlan } from '../client/src/motion/Compositor.js';
 import { renderVectorFrames } from '../server/compositor/TemplateRenderer.js';
 
@@ -38,6 +39,23 @@ drawTemporalMotionBlur(staticCtx, settings, 0.5, 1, drawCtx => {
 assert.ok(staticCtx.getImageData(8, 8, 1, 1).data[3] >= 250,
   'equal-exposure accumulation preserves near-full opacity for a stationary graphic');
 assert.deepEqual(frame(false), sharp, 'disabled temporal blur leaves direct rendering unchanged');
+let cappedSampleCount = 0;
+drawTemporalMotionBlur(staticCtx, { enabled: true, samples: MAX_MOTION_BLUR_SAMPLES * 4,
+  shutterAngle: 360, frameRate: 30 }, 0.5, 1, () => { cappedSampleCount++; });
+assert.equal(cappedSampleCount, MAX_MOTION_BLUR_SAMPLES,
+  'preview temporal blur uses the shared render limit when oversized settings are loaded');
+
+const rendererCaps = [
+  ['client spatial blur', '../client/src/motion/SpatialMotion.js', /Math\.min\((\d+), num\(options\.samples, 5\)\)/],
+  ['Revideo spatial blur', '../render-worker/revideo/src/motion/SpatialMotion.js', /Math\.min\((\d+), num\(options\.samples, 5\)\)/],
+  ['FFmpeg compositor blur', '../server/compositor/CompositorCompiler.js', /Math\.min\((\d+), Math\.round\(Number\(overlay\.motionBlur\.samples\)/],
+];
+for (const [renderer, file, pattern] of rendererCaps) {
+  const source = fs.readFileSync(new URL(file, import.meta.url), 'utf8');
+  const cap = Number(source.match(pattern)?.[1]);
+  assert.equal(cap, MAX_MOTION_BLUR_SAMPLES,
+    `${renderer} sample cap stays aligned with the shared preview and 3D renderer limit`);
+}
 
 const transformCanvas = Canvas.createCanvas(96, 32);
 const transformCtx = transformCanvas.getContext('2d');

@@ -202,6 +202,21 @@ const malformedPathScene = createScene({ duration: 1, nodes: [createNode(NODE_TY
 })] });
 assert.ok(validateScene(malformedPathScene, { skipCollisions: true }).issues.some(issue => issue.code === ISSUE_CODES.INVALID_VECTOR_PATH),
   'scene validation reports malformed vector path data before export');
+const unknownVectorScene = createScene({ duration: 1, nodes: [createNode(NODE_TYPES.SHAPE, {
+  duration: 1, vector: { kind: 'not-a-shape', w: 100, h: 100, fill: '#FFFFFF' },
+})] });
+assert.ok(validateScene(unknownVectorScene, { skipCollisions: true }).issues.some(issue => issue.code === ISSUE_CODES.UNSUPPORTED_VECTOR_SHAPE),
+  'scene validation reports vector primitives that preview and export cannot draw');
+const unknownVectorCanvas = Canvas.createCanvas(24, 24);
+drawVectorGraphic(unknownVectorCanvas.getContext('2d'), { kind: 'not-a-shape', x: 0, y: 0, w: 24, h: 24, fill: '#FFFFFF' });
+assert.equal(unknownVectorCanvas.getContext('2d').getImageData(12, 12, 1, 1).data[3], 0,
+  'an unsupported explicit vector kind cannot masquerade as a rectangle in preview');
+for (const kind of [undefined, null, '']) {
+  const defaultVectorCanvas = Canvas.createCanvas(24, 24);
+  drawVectorGraphic(defaultVectorCanvas.getContext('2d'), { kind, x: 0, y: 0, w: 24, h: 24, fill: '#FFFFFF' });
+  assert.equal(defaultVectorCanvas.getContext('2d').getImageData(12, 12, 1, 1).data[3], 255,
+    `the ${String(kind)} vector kind uses the rectangle default consistently with the export plan`);
+}
 const arcMorph = interpolateSvgPaths('M 0 0 A 10 10 0 0 0 10 10', 'M 0 0 A 20 20 0 1 0 10 10', 0.5);
 assert.ok(arcMorph?.length > 2 && arcMorph.every(command => command.type !== 'A'),
   'arc flag changes are converted to sampled contours rather than interpolated as fractional flags');

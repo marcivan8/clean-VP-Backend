@@ -76,6 +76,10 @@ function renderAreaLightFixture(light, time = 0) {
   return canvas.getContext('2d').getImageData(0, 0, 180, 180).data;
 }
 const pointLightPixels = renderAreaLightFixture({ type: 'point', position: { x: -3, y: 3, z: 5 }, target: { x: 0, y: 0, z: 0 }, intensity: 1, range: 50, decay: 0 });
+const directionalLightPixels = renderAreaLightFixture({ type: 'directional', direction: { x: -1, y: -1, z: -1 }, intensity: 1 });
+const sunLightPixels = renderAreaLightFixture({ type: 'sun', direction: { x: -1, y: -1, z: -1 }, intensity: 1 });
+assert.deepEqual(sunLightPixels, directionalLightPixels,
+  'sun lights normalize to directional shading rather than point-light shading');
 const areaLightPixels = renderAreaLightFixture({ type: 'area', position: { x: -3, y: 3, z: 5 }, target: { x: 0, y: 0, z: 0 }, width: 6, height: 6, intensity: 1, range: 50, decay: 0 });
 let areaLightDifference = 0;
 for (let index = 0; index < pointLightPixels.length; index += 4) {
@@ -92,6 +96,34 @@ const animatedAreaLight = { type: 'area', position: { x: -3, y: 3, z: 5 }, targe
   ] }] };
 assert.notDeepEqual(renderAreaLightFixture(animatedAreaLight, 1), renderAreaLightFixture(animatedAreaLight, 0),
   'area source dimensions follow authored light keyframes and change the rendered illumination');
+
+function render3DMotionBlur(samples) {
+  const canvas = Canvas.createCanvas(180, 180);
+  drawScene3D(canvas.getContext('2d'), {
+    camera: { z: 7 }, ambient: 0.8, shadows: { enabled: false },
+    motionBlur: { enabled: true, samples, shutterAngle: 360, frameRate: 4 },
+    objects: [{ id: 'motion-blur-sphere', type: 'sphere', castsShadow: false,
+      animations: [{ startTime: 0, duration: 1, easing: 'linear', keyframes: [
+        { time: 0, properties: { x: -2 } }, { time: 1, properties: { x: 2 } },
+      ] }] }],
+  }, 0.5, 1, 180, 180, {});
+  return canvas.getContext('2d').getImageData(0, 0, 180, 180).data;
+}
+function renderStatic3DSceneMotionBlur(enabled) {
+  const canvas = Canvas.createCanvas(96, 96);
+  drawScene3D(canvas.getContext('2d'), {
+    camera: { z: 7 }, ambient: 0.8, shadows: { enabled: false },
+    motionBlur: { enabled, samples: 15, shutterAngle: 360 },
+    objects: [{ id: 'static-blur-sphere', type: 'sphere', castsShadow: false }],
+  }, 0.5, 1, 96, 96, {});
+  return canvas.getContext('2d').getImageData(0, 0, 96, 96).data;
+}
+assert.deepEqual(renderStatic3DSceneMotionBlur(true), renderStatic3DSceneMotionBlur(false),
+  'static 3D scenes skip redundant shutter samples without changing their rendered pixels');
+assert.notDeepEqual(render3DMotionBlur(15), render3DMotionBlur(5),
+  '3D scene motion blur honors authored sample counts above five');
+assert.deepEqual(render3DMotionBlur(15), render3DMotionBlur(30),
+  '3D scene motion blur safely clamps sample counts to the 15-sample schema maximum');
 
 const oversizedPolygonMesh = normalizeSceneMesh({
   type: 'mesh',
@@ -119,10 +151,56 @@ assert.deepEqual(getScene3DCompatibilityWarnings({
   '3D object “Authored shape” uses unsupported type “star-poly”; it will be skipped.',
   '3D object “Authored shape” uses unsupported material side “both”; it will render as front-sided.',
   '3D object “Authored shape” uses unsupported blend mode “linear-dodge”; it will render as source-over.',
-  '3D light 1 uses unsupported type “sun”; it will render as a point light.',
 ], '3D compatibility checks disclose renderer substitutions');
+assert.deepEqual(getScene3DCompatibilityWarnings({ lights: [{ type: 'sun' }] }), [],
+  'sun is a supported directional light alias and needs no compatibility warning');
 assert.deepEqual(getScene3DCompatibilityWarnings({ objects: [{ type: 'box', material: { side: 'double' }, blendMode: 'multiply' }], lights: [{ type: 'spot' }] }), [],
   'supported 3D authored values do not produce compatibility warnings');
+const cameraCompatibilityWarnings = getScene3DCompatibilityWarnings({ camera: {
+  projection: 'fisheye', z: 0, fov: 40, near: 5, far: 4,
+  depthOfField: { focusDistance: 0, focusRange: 120, strength: 3, maxBlur: 14 },
+} });
+assert.deepEqual(cameraCompatibilityWarnings.map(warning => warning.message), [
+  '3D camera uses unsupported projection “fisheye”; it will render with perspective projection.',
+  'Camera distance on the 3D camera is 0, below the supported minimum 0.1; the renderer will clamp it.',
+  'Perspective focal scale on the 3D camera is 40, outside the supported range 80–2400; the renderer will clamp it.',
+  'Far clipping plane on the 3D camera must be greater than the near clipping plane; the renderer will widen it.',
+  'Focus distance on 3D camera depth of field is 0, outside the supported range 0.1–100000; the renderer will clamp it.',
+  'Focus range on 3D camera depth of field is 120, outside the supported range 0–100; the renderer will clamp it.',
+  'Depth of field strength on 3D camera depth of field is 3, outside the supported range 0–2; the renderer will clamp it.',
+  'Maximum depth of field blur on 3D camera depth of field is 14, outside the supported range 0–12; the renderer will clamp it.',
+], 'camera controls that render with substituted or clamped values are disclosed before preview/export');
+assert.deepEqual(getScene3DCompatibilityWarnings({ camera: {
+  projection: 'orthographic', z: 7, fov: 780, orthoScale: 180, near: 0.05, far: 1000,
+  depthOfField: { focusDistance: 7, focusRange: 0.35, strength: 1, maxBlur: 6 },
+} }), [], 'supported camera projection, clipping and depth-of-field settings remain warning-free');
+assert.deepEqual(getScene3DCompatibilityWarnings({ camera: { z: 1_000_000 } }), [],
+  'camera distance remains unbounded above, matching the actual projection renderer');
+assert.deepEqual(getScene3DCompatibilityWarnings({ camera: { animations: [{ keyframes: [
+  { time: 0, properties: { fov: 40, z: 0 } },
+  { time: 1, properties: { fov: 780, z: 7, near: 0.05 } },
+] }] } }).map(warning => warning.message), [
+  'Perspective focal scale on 3D camera animation 1, keyframe 1 is 40, outside the supported range 80–2400; the renderer will clamp it.',
+  'Camera distance on 3D camera animation 1, keyframe 1 is 0, outside the supported range 0.1–unbounded; the renderer will clamp it.',
+], 'animated camera values disclose clamped keyframes and accept supported animated values');
+assert.deepEqual(getScene3DCompatibilityWarnings({ lights: [{ type: 'spot', animations: [{ keyframes: [
+  { time: 0, properties: { intensity: 5, angle: 0 } },
+  { time: 1, properties: { intensity: 1, angle: 45 } },
+] }] }] }).map(warning => warning.message), [
+  'Intensity on 3D light 1 animation 1, keyframe 1 is 5, outside the supported range 0–4; the renderer will clamp it.',
+  'Spot angle on 3D light 1 animation 1, keyframe 1 is 0, outside the supported range 1–179; the renderer will clamp it.',
+], 'animated light values disclose clamped keyframes and accept supported animated values');
+assert.deepEqual(getScene3DCompatibilityWarnings({ camera: { expressions: {
+  fov: 'sin(t) * 200 + 780', yaw: 'unknown(t)', mystery: 't',
+} }, objects: [{ id: 'expression-object', type: 'box', expressions: { opacity: '1 +', hiddenThing: 't' } }],
+lights: [{ type: 'point', expressions: { intensity: 'wiggle(time, 0.2)', shadowSoftness: 'time' } }],
+}).map(warning => warning.message), [
+  'Expression for “yaw” on the 3D camera is invalid (unsupported_function) and will be ignored.',
+  'Expression for unsupported 3D property “mystery” on the 3D camera will be ignored.',
+  'Expression for “opacity” on 3D object “expression-object” is invalid (non_finite) and will be ignored.',
+  'Expression for unsupported 3D property “hiddenThing” on 3D object “expression-object” will be ignored.',
+  'Expression for unsupported 3D property “shadowSoftness” on 3D light 1 will be ignored.',
+], 'invalid and unsupported 3D expressions are disclosed, while valid procedural expressions remain accepted');
 assert.equal(normalizeSceneMesh({ type: 'mesh', size: { x: 3, y: 3, z: 3 } }).faces.length, 0,
   'a custom mesh missing authored topology is not silently replaced by a box');
 assert.deepEqual(normalizeSceneMesh({ type: 'star-poly', size: { x: 3, y: 3, z: 3 } }), { vertices: [], faces: [] },
@@ -131,6 +209,8 @@ assert.deepEqual(normalizeSceneMesh({ type: '', size: { x: 3, y: 3, z: 3 } }), {
   'an explicitly empty primitive type is not silently treated as the default box');
 assert.deepEqual(normalizeSceneMesh({ type: 'toString' }), { vertices: [], faces: [] },
   'prototype property names are not mistaken for supported primitive types');
+assert.deepEqual(normalizeSceneMesh({ type: 'text' }), { vertices: [], faces: [] },
+  '3D text uses its dedicated raster path instead of receiving box topology');
 assert.match(getScene3DCompatibilityWarnings({ objects: [{ id: 'missing-topology', type: 'mesh' }] })[0]?.message || '',
   /missing its vertex or face array and will not render/,
   'invalid custom-mesh topology is reported before preview or export');
@@ -567,11 +647,16 @@ const roughTextureAfter = texturedMaterialPixel({ roughness: 1, metalness: 0 }, 
 assert.ok(roughTextureAfter[0] > roughTextureBefore[0] + 5,
   `3D roughness keyframes change specular lighting on image and video textures: ${roughTextureBefore} -> ${roughTextureAfter}`);
 const dielectricTexture = texturedMaterialPixel({ roughness: 0.04, metalness: 0 });
+const intermediateMetalTexture = texturedMaterialPixel({ roughness: 0.04, metalness: 0.45 });
 const metallicTexture = texturedMaterialPixel({ roughness: 0.04, metalness: 0 }, 1, [{ duration: 1, keyframes: [
   { time: 0, properties: { metalness: 0 } }, { time: 1, properties: { metalness: 0.92 } },
 ] }]);
 assert.notDeepEqual(metallicTexture.slice(0, 3), dielectricTexture.slice(0, 3),
   '3D metalness keyframes change specular response on image and video textures');
+assert.notDeepEqual(intermediateMetalTexture.slice(0, 3), dielectricTexture.slice(0, 3),
+  '3D metalness changes continuously below the former dielectric/metal threshold');
+assert.notDeepEqual(intermediateMetalTexture.slice(0, 3), metallicTexture.slice(0, 3),
+  'intermediate 3D metalness produces its own material response');
 const expressedTexture = texturedMaterialPixel({ roughness: 1, metalness: 0 }, 0, [], { roughness: '0.04' });
 assert.ok(expressedTexture[0] > roughTextureBefore[0] + 5,
   '3D material expressions change texture lighting');
@@ -612,8 +697,8 @@ function render3dBlend(mode) {
   return [...canvas.getContext('2d').getImageData(60, 60, 1, 1).data];
 }
 const expected3dBlend = {
-  'color-dodge': [255, 204, 204], 'color-burn': [202, 0, 0],
-  'hard-light': [255, 5, 5], 'soft-light': [227, 161, 161], 'exclusion': [53, 200, 200],
+  'color-dodge': [255, 143, 143], 'color-burn': [136, 0, 0],
+  'hard-light': [255, 13, 13], 'soft-light': [186, 79, 79], 'exclusion': [119, 135, 135],
 };
 for (const [mode, expected] of Object.entries(expected3dBlend)) {
   const actual = render3dBlend(mode);
@@ -1310,11 +1395,18 @@ assert.equal(maxSceneObjectSourceTime(linearRemap, 1, 1, [1.4]), 7,
 assert.deepEqual(getSceneShutterSampleTimes(2, 1, 2, { enabled: false }), [1],
   'a scene without motion blur samples only the regular output frame time');
 assert.deepEqual(getSceneShutterSampleTimes(2, 1, 2, { enabled: true, samples: 3, frameRate: 30, shutterAngle: 180 }), [
-  1 - 1 / 180, 1, 1 + 1 / 180,
+  1 - 1 / 180, 1, 1,
 ], 'preview and export share deterministic shutter sample timestamps');
 assert.deepEqual(getSceneShutterSampleTimes(2, 1, 2, { enabled: true, samples: null, frameRate: 0, shutterAngle: null }), [
-  1 - 1 / 180, 1, 1 + 1 / 180,
+  1 - 1 / 180, 1, 1,
 ], 'missing shutter values retain the renderer defaults');
+const maxShutterSamples = getSceneShutterSampleTimes(2, 1, 2, { enabled: true, samples: 15, frameRate: 30, shutterAngle: 180 });
+assert.equal(maxShutterSamples.length, 15, 'scene source-time sampling honors the shared maximum motion-blur sample count');
+assert.equal(getSceneShutterSampleTimes(2, 1, 2, { enabled: true, samples: 30, frameRate: 30, shutterAngle: 180 }).length, 15,
+  'scene source-time sampling clamps oversized motion-blur requests to the shared maximum');
+assert.deepEqual(getSceneShutterSampleTimes(59, 2, 30, { enabled: true, samples: 3, frameRate: 10, shutterAngle: 360 }), [
+  59 / 30 - 1 / 30, 59 / 30, 2,
+], '3D shutter samples stop at scene duration instead of reading animation or video beyond the composition end');
 
 const malformedHierarchy = { objects: [
   { id: 'cycle-a', parentId: 'cycle-b', position: { x: 2 } },

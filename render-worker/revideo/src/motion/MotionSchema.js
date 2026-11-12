@@ -102,6 +102,16 @@ export const IDENTITY = Object.freeze({
 });
 
 let _seq = 0;
+// Imported timeline JSON can contain null, booleans, or blank strings. Number()
+// accepts all of those as 0/1, which can silently move layers or keyframes.
+// Keep numeric strings for older persisted projects, but reject those values.
+function finiteMotionNumber(value) {
+    if (value === null || value === undefined || typeof value === 'boolean') return undefined;
+    if (typeof value === 'string' && value.trim() === '') return undefined;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : undefined;
+}
+
 /**
  * ID generator. Deliberately NOT Date.now()-only: `addCaptionClips` builds
  * dozens of clips inside one millisecond, and a same-ms collision produced
@@ -121,9 +131,8 @@ function nextId(prefix) {
 export function createKeyframe(time, properties = {}, easing, easingByProperty) {
     const props = {};
     for (const key of ANIMATABLE_PROPS) {
-        if (properties[key] !== undefined && Number.isFinite(Number(properties[key]))) {
-            props[key] = Number(properties[key]);
-        }
+        const value = finiteMotionNumber(properties?.[key]);
+        if (value !== undefined) props[key] = value;
     }
     const perPropertyEasing = easingByProperty && typeof easingByProperty === 'object'
         ? Object.fromEntries(ANIMATABLE_PROPS
@@ -131,7 +140,7 @@ export function createKeyframe(time, properties = {}, easing, easingByProperty) 
             .map(key => [key, easingByProperty[key]]))
         : {};
     return {
-        time: Math.max(0, Number(time) || 0),
+        time: finiteMotionNumber(time) === undefined ? NaN : Math.max(0, finiteMotionNumber(time)),
         properties: props,
         ...(easing ? { easing } : {}),
         ...(Object.keys(perPropertyEasing).length ? { easingByProperty: perPropertyEasing } : {}),
@@ -145,12 +154,14 @@ export function createKeyframe(time, properties = {}, easing, easingByProperty) 
  */
 export function createAnimation(overrides = {}) {
     const keyframes = Array.isArray(overrides.keyframes) ? [...overrides.keyframes] : [];
-    keyframes.sort((a, b) => (a.time || 0) - (b.time || 0));
+    keyframes.sort((a, b) => (finiteMotionNumber(a?.time) ?? Infinity) - (finiteMotionNumber(b?.time) ?? Infinity));
+    const startTime = finiteMotionNumber(overrides.startTime) ?? 0;
+    const duration = finiteMotionNumber(overrides.duration) ?? 0;
     return {
         id:        overrides.id || nextId('anim'),
         type:      overrides.type || ANIMATION_TYPES.FADE,
-        startTime: Math.max(0, Number(overrides.startTime) || 0),
-        duration:  Math.max(0, Number(overrides.duration) || 0),
+        startTime: Math.max(0, startTime),
+        duration:  Math.max(0, duration),
         easing:    overrides.easing || 'easeOutCubic',
         /** 'in' anchors to layer start, 'out' anchors to layer END. */
         anchor:    overrides.anchor === 'out' ? 'out' : 'in',
@@ -167,10 +178,13 @@ export function createAnimation(overrides = {}) {
  * neither convention has to lose.
  */
 export function createMotionLayer(overrides = {}) {
-    const startTime = Math.max(0, Number(overrides.startTime) || 0);
-    const duration = Number.isFinite(Number(overrides.duration))
-        ? Math.max(0, Number(overrides.duration))
-        : Math.max(0, (Number(overrides.endTime) || 0) - startTime);
+    const startTime = Math.max(0, finiteMotionNumber(overrides.startTime) ?? 0);
+    const explicitDuration = finiteMotionNumber(overrides.duration);
+    const endTime = finiteMotionNumber(overrides.endTime);
+    const duration = explicitDuration !== undefined
+        ? Math.max(0, explicitDuration)
+        : Math.max(0, (endTime ?? startTime) - startTime);
+    const transform = (key, fallback) => finiteMotionNumber(overrides[key]) ?? fallback;
 
     return {
         id:        overrides.id || nextId('layer'),
@@ -186,13 +200,13 @@ export function createMotionLayer(overrides = {}) {
 
         // Base transform. Position is in PERCENT of frame (0-100), matching
         // clip.x / clip.y and TextOverlay's `left: {x}%` — NOT pixels.
-        x:        Number.isFinite(Number(overrides.x)) ? Number(overrides.x) : 50,
-        y:        Number.isFinite(Number(overrides.y)) ? Number(overrides.y) : 50,
-        scale:    Number.isFinite(Number(overrides.scale)) ? Number(overrides.scale) : 1,
-        scaleX:   Number.isFinite(Number(overrides.scaleX)) ? Number(overrides.scaleX) : 1,
-        scaleY:   Number.isFinite(Number(overrides.scaleY)) ? Number(overrides.scaleY) : 1,
-        rotation: Number.isFinite(Number(overrides.rotation)) ? Number(overrides.rotation) : 0,
-        opacity:  Number.isFinite(Number(overrides.opacity)) ? clamp(overrides.opacity, 0, 1) : 1,
+        x:        transform('x', 50),
+        y:        transform('y', 50),
+        scale:    transform('scale', 1),
+        scaleX:   transform('scaleX', 1),
+        scaleY:   transform('scaleY', 1),
+        rotation: transform('rotation', 0),
+        opacity:  clamp(transform('opacity', 1), 0, 1),
 
         legacyKeyframes: overrides.legacyKeyframes && typeof overrides.legacyKeyframes === 'object' && !Array.isArray(overrides.legacyKeyframes)
             ? { ...overrides.legacyKeyframes } : {},
@@ -206,15 +220,21 @@ export function createMotionLayer(overrides = {}) {
             : null,
         expressions: overrides.expressions && typeof overrides.expressions === 'object' && !Array.isArray(overrides.expressions) ? { ...overrides.expressions } : {},
         expressionLayers: Array.isArray(overrides.expressionLayers) ? overrides.expressionLayers
-            .filter(layer => layer && Number.isFinite(Number(layer.startTime)) && layer.expressions && typeof layer.expressions === 'object')
-            .map(layer => ({
-                startTime: Number(layer.startTime), duration: Math.max(0, Number(layer.duration) || 0),
-                ...(Number.isFinite(Number(layer.originX)) ? { originX: Number(layer.originX) } : {}),
-                ...(Number.isFinite(Number(layer.originY)) ? { originY: Number(layer.originY) } : {}),
-                ...(Number.isFinite(Number(layer.frameW)) ? { frameW: Number(layer.frameW) } : {}),
-                ...(Number.isFinite(Number(layer.frameH)) ? { frameH: Number(layer.frameH) } : {}),
-                expressions: { ...layer.expressions },
-            })) : [],
+            .map(layer => {
+                const layerStart = finiteMotionNumber(layer?.startTime);
+                if (!layer || layerStart === undefined || !layer.expressions || typeof layer.expressions !== 'object' || Array.isArray(layer.expressions)) return null;
+                const layerDuration = finiteMotionNumber(layer.duration);
+                const optionalNumber = key => {
+                    const value = finiteMotionNumber(layer[key]);
+                    return value === undefined ? {} : { [key]: value };
+                };
+                return {
+                    startTime: layerStart, duration: Math.max(0, layerDuration ?? 0),
+                    ...optionalNumber('originX'), ...optionalNumber('originY'),
+                    ...optionalNumber('frameW'), ...optionalNumber('frameH'),
+                    expressions: { ...layer.expressions },
+                };
+            }).filter(Boolean) : [],
         style:      overrides.style && typeof overrides.style === 'object' ? overrides.style : {},
 
         /** Caption-only: per-word timings. See CaptionModel.js. */

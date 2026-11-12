@@ -38,6 +38,10 @@
 
 const hasNumericValue = value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
 const SHAPE_MASKS = new Set(['ellipse', 'circle', 'rectangle', 'rounded-rectangle', 'capsule', 'callout', 'polygon', 'star', 'arrow']);
+// Match the browser's SVG luminance matrix for layer mattes. FFmpeg's implicit
+// RGB-to-gray conversion uses a different default matrix (commonly BT.601),
+// which makes a red/green/blue matte render with different coverage in export.
+const REC709_LUMINANCE_FILTER = "format=rgb24,geq=r='0.2126*r(X,Y)+0.7152*g(X,Y)+0.0722*b(X,Y)':g='0.2126*r(X,Y)+0.7152*g(X,Y)+0.0722*b(X,Y)':b='0.2126*r(X,Y)+0.7152*g(X,Y)+0.0722*b(X,Y)',format=gray";
 
 /**
  * Scene layers are flattened onto timeline tracks, so siblings in a nested
@@ -144,11 +148,12 @@ const n4 = (v) => {
 // Use the editor's half-open timeline windows in every exported gate.
 const timeWindowExpr = (start, end) => `(gte(t,${n4(start)})*lt(t,${n4(end)}))`;
 
-function compileIsolatedGroupEffects(group, groupToken = 'group') {
+function compileIsolatedGroupEffects(group, groupToken = 'group', frame = { width: 1080, height: 1920 }) {
     const parts = [];
     for (const effect of Array.isArray(group?.effects) ? group.effects : []) {
         if (!effect || effect.enabled === false) continue;
         const p = effect.params || {};
+        const kind = effect.kind || effect.type;
         const read = (key, fallback) => {
             const value = Number(p[key]?.value ?? p[key] ?? fallback);
             return Number.isFinite(value) ? value : fallback;
@@ -168,7 +173,32 @@ function compileIsolatedGroupEffects(group, groupToken = 'group') {
             }
             return expression;
         };
-        switch (effect.kind || effect.type) {
+        switch (kind) {
+            case 'gradient-fill':
+                // Apply the gradient to the isolated group's existing pixels
+                // while retaining the group's alpha silhouette.
+                parts.push(compileGradientFill(effect, {
+                    angle: sampled('angle', 0),
+                    opacity: sampled('opacity', 0),
+                }));
+                break;
+            case 'inner-shadow':
+                parts.push(compileInnerShadow(effect, frame, {
+                    x: sampled('x', 0), y: sampled('y', 0),
+                    blur: sampled('blur', 0), opacity: sampled('opacity', 0),
+                }));
+                break;
+            case 'stroke':
+                parts.push(compileGroupStroke(effect, frame, sampled('opacity', 0)));
+                break;
+            case 'shadow': case 'drop-shadow':
+                parts.push(compileGroupShadow(effect, frame, {
+                    x: sampled('x', 0) || sampled('offsetX', 0),
+                    y: sampled('y', 0) || sampled('offsetY', 0),
+                    blur: sampled('blur', 0),
+                    opacity: sampled('opacity', 0),
+                }, groupToken));
+                break;
             case 'blur': case 'blur_gaussian': {
                 const sigma = Math.max(0, Math.min(50, read('radius', read('amount', 0))));
                 const key = Array.isArray(effect.samples?.radius) ? 'radius' : 'amount';
@@ -274,6 +304,57 @@ function compileIsolatedGroupEffects(group, groupToken = 'group') {
                 else parts.push(`eq=saturation=${n4(Math.max(0, Math.min(5, read('amount', read('value', 1)))))}`);
                 break;
             }
+            case 'grayscale': {
+                const amount = Math.max(0, Math.min(1, read('amount', read('value', 1))));
+                const expression = sampled('amount');
+                const saturation = expression ? `(1-(${expression}))` : n4(1 - amount);
+                parts.push(`eq=saturation='${saturation}':eval=frame`);
+                break;
+            }
+            case 'sepia': {
+                const amount = Math.max(0, Math.min(1, read('amount', read('value', 1))));
+                const expression = String(sampled('amount') || n4(amount)).replace(/\bt\b/g, 'T');
+                const channel = (name, red, green, blue) => `clip((1-(${expression}))*${name}(X,Y)+(${expression})*(${red}*r(X,Y)+${green}*g(X,Y)+${blue}*b(X,Y)),0,255)`;
+                parts.push(`format=rgba,geq=r='${channel('r', '0.393', '0.769', '0.189')}':g='${channel('g', '0.349', '0.686', '0.168')}':b='${channel('b', '0.272', '0.534', '0.131')}':a='alpha(X,Y)'`);
+                break;
+            }
+            case 'vignette': {
+                const intensity = Math.max(0, Math.min(1, read('intensity', 0.5)));
+                const radius = Math.max(0.1, Math.min(1.5, read('radius', 0.7)));
+                const softness = Math.max(0, Math.min(1, read('softness', 0.5)));
+                const toGeqTime = expression => String(expression).replace(/\bt\b/g, 'T');
+                const strength = toGeqTime(sampled('intensity') || n4(intensity));
+                const edgeRadius = toGeqTime(sampled('radius') || n4(radius));
+                const feather = toGeqTime(sampled('softness') || n4(softness));
+                const [red, green, blue] = colorToRgb(p.color?.value ?? p.color, [0, 0, 0]);
+                const distance = 'sqrt(pow(X/W-0.5,2)+pow(Y/H-0.5,2))';
+                const edgeT = `clip((${distance}-(${edgeRadius}-${feather}))/max(${feather},0.0001),0,1)`;
+                const edge = `(${edgeT})*(${edgeT})*(3-2*(${edgeT}))`;
+                const mix = `(${edge})*(${strength})`;
+                parts.push(`format=rgba,geq=r='r(X,Y)*(1-${mix})+${red}*${mix}':g='g(X,Y)*(1-${mix})+${green}*${mix}':b='b(X,Y)*(1-${mix})+${blue}*${mix}':a='alpha(X,Y)'`);
+                break;
+            }
+            case 'grain': case 'film_grain': case 'film-grain': {
+                const film = kind === 'film_grain' || kind === 'film-grain';
+                const sampleKey = film ? 'intensity' : 'amount';
+                const fallback = film ? 0.15 : 8;
+                const maximum = film ? 1 : 48;
+                const raw = read(sampleKey, fallback);
+                const value = Math.max(0, Math.min(maximum, raw));
+                const expression = sampled(sampleKey, 0);
+                const strength = film
+                    ? `(${String(expression || n4(value)).replace(/\bt\b/g, 'T').replace(/,/g, '\\,')})*48`
+                    : String(expression || n4(value)).replace(/\bt\b/g, 'T').replace(/,/g, '\\,');
+                const size = film ? Math.max(0.5, Math.min(5, read('size', 1.5))) : 1;
+                const seed = film ? Math.max(0, Math.min(2147483647, Math.floor(read('seed', 941)))) : 41;
+                const animatedGrain = film ? (p.animated?.value ?? p.animated) !== false : true;
+                const frame = animatedGrain ? 'floor(T*30)' : '0';
+                const hash = `(sin((floor(X/${n4(size)})+${seed}*7.1)*12.9898+(floor(Y/${n4(size)})+${seed}*3.17)*78.233+${frame}*37.719)*43758.5453)`;
+                const noise = `((${hash})-floor(${hash})-0.5)*(${strength})`;
+                const channel = name => `if(gt(alpha(X,Y),0),clip(${name}(X,Y)+${noise},0,255),${name}(X,Y))`;
+                parts.push(`format=rgba,geq=r='${channel('r')}':g='${channel('g')}':b='${channel('b')}':a='alpha(X,Y)'`);
+                break;
+            }
             case 'color_grade': {
                 const readGrade = (key, fallback) => Math.max(0, Math.min(200, read(key, fallback)));
                 const grade = (key, min = 0, max = 200, fallback = 100, normalize = true) => {
@@ -333,7 +414,7 @@ function compileBrightnessScale(value, maximum = 2) {
  */
 function decimate(samples, max) {
     if (!Array.isArray(samples) || samples.length <= max || max < 2) return samples;
-    const keys = ['x', 'y', 'w', 'h', 'opacity', 'rotation', 'blur', 'flipH', 'flipV']
+    const keys = ['x', 'y', 'w', 'h', 'opacity', 'rotation', 'blur', 'reveal', 'flipH', 'flipV']
         .filter(key => samples.some(sample => Number.isFinite(Number(sample?.[key]))));
     const normalize = (key, value) => key === 'rotation' ? value / 360 : key === 'blur' ? value / 100 : value;
     const retained = new Set([0, samples.length - 1]);
@@ -471,6 +552,17 @@ function compileOverlaySource(ov, inputIdx, label, frame, options = {}) {
         parts.push(`setpts=(PTS-STARTPTS)/${n4(ovSpeed)}+${n4(ov.outputStart)}/TB`);
     } else {
         parts.push(`setpts=PTS-STARTPTS+${n4(ov.outputStart)}/TB`);
+    }
+
+    // Progressive reveal is a local-space left-to-right alpha wipe. Apply it
+    // before scaling, flips, and rotation so the visible edge follows the
+    // layer's authored orientation, matching the preview's clipped media box.
+    const revealExpr = isAnimated(samples, 'reveal')
+        ? buildPiecewiseExpr(samples, 'reveal').replace(/\bt\b/g, 'T').replace(/,/g, '\\,')
+        : n4(Math.max(0, Math.min(1, Number(first.reveal ?? 1))));
+    if (isAnimated(samples, 'reveal') || Number(first.reveal ?? 1) < 0.999) {
+        parts.push('format=rgba');
+        parts.push(`geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lt(X/W,${revealExpr}),alpha(X,Y),0)'`);
     }
 
     // 2. Size. `eval=frame` re-evaluates per frame, which is what makes an
@@ -767,6 +859,22 @@ function compileOverlaySource(ov, inputIdx, label, frame, options = {}) {
                 const raw = Number(p.amount?.value ?? p.amount ?? p.value?.value ?? p.value);
                 const expression = effectExpr('amount', Number.isFinite(raw) ? raw : 1, 0, 5);
                 parts.push(expression ? `eq=saturation='${expression}':eval=frame` : `eq=saturation=${n4(Math.max(0, Math.min(5, Number.isFinite(raw) ? raw : 1)))}`);
+                break;
+            }
+            case 'grayscale': {
+                const raw = Number(p.amount?.value ?? p.amount ?? p.value?.value ?? p.value);
+                const amount = Math.max(0, Math.min(1, Number.isFinite(raw) ? raw : 1));
+                const expression = effectExpr('amount', amount, 0, 1);
+                parts.push(`eq=saturation='${expression ? `(1-(${expression}))` : n4(1 - amount)}':eval=frame`);
+                break;
+            }
+            case 'sepia': {
+                const raw = Number(p.amount?.value ?? p.amount ?? p.value?.value ?? p.value);
+                const amount = Math.max(0, Math.min(1, Number.isFinite(raw) ? raw : 1));
+                const expression = effectExpr('amount', amount, 0, 1);
+                const mix = String(expression || n4(amount)).replace(/\bt\b/g, 'T');
+                const channel = (name, red, green, blue) => `clip((1-(${mix}))*${name}(X,Y)+(${mix})*(${red}*r(X,Y)+${green}*g(X,Y)+${blue}*b(X,Y)),0,255)`;
+                parts.push(`format=rgba,geq=r='${channel('r', '0.393', '0.769', '0.189')}':g='${channel('g', '0.349', '0.686', '0.168')}':b='${channel('b', '0.272', '0.534', '0.131')}':a='alpha(X,Y)'`);
                 break;
             }
             case 'hue': case 'hue-rotate': {
@@ -1093,7 +1201,7 @@ function compileShadowSource(ov, inputIdx, label, frame) {
 function overlayAlphaEffects(ov) {
     if (!['image', 'video', 'sticker'].includes(ov?.source?.type)) return [];
     return (Array.isArray(ov.effects) ? ov.effects : [])
-        .filter(effect => effect && effect.enabled !== false && ['shadow', 'glow'].includes(effect.kind || effect.type)
+        .filter(effect => effect && effect.enabled !== false && ['shadow', 'drop-shadow', 'glow'].includes(effect.kind || effect.type)
             && !((effect.kind || effect.type) === 'glow' && ov.source?.type === 'video'));
 }
 
@@ -1125,9 +1233,12 @@ function compileStrokeSource(ov, inputIdx, label, frame, effect) {
     const base = compileOverlaySource(sourceOverlay, inputIdx, rawLabel, frame);
     const p = effect.params || {};
     const scale = frame.width / 1080;
-    const radius = Math.max(1, Math.min(24, Math.round(Number(p.width ?? p.amount ?? 2) * scale)));
+    const radius = Math.max(1, Math.round(Math.max(1, Math.min(12, Number(p.width ?? p.amount ?? 2))) * scale));
     const pad = radius + 1;
-    const iterations = Math.max(1, Math.ceil(radius / 2));
+    // FFmpeg's default morphology kernel expands one pixel per pass. Match
+    // the Canvas max-alpha dilation radius instead of halving the authored
+    // outline width during export.
+    const iterations = radius;
     const [red, green, blue] = colorToRgb(p.color, [255, 255, 255]);
     const opacity = Math.max(0, Math.min(1, Number.isFinite(Number(p.opacity)) ? Number(p.opacity) : 1));
     const dilation = Array.from({ length: iterations }, () => 'dilation=coordinates=255').join(',');
@@ -1165,26 +1276,103 @@ function colorToRgb(color, fallback) {
     return [0, 2, 4].map(index => parseInt(value.slice(index, index + 2), 16));
 }
 
-function compileInnerShadow(effect, frame) {
+function compileInnerShadow(effect, frame, animated = {}) {
     const p = effect.params || {};
     const scale = frame.width / 1080;
-    const dx = Math.max(-80, Math.min(80, Number(p.x ?? p.offsetX) || 0)) * scale;
-    const dy = Math.max(-80, Math.min(80, Number(p.y ?? p.offsetY) || 0)) * scale;
-    const radius = Math.max(0, Math.min(16, Number(p.blur ?? p.radius) || 0)) * scale;
-    const opacity = Math.max(0, Math.min(1, Number.isFinite(Number(p.opacity)) ? Number(p.opacity) : 0.65));
+    const bounded = (value, min, max) => Math.max(min, Math.min(max, Number.isFinite(Number(value)) ? Number(value) : 0));
+    const geqValue = (key, raw, min, max) => {
+        if (!animated[key]) return n4(bounded(raw, min, max) * scale);
+        const expression = String(animated[key]).replace(/\bt\b/g, 'T').replace(/,/g, '\\,');
+        return `clip((${expression})\\,${n4(min)}\\,${n4(max)})*${n4(scale)}`;
+    };
+    const dx = geqValue('x', p.x ?? p.offsetX, -80, 80);
+    const dy = geqValue('y', p.y ?? p.offsetY, -80, 80);
+    const radius = geqValue('blur', p.blur ?? p.radius, 0, 16);
+    const opacity = animated.opacity
+        ? `clip((${String(animated.opacity).replace(/\bt\b/g, 'T').replace(/,/g, '\\,')})\\,0\\,1)`
+        : n4(bounded(p.opacity ?? 0.65, 0, 1));
     const [red, green, blue] = colorToRgb(p.color, [0, 0, 0]);
-    const taps = radius > 0
+    const animatedRadius = Boolean(animated.blur);
+    const taps = Number(radius) > 0 || animatedRadius
         ? [-1, 0, 1].flatMap(ty => [-1, 0, 1].map(tx => {
             const weight = (tx === 0 ? 2 : 1) * (ty === 0 ? 2 : 1);
-            return `${weight}*alpha(X-${n4(dx)}+${n4(tx * radius)},Y-${n4(dy)}+${n4(ty * radius)})/255`;
+            const offsetX = animatedRadius ? `(${radius})*${tx}` : n4(tx * Number(radius));
+            const offsetY = animatedRadius ? `(${radius})*${ty}` : n4(ty * Number(radius));
+            return `${weight}*alpha(X-(${dx})+${offsetX},Y-(${dy})+${offsetY})/255`;
         }))
-        : [`16*alpha(X-${n4(dx)},Y-${n4(dy)})/255`];
+        : [`16*alpha(X-(${dx}),Y-(${dy}))/255`];
     const visible = `alpha(X,Y)/255`;
-    const shade = `(${visible})*${n4(opacity)}*(1-(${taps.join('+')})/16)`;
+    const shade = `(${visible})*(${opacity})*(1-(${taps.join('+')})/16)`;
     return `format=rgba,geq=r='r(X,Y)*(1-${shade})+${red}*${shade}':g='g(X,Y)*(1-${shade})+${green}*${shade}':b='b(X,Y)*(1-${shade})+${blue}*${shade}':a='alpha(X,Y)'`;
 }
 
-function compileGradientFill(effect) {
+/** Describe a static outline pass for an isolated composition's alpha. */
+function compileGroupStroke(effect, frame, animatedOpacity = null) {
+    const params = effect.params || {};
+    const scale = frame.width / 1080;
+    const rawWidth = Number(params.width?.value ?? params.width ?? params.amount?.value ?? params.amount ?? 2);
+    const width = Math.max(1, Math.min(12, Number.isFinite(rawWidth) ? rawWidth : 2)) * scale;
+    const iterations = Math.max(1, Math.round(width));
+    const [red, green, blue] = colorToRgb(params.color, [255, 255, 255]);
+    const rawOpacity = Number(params.opacity?.value ?? params.opacity ?? 1);
+    const opacity = Math.max(0, Math.min(1, Number.isFinite(rawOpacity) ? rawOpacity : 1));
+    const opacityExpression = animatedOpacity
+        ? String(animatedOpacity).replace(/\bt\b/g, 'T').replace(/,/g, '\\,')
+        : null;
+    return `__VIBED_GROUP_STROKE__${JSON.stringify({ red, green, blue, opacity, opacityExpression, iterations })}`;
+}
+
+/** Describe one soft shadow for the already-isolated composition alpha. */
+function compileGroupShadow(effect, frame, animated = {}, groupToken = 'group') {
+    const params = effect.params || {};
+    const scale = frame.width / 1080;
+    const number = (value, fallback, min, max) => {
+        const parsed = Number(value?.value ?? value);
+        return Math.max(min, Math.min(max, Number.isFinite(parsed) ? parsed : fallback));
+    };
+    const [red, green, blue] = colorToRgb(params.color, [0, 0, 0]);
+    const blur = number(params.blur, 12, 0, 100) * scale;
+    const blurTrack = animated.blur;
+    let blurCommands = null;
+    let initialSigma = Math.max(0.5, blur / 2);
+    if (blurTrack) {
+        const points = effect.samples?.blur;
+        if (Array.isArray(points) && points.length > 1) {
+            const sorted = points.map(point => ({ t: Number(point.t), value: Number(point.value) }))
+                .filter(point => Number.isFinite(point.t) && Number.isFinite(point.value)).sort((a, b) => a.t - b.t);
+            const from = Math.max(0, sorted[0].t), to = Math.max(from, sorted.at(-1).t);
+            const steps = Math.min(1800, Math.max(1, Math.ceil((to - from) * 30)));
+            const times = new Set([from, to]);
+            for (let index = 1; index < steps; index++) times.add(from + (to - from) * index / steps);
+            const valueAt = time => {
+                if (time <= sorted[0].t) return sorted[0].value;
+                for (let index = 0; index < sorted.length - 1; index++) {
+                    const a = sorted[index], b = sorted[index + 1];
+                    if (time <= b.t) return a.value + (b.value - a.value) * (time - a.t) / Math.max(1e-6, b.t - a.t);
+                }
+                return sorted.at(-1).value;
+            };
+            const target = `${String(groupToken).replace(/[^a-zA-Z0-9_]/g, '_')}_shadow_blur`;
+            blurCommands = [...times].sort((a, b) => a - b).map(time =>
+                `${n4(time)} ${target} sigma ${n4(Math.max(0, Math.min(100, valueAt(time))) * scale / 2)}`);
+            initialSigma = Math.max(0.5, valueAt(from) * scale / 2);
+            blurCommands = { target, commands: blurCommands };
+        }
+    }
+    const expression = track => track
+        ? track.replace(/\bt\b/g, 'T').replace(/,/g, '\\,') : null;
+    return `__VIBED_GROUP_SHADOW__${JSON.stringify({
+        red, green, blue,
+        opacity: number(params.opacity, 0.55, 0, 1),
+        opacityExpression: expression(animated.opacity),
+        x: animated.x ? `((${animated.x})*${n4(scale)})` : number(params.x ?? params.offsetX, 0, -200, 200) * scale,
+        y: animated.y ? `((${animated.y})*${n4(scale)})` : number(params.y ?? params.offsetY, 0, -200, 200) * scale,
+        sigma: initialSigma,
+        blurCommands,
+    })}`;
+}
+
+function compileGradientFill(effect, animated = {}) {
     const p = effect.params || {};
     const supplied = Array.isArray(p.colors) && p.colors.length
         ? p.colors
@@ -1194,10 +1382,23 @@ function compileGradientFill(effect) {
         color: colorToRgb(typeof entry === 'string' ? entry : entry?.color, [255, 255, 255]),
     })).sort((a, b) => a.offset - b.offset);
     if (stops.length === 1) stops.push({ offset: 1, color: stops[0].color });
-    const angle = (Number(p.angle) || 0) * Math.PI / 180;
-    const cos = Math.cos(angle), sin = Math.sin(angle);
-    const t = `clip(0.5+2*((X-W/2)*${n4(cos)}*W+(Y-H/2)*${n4(sin)}*H)/(${n4(cos * cos)}*W*W+${n4(sin * sin)}*H*H),0,1)`;
+    const angle = Number(p.angle?.value ?? p.angle) || 0;
+    const angleExpr = animated.angle
+        ? `(${String(animated.angle).replace(/\bt\b/g, 'T').replace(/,/g, '\\,')})*PI/180`
+        : `${n4(angle * Math.PI / 180)}`;
+    const cosine = animated.angle ? `cos(${angleExpr})` : n4(Math.cos(angle * Math.PI / 180));
+    const sine = animated.angle ? `sin(${angleExpr})` : n4(Math.sin(angle * Math.PI / 180));
+    const t = `clip(0.5+2*((X-W/2)*(${cosine})*W+(Y-H/2)*(${sine})*H)/(((${cosine})*(${cosine}))*W*W+(((${sine})*(${sine})))*H*H),0,1)`;
     const opacity = Math.max(0, Math.min(1, Number.isFinite(Number(p.opacity)) ? Number(p.opacity) : 1));
+    let opacityExpr = animated.opacity
+        ? `clip((${String(animated.opacity).replace(/\bt\b/g, 'T').replace(/,/g, '\\,')})\\,0\\,1)`
+        : n4(opacity);
+    const windows = Array.isArray(effect.outputWindows) ? effect.outputWindows
+        .filter(window => Number.isFinite(Number(window?.start)) && Number.isFinite(Number(window?.end)) && Number(window.end) > Number(window.start)) : [];
+    if (!animated.opacity && windows.length) {
+        const active = windows.map(window => timeWindowExpr(window.start, window.end).replace(/\bt\b/g, 'T').replace(/,/g, '\\,')).join('+');
+        opacityExpr = `if(${active}\\,${n4(opacity)}\\,0)`;
+    }
     const channel = index => {
         let expression = String(stops.at(-1).color[index]);
         for (let i = stops.length - 2; i >= 0; i--) {
@@ -1209,7 +1410,7 @@ function compileGradientFill(effect) {
         const first = stops[0], last = stops.at(-1);
         if (first.offset > 0) expression = `if(lt(${t},${n4(first.offset)}),${first.color[index]},${expression})`;
         if (last.offset < 1) expression = `if(gt(${t},${n4(last.offset)}),${last.color[index]},${expression})`;
-        return `r(X,Y)*(1-${n4(opacity)})+(${expression})*${n4(opacity)}`;
+        return `r(X,Y)*(1-(${opacityExpr}))+(${expression})*(${opacityExpr})`;
     };
     return `format=rgba,geq=r='${channel(0)}':g='${channel(1)}':b='${channel(2)}':a='alpha(X,Y)'`;
 }
@@ -1218,7 +1419,7 @@ function compileGradientFill(effect) {
 function compileAlphaEffectSource(ov, inputIdx, label, frame, effect) {
     const rawLabel = `${label}_raw`;
     const kind = effect.kind || effect.type;
-    const sourceOverlay = { ...ov, effects: (ov.effects || []).filter(item => !['shadow', 'glow'].includes(item?.kind || item?.type)) };
+    const sourceOverlay = { ...ov, effects: (ov.effects || []).filter(item => !['shadow', 'drop-shadow', 'glow'].includes(item?.kind || item?.type)) };
     const base = compileOverlaySource(sourceOverlay, inputIdx, rawLabel, frame);
     const p = effect.params || {};
     const { sigma, pad } = alphaEffectMetrics(effect, frame);
@@ -1271,10 +1472,10 @@ function compileAlphaEffectSource(ov, inputIdx, label, frame, effect) {
     const rawOpacity = Number(p.opacity?.value ?? p.opacity);
     const opacity = Math.max(0, Math.min(1, Number.isFinite(rawOpacity) ? rawOpacity : (kind === 'glow' ? glowOpacity : 0.55)));
     const scale = frame.width / 1080;
-    const dx = kind === 'shadow'
+    const dx = kind === 'shadow' || kind === 'drop-shadow'
         ? (animatedX ? `(${buildPiecewiseExpr(animatedX.points, 'value', scale)})` : n4((Number(p.x?.value ?? p.x ?? p.offsetX?.value ?? p.offsetX) || 0) * scale))
         : '0';
-    const dy = kind === 'shadow'
+    const dy = kind === 'shadow' || kind === 'drop-shadow'
         ? (animatedY ? `(${buildPiecewiseExpr(animatedY.points, 'value', scale)})` : n4((Number(p.y?.value ?? p.y ?? p.offsetY?.value ?? p.offsetY) || 0) * scale))
         : '0';
     const tint = `lutrgb=r='0*val+${red}':g='0*val+${green}':b='0*val+${blue}'`;
@@ -1492,7 +1693,7 @@ function compileCompositionPlan(plan, inputs, options = {}) {
         const groupOutput = `comp${groupSerial++}out`;
         const opacity = Math.max(0, Math.min(1, Number(group.opacity ?? 1)));
         const opacitySamples = Array.isArray(group.opacitySamples) ? group.opacitySamples : [];
-        const groupEffects = compileIsolatedGroupEffects(group, `comp${groupSerial}`);
+        const groupEffects = compileIsolatedGroupEffects(group, `comp${groupSerial}`, frame);
         const animatedOpacity = opacitySamples.length > 1
             ? buildPiecewiseExpr(opacitySamples, 'value').replace(/\bt\b/g, 'T')
             : null;
@@ -1525,6 +1726,37 @@ function compileCompositionPlan(plan, inputs, options = {}) {
                 chains.push(`[${processed}]split[${baseLabel}][${bloomLabel}]`);
                 chains.push(`[${bloomLabel}]geq=r='${glow.red}':g='${glow.green}':b='${glow.blue}':a='alpha(X,Y)*${ramp}*(${intensityValue})',${radiusFilter}[${blurredLabel}]`);
                 chains.push(`[${baseLabel}][${blurredLabel}]overlay=x=0:y=0:format=auto:shortest=1[${mergedLabel}]`);
+                processed = mergedLabel;
+            } else if (effect.startsWith('__VIBED_GROUP_STROKE__')) {
+                const stroke = JSON.parse(effect.slice('__VIBED_GROUP_STROKE__'.length));
+                const baseLabel = emitLabel(), alphaLabel = emitLabel(), strokeLabel = emitLabel(), mergedLabel = emitLabel();
+                const dilation = Array.from({ length: stroke.iterations }, () => 'dilation=coordinates=255').join(',');
+                chains.push(`[${processed}]split[${baseLabel}][${alphaLabel}]`);
+                const alpha = stroke.opacityExpression
+                    ? `clip((${stroke.opacityExpression})\\,0\\,1)`
+                    : n4(stroke.opacity);
+                chains.push(`[${alphaLabel}]format=rgba,alphaextract,${dilation},format=rgba,geq=r='${stroke.red}':g='${stroke.green}':b='${stroke.blue}':a='r(X,Y)*(${alpha})'[${strokeLabel}]`);
+                chains.push(`[${strokeLabel}][${baseLabel}]overlay=x=0:y=0:format=auto:shortest=1[${mergedLabel}]`);
+                processed = mergedLabel;
+            } else if (effect.startsWith('__VIBED_GROUP_SHADOW__')) {
+                const shadow = JSON.parse(effect.slice('__VIBED_GROUP_SHADOW__'.length));
+                const baseLabel = emitLabel(), sourceLabel = emitLabel(), tintedLabel = emitLabel();
+                const shadowCanvas = emitLabel(), shiftedLabel = emitLabel(), mergedLabel = emitLabel();
+                const blurFilter = shadow.blurCommands
+                    ? `sendcmd=c='${shadow.blurCommands.commands.join(';')}',gblur@${shadow.blurCommands.target}=sigma=${n4(shadow.sigma)}:planes=15`
+                    : `gblur=sigma=${n4(shadow.sigma)}:planes=15`;
+                const alphaFilter = shadow.opacityExpression
+                    ? `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='clip(alpha(X,Y)*(${shadow.opacityExpression}),0,255)'`
+                    : `colorchannelmixer=aa=${n4(shadow.opacity)}`;
+                const x = typeof shadow.x === 'string' ? shadow.x : n4(shadow.x);
+                const y = typeof shadow.y === 'string' ? shadow.y : n4(shadow.y);
+                chains.push(`[${processed}]split[${baseLabel}][${sourceLabel}]`);
+                chains.push(`[${sourceLabel}]format=rgba,${blurFilter},lutrgb=r=${shadow.red}:g=${shadow.green}:b=${shadow.blue},${alphaFilter}[${tintedLabel}]`);
+                const duration = Math.max(0.1, Number(plan.base?.totalDuration) || 0.1);
+                const fps = Number(plan.fps) > 0 ? Number(plan.fps) : 30;
+                chains.push(`color=c=black@0:s=${frame.width}x${frame.height}:r=${fps}:d=${n4(duration)},format=rgba[${shadowCanvas}]`);
+                chains.push(`[${shadowCanvas}][${tintedLabel}]overlay=x='${x}':y='${y}':format=auto:shortest=1[${shiftedLabel}]`);
+                chains.push(`[${shiftedLabel}][${baseLabel}]overlay=x=0:y=0:format=auto:shortest=1[${mergedLabel}]`);
                 processed = mergedLabel;
             } else {
                 const next = emitLabel();
@@ -1660,7 +1892,7 @@ function compileCompositionPlan(plan, inputs, options = {}) {
                 chains.push(`[matte${i}taSource]alphaextract[${targetAlpha}]`);
                 if (ov.sceneMask.mode === 'luma' || ov.sceneMask.mode === 'luminance') {
                     chains.push(`[${matteFull}]split=2[matte${i}lumaSource][matte${i}alphaSource]`);
-                    chains.push(`[matte${i}lumaSource]format=gray[matte${i}luma]`);
+                    chains.push(`[matte${i}lumaSource]${REC709_LUMINANCE_FILTER}[matte${i}luma]`);
                     chains.push(`[matte${i}alphaSource]alphaextract[matte${i}sourceAlpha]`);
                     chains.push(`[matte${i}luma][matte${i}sourceAlpha]blend=all_mode=multiply[matte${i}lumaAlpha]`);
                     chains.push(`[matte${i}lumaAlpha]${ov.sceneMask.invert ? "lut=y='negval'" : 'null'}[${matteAlpha}]`);
@@ -1747,7 +1979,7 @@ function compileCompositionPlan(plan, inputs, options = {}) {
                 const matteFull = `matte${i}mf${sampleIndex}`;
                 if (ov.sceneMask.mode === 'luma' || ov.sceneMask.mode === 'luminance') {
                     chains.push(`[${matteFull}]split=2[${suffix}lumaSource][${suffix}alphaSource]`);
-                    chains.push(`[${suffix}lumaSource]format=gray[${suffix}luma]`);
+                    chains.push(`[${suffix}lumaSource]${REC709_LUMINANCE_FILTER}[${suffix}luma]`);
                     chains.push(`[${suffix}alphaSource]alphaextract[${suffix}sourceAlpha]`);
                     chains.push(`[${suffix}luma][${suffix}sourceAlpha]blend=all_mode=multiply[${suffix}lumaAlpha]`);
                     chains.push(`[${suffix}lumaAlpha]${ov.sceneMask.invert ? "lut=y='negval'" : 'null'}[${matteAlpha}]`);
@@ -1823,7 +2055,7 @@ function compileCompositionPlan(plan, inputs, options = {}) {
  * executing a plan whose shape you are guessing at produces a wrong video that
  * nothing flags as wrong.
  */
-const SUPPORTED_PLAN_VERSION = 7;
+const SUPPORTED_PLAN_VERSION = 8;
 const BLEND_MODES = new Set(['multiply', 'screen', 'darken', 'lighten', 'difference', 'addition', 'overlay', 'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'exclusion', 'hue', 'saturation', 'color', 'luminosity']);
 const SUPPORTED_BLEND_MODE_KINDS = Object.freeze([...BLEND_MODES]);
 // Keep this list in lockstep with compileOverlaySource and its dedicated alpha,
@@ -1833,21 +2065,76 @@ const SUPPORTED_BLEND_MODE_KINDS = Object.freeze([...BLEND_MODES]);
 const SUPPORTED_OVERLAY_EFFECTS = new Set([
     'gradient-fill', 'fade_in', 'fade_out', 'blur', 'blur_gaussian', 'blur_radial',
     'blur_motion', 'motion-blur', 'shake', 'brightness', 'contrast', 'saturation',
-    'saturate', 'hue', 'hue-rotate', 'color_grade', 'grain', 'film_grain', 'film-grain',
+    'saturate', 'hue', 'hue-rotate', 'grayscale', 'sepia', 'color_grade', 'grain', 'film_grain', 'film-grain',
     'chromatic-aberration', 'rgb_split', 'distortion', 'vignette', 'glitch', 'inner-shadow',
     // These are compiled as dedicated alpha/top/stroke passes rather than by
     // compileOverlaySource's main effect switch. They still need to pass the
     // worker trust-boundary check or valid editor effects are rejected before
     // those specialized passes can run.
-    'shadow', 'glow', 'stroke',
+    'shadow', 'drop-shadow', 'glow', 'stroke',
 ]);
 
 function validIsolatedGroupEffect(effect) {
     if (effect?.enabled === false) return true;
     const kind = effect?.kind || effect?.type;
-    if (!['blur', 'blur_gaussian', 'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate', 'color_grade', 'glow'].includes(kind)) return false;
+    if (!['gradient-fill', 'inner-shadow', 'stroke', 'shadow', 'drop-shadow', 'blur', 'blur_gaussian', 'brightness', 'contrast', 'saturation', 'saturate', 'grayscale', 'sepia', 'vignette', 'grain', 'film_grain', 'film-grain', 'hue', 'hue-rotate', 'color_grade', 'glow'].includes(kind)) return false;
     if (effect.keyframes || effect.expressions) return false;
     const samples = effect.samples;
+    if (kind === 'gradient-fill') {
+        const limits = { angle: [-360, 360], opacity: [0, 1] };
+        if (samples != null && (!samples || typeof samples !== 'object' || Array.isArray(samples)
+            || !Object.keys(samples).length || Object.keys(samples).some(key => !limits[key]))) return false;
+        for (const [key, points] of Object.entries(samples || {})) {
+            const [min, max] = limits[key];
+            if (!Array.isArray(points) || points.length === 0 || points.length > 60 || points.some((point, index) => !point
+                || !hasNumericValue(point.t) || Number(point.t) < 0 || !hasNumericValue(point.value)
+                || Number(point.value) < min || Number(point.value) > max
+                || (index > 0 && Number(point.t) <= Number(points[index - 1]?.t)))) return false;
+        }
+        return effect.outputWindows == null || (Array.isArray(effect.outputWindows) && effect.outputWindows.every(window =>
+            window && hasNumericValue(window.start) && hasNumericValue(window.end) && Number(window.start) >= 0 && Number(window.end) > Number(window.start)));
+    }
+    if (kind === 'stroke') {
+        const allowed = new Set(['opacity']);
+        if (samples != null && (!samples || typeof samples !== 'object' || Array.isArray(samples)
+            || !Object.keys(samples).length || Object.keys(samples).some(key => !allowed.has(key)))) return false;
+        if (samples?.opacity && (!Array.isArray(samples.opacity) || samples.opacity.length === 0 || samples.opacity.length > 60
+            || samples.opacity.some((point, index) => !point || !hasNumericValue(point.t) || Number(point.t) < 0
+                || !hasNumericValue(point.value) || Number(point.value) < 0 || Number(point.value) > 1
+                || (index > 0 && Number(point.t) <= Number(samples.opacity[index - 1]?.t))))) return false;
+        return effect.outputWindows == null || (Array.isArray(effect.outputWindows) && effect.outputWindows.every(window =>
+            window && hasNumericValue(window.start) && hasNumericValue(window.end) && Number(window.start) >= 0 && Number(window.end) > Number(window.start)));
+    }
+    if (kind === 'inner-shadow') {
+        const limits = { x: [-80, 80], y: [-80, 80], blur: [0, 16], opacity: [0, 1] };
+        if (samples == null) return effect.outputWindows == null;
+        if (!samples || typeof samples !== 'object' || Array.isArray(samples)
+            || !Object.keys(samples).length || Object.keys(samples).some(key => !limits[key])) return false;
+        for (const [key, points] of Object.entries(samples)) {
+            const [min, max] = limits[key];
+            if (!Array.isArray(points) || points.length === 0 || points.length > 60 || points.some((point, index) => !point
+                || !hasNumericValue(point.t) || Number(point.t) < 0 || !hasNumericValue(point.value)
+                || Number(point.value) < min || Number(point.value) > max
+                || (index > 0 && Number(point.t) <= Number(points[index - 1]?.t)))) return false;
+        }
+        return effect.outputWindows == null || (Array.isArray(effect.outputWindows) && effect.outputWindows.every(window =>
+            window && hasNumericValue(window.start) && hasNumericValue(window.end) && Number(window.start) >= 0 && Number(window.end) > Number(window.start)));
+    }
+    if (kind === 'shadow' || kind === 'drop-shadow') {
+        const limits = { x: [-200, 200], y: [-200, 200], offsetX: [-200, 200], offsetY: [-200, 200], blur: [0, 100], opacity: [0, 1] };
+        if (samples == null) return effect.outputWindows == null;
+        if (samples != null && (!samples || typeof samples !== 'object' || Array.isArray(samples)
+            || !Object.keys(samples).length || Object.keys(samples).some(key => !limits[key]))) return false;
+        for (const [key, points] of Object.entries(samples || {})) {
+            const [min, max] = limits[key];
+            if (!Array.isArray(points) || points.length === 0 || points.length > 60 || points.some((point, index) => !point
+                || !hasNumericValue(point.t) || Number(point.t) < 0 || !hasNumericValue(point.value)
+                || Number(point.value) < min || Number(point.value) > max
+                || (index > 0 && Number(point.t) <= Number(points[index - 1]?.t)))) return false;
+        }
+        return effect.outputWindows == null || (Array.isArray(effect.outputWindows) && effect.outputWindows.every(window =>
+            window && hasNumericValue(window.start) && hasNumericValue(window.end) && Number(window.start) >= 0 && Number(window.end) > Number(window.start)));
+    }
     if (samples == null) return effect.outputWindows == null;
     if (kind === 'blur' || kind === 'blur_gaussian') {
         const key = samples.radius ? 'radius' : 'amount';
@@ -1881,6 +2168,30 @@ function validIsolatedGroupEffect(effect) {
                 || Number(point.value) < min || Number(point.value) > max
                 || (index > 0 && Number(point.t) <= Number(points[index - 1]?.t)))) return false;
         }
+        return effect.outputWindows == null || (Array.isArray(effect.outputWindows) && effect.outputWindows.every(window =>
+            window && hasNumericValue(window.start) && hasNumericValue(window.end) && Number(window.start) >= 0 && Number(window.end) > Number(window.start)));
+    }
+    if (kind === 'vignette') {
+        const limits = { intensity: [0, 1], radius: [0.1, 1.5], softness: [0, 1] };
+        if (!samples || !Object.keys(samples).length || Object.keys(samples).some(key => !limits[key])) return false;
+        for (const [key, points] of Object.entries(samples)) {
+            const [min, max] = limits[key];
+            if (!Array.isArray(points) || points.length === 0 || points.length > 60 || points.some((point, index) => !point
+                || !hasNumericValue(point.t) || Number(point.t) < 0 || !hasNumericValue(point.value)
+                || Number(point.value) < min || Number(point.value) > max
+                || (index > 0 && Number(point.t) <= Number(points[index - 1]?.t)))) return false;
+        }
+        return effect.outputWindows == null || (Array.isArray(effect.outputWindows) && effect.outputWindows.every(window =>
+            window && hasNumericValue(window.start) && hasNumericValue(window.end) && Number(window.start) >= 0 && Number(window.end) > Number(window.start)));
+    }
+    if (kind === 'grain' || kind === 'film_grain' || kind === 'film-grain') {
+        const key = kind === 'grain' ? 'amount' : 'intensity';
+        const maximum = kind === 'grain' ? 48 : 1;
+        if (!samples || !Array.isArray(samples[key]) || samples[key].length === 0 || samples[key].length > 60
+            || Object.keys(samples).some(sampleKey => sampleKey !== key)
+            || samples[key].some((point, index, points) => !point || !hasNumericValue(point.t) || Number(point.t) < 0
+                || !hasNumericValue(point.value) || Number(point.value) < 0 || Number(point.value) > maximum
+                || (index > 0 && Number(point.t) <= Number(points[index - 1]?.t)))) return false;
         return effect.outputWindows == null || (Array.isArray(effect.outputWindows) && effect.outputWindows.every(window =>
             window && hasNumericValue(window.start) && hasNumericValue(window.end) && Number(window.start) >= 0 && Number(window.end) > Number(window.start)));
     }
@@ -2115,7 +2426,7 @@ function validateCompositionPlanShape(plan, frameWidth, frameHeight) {
             if (kind === 'stroke' && !['image', 'sticker'].includes(ov.source?.type)) {
                 errors.push(`overlays[${i}] cannot apply stroke to source type ${String(ov.source?.type || '(missing type)')}`);
             }
-            if (['shadow', 'glow'].includes(kind) && !['image', 'video', 'sticker'].includes(ov.source?.type)) {
+            if (['shadow', 'drop-shadow', 'glow'].includes(kind) && !['image', 'video', 'sticker'].includes(ov.source?.type)) {
                 errors.push(`overlays[${i}] cannot apply ${kind} to source type ${String(ov.source?.type || '(missing type)')}`);
             }
         }
@@ -2162,7 +2473,8 @@ function validateCompositionPlanShape(plan, frameWidth, frameHeight) {
         }
         for (const g of ov.geometry) {
             if (!g || typeof g !== 'object'
-                || !['x', 'y', 'w', 'h', 't', 'rotation', 'opacity', 'blur'].every(k => hasNumericValue(g[k]))) {
+                || !['x', 'y', 'w', 'h', 't', 'rotation', 'opacity', 'blur'].every(k => hasNumericValue(g[k]))
+                || (g.reveal !== undefined && !hasNumericValue(g.reveal))) {
                 errors.push(`overlays[${i}] has a non-finite geometry sample`);
                 break;
             }
@@ -2170,7 +2482,8 @@ function validateCompositionPlanShape(plan, frameWidth, frameHeight) {
                 errors.push(`overlays[${i}] has a non-positive size`);
                 break;
             }
-            if (Number(g.t) < 0 || Number(g.opacity) < 0 || Number(g.opacity) > 1 || Number(g.blur) < 0) {
+            if (Number(g.t) < 0 || Number(g.opacity) < 0 || Number(g.opacity) > 1 || Number(g.blur) < 0
+                || (g.reveal !== undefined && (Number(g.reveal) < 0 || Number(g.reveal) > 1))) {
                 errors.push(`overlays[${i}] has geometry outside supported bounds`);
                 break;
             }

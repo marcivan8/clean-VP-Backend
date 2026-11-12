@@ -191,7 +191,17 @@ console.log('\n=== proxyRoutes: a range-stream error always ends the response ==
     const path = require('path');
     const src  = fs.readFileSync(path.resolve(__dirname, '../routes/proxyRoutes.js'), 'utf8');
 
-    ok('range reads are retried', /openRangeStream\(attempt \+ 1\)/.test(src), true);
+    // R163 — this pinned `openRangeStream(attempt + 1)` by NAME, and the
+    // in-flight proxy work replaced that mechanism outright: a range is now
+    // BUFFERED by readGcsRange() and only then sent, so a transient GCS reset
+    // is retried before any header goes out instead of truncating a 206 that
+    // the browser has already started reading. The assertion now pins that
+    // guarantee rather than the old function's name.
+    ok('a transient range read is retried', /readGcsRange\([^)]*attempt \+ 1\)/.test(src), true);
+    ok('a range is fully buffered before the 206 is sent, so a reset cannot truncate it',
+        /const body = await readGcsRange\([\s\S]{0,200}?res\.status\(206\)/.test(src), true);
+    ok('a short read is an error, not a silently truncated response',
+        /ERR_GCS_INCOMPLETE_RANGE/.test(src), true);
     ok('the response is destroyed when headers already went out',
         /else res\.destroy\(\);/.test(src), true);
     ok('the no-headers case still sends a status',

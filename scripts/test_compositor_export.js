@@ -54,7 +54,7 @@ const { compileTimelineVisualEffects } = require(path.join(ROOT, 'jobs/exportPro
 // Build plans with the REAL client Compositor, so this exercises the true
 // client→worker path rather than a hand-written plan that could drift from it.
 function loadCompositor() {
-    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionExpression', 'SpatialMotion', 'AudioReactive', 'MotionResolver', 'TimeRemap', 'MotionPresets', 'EffectTiming', 'CaptionModel', 'ClipAdapter', 'Compositor'];
+    const order = ['MotionLimits', 'Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionExpression', 'SpatialMotion', 'AudioReactive', 'MotionResolver', 'TimeRemap', 'MotionPresets', 'EffectTiming', 'CaptionModel', 'ClipAdapter', 'Compositor'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);
@@ -132,6 +132,19 @@ section('1 · The client and worker agree on the plan version');
     check('authored motion paths reach the shared export geometry plan',
         motionPath.geometry[0].x < 0.2 && motionPath.geometry.at(-1).x > 0.5,
         JSON.stringify(motionPath.geometry));
+    const revealPlan = planFor([vclip({ id: 'reveal-layer', start: 0, duration: 1, extra: {
+        animations: [{ type: 'reveal', startTime: 0, duration: 1, easing: 'linear', keyframes: [
+            { time: 0, properties: { reveal: 0 } }, { time: 1, properties: { reveal: 1 } },
+        ] }],
+    } })]);
+    const revealOverlay = revealPlan.overlays[0];
+    const revealGraph = compileCompositionPlan(revealPlan, [{ overlayId: revealOverlay.id, inputIndex: 1 }]);
+    check('animated reveal progress is sampled into the shared composition plan',
+        revealOverlay.geometry[0].reveal === 0 && revealOverlay.geometry.at(-1).reveal === 1,
+        JSON.stringify(revealOverlay.geometry));
+    check('export applies animated reveal as a local-space alpha wipe',
+        revealGraph.filterComplex.includes("a='if(lt(X/W,if(lt(T")
+            && revealGraph.filterComplex.includes('format=rgba,geq='), revealGraph.filterComplex);
 }
 
 section('2 · The worker refuses plans it must not execute');
@@ -398,6 +411,19 @@ section('3 · Compilation produces a sane filter graph');
     check('long keyed effect sampling retains brief authored keyframe peaks',
         longSamples.some(sample => Math.abs(sample.t - narrowPeak) < 0.0001 && Math.abs(sample.value - 4) < 0.0001),
         `peak at ${narrowPeak}s is missing from ${longSamples.length} exported samples`);
+    const frameRateEasingPlan = C.buildCompositionPlan([
+        { id: 'frame-rate-easing-base', type: 'video', order: 0, clips: [vclip({ id: 'frame-rate-easing-base-clip', start: 0, duration: 1, w: W, h: H })] },
+        { id: 'frame-rate-easing-overlay', type: 'video', order: 1, clips: [vclip({ id: 'frame-rate-easing-clip', start: 0, duration: 1, extra: {
+            effects: [{ kind: 'brightness', params: { amount: { value: 1 } }, keyframes: { amount: [
+                { time: 0, value: 0, easing: 'linear' }, { time: 1, value: 4, easing: 'easeInOutExpo' },
+            ] } }],
+        } })] },
+    ], { width: W, height: H, fps: 30 });
+    const frameRateEasingSamples = frameRateEasingPlan.overlays[0].effects[0].samples.amount;
+    check('animated effect curves are sampled densely enough for the requested render frame rate',
+        frameRateEasingSamples.length > 11 && frameRateEasingSamples.length <= 60
+            && frameRateEasingSamples.some(sample => Math.abs(sample.t - 1 / 30) < 0.0001),
+        `30fps one-second ease retained ${frameRateEasingSamples.length} points`);
     const overBudgetKeyframes = Array.from({ length: 62 }, (_, index) => ({ time: index / 3, value: 1 + (index % 2) }));
     const overBudgetPlan = C.buildCompositionPlan([
         { id: 'over-budget-base', type: 'video', order: 0, clips: [longBase] },
@@ -431,6 +457,18 @@ section('3 · Compilation produces a sane filter graph');
             && /gblur=sigma=/.test(imageShadowGraph.filterComplex)
             && /overlay=x=/.test(imageShadowGraph.filterComplex),
         JSON.stringify({ errors: validateCompositionPlanShape(imageShadowPlan, W, H), graph: imageShadowGraph.filterComplex }));
+    const stackedImageShadowPlan = planFor([vclip({ id: 'stacked-image-shadow', type: 'image', start: 0.5, duration: 2, extra: {
+        effects: [
+            { kind: 'shadow', params: { x: 4, y: 6, blur: 4, opacity: 0.45, color: '#000000' } },
+            { kind: 'drop-shadow', params: { x: -8, y: 12, blur: 18, opacity: 0.8, color: '#ff0000' } },
+        ],
+    } })]);
+    const stackedImageShadowGraph = compileCompositionPlan(stackedImageShadowPlan, [{ overlayId: stackedImageShadowPlan.overlays[0].id, inputIndex: 1 }]);
+    check('independent image shadow effects compile as separate compositor passes',
+        validateCompositionPlanShape(stackedImageShadowPlan, W, H).length === 0
+            && stackedImageShadowGraph.filterComplex.includes('[ov0e0_raw]')
+            && stackedImageShadowGraph.filterComplex.includes('[ov0e1_raw]'),
+        JSON.stringify({ errors: validateCompositionPlanShape(stackedImageShadowPlan, W, H), graph: stackedImageShadowGraph.filterComplex }));
     const imageStrokePlan = planFor([vclip({ id: 'image-stroke', type: 'image', start: 0.5, duration: 2, extra: {
         effects: [{ kind: 'stroke', params: { width: 3, color: '#ffffff', opacity: 1 } }],
     } })]);
@@ -570,8 +608,25 @@ if (!FFMPEG) {
         { overlayId: target.id, inputIndex: 1 }, { overlayId: matte.id, inputIndex: 2 },
     ]);
     check('luminance mode derives matte values from source brightness and preserves its alpha',
-        lumaCompiled.filterComplex.includes('format=gray') && lumaCompiled.filterComplex.includes('sourceAlpha')
+        lumaCompiled.filterComplex.includes('format=rgb24,geq=') && lumaCompiled.filterComplex.includes('0.2126*r(X,Y)+0.7152*g(X,Y)+0.0722*b(X,Y)')
+        && lumaCompiled.filterComplex.includes('sourceAlpha')
         && lumaCompiled.filterComplex.includes('lumaAlpha'));
+    const lumaFilterStart = lumaCompiled.filterComplex.indexOf('format=rgb24,geq=');
+    const lumaFilterEnd = lumaCompiled.filterComplex.indexOf(',format=gray', lumaFilterStart);
+    const lumaFilter = lumaFilterStart >= 0 && lumaFilterEnd > lumaFilterStart
+        ? lumaCompiled.filterComplex.slice(lumaFilterStart, lumaFilterEnd + ',format=gray'.length)
+        : null;
+    const channelLuma = Object.fromEntries([['red', 'red'], ['green', 'lime'], ['blue', 'blue']].map(([channel, color]) => {
+        const rendered = lumaFilter && spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i',
+            `color=c=${color}:s=2x2:d=1`, '-frames:v', '1', '-vf', lumaFilter, '-f', 'rawvideo', '-pix_fmt', 'gray', '-'],
+        { encoding: 'buffer', timeout: 60_000 });
+        return [channel, rendered?.status === 0 && rendered.stdout?.length >= 4 ? rendered.stdout[0] : null];
+    }));
+    check('export luminance matte uses the same Rec.709 RGB weights as preview',
+        channelLuma.red >= 52 && channelLuma.red <= 56
+        && channelLuma.green >= 180 && channelLuma.green <= 184
+        && channelLuma.blue >= 17 && channelLuma.blue <= 20,
+        `RGB matte luminance=${JSON.stringify(channelLuma)}`);
     const lumaOutput = path.join(dir, 'luma-matte-output.mp4');
     const lumaRender = spawnSync(FFMPEG, [
         '-hide_banner', '-loglevel', 'error', '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
@@ -584,6 +639,26 @@ if (!FFMPEG) {
         colorDist(regionColor(lumaOutput, 1, { x: 314, y: 174, w: 12, h: 12 }), 'ff0000') < 40);
     check('luminance matte keeps transparent matte pixels transparent',
         colorDist(regionColor(lumaOutput, 1, { x: 244, y: 104, w: 12, h: 12 }), '808080') < 25);
+    const rgbMattePath = path.join(dir, 'rgb-luminance-matte.png');
+    const rgbMatteFixture = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i',
+        'color=c=red:s=67x200:d=1[r];color=c=lime:s=66x200:d=1[g];color=c=blue:s=67x200:d=1[b];[r][g][b]hstack=inputs=3',
+        '-frames:v', '1', '-y', rgbMattePath], { encoding: 'utf8', timeout: 60_000 });
+    check('opaque RGB luminance matte fixture is generated', rgbMatteFixture.status === 0, rgbMatteFixture.stderr);
+    const rgbLumaOutput = path.join(dir, 'rgb-luma-matte-output.mp4');
+    const rgbLumaRender = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+        '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
+        '-loop', '1', '-t', '3', '-i', rgbMattePath, '-filter_complex', lumaCompiled.filterComplex,
+        '-map', `[${lumaCompiled.outputLabel}]`, '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', rgbLumaOutput,
+    ], { encoding: 'utf8', timeout: 120_000 });
+    const redCoverage = regionColor(rgbLumaOutput, 1, { x: 244, y: 174, w: 12, h: 12 });
+    const greenCoverage = regionColor(rgbLumaOutput, 1, { x: 314, y: 174, w: 12, h: 12 });
+    const blueCoverage = regionColor(rgbLumaOutput, 1, { x: 384, y: 174, w: 12, h: 12 });
+    check('colored luminance matte renders and applies Rec.709 coverage to each channel',
+        rgbLumaRender.status === 0
+        && colorDist(redCoverage, '9b6565') < 22
+        && colorDist(greenCoverage, 'db2525') < 22
+        && colorDist(blueCoverage, '897777') < 22,
+        `red=${redCoverage} green=${greenCoverage} blue=${blueCoverage}; ${rgbLumaRender.stderr}`);
     target.sceneMask.invert = true;
     const invertedLumaCompiled = compileCompositionPlan(plan, [
         { overlayId: target.id, inputIndex: 1 }, { overlayId: matte.id, inputIndex: 2 },
@@ -1107,6 +1182,367 @@ if (!FFMPEG) {
         !!darkGrade && !!brightGrade && colorDist(darkGrade, brightGrade) > 35,
         `expected a visible grade change, got ${darkGrade} then ${brightGrade}`);
 
+    for (const kind of ['grayscale', 'sepia']) {
+        const groupStack = [{ id: `${kind}-group`, type: 'composition', opacity: 1, blendMode: 'source-over', start: 0, duration: 3,
+            effects: [{ kind, params: { amount: 1 } }] }];
+        const groupPlan = planFor([vclip({ id: `${kind}-child`, start: 0, duration: 3,
+            extra: { x: 50, y: 50, compositionStack: groupStack } })]);
+        check(`${kind} is accepted on isolated composition layers`, validateCompositionPlanShape(groupPlan, W, H).length === 0,
+            validateCompositionPlanShape(groupPlan, W, H).join('; '));
+        const groupGraph = compileCompositionPlan(groupPlan, [{ overlayId: groupPlan.overlays[0].id, inputIndex: 1 }]);
+        check(`${kind} reaches the isolated composition filter graph`, kind === 'grayscale'
+            ? /eq=saturation='0'/.test(groupGraph.filterComplex)
+            : /geq=r='clip\(/.test(groupGraph.filterComplex));
+        const groupOutput = path.join(dir, `isolated-${kind}.mp4`);
+        const groupRender = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+            '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
+            '-filter_complex', groupGraph.filterComplex, '-map', `[${groupGraph.outputLabel}]`,
+            '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', groupOutput,
+        ], { encoding: 'utf8', timeout: 120_000 });
+        check(`FFmpeg renders isolated composition ${kind}`, groupRender.status === 0,
+            (groupRender.stderr || '').split('\n').slice(-5).join(' | '));
+        const sampled = regionColor(groupOutput, 1, { x: 315, y: 175, w: 12, h: 12 });
+        const [red, green, blue] = sampled ? sampled.match(/../g).map(value => parseInt(value, 16)) : [];
+        check(`isolated composition ${kind} visibly transforms its child`, kind === 'grayscale'
+            ? Number.isFinite(red) && Math.max(red, green, blue) - Math.min(red, green, blue) <= 5
+            : Number.isFinite(red) && red > green && green > blue,
+        `sampled ${sampled}`);
+    }
+
+    const vignetteStack = [{ id: 'vignette-group', type: 'composition', opacity: 1, blendMode: 'source-over', start: 0, duration: 3,
+        effects: [{ kind: 'vignette', params: { intensity: 1, radius: 0.1, softness: 0.2, color: [0, 0, 0] } }] }];
+    const vignettePlan = planFor([vclip({ id: 'vignette-child', start: 0, duration: 3,
+        extra: { x: 10, y: 10, compositionStack: vignetteStack } })]);
+    check('vignette is accepted on isolated composition layers', validateCompositionPlanShape(vignettePlan, W, H).length === 0,
+        validateCompositionPlanShape(vignettePlan, W, H).join('; '));
+    const vignetteGraph = compileCompositionPlan(vignettePlan, [{ overlayId: vignettePlan.overlays[0].id, inputIndex: 1 }]);
+    check('vignette reaches the isolated composition geq filter', /geq=r='r\(X,Y\)\*\(1-/.test(vignetteGraph.filterComplex));
+    const vignetteOutput = path.join(dir, 'isolated-vignette.mp4');
+    const vignetteRender = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+        '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
+        '-filter_complex', vignetteGraph.filterComplex, '-map', `[${vignetteGraph.outputLabel}]`,
+        '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', vignetteOutput,
+    ], { encoding: 'utf8', timeout: 120_000 });
+    check('FFmpeg renders vignette on an isolated composition', vignetteRender.status === 0,
+        (vignetteRender.stderr || '').split('\n').slice(-5).join(' | '));
+    const vignetteGeometry = vignettePlan.overlays[0].geometry[0];
+    const vignetteCenter = regionColor(vignetteOutput, 1, {
+        x: Math.max(0, Math.round((vignetteGeometry.x + vignetteGeometry.w / 2) * W) - 6),
+        y: Math.max(0, Math.round((vignetteGeometry.y + vignetteGeometry.h / 2) * H) - 6), w: 12, h: 12,
+    });
+    check('composition vignette darkens child footage positioned near a frame edge',
+        !!vignetteCenter && colorDist(vignetteCenter, 'ff0000') > 60, `sampled ${vignetteCenter}`);
+
+    const animatedVignetteStack = [{ id: 'animated-vignette-group', type: 'composition', opacity: 1, blendMode: 'source-over', start: 0, duration: 3,
+        effects: [{ kind: 'vignette', params: { intensity: 0, radius: 0.1, softness: 0.2, color: [0, 0, 0] },
+            samples: { intensity: [{ t: 0, value: 0 }, { t: 3, value: 1 }] }, outputWindows: [{ start: 0, end: 3 }] }] }];
+    const animatedVignettePlan = planFor([vclip({ id: 'animated-vignette-child', start: 0, duration: 3,
+        extra: { x: 10, y: 10, compositionStack: animatedVignetteStack } })]);
+    check('animated vignette controls pass isolated composition validation',
+        validateCompositionPlanShape(animatedVignettePlan, W, H).length === 0,
+        validateCompositionPlanShape(animatedVignettePlan, W, H).join('; '));
+    const animatedVignetteGraph = compileCompositionPlan(animatedVignettePlan,
+        [{ overlayId: animatedVignettePlan.overlays[0].id, inputIndex: 1 }]);
+    check('animated vignette uses per-frame geq time and its sampled intensity track',
+        /geq=.*T.*if\(lt\(T,3/.test(animatedVignetteGraph.filterComplex), animatedVignetteGraph.filterComplex);
+    const animatedVignetteOutput = path.join(dir, 'isolated-vignette-animated.mp4');
+    const animatedVignetteRender = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+        '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
+        '-filter_complex', animatedVignetteGraph.filterComplex, '-map', `[${animatedVignetteGraph.outputLabel}]`,
+        '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', animatedVignetteOutput,
+    ], { encoding: 'utf8', timeout: 120_000 });
+    check('FFmpeg renders animated vignette on an isolated composition', animatedVignetteRender.status === 0,
+        (animatedVignetteRender.stderr || '').split('\n').slice(-5).join(' | '));
+    const animatedVignetteGeometry = animatedVignettePlan.overlays[0].geometry[0];
+    const edgeCrop = {
+        x: Math.max(0, Math.round((animatedVignetteGeometry.x + animatedVignetteGeometry.w / 2) * W) - 6),
+        y: Math.max(0, Math.round((animatedVignetteGeometry.y + animatedVignetteGeometry.h / 2) * H) - 6), w: 12, h: 12,
+    };
+    const vignetteEarly = regionColor(animatedVignetteOutput, 0.2, edgeCrop);
+    const vignetteLate = regionColor(animatedVignetteOutput, 2.5, edgeCrop);
+    check('animated composition vignette changes edge pixels over time', !!vignetteEarly && !!vignetteLate
+        && colorDist(vignetteEarly, vignetteLate) > 40, `expected a darker edge, got ${vignetteEarly} then ${vignetteLate}`);
+
+    const gradientStack = [{ id: 'gradient-group', type: 'composition', opacity: 1, blendMode: 'source-over', start: 0, duration: 3,
+        effects: [{ kind: 'gradient-fill', params: { from: '#0033ff', to: '#00ff66', angle: 0, opacity: 1 } }] }];
+    const gradientPlan = planFor([vclip({ id: 'gradient-child', start: 0, duration: 3,
+        extra: { x: 50, y: 50, compositionStack: gradientStack } })]);
+    check('gradient fill is accepted on isolated composition layers', validateCompositionPlanShape(gradientPlan, W, H).length === 0,
+        validateCompositionPlanShape(gradientPlan, W, H).join('; '));
+    const gradientGraph = compileCompositionPlan(gradientPlan, [{ overlayId: gradientPlan.overlays[0].id, inputIndex: 1 }]);
+    check('gradient fill is compiled inside the isolated group before it is composited',
+        gradientGraph.filterComplex.includes('comp0canvas') && gradientGraph.filterComplex.includes('geq=r=')
+            && gradientGraph.filterComplex.includes("a='alpha(X,Y)'"));
+    const gradientOutput = path.join(dir, 'isolated-gradient.mp4');
+    const gradientRender = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+        '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
+        '-filter_complex', gradientGraph.filterComplex, '-map', `[${gradientGraph.outputLabel}]`,
+        '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', gradientOutput,
+    ], { encoding: 'utf8', timeout: 120_000 });
+    check('FFmpeg renders gradient fill on an isolated composition', gradientRender.status === 0,
+        (gradientRender.stderr || '').split('\n').slice(-5).join(' | '));
+    const gradientGeometry = gradientPlan.overlays[0].geometry[0];
+    const gradientCenterX = Math.round((gradientGeometry.x + gradientGeometry.w / 2) * W);
+    const gradientCenterY = Math.round((gradientGeometry.y + gradientGeometry.h / 2) * H);
+    const gradientLeft = regionColor(gradientOutput, 1.5, { x: gradientCenterX - 28, y: gradientCenterY - 6, w: 12, h: 12 });
+    const gradientRight = regionColor(gradientOutput, 1.5, { x: gradientCenterX + 16, y: gradientCenterY - 6, w: 12, h: 12 });
+    check('isolated gradient fill produces visibly different colors across the group',
+        !!gradientLeft && !!gradientRight && colorDist(gradientLeft, gradientRight) > 20,
+        `expected a gradient across the group, got ${gradientLeft} / ${gradientRight}`);
+
+    const animatedGradientStack = [{ id: 'animated-gradient-group', type: 'composition', opacity: 1,
+        blendMode: 'source-over', start: 0, duration: 3, effects: [{ kind: 'gradient-fill',
+            params: { from: '#0033ff', to: '#00ff66', angle: 0, opacity: 1 },
+            samples: {
+                angle: [{ t: 0, value: 0 }, { t: 3, value: 90 }],
+                opacity: [{ t: 0, value: 0 }, { t: 3, value: 1 }],
+            },
+            outputWindows: [{ start: 0, end: 3 }] }] }];
+    const animatedGradientPlan = planFor([vclip({ id: 'animated-gradient-child', start: 0, duration: 3,
+        extra: { x: 50, y: 50, compositionStack: animatedGradientStack } })]);
+    check('keyframed gradient angle and opacity pass isolated composition validation',
+        validateCompositionPlanShape(animatedGradientPlan, W, H).length === 0,
+        validateCompositionPlanShape(animatedGradientPlan, W, H).join('; '));
+    const animatedGradientGraph = compileCompositionPlan(animatedGradientPlan,
+        [{ overlayId: animatedGradientPlan.overlays[0].id, inputIndex: 1 }]);
+    check('gradient angle uses a per-frame expression while opacity retains its active window',
+        animatedGradientGraph.filterComplex.includes('cos((') && animatedGradientGraph.filterComplex.includes('clip((')
+            && animatedGradientGraph.filterComplex.includes('T\\,0'), animatedGradientGraph.filterComplex);
+    const animatedGradientOutput = path.join(dir, 'isolated-gradient-animated.mp4');
+    const animatedGradientRender = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+        '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
+        '-filter_complex', animatedGradientGraph.filterComplex, '-map', `[${animatedGradientGraph.outputLabel}]`,
+        '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', animatedGradientOutput,
+    ], { encoding: 'utf8', timeout: 120_000 });
+    check('FFmpeg renders keyframed gradient angle and opacity on an isolated composition', animatedGradientRender.status === 0,
+        (animatedGradientRender.stderr || '').split('\n').slice(-5).join(' | '));
+    const animatedGradientPoint = { x: gradientCenterX - 6, y: gradientCenterY - 6, w: 12, h: 12 };
+    const animatedGradientEarly = regionColor(animatedGradientOutput, 0.2, animatedGradientPoint);
+    const animatedGradientLate = regionColor(animatedGradientOutput, 2.5, animatedGradientPoint);
+    check('keyframed gradient changes exported color and strength over time',
+        !!animatedGradientEarly && !!animatedGradientLate && colorDist(animatedGradientEarly, animatedGradientLate) > 20,
+        `expected animated gradient pixels, got ${animatedGradientEarly} / ${animatedGradientLate}`);
+
+    const innerShadowStack = [{ id: 'inner-shadow-group', type: 'composition', opacity: 1, blendMode: 'source-over', start: 0, duration: 3,
+        effects: [{ kind: 'inner-shadow', params: { color: '#000000', opacity: 1, blur: 8, x: 0, y: 0 } }] }];
+    const innerShadowPlan = planFor([vclip({ id: 'inner-shadow-child', start: 0, duration: 3,
+        extra: { x: 50, y: 50, compositionStack: innerShadowStack } })]);
+    check('inner shadow is accepted on isolated composition layers', validateCompositionPlanShape(innerShadowPlan, W, H).length === 0,
+        validateCompositionPlanShape(innerShadowPlan, W, H).join('; '));
+    const innerShadowGraph = compileCompositionPlan(innerShadowPlan, [{ overlayId: innerShadowPlan.overlays[0].id, inputIndex: 1 }]);
+    check('inner shadow is compiled into the isolated group effect stack',
+        innerShadowGraph.filterComplex.includes('comp0canvas') && innerShadowGraph.filterComplex.includes('alpha(X,Y)/255'));
+    const innerShadowOutput = path.join(dir, 'isolated-inner-shadow.mp4');
+    const innerShadowRender = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+        '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
+        '-filter_complex', innerShadowGraph.filterComplex, '-map', `[${innerShadowGraph.outputLabel}]`,
+        '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', innerShadowOutput,
+    ], { encoding: 'utf8', timeout: 120_000 });
+    check('FFmpeg renders inner shadow on an isolated composition', innerShadowRender.status === 0,
+        (innerShadowRender.stderr || '').split('\n').slice(-5).join(' | '));
+    const innerShadowGeometry = innerShadowPlan.overlays[0].geometry[0];
+    const innerShadowCenterX = Math.round((innerShadowGeometry.x + innerShadowGeometry.w / 2) * W);
+    const innerShadowCenterY = Math.round((innerShadowGeometry.y + innerShadowGeometry.h / 2) * H);
+    const innerShadowEdge = regionColor(innerShadowOutput, 1.5, { x: innerShadowCenterX - 76, y: innerShadowCenterY - 2, w: 2, h: 2 });
+    const innerShadowCenter = regionColor(innerShadowOutput, 1.5, { x: innerShadowCenterX - 2, y: innerShadowCenterY - 2, w: 2, h: 2 });
+    check('isolated inner shadow darkens the group edge while preserving its center',
+        !!innerShadowEdge && !!innerShadowCenter && colorDist(innerShadowEdge, 'ff0000') > 15
+            && colorDist(innerShadowCenter, 'ff0000') < 20,
+        `expected a darkened edge and red center, got ${innerShadowEdge} / ${innerShadowCenter}`);
+
+    const strokeStack = [{ id: 'stroke-group', type: 'composition', opacity: 1, blendMode: 'source-over', start: 0, duration: 3,
+        effects: [{ kind: 'stroke', params: { color: '#00ff00', width: 14, opacity: 1 } }] }];
+    const strokePlan = planFor([vclip({ id: 'stroke-child', start: 0, duration: 3,
+        extra: { x: 50, y: 50, compositionStack: strokeStack } })]);
+    check('stroke is accepted on isolated composition layers', validateCompositionPlanShape(strokePlan, W, H).length === 0,
+        validateCompositionPlanShape(strokePlan, W, H).join('; '));
+    const strokeGraph = compileCompositionPlan(strokePlan, [{ overlayId: strokePlan.overlays[0].id, inputIndex: 1 }]);
+    check('group stroke is compiled as a dilation and behind-layer alpha pass',
+        strokeGraph.filterComplex.includes('dilation=coordinates=255') && strokeGraph.filterComplex.includes('__VIBED_GROUP_STROKE__') === false);
+    const strokeOutput = path.join(dir, 'isolated-stroke.mp4');
+    const strokeRender = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+        '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
+        '-filter_complex', strokeGraph.filterComplex, '-map', `[${strokeGraph.outputLabel}]`,
+        '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', strokeOutput,
+    ], { encoding: 'utf8', timeout: 120_000 });
+    check('FFmpeg renders a stroke around an isolated composition', strokeRender.status === 0,
+        (strokeRender.stderr || '').split('\n').slice(-5).join(' | '));
+    const strokeCenterX = Math.round((strokePlan.overlays[0].geometry[0].x + strokePlan.overlays[0].geometry[0].w / 2) * W);
+    const strokeCenterY = Math.round((strokePlan.overlays[0].geometry[0].y + strokePlan.overlays[0].geometry[0].h / 2) * H);
+    const strokeOutside = regionColor(strokeOutput, 1.5, { x: strokeCenterX - 84, y: strokeCenterY - 2, w: 2, h: 2 });
+    const strokeInside = regionColor(strokeOutput, 1.5, { x: strokeCenterX - 2, y: strokeCenterY - 2, w: 2, h: 2 });
+    const strokeOutsideRgb = strokeOutside && [0, 2, 4].map(index => parseInt(strokeOutside.slice(index, index + 2), 16));
+    check('group stroke remains visible beyond the media edge and leaves the center intact',
+        !!strokeOutsideRgb && strokeOutsideRgb[1] > strokeOutsideRgb[0] + 25 && !!strokeInside
+            && colorDist(strokeInside, 'ff0000') < 20,
+        `expected green outline and red center, got ${strokeOutside} / ${strokeInside}`);
+
+    const shadowStack = [{ id: 'shadow-group', type: 'composition', opacity: 1, blendMode: 'source-over', start: 0, duration: 3,
+        effects: [{ kind: 'drop-shadow', params: { color: '#0000ff', opacity: 1, blur: 2, x: 20, y: 0 } }] }];
+    const shadowPlan = planFor([vclip({ id: 'shadow-child', start: 0, duration: 3,
+        extra: { x: 50, y: 50, compositionStack: shadowStack } })]);
+    check('drop shadow is accepted on isolated composition layers', validateCompositionPlanShape(shadowPlan, W, H).length === 0,
+        validateCompositionPlanShape(shadowPlan, W, H).join('; '));
+    const shadowGraph = compileCompositionPlan(shadowPlan, [{ overlayId: shadowPlan.overlays[0].id, inputIndex: 1 }]);
+    check('group shadow uses one softened alpha silhouette behind the isolated pixels',
+        shadowGraph.filterComplex.includes('gblur=sigma=') && shadowGraph.filterComplex.includes("overlay=x='11.8519':y='0'"));
+    const shadowOutput = path.join(dir, 'isolated-shadow.mp4');
+    const shadowRender = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+        '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
+        '-filter_complex', shadowGraph.filterComplex, '-map', `[${shadowGraph.outputLabel}]`,
+        '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', shadowOutput,
+    ], { encoding: 'utf8', timeout: 120_000 });
+    check('FFmpeg renders a drop shadow for an isolated composition', shadowRender.status === 0,
+        (shadowRender.stderr || '').split('\n').slice(-5).join(' | '));
+    const shadowGeometry = shadowPlan.overlays[0].geometry[0];
+    const shadowCenterX = Math.round((shadowGeometry.x + shadowGeometry.w / 2) * W);
+    const shadowCenterY = Math.round((shadowGeometry.y + shadowGeometry.h / 2) * H);
+    const shadowPixel = regionColor(shadowOutput, 1.5, { x: shadowCenterX + 85, y: shadowCenterY - 2, w: 2, h: 2 });
+    const shadowCenter = regionColor(shadowOutput, 1.5, { x: shadowCenterX - 2, y: shadowCenterY - 2, w: 2, h: 2 });
+    check('group shadow appears beyond the child edge while preserving the child center',
+        !!shadowPixel && !!shadowCenter && colorDist(shadowPixel, 'ff0000') > 25 && colorDist(shadowCenter, 'ff0000') < 20,
+        `expected a tinted shadow outside and red source inside, got ${shadowPixel} / ${shadowCenter}`);
+
+    const animatedShadowStack = [{ id: 'animated-shadow-group', type: 'composition', opacity: 1, blendMode: 'source-over', start: 0, duration: 3,
+        effects: [{ kind: 'shadow', params: { color: '#0000ff', opacity: 0.2, blur: 2, x: -20, y: 0 }, samples: {
+            opacity: [{ t: 0, value: 0.15 }, { t: 2, value: 1 }],
+            blur: [{ t: 0, value: 2 }, { t: 2, value: 24 }],
+            x: [{ t: 0, value: -20 }, { t: 2, value: 20 }],
+        } }] }];
+    const animatedShadowPlan = planFor([vclip({ id: 'animated-shadow-child', start: 0, duration: 3,
+        extra: { x: 50, y: 50, compositionStack: animatedShadowStack } })]);
+    check('animated group shadow tracks pass worker validation',
+        validateCompositionPlanShape(animatedShadowPlan, W, H).length === 0,
+        validateCompositionPlanShape(animatedShadowPlan, W, H).join('; '));
+    const animatedGroupShadowGraph = compileCompositionPlan(animatedShadowPlan,
+        [{ overlayId: animatedShadowPlan.overlays[0].id, inputIndex: 1 }]);
+    check('animated group shadow compiles sampled opacity, offset and blur controls',
+        animatedGroupShadowGraph.filterComplex.includes('sendcmd=c=')
+            && /gblur@comp\d+_shadow_blur=sigma=/.test(animatedGroupShadowGraph.filterComplex)
+            && /alpha\(X,Y\).*if\(lt\(T/.test(animatedGroupShadowGraph.filterComplex)
+            && /overlay=x='\(\(if\(lt\(t/.test(animatedGroupShadowGraph.filterComplex),
+        animatedGroupShadowGraph.filterComplex);
+    const invalidAnimatedShadow = structuredClone(animatedShadowPlan);
+    invalidAnimatedShadow.overlays[0].compositionStack[0].effects[0].samples.opacity[1].value = 1.1;
+    check('animated group shadow rejects opacity samples above one',
+        validateCompositionPlanShape(invalidAnimatedShadow, W, H).length > 0);
+    const animatedGroupShadowOutput = path.join(dir, 'isolated-shadow-animated.mp4');
+    const animatedGroupShadowRender = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+        '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
+        '-filter_complex', animatedGroupShadowGraph.filterComplex, '-map', `[${animatedGroupShadowGraph.outputLabel}]`,
+        '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', animatedGroupShadowOutput,
+    ], { encoding: 'utf8', timeout: 120_000 });
+    check('FFmpeg renders animated group shadow controls', animatedGroupShadowRender.status === 0,
+        (animatedGroupShadowRender.stderr || '').split('\n').slice(-5).join(' | '));
+    const earlyGroupShadow = framePixels(animatedGroupShadowOutput, 0.2);
+    const lateGroupShadow = framePixels(animatedGroupShadowOutput, 2.5);
+    check('animated group shadow produces visibly different frames over time',
+        !!earlyGroupShadow && !!lateGroupShadow && !earlyGroupShadow.equals(lateGroupShadow),
+        `frames=${earlyGroupShadow?.length} -> ${lateGroupShadow?.length}`);
+
+    const animatedStrokeStack = [{ ...strokeStack[0], id: 'animated-stroke-group', effects: [{ kind: 'stroke',
+        params: { color: '#00ff00', width: 14, opacity: 1 },
+        samples: { opacity: [{ t: 0, value: 0 }, { t: 3, value: 1 }] },
+        outputWindows: [{ start: 0, end: 3 }] }] }];
+    const animatedStrokePlan = planFor([vclip({ id: 'animated-stroke-child', start: 0, duration: 3,
+        extra: { x: 50, y: 50, compositionStack: animatedStrokeStack } })]);
+    check('keyframed group stroke opacity is accepted by isolated composition validation',
+        validateCompositionPlanShape(animatedStrokePlan, W, H).length === 0,
+        validateCompositionPlanShape(animatedStrokePlan, W, H).join('; '));
+    const animatedStrokeGraph = compileCompositionPlan(animatedStrokePlan,
+        [{ overlayId: animatedStrokePlan.overlays[0].id, inputIndex: 1 }]);
+    check('group stroke opacity is evaluated on the output-frame clock',
+        animatedStrokeGraph.filterComplex.includes('T\\,0') && animatedStrokeGraph.filterComplex.includes('clip(('),
+        animatedStrokeGraph.filterComplex);
+    const animatedStrokeOutput = path.join(dir, 'isolated-stroke-animated.mp4');
+    const animatedStrokeRender = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+        '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
+        '-filter_complex', animatedStrokeGraph.filterComplex, '-map', `[${animatedStrokeGraph.outputLabel}]`,
+        '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', animatedStrokeOutput,
+    ], { encoding: 'utf8', timeout: 120_000 });
+    check('FFmpeg renders keyframed group stroke opacity', animatedStrokeRender.status === 0,
+        (animatedStrokeRender.stderr || '').split('\n').slice(-5).join(' | '));
+    const animatedStrokeX = Math.round((animatedStrokePlan.overlays[0].geometry[0].x + animatedStrokePlan.overlays[0].geometry[0].w / 2) * W) - 84;
+    const animatedStrokeY = Math.round((animatedStrokePlan.overlays[0].geometry[0].y + animatedStrokePlan.overlays[0].geometry[0].h / 2) * H) - 2;
+    const animatedStrokeEarly = regionColor(animatedStrokeOutput, 0.2, { x: animatedStrokeX, y: animatedStrokeY, w: 2, h: 2 });
+    const animatedStrokeLate = regionColor(animatedStrokeOutput, 2.5, { x: animatedStrokeX, y: animatedStrokeY, w: 2, h: 2 });
+    const earlyStrokeRgb = animatedStrokeEarly && [0, 2, 4].map(index => parseInt(animatedStrokeEarly.slice(index, index + 2), 16));
+    const lateStrokeRgb = animatedStrokeLate && [0, 2, 4].map(index => parseInt(animatedStrokeLate.slice(index, index + 2), 16));
+    check('keyframed group stroke opacity fades in at its authored times',
+        !!earlyStrokeRgb && !!lateStrokeRgb && lateStrokeRgb[1] - lateStrokeRgb[0] > earlyStrokeRgb[1] - earlyStrokeRgb[0] + 40,
+        `expected absent early stroke and visible late stroke, got ${animatedStrokeEarly} / ${animatedStrokeLate}`);
+
+    const animatedInnerShadowStack = [{ id: 'animated-inner-shadow-group', type: 'composition', opacity: 1,
+        blendMode: 'source-over', start: 0, duration: 3, effects: [{ kind: 'inner-shadow',
+            params: { color: '#000000', blur: 8, x: 0, y: 0 },
+            samples: { opacity: [{ t: 0, value: 0 }, { t: 3, value: 1 }] },
+            outputWindows: [{ start: 0, end: 3 }] }] }];
+    const animatedInnerShadowPlan = planFor([vclip({ id: 'animated-inner-shadow-child', start: 0, duration: 3,
+        extra: { x: 50, y: 50, compositionStack: animatedInnerShadowStack } })]);
+    check('animated inner shadow controls pass isolated composition validation',
+        validateCompositionPlanShape(animatedInnerShadowPlan, W, H).length === 0,
+        validateCompositionPlanShape(animatedInnerShadowPlan, W, H).join('; '));
+    const animatedInnerShadowGraph = compileCompositionPlan(animatedInnerShadowPlan,
+        [{ overlayId: animatedInnerShadowPlan.overlays[0].id, inputIndex: 1 }]);
+    check('animated inner shadow opacity is evaluated on the output-frame clock',
+        /geq=.*T.*clip\(/.test(animatedInnerShadowGraph.filterComplex), animatedInnerShadowGraph.filterComplex);
+    const animatedInnerShadowOutput = path.join(dir, 'isolated-inner-shadow-animated.mp4');
+    const animatedInnerShadowRender = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+        '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
+        '-filter_complex', animatedInnerShadowGraph.filterComplex, '-map', `[${animatedInnerShadowGraph.outputLabel}]`,
+        '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', animatedInnerShadowOutput,
+    ], { encoding: 'utf8', timeout: 120_000 });
+    check('FFmpeg renders animated inner shadow on an isolated composition', animatedInnerShadowRender.status === 0,
+        (animatedInnerShadowRender.stderr || '').split('\n').slice(-5).join(' | '));
+    const animatedShadowGeometry = animatedInnerShadowPlan.overlays[0].geometry[0];
+    const animatedShadowX = Math.round((animatedShadowGeometry.x + animatedShadowGeometry.w / 2) * W) - 76;
+    const animatedShadowY = Math.round((animatedShadowGeometry.y + animatedShadowGeometry.h / 2) * H) - 2;
+    const animatedShadowEarly = regionColor(animatedInnerShadowOutput, 0.2,
+        { x: animatedShadowX, y: animatedShadowY, w: 2, h: 2 });
+    const animatedShadowLate = regionColor(animatedInnerShadowOutput, 2.5,
+        { x: animatedShadowX, y: animatedShadowY, w: 2, h: 2 });
+    check('keyframed inner shadow opacity changes the rendered edge over time',
+        !!animatedShadowEarly && !!animatedShadowLate && colorDist(animatedShadowEarly, animatedShadowLate) > 12,
+        `expected a growing edge shadow, got ${animatedShadowEarly} then ${animatedShadowLate}`);
+
+    for (const kind of ['grain', 'film_grain']) {
+        const isFilmGrain = kind === 'film_grain';
+        const effect = isFilmGrain
+            ? { kind, params: { intensity: 0 }, samples: { intensity: [{ t: 0, value: 0 }, { t: 3, value: 1 }] }, outputWindows: [{ start: 0, end: 3 }] }
+            : { kind, params: { amount: 48 } };
+        const grainStack = [{ id: `${kind}-group`, type: 'composition', opacity: 1, blendMode: 'source-over', start: 0, duration: 3, effects: [effect] }];
+        const grainPlan = planFor([vclip({ id: `${kind}-child`, start: 0, duration: 3,
+            extra: { x: 50, y: 50, compositionStack: grainStack } })]);
+        check(`${kind} is accepted on isolated composition layers`, validateCompositionPlanShape(grainPlan, W, H).length === 0,
+            validateCompositionPlanShape(grainPlan, W, H).join('; '));
+        const grainGraph = compileCompositionPlan(grainPlan, [{ overlayId: grainPlan.overlays[0].id, inputIndex: 1 }]);
+        check(`${kind} reaches the isolated composition alpha-preserving geq filter`, /geq=r='if\(gt\(alpha\(X,Y\),0\)/.test(grainGraph.filterComplex));
+        const grainOutput = path.join(dir, `isolated-${kind}.mp4`);
+        const grainRender = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+            '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
+            '-filter_complex', grainGraph.filterComplex, '-map', `[${grainGraph.outputLabel}]`,
+            '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', grainOutput,
+        ], { encoding: 'utf8', timeout: 120_000 });
+        check(`FFmpeg renders ${kind} on an isolated composition`, grainRender.status === 0,
+            (grainRender.stderr || '').split('\n').slice(-5).join(' | '));
+        const grainGeometry = grainPlan.overlays[0].geometry[0];
+        const grainCenterX = Math.round((grainGeometry.x + grainGeometry.w / 2) * W);
+        const grainCenterY = Math.round((grainGeometry.y + grainGeometry.h / 2) * H);
+        const grainCrop = {
+            x: Math.max(0, Math.floor(grainCenterX / 2) * 2),
+            y: Math.max(0, Math.floor(grainCenterY / 2) * 2), w: 2, h: 2,
+        };
+        if (isFilmGrain) {
+            const early = regionColor(grainOutput, 0.2, grainCrop);
+            const late = regionColor(grainOutput, 2.5, grainCrop);
+            check('film grain intensity animates over the isolated composition', !!early && !!late && colorDist(early, late) > 2,
+                `expected changing grain, got ${early} then ${late}`);
+        } else {
+            const grained = regionColor(grainOutput, 1, grainCrop);
+            check('grain visibly changes pixels in the isolated composition', !!grained && colorDist(grained, 'ff0000') > 1,
+                `expected grain over red footage, got ${grained}`);
+        }
+    }
 
     fs.rmSync(dir, { recursive: true, force: true });
 }
@@ -1183,6 +1619,31 @@ if (!FFMPEG) {
             'an animation that compiles but renders identically every frame was simplified away');
     }
 
+    fs.rmSync(dir, { recursive: true, force: true });
+}
+
+section('6a.1 · Progressive reveal renders on visual overlays');
+if (!FFMPEG) {
+    skip('progressive overlay reveal render', 'no ffmpeg binary available');
+} else {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'comp-reveal-'));
+    makeSources(dir);
+    const plan = planFor([vclip({ id: 'runtime-reveal', start: 0, duration: 3, extra: {
+        x: 50, y: 50,
+        animations: [{ type: 'reveal', startTime: 0, duration: 1, easing: 'linear', keyframes: [
+            { time: 0, properties: { reveal: 0 } }, { time: 1, properties: { reveal: 1 } },
+        ] }],
+    } })]);
+    const overlay = plan.overlays[0];
+    const graph = compileCompositionPlan(plan, [{ overlayId: overlay.id, inputIndex: 1 }]);
+    const { r, out } = runGraph(dir, graph, 'progressive-reveal.mp4');
+    check('FFmpeg renders an animated overlay reveal', r.status === 0,
+        (r.stderr || '').split('\n').slice(-5).join(' | '));
+    const revealed = regionColor(out, 0.5, { x: 255, y: 170, w: 12, h: 12 });
+    const unrevealed = regionColor(out, 0.5, { x: 370, y: 170, w: 12, h: 12 });
+    check('the reveal shows the left side while keeping the right side transparent',
+        colorDist(revealed, 'ff0000') < 30 && colorDist(unrevealed, '808080') < 20,
+        `left=${revealed} right=${unrevealed}`);
     fs.rmSync(dir, { recursive: true, force: true });
 }
 

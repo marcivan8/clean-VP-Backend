@@ -354,10 +354,14 @@ section('5d · Effect keyframes stay on project timeline time');
     const plan = M.buildCompositionPlan(tracks, FRAME);
     const samples = plan.overlays[0].effects[0].samples.amount;
     const start = samples.find(sample => near(sample.t, 2));
-    const middle = samples.find(sample => near(sample.t, 4));
+    const beforeMiddle = [...samples].reverse().find(sample => sample.t <= 4);
+    const afterMiddle = samples.find(sample => sample.t >= 4);
+    const middleValue = beforeMiddle && afterMiddle && afterMiddle.t > beforeMiddle.t
+        ? beforeMiddle.value + (afterMiddle.value - beforeMiddle.value) * ((4 - beforeMiddle.t) / (afterMiddle.t - beforeMiddle.t))
+        : beforeMiddle?.value;
     const end = samples.find(sample => near(sample.t, 6));
     check('the first effect keyframe aligns with the overlay start', !!start && near(start.value, 0.2));
-    check('a project-time keyframe interpolates at its timeline position', !!middle && near(middle.value, 1));
+    check('a project-time keyframe interpolates at its timeline position', Number.isFinite(middleValue) && near(middleValue, 1));
     check('the last effect keyframe aligns with the overlay end', !!end && near(end.value, 1.8));
 }
 

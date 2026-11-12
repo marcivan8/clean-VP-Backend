@@ -1256,6 +1256,9 @@ const staticGrain = compileTimelineVisualEffects([{ kind: 'film_grain', params: 
 const hyphenatedFilmGrain = compileTimelineVisualEffects([{ kind: 'film-grain', params: { intensity: 0.2, size: 2.5, seed: 41, animated: false } }]);
 assert.deepEqual(hyphenatedFilmGrain, staticGrain, 'the hyphenated footage film-grain alias exports with the same treatment as film_grain');
 assert.deepEqual(collectTimelineEffectWarnings([{ name: 'Film grain alias', effects: [{ kind: 'film-grain', params: { intensity: 0.2 } }] }]), [], 'the film-grain alias is not falsely reported as skipped');
+assert.deepEqual(collectTimelineEffectWarnings([{ name: 'Color treatment', effects: [
+  { kind: 'grayscale', params: { amount: 1 } }, { kind: 'sepia', params: { amount: 0.7 } },
+] }]), [], 'grayscale and sepia are not falsely reported as unsupported export effects');
 const animatedGrain = compileTimelineVisualEffects([{ kind: 'film_grain', params: { intensity: 0.2, size: 1, seed: 41, animated: { value: true } } }]);
 assert.ok(staticGrain[0].includes('floor(X/2.5000)') && staticGrain[0].includes('41*7.1') && !staticGrain[0].includes('floor(T*30)'), 'film grain export applies authored size and seed while holding the pattern when animation is disabled');
 assert.ok(animatedGrain[0].includes('floor(X/1.0000)') && animatedGrain[0].includes('floor(T*30)'), 'wrapped animation control advances the seeded grain at 30 fps');
@@ -1380,6 +1383,51 @@ const brightnessRender = spawnSync(ffmpeg, [
 assert.equal(brightnessRender.status, 0, `FFmpeg renders multiplicative brightness: ${brightnessRender.stderr?.toString() || brightnessRender.error?.message || ''}`);
 assert.ok([...brightnessRender.stdout.subarray(0, 3)].every(channel => Math.abs(channel - 150) <= 5),
   `1.5x brightness maps channel value 100 near 150, received ${[...brightnessRender.stdout.subarray(0, 3)].join(',')}`);
+
+for (const kind of ['grayscale', 'sepia']) {
+  const filters = compileTimelineVisualEffects([{ kind, params: { amount: 1 } }]);
+  const rendered = spawnSync(ffmpeg, [
+    '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=0xCC6633:s=2x2:d=1',
+    '-vf', filters.join(','), '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1',
+  ], { timeout: 20000 });
+  assert.equal(rendered.status, 0, `FFmpeg renders ${kind} on primary footage: ${rendered.stderr?.toString() || rendered.error?.message || ''}`);
+  const [red, green, blue] = rendered.stdout.subarray(0, 3);
+  if (kind === 'grayscale') assert.ok(Math.max(red, green, blue) - Math.min(red, green, blue) <= 4,
+    `primary footage grayscale is neutral, received ${red},${green},${blue}`);
+  else assert.ok(red > green && green > blue, `primary footage sepia is warm, received ${red},${green},${blue}`);
+
+  const label = `overlay_${kind}`;
+  const overlayGraph = compileOverlaySource({
+    outputStart: 0, outputEnd: 1, source: { type: 'video' },
+    geometry: [{ t: 0, x: 0.5, y: 0.5, w: 1, h: 1, opacity: 1, rotation: 0 }],
+    effects: [{ kind, params: { amount: 1 } }],
+  }, 1, label, { width: 2, height: 2, fps: 1 });
+  const overlayRender = spawnSync(ffmpeg, [
+    '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=2x2:d=1',
+    '-f', 'lavfi', '-i', 'color=c=0xCC6633:s=2x2:d=1',
+    '-filter_complex', overlayGraph, '-map', `[${label}]`, '-frames:v', '1',
+    '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1',
+  ], { timeout: 20000 });
+  assert.equal(overlayRender.status, 0, `FFmpeg renders ${kind} on a media overlay: ${overlayRender.stderr?.toString() || overlayRender.error?.message || ''}`);
+  const [overlayRed, overlayGreen, overlayBlue] = overlayRender.stdout.subarray(0, 3);
+  if (kind === 'grayscale') assert.ok(Math.max(overlayRed, overlayGreen, overlayBlue) - Math.min(overlayRed, overlayGreen, overlayBlue) <= 4,
+    `media overlay grayscale is neutral, received ${overlayRed},${overlayGreen},${overlayBlue}`);
+  else assert.ok(overlayRed > overlayGreen && overlayGreen > overlayBlue,
+    `media overlay sepia is warm, received ${overlayRed},${overlayGreen},${overlayBlue}`);
+}
+const animatedSepiaFilters = compileTimelineVisualEffects([{
+  kind: 'sepia', params: { amount: 0 }, keyframes: { amount: [
+    { time: 0, value: 0 }, { time: 1, value: 1 },
+  ] },
+}], { duration: 1 });
+assert.ok(animatedSepiaFilters.join(',').includes('T'),
+  'animated sepia converts sampled clip time to the FFmpeg geq frame-time variable');
+const animatedSepiaRender = spawnSync(ffmpeg, [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=0xCC6633:s=2x2:r=2:d=1',
+  '-vf', animatedSepiaFilters.join(','), '-frames:v', '2', '-f', 'null', '-',
+], { encoding: 'utf8', timeout: 20000 });
+assert.equal(animatedSepiaRender.status, 0,
+  `FFmpeg renders animated sepia on primary footage: ${animatedSepiaRender.stderr || animatedSepiaRender.error?.message || ''}`);
 
 const animatedGradeRender = spawnSync(ffmpeg, [
   '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=0x646464:s=2x2:r=24:d=0.5',

@@ -4,7 +4,7 @@ import { waitFor, useScene, all, createRef } from '@revideo/core';
 import { clipToLayer } from '../motion/RevideoLayerAdapter.js';
 import { resolveMotionAt } from '../motion/MotionResolver.js';
 import { activeWordIndex, revealedWordCount } from '../motion/CaptionModel.js';
-import { createRevideoEffectFilters } from '../motion/EffectAdapter.js';
+import { createRevideoEffectFilters, createRevideoEffectShadowProps } from '../motion/EffectAdapter.js';
 
 /**
  * render-worker/revideo/src/scenes/timeline.tsx
@@ -134,6 +134,7 @@ export default makeScene2D('timeline', function* (view) {
                 const resolved = () => resolveMotionAt(layer, playback.time, { audioWaveformsByAsset });
                 const nodeRef = createRef<Node>();
                 const effectFilters = createRevideoEffectFilters(clip.effects, clip.start, clip.duration, () => playback.time);
+                const effectShadow = createRevideoEffectShadowProps(clip.effects, clip.start, clip.duration, () => playback.time);
 
                 if (track.type === 'text') {
                     const wordCount = Array.isArray(layer.words) ? layer.words.length : 0;
@@ -191,6 +192,7 @@ export default makeScene2D('timeline', function* (view) {
                             rotation={() => resolved().rotation}
                             opacity={() => resolved().opacity}
                             filters={effectFilters}
+                            {...effectShadow}
                         />
                     );
                 } else if (track.type === 'overlay') {
@@ -209,6 +211,7 @@ export default makeScene2D('timeline', function* (view) {
                             rotation={() => resolved().rotation}
                             opacity={() => resolved().opacity}
                             filters={effectFilters}
+                            {...effectShadow}
                         />
                     );
                 }

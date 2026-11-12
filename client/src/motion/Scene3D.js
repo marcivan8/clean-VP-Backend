@@ -9,12 +9,13 @@
  */
 
 import { sampleAnimation } from './MotionResolver.js';
-import { evaluateMotionExpression } from './MotionExpression.js';
+import { evaluateMotionExpression, validateMotionExpression } from './MotionExpression.js';
 import { sceneImageTextureCache } from './SceneImageTextureCache.js';
 import { renderScene3DGpu } from './Scene3DGPU.js';
 import { remapSceneObjectTime } from './TimeRemap.js';
 import { sampleProceduralParticle } from './ProceduralParticles.js';
 import { sampleAudioEnvelope } from './AudioReactive.js';
+import { MAX_MOTION_BLUR_SAMPLES } from './MotionLimits.js';
 export { remapSceneObjectTime, resolveSceneVideoSourceTime, maxSceneObjectSourceTime, getSceneShutterSampleTimes } from './TimeRemap.js';
 
 /** Shared editor/renderer defaults so a new camera keyframe starts from the value actually rendered. */
@@ -42,6 +43,7 @@ export const MAX_MESH_FACES = 5000;
 export const MAX_MESH_TRIANGLES = 10_000;
 export const MAX_SCENE_TRIANGLES = 50_000;
 export const MAX_SCENE_SHADOW_RECEIVERS = 16;
+export const MAX_SCENE_MOTION_BLUR_SAMPLES = MAX_MOTION_BLUR_SAMPLES;
 const SCENE3D_MULTIPLICATIVE_ANIMATION_PROPERTIES = new Set(['scale', 'scaleX', 'scaleY', 'scaleZ', 'opacity']);
 const SCENE3D_COLOR_CHANNEL_PROPERTIES = new Set(['colorR', 'colorG', 'colorB', 'emissiveR', 'emissiveG', 'emissiveB']);
 /** Limits that truncate content in the deterministic 3D renderer. */
@@ -131,7 +133,7 @@ export function getScene3DRenderLimitWarnings(scene = {}) {
 /** Report authored 3D values that the renderer silently substitutes. */
 export function getScene3DCompatibilityWarnings(scene = {}) {
     const supportedObjects = new Set(['box', 'sphere', 'capsule', 'cylinder', 'cone', 'torus', 'plane', 'image', 'video', 'text', 'mesh']);
-    const supportedLights = new Set(['point', 'directional', 'spot', 'area']);
+    const supportedLights = new Set(['point', 'directional', 'sun', 'spot', 'area']);
     const supportedSides = new Set(['front', 'back', 'double']);
     const warnings = [];
     const checkRange = (record, key, label, min, max, owner, fallback) => {
@@ -143,9 +145,89 @@ export function getScene3DCompatibilityWarnings(scene = {}) {
             warnings.push({ ...owner, message: `${label} on ${owner.messageOwner} is ${value}, outside the supported range ${min}–${max}; the renderer will clamp it.` });
         }
     };
+    const checkExpressions = (record, owner, supportedProperties) => {
+        const expressions = record?.expressions;
+        if (!expressions || typeof expressions !== 'object' || Array.isArray(expressions)) return;
+        for (const [property, expression] of Object.entries(expressions)) {
+            if (!supportedProperties.has(property)) {
+                warnings.push({ ...owner, message: `Expression for unsupported 3D property “${property}” on ${owner.messageOwner} will be ignored.` });
+                continue;
+            }
+            const validation = validateMotionExpression(expression);
+            if (!validation.valid) {
+                warnings.push({ ...owner, message: `Expression for “${property}” on ${owner.messageOwner} is invalid (${validation.reason}) and will be ignored.` });
+            }
+        }
+    };
+    const camera = scene.camera && typeof scene.camera === 'object' ? scene.camera : {};
+    const cameraOwner = { messageOwner: 'the 3D camera' };
+    checkExpressions(camera, cameraOwner, new Set([
+        'x', 'y', 'z', 'yaw', 'pitch', 'roll', 'fov', 'orthoScale', 'near', 'far', 'targetX', 'targetY', 'targetZ',
+        'dofFocusDistance', 'dofFocusRange', 'dofStrength', 'dofMaxBlur',
+    ]));
+    if (Object.hasOwn(camera, 'projection') && camera.projection !== undefined
+        && !['perspective', 'orthographic'].includes(camera.projection)) {
+        warnings.push({ message: `3D camera uses unsupported projection “${camera.projection}”; it will render with perspective projection.` });
+    }
+    if (Object.hasOwn(camera, 'z') && camera.z !== undefined) {
+        const distance = Number(camera.z);
+        if (!Number.isFinite(distance)) {
+            warnings.push({ message: `Camera distance on ${cameraOwner.messageOwner} is invalid; the renderer will use ${SCENE3D_CAMERA_DEFAULTS.z}.` });
+        } else if (distance < 0.1) {
+            warnings.push({ message: `Camera distance on ${cameraOwner.messageOwner} is ${distance}, below the supported minimum 0.1; the renderer will clamp it.` });
+        }
+    }
+    checkRange(camera, 'fov', 'Perspective focal scale', 80, 2400, cameraOwner, String(SCENE3D_CAMERA_DEFAULTS.fov));
+    checkRange(camera, 'orthoScale', 'Orthographic scale', 10, 2400, cameraOwner, String(SCENE3D_CAMERA_DEFAULTS.orthoScale));
+    checkRange(camera, 'near', 'Near clipping plane', 0.01, 100, cameraOwner, String(SCENE3D_CAMERA_DEFAULTS.near));
+    checkRange(camera, 'far', 'Far clipping plane', 0.02, 100_000, cameraOwner, String(SCENE3D_CAMERA_DEFAULTS.far));
+    const animatedCameraRanges = {
+        z: [0.1, Infinity, 'Camera distance', '0.1–unbounded'],
+        fov: [80, 2400, 'Perspective focal scale', '80–2400'],
+        orthoScale: [10, 2400, 'Orthographic scale', '10–2400'],
+        near: [0.01, 100, 'Near clipping plane', '0.01–100'],
+        far: [0.02, 100_000, 'Far clipping plane', '0.02–100000'],
+        dofFocusDistance: [0.1, 100_000, 'Depth of field focus distance', '0.1–100000'],
+        dofFocusRange: [0, 100, 'Depth of field focus range', '0–100'],
+        dofStrength: [0, 2, 'Depth of field strength', '0–2'],
+        dofMaxBlur: [0, 12, 'Maximum depth of field blur', '0–12'],
+    };
+    (Array.isArray(camera.animations) ? camera.animations : []).forEach((animation, animationIndex) => {
+        (Array.isArray(animation?.keyframes) ? animation.keyframes : []).forEach((keyframe, keyframeIndex) => {
+            const properties = keyframe?.properties;
+            if (!properties || typeof properties !== 'object') return;
+            for (const [property, authoredValue] of Object.entries(properties)) {
+                const range = animatedCameraRanges[property];
+                if (!range) continue;
+                const [min, max, label, supportedRange] = range;
+                const value = Number(authoredValue);
+                if (!Number.isFinite(value) || (value >= min && value <= max)) continue;
+                warnings.push({ message: `${label} on 3D camera animation ${animationIndex + 1}, keyframe ${keyframeIndex + 1} is ${value}, outside the supported range ${supportedRange}; the renderer will clamp it.` });
+            }
+        });
+    });
+    if (Number.isFinite(Number(camera.near)) && Number.isFinite(Number(camera.far))
+        && Number(camera.far) <= Number(camera.near)) {
+        warnings.push({ message: 'Far clipping plane on the 3D camera must be greater than the near clipping plane; the renderer will widen it.' });
+    }
+    const depthOfField = camera.depthOfField || scene.depthOfField;
+    if (depthOfField != null && typeof depthOfField !== 'object') {
+        warnings.push({ message: '3D camera depth of field settings are invalid; the renderer will ignore them.' });
+    } else if (depthOfField && typeof depthOfField === 'object') {
+        const dofOwner = { messageOwner: '3D camera depth of field' };
+        checkRange(depthOfField, 'focusDistance', 'Focus distance', 0.1, 100_000, dofOwner, String(camera.z ?? SCENE3D_CAMERA_DEFAULTS.z));
+        checkRange(depthOfField, 'focusRange', 'Focus range', 0, 100, dofOwner, '0.35');
+        checkRange(depthOfField, 'strength', 'Depth of field strength', 0, 2, dofOwner, '1');
+        checkRange(depthOfField, 'maxBlur', 'Maximum depth of field blur', 0, 12, dofOwner, '6');
+    }
     for (const object of Array.isArray(scene.objects) ? scene.objects : []) {
         const name = object?.name || object?.id || 'unnamed';
         const owner = { objectId: object?.id || null, messageOwner: `3D object “${name}”` };
+        checkExpressions(object, owner, new Set([
+            'x', 'y', 'z', 'scale', 'scaleX', 'scaleY', 'scaleZ', 'rotationX', 'rotationY', 'rotationZ', 'opacity',
+            'roughness', 'metalness', 'emissiveIntensity', 'colorR', 'colorG', 'colorB', 'emissiveR', 'emissiveG', 'emissiveB',
+            'radius', 'height', 'tube', 'sizeX', 'sizeY', 'sizeZ',
+        ]));
         if (object && Object.hasOwn(object, 'type') && object.type !== undefined && !supportedObjects.has(object.type)) {
             warnings.push({ objectId: object.id || null, message: `3D object “${name}” uses unsupported type “${object.type}”; it will be skipped.` });
         }
@@ -190,6 +272,10 @@ export function getScene3DCompatibilityWarnings(scene = {}) {
     }
     (Array.isArray(scene.lights) ? scene.lights : []).forEach((light, index) => {
         const owner = { lightIndex: index, messageOwner: `3D light ${index + 1}` };
+        checkExpressions(light, owner, new Set([
+            'intensity', 'range', 'decay', 'angle', 'width', 'height', 'positionX', 'positionY', 'positionZ',
+            'directionX', 'directionY', 'directionZ', 'targetX', 'targetY', 'targetZ', 'colorR', 'colorG', 'colorB',
+        ]));
         if (light && Object.hasOwn(light, 'type') && light.type !== undefined && !supportedLights.has(light.type)) {
             warnings.push({ lightIndex: index, message: `3D light ${index + 1} uses unsupported type “${light.type}”; it will render as a point light.` });
         }
@@ -199,6 +285,26 @@ export function getScene3DCompatibilityWarnings(scene = {}) {
         checkRange(light, 'angle', 'Spot angle', 1, 179, owner, '60');
         checkRange(light, 'width', 'Area-light width', 0.1, 40, owner, '4');
         checkRange(light, 'height', 'Area-light height', 0.1, 40, owner, '4');
+        const animatedRanges = {
+            intensity: [0, 4, 'Intensity', '0–4'], range: [0.1, 1000, 'Range', '0.1–1000'],
+            decay: [0, 8, 'Decay', '0–8'], angle: [1, 179, 'Spot angle', '1–179'],
+            width: [0.1, 40, 'Area-light width', '0.1–40'], height: [0.1, 40, 'Area-light height', '0.1–40'],
+        };
+        (Array.isArray(light?.animations) ? light.animations : []).forEach((animation, animationIndex) => {
+            (Array.isArray(animation?.keyframes) ? animation.keyframes : []).forEach((keyframe, keyframeIndex) => {
+                const properties = keyframe?.properties;
+                if (!properties || typeof properties !== 'object') return;
+                for (const [property, authoredValue] of Object.entries(properties)) {
+                    const range = animatedRanges[property];
+                    if (!range) continue;
+                    const [min, max, label, supportedRange] = range;
+                    const value = Number(authoredValue);
+                    if (!Number.isFinite(value) || (value >= min && value <= max)) continue;
+                    warnings.push({ lightIndex: index,
+                        message: `${label} on 3D light ${index + 1} animation ${animationIndex + 1}, keyframe ${keyframeIndex + 1} is ${value}, outside the supported range ${supportedRange}; the renderer will clamp it.` });
+                }
+            });
+        });
     });
     const particleShape = scene.particles?.shape;
     if (particleShape != null && !SCENE3D_PARTICLE_SHAPES.includes(particleShape)) {
@@ -480,6 +586,10 @@ export function normalizeSceneMesh(object) {
     // compatibility preflight reports the skipped object; returning empty
     // topology keeps preview and export behavior deterministic.
     if (!Object.hasOwn(SCENE3D_PRIMITIVES, type)) return { vertices: [], faces: [] };
+    // Text is rasterized and depth-tested by the dedicated 3D text path; it
+    // has no box mesh. Keeping the generic topology helper empty prevents
+    // callers from accidentally treating a supported text object as a cube.
+    if (type === 'text') return { vertices: [], faces: [] };
     const size = object?.size || {};
     const radius = type === 'torus' ? clamp(n(object?.radius, 0.8), 0.02, 10) : clamp(n(object?.radius, 0.65), 0.02, 10);
     const height = clamp(n(object?.height, 1.5), 0.02, 20);
@@ -525,52 +635,81 @@ function colorFromChannels(baseColor, animated, prefix) {
     return `#${channels.map(channel => Math.round(channel).toString(16).padStart(2, '0')).join('').toUpperCase()}`;
 }
 
-function shadeMaterial(baseColor, ambient, contributions, metalness, roughness, emissiveColor = null, emissiveIntensity = 0) {
-    const base = parseHexColor(baseColor);
-    const out = base.map(channel => channel * ambient);
-    if (emissiveColor && emissiveIntensity > 0) {
-        const emission = parseHexColor(emissiveColor);
-        for (let i = 0; i < 3; i++) out[i] += emission[i] * emissiveIntensity;
-    }
-    for (const { color, diffuse, specular } of contributions) {
-        const tint = parseHexColor(color);
-        for (let i = 0; i < 3; i++) {
-            const light = tint[i] / 255;
-            out[i] += base[i] * light * diffuse;
-            // Metals reflect their own base colour; dielectrics reflect the light.
-            out[i] += (metalness > 0.5 ? base[i] * light : tint[i]) * specular;
-        }
-    }
-    return `rgb(${out.map(channel => clamp(Math.round(channel * (1 - roughness * 0.08)), 0, 255)).join(',')})`;
+function srgbToLinear(channel) {
+    const value = clamp(channel / 255, 0, 1);
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
 }
 
-function textureLighting(ambient, contributions, metalness, roughness, emissiveColor, emissiveIntensity) {
-    const diffuse = [ambient, ambient, ambient];
-    const specular = [0, 0, 0];
+function linearToSrgb(channel) {
+    const value = Math.max(0, channel);
+    return 255 * (value <= 0.0031308 ? value * 12.92 : 1.055 * value ** (1 / 2.4) - 0.055);
+}
+
+/** Precompute a GGX Cook-Torrance light response for a face/material. */
+function materialLighting(ambient, contributions, metalness, roughness, emissiveColor, emissiveIntensity) {
+    const diffuseBase = [0, 0, 0];
+    const diffuseBaseSquared = [0, 0, 0];
+    const specularBase = [0, 0, 0];
+    const specularConstant = [0, 0, 0];
+    const alpha = Math.max(0.045, roughness * roughness);
+    const alphaSquared = alpha * alpha;
+    const geometryK = ((roughness + 1) ** 2) / 8;
     for (const contribution of contributions) {
-        const lightColor = parseHexColor(contribution.color);
+        const nDotH = contribution.nDotH;
+        const denominator = nDotH * nDotH * (alphaSquared - 1) + 1;
+        const distribution = alphaSquared / Math.max(1e-6, Math.PI * denominator * denominator);
+        const geometryV = contribution.nDotV / (contribution.nDotV * (1 - geometryK) + geometryK);
+        const geometryL = contribution.nDotL / (contribution.nDotL * (1 - geometryK) + geometryK);
+        const fresnelWeight = (1 - contribution.vDotH) ** 5;
+        const specularScale = distribution * geometryV * geometryL
+            / Math.max(1e-5, 4 * contribution.nDotV) * contribution.energy;
         for (let channel = 0; channel < 3; channel++) {
-            diffuse[channel] += lightColor[channel] / 255 * contribution.diffuse;
-            specular[channel] += lightColor[channel] / 255 * contribution.specular;
+            const light = contribution.color[channel];
+            const diffuseScale = contribution.energy * contribution.nDotL * light
+                * (1 - fresnelWeight) * (1 - metalness) / Math.PI;
+            diffuseBase[channel] += diffuseScale * (0.96 + 0.04 * metalness);
+            diffuseBaseSquared[channel] -= diffuseScale * metalness;
+            specularBase[channel] += specularScale * light * metalness * (1 - fresnelWeight);
+            specularConstant[channel] += specularScale * light
+                * ((1 - metalness) * 0.04 * (1 - fresnelWeight) + fresnelWeight);
         }
     }
-    const emission = emissiveColor && emissiveIntensity > 0
-        ? parseHexColor(emissiveColor).map(channel => channel * emissiveIntensity) : [0, 0, 0];
     const finish = 1 - roughness * 0.08;
+    const rawEmission = emissiveColor && emissiveIntensity > 0
+        ? parseHexColor(emissiveColor).map(channel => channel * emissiveIntensity) : [0, 0, 0];
+    const emission = rawEmission.map(srgbToLinear);
     return {
-        diffuse: diffuse.map(value => value * finish),
-        metallicSpecular: metalness > 0.5 ? specular.map(value => value * finish) : [0, 0, 0],
-        dielectricSpecular: metalness > 0.5 ? [0, 0, 0] : specular.map(value => value * finish),
+        ambient: ambient * finish,
+        hasDirect: contributions.length > 0,
+        legacyAmbient: ambient,
+        legacyFinish: finish,
+        legacyEmission: rawEmission,
+        diffuseBase: diffuseBase.map(value => value * finish),
+        diffuseBaseSquared: diffuseBaseSquared.map(value => value * finish),
+        specularBase: specularBase.map(value => value * finish),
+        specularConstant: specularConstant.map(value => value * finish),
         emission: emission.map(value => value * finish),
     };
 }
 
+function shadeMaterialChannels(baseRgb, lighting) {
+    // With no direct lights, retain the established sRGB ambient/emissive
+    // response exactly; only lit surfaces need the physically based transfer.
+    if (!lighting.hasDirect) return baseRgb.map((channel, index) =>
+        channel * lighting.legacyAmbient * lighting.legacyFinish
+        + lighting.legacyEmission[index] * lighting.legacyFinish);
+    const base = baseRgb.map(srgbToLinear);
+    return [0, 1, 2].map(channel => linearToSrgb(
+        base[channel] * (lighting.ambient + lighting.diffuseBase[channel] + lighting.specularBase[channel])
+        + base[channel] * base[channel] * lighting.diffuseBaseSquared[channel]
+        + lighting.specularConstant[channel] + lighting.emission[channel],
+    ));
+}
+
 function shadeTextureSample(source, lighting) {
     if (!lighting) return source;
-    return [0, 1, 2].map(channel => clamp(Math.round(
-        source[channel] * (lighting.diffuse[channel] + lighting.metallicSpecular[channel])
-        + lighting.dielectricSpecular[channel] + lighting.emission[channel],
-    ), 0, 255)).concat(source[3]);
+    return shadeMaterialChannels(source.slice(0, 3), lighting)
+        .map(channel => clamp(Math.round(channel), 0, 255)).concat(source[3]);
 }
 
 function drawTexturedTriangle(ctx, image, uvs, points, opacity) {
@@ -1792,7 +1931,8 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
             if (Number.isFinite(Number(animated[`direction${axis.toUpperCase()}`]))) animated.direction[axis] = Number(animated[`direction${axis.toUpperCase()}`]);
             if (Number.isFinite(Number(animated[`target${axis.toUpperCase()}`]))) animated.target[axis] = Number(animated[`target${axis.toUpperCase()}`]);
         }
-        const type = ['directional', 'spot', 'area'].includes(animated?.type) ? animated.type : 'point';
+        const authoredType = animated?.type === 'sun' ? 'directional' : animated?.type;
+        const type = ['directional', 'spot', 'area'].includes(authoredType) ? authoredType : 'point';
         return {
             type,
             position: V(animated?.position?.x, animated?.position?.y, animated?.position?.z),
@@ -2110,14 +2250,20 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
                         cone *= cone;
                     }
                     const energy = light.intensity * attenuation * cone / samples.length;
-                    const diffuse = Math.max(0, dot(shadedNormal, direction)) * energy;
+                    const nDotL = Math.max(0, dot(shadedNormal, direction));
+                    if (nDotL <= 0 || energy <= 0) continue;
                     const half = norm(add(direction, view));
-                    const exponent = 8 + (1 - roughness) ** 2 * 112;
-                    const specular = (Math.max(0, dot(shadedNormal, half)) ** exponent) * energy * (0.18 + metalness * 0.55) * (1 - roughness * 0.7);
-                    contributions.push({ color: light.color, diffuse, specular });
+                    contributions.push({
+                        color: parseHexColor(light.color).map(srgbToLinear), energy, nDotL,
+                        nDotV: Math.max(1e-4, dot(shadedNormal, view)),
+                        nDotH: Math.max(0, dot(shadedNormal, half)),
+                        vDotH: Math.max(0, dot(view, half)),
+                    });
                 }
             }
-            const color = shadeMaterial(colorFromChannels(object.color || object.material?.color || '#7C3AED', transform.material, 'color'), ambient, contributions, metalness, roughness, emissiveColor, emissiveIntensity);
+            const lighting = materialLighting(ambient, contributions, metalness, roughness, emissiveColor, emissiveIntensity);
+            const color = `rgb(${shadeMaterialChannels(parseHexColor(colorFromChannels(object.color || object.material?.color || '#7C3AED', transform.material, 'color')), lighting)
+                .map(channel => clamp(Math.round(channel), 0, 255)).join(',')})`;
             const uvByIndex = mesh.uvs || [[0, 1], [1, 1], [1, 0], [0, 0]];
             const cameraVertices = points.map((p, pointIndex) => {
                 const point = cameraPoint(p, camera);
@@ -2138,7 +2284,7 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
                 const triangle = [projected[0], projected[i], projected[i + 1]];
                 const z = (triangle[0].z + triangle[1].z + triangle[2].z) / 3;
                 const face = { projected: triangle, z, order: objectOrder, color, opacity: objectOpacity,
-                    textureLighting: textureLighting(ambient, contributions, metalness, roughness, emissiveColor, emissiveIntensity),
+                    textureLighting: lighting,
                     maskShape: TEXTURE_MASK_SHAPES.has(object.maskShape) ? object.maskShape : 'none',
                     maskAspectRatio: Math.abs(n(object.size?.x, 1) / (n(object.size?.y, 1) || 1)),
                     maskInvert: !!object.maskInvert, maskRect,
@@ -2314,8 +2460,9 @@ function sceneSampleCanvas(reference, width, height, slot) {
     else if (reference?.ownerDocument?.createElement) { canvas = reference.ownerDocument.createElement('canvas'); canvas.width = width; canvas.height = height; }
     else if (reference?.constructor) canvas = new reference.constructor(width, height);
     if (canvas) {
-        // Motion blur uses at most five samples and one accumulation surface.
-        // Six entries preserve reuse for the active render at any resolution.
+        // Each render reuses one shutter surface and one accumulation surface.
+        // Six entries keep three recent resolutions warm without pinning every
+        // export size for the lifetime of a preview or worker process.
         if (sceneSampleCanvases.size >= 6) sceneSampleCanvases.delete(sceneSampleCanvases.keys().next().value);
         sceneSampleCanvases.set(key, canvas);
     }
@@ -2323,10 +2470,35 @@ function sceneSampleCanvas(reference, width, height, slot) {
 }
 
 /** Render a scene frame, optionally sampling object motion across a shutter interval. */
+function sceneHasTemporalMotion(scene = {}) {
+    const hasMotion = node => {
+        if (!node || typeof node !== 'object') return false;
+        if ((Array.isArray(node.animations) && node.animations.length > 0)
+            || (node.expressions && Object.keys(node.expressions).length > 0)
+            || node.motionPath || node.audioReactive?.assetId || node.timeRemap) return true;
+        if (node.autoRotate && typeof node.autoRotate === 'object'
+            && ['x', 'y', 'z'].some(axis => Math.abs(n(node.autoRotate[axis])) > 0)) return true;
+        return node.type === 'video' || !!(node.videoUrl || node.videoAssetId);
+    };
+    return hasMotion(scene)
+        || hasMotion(scene.camera)
+        || (Array.isArray(scene.objects) && scene.objects.some(hasMotion))
+        || (Array.isArray(scene.lights) && scene.lights.some(hasMotion))
+        // Particle positions depend on scene time even when the optional
+        // simulation controls are omitted, so any visible population moves.
+        || Math.round(clamp(n(scene.particles?.count), 0, MAX_SCENE_PARTICLES)) > 0;
+}
+
 export function drawScene3D(ctx, scene = {}, time = 0, duration = 1, width = 1080, height = 760, images = {}) {
     if (!ctx) return;
     const motionBlur = scene.motionBlur || {};
-    const sampleCount = motionBlur.enabled ? Math.round(clamp(n(motionBlur.samples, 3), 2, 5)) : 1;
+    const needsIsolatedComposite = n(ctx.globalAlpha, 1) < 1
+        || (ctx.globalCompositeOperation && ctx.globalCompositeOperation !== 'source-over');
+    const sampleCount = motionBlur.enabled
+        ? sceneHasTemporalMotion(scene)
+            ? Math.round(clamp(n(motionBlur.samples, 5), 2, MAX_SCENE_MOTION_BLUR_SAMPLES))
+            : needsIsolatedComposite ? 2 : 1
+        : 1;
     if (sampleCount === 1) return drawScene3DSample(ctx, scene, time, duration, width, height, images);
     const shutterAngle = clamp(n(motionBlur.shutterAngle, 180), 0, 360);
     const frameRate = clamp(n(motionBlur.frameRate, 30), 1, 120);
@@ -2340,26 +2512,23 @@ export function drawScene3D(ctx, scene = {}, time = 0, duration = 1, width = 108
     const transform = typeof ctx.getTransform === 'function'
         ? ctx.getTransform()
         : { a: pixelWidth / width, b: 0, c: 0, d: pixelHeight / height, e: 0, f: 0 };
-    const buffers = [];
+    const accumulation = sceneSampleCanvas(ctx.canvas, pixelWidth, pixelHeight, MAX_SCENE_MOTION_BLUR_SAMPLES);
+    const accumulationCtx = accumulation?.getContext?.('2d');
+    const sampleCanvas = sceneSampleCanvas(ctx.canvas, pixelWidth, pixelHeight, 0);
+    const sampleCtx = sampleCanvas?.getContext?.('2d');
+    if (!accumulationCtx || !sampleCtx) return drawScene3DSample(ctx, scene, time, duration, width, height, images);
+    accumulationCtx.setTransform?.(1, 0, 0, 1, 0, 0);
+    accumulationCtx.clearRect(0, 0, pixelWidth, pixelHeight);
+    accumulationCtx.globalCompositeOperation = 'lighter';
+    accumulationCtx.globalAlpha = 1 / sampleCount;
     for (let index = 0; index < sampleCount; index++) {
-        const canvas = sceneSampleCanvas(ctx.canvas, pixelWidth, pixelHeight, index);
-        const sampleCtx = canvas?.getContext?.('2d');
-        if (!sampleCtx) return drawScene3DSample(ctx, scene, time, duration, width, height, images);
         sampleCtx.setTransform?.(1, 0, 0, 1, 0, 0);
         sampleCtx.clearRect(0, 0, pixelWidth, pixelHeight);
         sampleCtx.setTransform?.(transform.a, transform.b, transform.c, transform.d, transform.e, transform.f);
         const offset = ((index + 0.5) / sampleCount - 0.5) * exposure;
         drawScene3DSample(sampleCtx, scene, Math.max(0, time + offset), duration, width, height, images);
-        buffers.push(canvas);
+        accumulationCtx.drawImage(sampleCanvas, 0, 0, pixelWidth, pixelHeight);
     }
-    const accumulation = sceneSampleCanvas(ctx.canvas, pixelWidth, pixelHeight, 5);
-    const accumulationCtx = accumulation?.getContext?.('2d');
-    if (!accumulationCtx) return drawScene3DSample(ctx, scene, time, duration, width, height, images);
-    accumulationCtx.setTransform?.(1, 0, 0, 1, 0, 0);
-    accumulationCtx.clearRect(0, 0, pixelWidth, pixelHeight);
-    accumulationCtx.globalCompositeOperation = 'lighter';
-    accumulationCtx.globalAlpha = 1 / sampleCount;
-    for (const canvas of buffers) accumulationCtx.drawImage(canvas, 0, 0, pixelWidth, pixelHeight);
     accumulationCtx.globalAlpha = 1;
     accumulationCtx.globalCompositeOperation = 'source-over';
     ctx.save();

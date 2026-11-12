@@ -43,6 +43,8 @@ assert.match(overlayPreviewSource, /function resolveShakeTransform[\s\S]*rotatio
 const effects = [
   { kind: 'blur', params: { radius: 3 } },
   { kind: 'brightness', params: { amount: 1.15 } },
+  { kind: 'grayscale', params: { amount: 1 } },
+  { kind: 'sepia', params: { amount: 0.8 } },
   { kind: 'shadow', params: { color: '#000000', blur: 8, x: 2, y: 3 } },
   { kind: 'grain', params: { amount: 8, seed: 7 } },
   { kind: 'chromatic-aberration', params: { amount: 2 } },
@@ -59,11 +61,12 @@ assert.equal(flattenScene(typedEffectScene).placements[0].clip.effects[0].kind, 
 const mediaEffectScene = createScene({ duration: 2, nodes: [createNode(NODE_TYPES.VIDEO, {
   id: 'media-effects', start: 0, duration: 2, source: { assetId: 'footage-1' },
   effects: [{ kind: 'vignette', params: { intensity: 0.5 } }, { kind: 'glitch', params: { intensity: 0.2 } },
-    { kind: 'fade_in', params: { duration: 0.5 } }, { kind: 'fade_out', params: { duration: 0.4 } }],
+    { kind: 'fade_in', params: { duration: 0.5 } }, { kind: 'fade_out', params: { duration: 0.4 } },
+    { kind: 'grayscale', params: { amount: 0.5 } }, { kind: 'sepia', params: { amount: 0.5 } }],
 })] });
 assert.equal(validateScene(mediaEffectScene, { assets: [{ id: 'footage-1' }], skipCollisions: true }).issues.some(issue => issue.code === ISSUE_CODES.UNSUPPORTED_EFFECT), false,
   'implemented footage effects are recognized by scene validation');
-assert.deepEqual(autoFixScene(mediaEffectScene, { assets: [{ id: 'footage-1' }], skipCollisions: true }).scene.nodes[0].effects.map(effect => effect.kind), ['vignette', 'glitch', 'fade_in', 'fade_out'],
+assert.deepEqual(autoFixScene(mediaEffectScene, { assets: [{ id: 'footage-1' }], skipCollisions: true }).scene.nodes[0].effects.map(effect => effect.kind), ['vignette', 'glitch', 'fade_in', 'fade_out', 'grayscale', 'sepia'],
   'auto-fix preserves supported footage effects');
 const scene = createScene({ duration: 1, nodes: [createNode(NODE_TYPES.SHAPE, {
   duration: 1, effects, vector: { kind: 'circle', w: 120, h: 120, fill: '#FF355E' },
@@ -78,6 +81,63 @@ function render(stack, timeSeconds = 0) {
   return canvas.toBuffer('image/png');
 }
 assert.notDeepEqual(render([]), render(effects), 'effect stack changes actual rendered output');
+function shadowAlpha(opacity) {
+  const canvas = Canvas.createCanvas(128, 96);
+  const ctx = canvas.getContext('2d');
+  drawLayerWithEffects(ctx, [{ kind: 'shadow', params: {
+    color: '#000000', opacity, blur: 0, x: 28, y: 0,
+  } }], drawCtx => {
+    drawCtx.fillStyle = '#FFFFFF';
+    drawCtx.fillRect(24, 32, 24, 24);
+  });
+  return ctx.getImageData(60, 42, 1, 1).data[3];
+}
+assert.ok(shadowAlpha(0.8) > shadowAlpha(0.2) + 100,
+  'Canvas layer shadow opacity controls actual alpha coverage, matching export');
+assert.ok(GRAPHIC_EFFECT_KINDS.includes('grayscale') && GRAPHIC_EFFECT_KINDS.includes('sepia'),
+  'grayscale and sepia are declared executable graphic effects');
+assert.ok(GRAPHIC_EFFECT_KINDS.includes('fade_in') && GRAPHIC_EFFECT_KINDS.includes('fade_out'),
+  'fade effects are declared executable graphic effects');
+const fadeGraphicScene = createScene({ duration: 1, nodes: [createNode(NODE_TYPES.SHAPE, {
+  id: 'graphic-fades', duration: 1, vector: { kind: 'circle', w: 120, h: 120, fill: '#FF355E' },
+  effects: [{ kind: 'fade_in', params: { duration: 0.5 } }, { kind: 'fade_out', params: { duration: 0.5 } }],
+})] });
+assert.equal(validateScene(fadeGraphicScene, { skipCollisions: true }).issues.some(issue => issue.code === ISSUE_CODES.UNSUPPORTED_EFFECT), false,
+  'graphic fades validate as effects executable by the scene renderer');
+function renderFadeAlpha(timeSeconds, effects) {
+  const canvas = Canvas.createCanvas(80, 80);
+  const ctx = canvas.getContext('2d');
+  drawLayerWithEffects(ctx, effects, drawCtx => {
+    drawCtx.fillStyle = '#FF0000';
+    drawCtx.fillRect(0, 0, 80, 80);
+  }, null, timeSeconds, { clipStart: 0, clipDuration: 1 });
+  return ctx.getImageData(40, 40, 1, 1).data[3];
+}
+assert.equal(renderFadeAlpha(0, [{ kind: 'fade_in', params: { duration: 0.5 } }]), 0,
+  'graphic fade-in starts transparent in preview');
+assert.ok(Math.abs(renderFadeAlpha(0.25, [{ kind: 'fade_in', params: { duration: 0.5 } }]) - 128) <= 1,
+  'graphic fade-in reaches half opacity in preview');
+assert.equal(renderFadeAlpha(1, [{ kind: 'fade_out', params: { duration: 0.5 } }]), 0,
+  'graphic fade-out ends transparent in preview');
+const offsetFadeCanvas = Canvas.createCanvas(80, 80);
+const offsetFadeCtx = offsetFadeCanvas.getContext('2d');
+offsetFadeCtx.globalAlpha = 0.5;
+drawLayerWithEffects(offsetFadeCtx, [{ kind: 'fade_in', startTime: 10, params: { duration: 1 } }], drawCtx => {
+  drawCtx.fillStyle = '#FF0000';
+  drawCtx.fillRect(0, 0, 80, 80);
+}, null, 10.5, { clipStart: 10, clipDuration: 2 });
+assert.ok(Math.abs(offsetFadeCtx.getImageData(40, 40, 1, 1).data[3] - 64) <= 1,
+  'graphic fades multiply their opacity with the parent layer opacity at nonzero project time');
+assert.notDeepEqual(render([{ kind: 'grayscale', params: { amount: 1 } }]), render([]),
+  'grayscale changes graphic-layer pixels');
+assert.notDeepEqual(render([{ kind: 'sepia', params: { amount: 1 } }]), render([]),
+  'sepia changes graphic-layer pixels');
+assert.deepEqual(render([{ kind: 'brightness', params: { amount: false } }]),
+  render([{ kind: 'brightness', params: { amount: 1 } }]),
+  'a malformed boolean brightness control uses its neutral default instead of turning footage black');
+assert.deepEqual(render([{ kind: 'brightness', params: { amount: ' ' } }]),
+  render([{ kind: 'brightness', params: { amount: 1 } }]),
+  'a blank imported brightness control uses its neutral default');
 const sequentialPixelEffects = [
   { kind: 'film_grain', params: { intensity: 0.7, size: 1.5, seed: 17, animated: false } },
   { kind: 'color_grade', params: { brightness: 145, contrast: 125, saturation: 135, temperature: 12 } },
@@ -202,6 +262,9 @@ assert.notDeepEqual(render([]), render([{ kind: 'vignette', params: { intensity:
 assert.notDeepEqual(render([{ kind: 'glitch', params: { amount: 24, seed: 3 } }], 0), render([{ kind: 'glitch', params: { amount: 24, seed: 3 } }], 0.5), 'glitch varies with frame time');
 assert.notDeepEqual(render([]), render([{ kind: 'glitch', params: { intensity: { value: 0.8 }, seed: 3 } }], 0), 'glitch resolves registry-wrapped intensity parameters');
 assert.notDeepEqual(render([]), render([{ kind: 'blur_radial', params: { intensity: 0.8, centerX: 0.1, centerY: 0.2, samples: 12 } }]), 'radial blur changes graphic layer pixels');
+assert.ok(GRAPHIC_EFFECT_KINDS.includes('drop-shadow'), 'drop-shadow alias is declared for graphic scene layers');
+assert.notDeepEqual(render([]), render([{ kind: 'drop-shadow', params: { color: '#ff0000', blur: 8, x: 4, y: 4 } }]),
+  'drop-shadow alias renders through the same canvas alpha-silhouette path as shadow');
 function directionalBlurBounds(width, height) {
   const source = Canvas.createCanvas(width, height);
   const sourceContext = source.getContext('2d');
@@ -311,9 +374,12 @@ assert.notDeepEqual(
 );
 const expandedAliases = [
   { kind: 'film_grain', params: { intensity: 0.8 } },
+  { kind: 'film-grain', params: { intensity: 0.8 } },
   { kind: 'rgb_split', params: { amount: 5 } },
 ];
 assert.notDeepEqual(render([]), render(expandedAliases), 'film-grain and RGB-split aliases render on graphic layers');
+assert.notDeepEqual(render([]), render([{ kind: 'film-grain', params: { intensity: 0.8 } }]),
+  'the hyphenated film-grain alias independently changes graphic-layer pixels');
 const aliasScene = createScene({ duration: 1, nodes: [createNode(NODE_TYPES.SHAPE, {
   id: 'alias-effects', duration: 1, vector: { kind: 'circle', w: 120, h: 120, fill: '#FFFFFF' }, effects: expandedAliases,
 })] });
@@ -519,6 +585,30 @@ try {
     durationSec: 0.5, fps: 2, widthPx: 120, tmpDir, name: 'plain', canvasModule: Canvas,
   });
   assert.notDeepEqual(fs.readFileSync(exported.files[0]), fs.readFileSync(plain.files[0]), 'server export applies the same effect stack');
+  for (const [kind, amount] of [['grayscale', 1], ['sepia', 1]]) {
+    const result = await renderVectorFrames({ kind: 'circle', w: 120, h: 120, fill: '#FF355E' }, {
+      durationSec: 0.5, fps: 2, widthPx: 120, tmpDir, name: `export-${kind}`, canvasModule: Canvas,
+      effects: [{ kind, params: { amount } }],
+    });
+    const image = await Canvas.loadImage(result.files[0]);
+    const probe = Canvas.createCanvas(120, 120);
+    const probeCtx = probe.getContext('2d');
+    probeCtx.drawImage(image, 0, 0);
+    const [red, green, blue] = probeCtx.getImageData(60, 60, 1, 1).data;
+    if (kind === 'grayscale') assert.ok(Math.max(red, green, blue) - Math.min(red, green, blue) <= 2,
+      'server vector export produces neutral grayscale pixels');
+    else assert.ok(red > green && green > blue, 'server vector export produces warm sepia pixels');
+  }
+  const fadedVector = await renderVectorFrames({ kind: 'circle', w: 120, h: 120, fill: '#FF355E' }, {
+    durationSec: 1, fps: 2, widthPx: 120, tmpDir, name: 'graphic-fade-in', canvasModule: Canvas,
+    effects: [{ kind: 'fade_in', params: { duration: 0.5 } }],
+  });
+  const firstFadeFrame = await Canvas.loadImage(fadedVector.files[0]);
+  const fadeProbe = Canvas.createCanvas(120, 120);
+  const fadeProbeCtx = fadeProbe.getContext('2d');
+  fadeProbeCtx.drawImage(firstFadeFrame, 0, 0);
+  assert.equal(fadeProbeCtx.getImageData(60, 60, 1, 1).data[3], 0,
+    'server vector export preserves transparent first frame for a graphic fade-in');
   const animatedGrain = await renderVectorFrames({ kind: 'circle', w: 120, h: 120, fill: '#FF355E' }, {
     durationSec: 1, fps: 2, widthPx: 120, tmpDir, name: 'animated-grain', canvasModule: Canvas,
     effects: [{ kind: 'grain', params: { amount: 28, seed: 17 } }],
@@ -534,4 +624,4 @@ try {
 } finally {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 }
-console.log('Layer effects passed: scene effects survive compilation and shared canvas rendering applies filters, masks, gradient fill, stroke and inner shadow.');
+console.log('Layer effects passed: scene effects survive compilation, grayscale/sepia match raster export, and shared canvas rendering applies filters, masks, gradient fill, stroke and inner shadow.');

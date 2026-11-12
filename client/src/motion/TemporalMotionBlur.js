@@ -1,3 +1,5 @@
+import { MAX_MOTION_BLUR_SAMPLES } from './MotionLimits.js';
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const surfacePools = new WeakMap();
 
@@ -115,7 +117,7 @@ export function drawTemporalMotionBlur(ctx, settings, timeSeconds, durationSecon
     if (!ctx || typeof draw !== 'function') return;
     if (!settings?.enabled) return draw(ctx, timeSeconds);
 
-    const samples = Math.round(clamp(Number(settings.samples) || 5, 2, 15));
+    const samples = Math.round(clamp(Number(settings.samples) || 5, 2, MAX_MOTION_BLUR_SAMPLES));
     const fps = clamp(Number(settings.frameRate) || 30, 1, 120);
     const rawShutterAngle = Number(settings.shutterAngle);
     const shutterAngle = clamp(Number.isFinite(rawShutterAngle) ? rawShutterAngle : 180, 0, 360);

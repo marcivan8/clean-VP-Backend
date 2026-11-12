@@ -121,7 +121,7 @@ const storageConfig = require('../config/storage');
 // Auth errors (401/403) and not-found (404) are rethrown immediately — retrying
 // them wastes time and would mask real problems.
 // ─────────────────────────────────────────────────────────────────────────────
-async function gcsRetry(fn, label, attempts = 3) {
+async function gcsRetry(fn, label, attempts = 5) {
     let lastErr;
     for (let i = 1; i <= attempts; i++) {
         try {
@@ -131,12 +131,68 @@ async function gcsRetry(fn, label, attempts = 3) {
             const code = err.code ?? err.response?.statusCode;
             if (code === 404 || code === 403 || code === 401) throw err; // deterministic — no point retrying
             if (i < attempts) {
-                console.warn(`[proxy/gcs-media] ${label} attempt ${i}/${attempts} failed: ${err.message} — retrying in ${250 * i}ms`);
-                await new Promise(r => setTimeout(r, 250 * i)); // 250ms → 500ms → 750ms
+                const delay = Math.min(250 * (2 ** (i - 1)), 4000);
+                console.warn(`[proxy/gcs-media] ${label} attempt ${i}/${attempts} failed: ${err.message} — retrying in ${delay}ms`);
+                await new Promise(r => setTimeout(r, delay));
             }
         }
     }
     throw lastErr;
+}
+
+// Buffer a bounded media range before sending headers. This lets us retry a
+// transient GCS reset without handing the browser a truncated 206 response.
+// The response is capped to 8 MiB; clients can request the following range.
+const MAX_MEDIA_RANGE_BYTES = 8 * 1024 * 1024;
+
+function parseMediaRange(header, size) {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(String(header || '').trim());
+    if (!match || !size) return null;
+    let start;
+    let end;
+    if (match[1] === '') {
+        const suffixLength = Number(match[2]);
+        if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return null;
+        start = Math.max(0, size - suffixLength);
+        end = size - 1;
+    } else {
+        start = Number(match[1]);
+        end = match[2] === '' ? size - 1 : Number(match[2]);
+        if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start >= size || end < start) return null;
+        end = Math.min(end, size - 1);
+    }
+    end = Math.min(end, start + MAX_MEDIA_RANGE_BYTES - 1, size - 1);
+    return { start, end };
+}
+
+function readGcsRange(file, start, end, gcsPath, attempt = 1) {
+    return new Promise((resolve, reject) => {
+        const stream = file.createReadStream({ start, end });
+        const chunks = [];
+        let bytes = 0;
+        stream.on('data', chunk => { chunks.push(chunk); bytes += chunk.length; });
+        stream.on('end', () => {
+            const expected = end - start + 1;
+            if (bytes !== expected) {
+                const err = new Error(`Incomplete GCS range for ${gcsPath}: expected ${expected} bytes, received ${bytes}`);
+                err.code = 'ERR_GCS_INCOMPLETE_RANGE';
+                if (attempt < 4) {
+                    const delay = 250 * (2 ** (attempt - 1));
+                    console.warn(`[proxy/gcs-media] Range read attempt ${attempt}/4 incomplete for ${gcsPath}: ${bytes}/${expected} bytes — retrying in ${delay}ms`);
+                    return setTimeout(() => readGcsRange(file, start, end, gcsPath, attempt + 1).then(resolve, reject), delay);
+                }
+                return reject(err);
+            }
+            resolve(Buffer.concat(chunks, bytes));
+        });
+        stream.on('error', err => {
+            stream.destroy();
+            if (attempt >= 4) return reject(err);
+            const delay = 250 * (2 ** (attempt - 1));
+            console.warn(`[proxy/gcs-media] Range read attempt ${attempt}/4 failed for ${gcsPath}: ${err.message} — retrying in ${delay}ms`);
+            setTimeout(() => readGcsRange(file, start, end, gcsPath, attempt + 1).then(resolve, reject), delay);
+        });
+    });
 }
 
 // ── In-memory segment cache ───────────────────────────────────────────────────
@@ -427,76 +483,23 @@ router.get('/gcs-media/*', mediaAccess.requireMediaAccess(req => req.params[0]),
         const fileSize = parseInt(metadata.size);
 
         if (req.headers.range) {
-            const [startStr, endStr] = req.headers.range.replace(/bytes=/, '').split('-');
-            const start = parseInt(startStr);
-            const end = endStr ? parseInt(endStr) : fileSize - 1;
-            const chunkLen = end - start + 1;
-
-            // Range reads are RETRIED and always terminate the response.
-            //
-            // Railway → GCS occasionally drops a pooled socket mid-read
-            // ("socket hang up"). gcsRetry() covers getMetadata() but never
-            // covered the read stream, so a single hiccup was fatal. Worse, the
-            // old error handler was `if (!res.headersSent) res.status(500).end()`
-            // — on a range response the 206 and its headers are already set, so
-            // headersSent is true and NOTHING ended the response. The socket
-            // dangled until Railway's edge timed it out and synthesised a 502,
-            // which is what made one clip's proxy.mp4 unplayable while another
-            // streamed fine. A response that is never ended is strictly worse
-            // than an error: the client cannot even retry intelligently.
-            const openRangeStream = (attempt = 1) => new Promise((resolve, reject) => {
-                const stream = file.createReadStream({ start, end });
-                let piped = false;
-                let clientClosed = false;
-
-                const onClose = () => {
-                    clientClosed = true;
-                    stream.destroy();
-                };
-                res.once('close', onClose);
-
-                stream.on('error', (err) => {
-                    stream.destroy();
-                    res.removeListener('close', onClose);
-                    if (clientClosed || res.destroyed) {
-                        return resolve();
-                    }
-                    // Only safe to retry while nothing has been written yet.
-                    if (!piped && !res.headersSent && attempt < 3) {
-                        console.warn(
-                            `[proxy/gcs-media] Range read attempt ${attempt}/3 failed for ${gcsPath}: ` +
-                            `${err.message} — retrying in ${250 * attempt}ms`
-                        );
-                        return setTimeout(
-                            () => openRangeStream(attempt + 1).then(resolve, reject),
-                            250 * attempt
-                        );
-                    }
-                    reject(err);
-                });
-
-                stream.once('data', () => { piped = true; });
-                stream.on('end', () => {
-                    res.removeListener('close', onClose);
-                    resolve();
-                });
-
+            try {
+                const range = parseMediaRange(req.headers.range, fileSize);
+                if (!range) {
+                    res.setHeader('Content-Range', `bytes */${fileSize}`);
+                    return res.status(416).end();
+                }
+                const { start, end } = range;
+                const body = await readGcsRange(file, start, end, gcsPath);
+                if (res.destroyed) return;
                 res.status(206);
                 res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
-                res.setHeader('Content-Length', chunkLen);
-                stream.pipe(res);
-            });
-
-            try {
-                await openRangeStream();
+                res.setHeader('Content-Length', body.length);
+                res.end(body);
             } catch (err) {
                 if (res.destroyed || res.writableEnded) return;
                 console.error('[proxy/gcs-media] Range stream error', gcsPath, ':', err.message);
-                // ALWAYS end the response. If headers went out we can only
-                // destroy the socket — the client sees a truncated body and
-                // retries the range, which is recoverable. Leaving it open is not.
                 if (!res.headersSent) res.status(502).end();
-                else res.destroy();
             }
             return;
         }

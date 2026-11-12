@@ -7,6 +7,8 @@ import { resolveMotionAt } from '../client/src/motion/MotionResolver.js';
 import { validateMotionExpression } from '../client/src/motion/MotionExpression.js';
 import { validateMotionExpression as validateWorkerMotionExpression } from '../render-worker/revideo/src/motion/MotionExpression.js';
 import { resolveMotionAt as resolveWorkerMotionAt } from '../render-worker/revideo/src/motion/MotionResolver.js';
+import { resolveRevideoEffectParameter } from '../render-worker/revideo/src/motion/EffectParameters.js';
+import { isEffectActiveAt } from '../render-worker/revideo/src/motion/EffectWindows.js';
 import { EffectNode } from '../client/src/effects/EffectNode.js';
 import { createGpuClipEffectConfigs } from '../client/src/effects/ClipEffectAdapter.js';
 import { EffectPipeline } from '../client/src/effects/EffectPipeline.js';
@@ -23,6 +25,25 @@ assert.equal(resolveEffectAtTime(effect, 4).params.amount.value, 1);
 assert.equal(resolveEffectAtTime(effect, 5).params.amount.value, 1.25);
 assert.equal(resolveEffectAtTime(effect, 6), null);
 assert.match(resolveTimelineEffectFilter([effect], 5), /brightness\(1\.25\)/);
+const legacyKeyframedEffect = {
+    kind: 'brightness',
+    params: { amount: { value: 0, keyframes: [{ time: 0, value: 0 }, { time: 10, value: 10 }] } },
+    keyframes: { amount: [] },
+};
+assert.equal(resolveEffectAtTime(legacyKeyframedEffect, 5).params.amount.value, 5,
+    'an empty effect-level track does not mask the populated parameter-level compatibility track');
+assert.equal(resolveRevideoEffectParameter({ params: { amount: false } }, 'amount', 0.75), 0.75,
+    'render-worker effect controls do not coerce boolean base values into zero or one');
+assert.equal(resolveRevideoEffectParameter({ params: { amount: ' ' } }, 'amount', 0.75), 0.75,
+    'render-worker effect controls use the authored fallback for whitespace values');
+assert.equal(resolveRevideoEffectParameter({ params: { amount: '2' } }, 'amount', 0.75), 2,
+    'render-worker effect controls preserve numeric-string compatibility');
+assert.equal(isEffectActiveAt({ startTime: false, endTime: ' ' }, 10, 2, 9), false,
+    'malformed render-worker effect bounds fall back to the clip window instead of activating early');
+assert.equal(isEffectActiveAt({ startTime: false, endTime: ' ' }, 10, 2, 10), true,
+    'malformed render-worker bounds preserve the clip start as the active boundary');
+assert.equal(isEffectActiveAt({ outputWindows: [{ start: null, end: true }] }, 10, 2, 10.5), false,
+    'malformed compositor output windows are ignored rather than coerced into an active range');
 const vectorExpression = {
     kind: 'glow',
     params: { color: { value: [0.1, 0.2, 0.3] } },
@@ -167,6 +188,18 @@ const plan = buildCompositionPlan([
 const overlaySamples = plan.overlays[0].effects[0].samples.amount;
 assert.ok(overlaySamples.some(point => Math.abs(point.value - 1.5) < 0.01));
 
+const legacyTrackPlan = buildCompositionPlan([
+    { id: 'legacy-track-base', type: 'video', clips: [{ id: 'legacy-track-footage', type: 'video', start: 0, duration: 10 }] },
+    { id: 'legacy-track-overlay', type: 'video', role: 'overlay', clips: [{
+        id: 'legacy-track-clip', type: 'video', start: 0, duration: 10,
+        effects: [legacyKeyframedEffect],
+    }] },
+]);
+const legacyTrackSamples = legacyTrackPlan.overlays[0].effects[0].samples.amount;
+assert.equal(legacyTrackSamples[0].value, 0);
+assert.equal(legacyTrackSamples.at(-1).value, 10,
+    'export planning samples the same parameter-level keyframes when the effect-level track is empty');
+
 const basePlan = buildCompositionPlan([{
     id: 'base-only', type: 'video', clips: [{
         id: 'main-footage', type: 'video', start: 10, duration: 2,
@@ -181,8 +214,8 @@ const mergedBaseEffects = exportProcessor.applyEffectSamples(
     [{ kind: 'brightness', params: { amount: 1 } }],
     basePlan.base.effectsByClip[0].effects,
 );
-assert.ok(mergedBaseEffects[0].samples.amount.length > 2,
-    'the export worker maps sampled base curves back onto the original clip effects');
+assert.ok(mergedBaseEffects[0].samples.amount.length >= 2,
+    'the export worker maps the planner-reduced base curve back onto the original clip effects');
 assert.equal(mergedBaseEffects[0].samples.amount[0].value, 0.5);
 assert.equal(mergedBaseEffects[0].samples.amount.at(-1).value, 1.5,
     'base footage export samples the same clip-local progress curve as preview');

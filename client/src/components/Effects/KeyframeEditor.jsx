@@ -24,6 +24,7 @@ const EASING_OPTIONS = [
     { value: 'ease-in-out', labelKey: 'effects.easingEaseInOut', path: 'M0,1 C0.42,1 0.58,0 1,0' },
     { value: 'step-start', labelKey: 'effects.easingStepStart', path: 'M0,0.5 H0.5 V0 H1' },
     { value: 'step-end', labelKey: 'effects.easingStepEnd', path: 'M0,1 H0.5 V0.5 H1 V0' },
+    { value: 'hold', labelKey: 'effects.easingHold', path: 'M0,1 H1 V0' },
     { value: '__custom_steps__', labelKey: 'effects.easingCustomSteps', path: 'M0,1 H0.25 V0.75 H0.5 V0.5 H0.75 V0.25 H1 V0' },
     { value: 'bounce', labelKey: 'effects.easingBounce', path: 'M0,1 C0.33,1 0.66,0.5 0.7,0 S1,0 1,0' },
     // R92: real springs and expo curves (motion/Easing.js)

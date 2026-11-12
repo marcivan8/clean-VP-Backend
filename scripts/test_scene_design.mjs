@@ -31,6 +31,7 @@ async function check(name, fn) {
 
 const SS = await import('../client/src/motion/SceneSchema.js');
 const SV = await import('../client/src/motion/SceneValidator.js');
+const { sampleAnimation } = await import('../client/src/motion/MotionResolver.js');
 const CM = await import('../client/src/motion/Compositor.js');
 const CL = await import('../client/src/motion/ComponentLibrary.js');
 const {
@@ -98,6 +99,21 @@ await check('normalising is idempotent, fills defaults and makes ids unique', ()
     assert.equal(b.transform.x, 50, 'an unreadable position falls back to the centre');
     assert.equal(b.transform.opacity, 1, 'opacity is clamped to 0..1');
     assert.deepEqual(b.children, [], 'a leaf always has an empty children list');
+});
+
+await check('scene normalization drops empty or non-numeric keyframe values instead of turning them into zero', () => {
+    const scene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [SS.createNode(NODE_TYPES.TEXT, {
+        id: 'invalid-keyframe-values', duration: 2, content: 'Motion',
+        animations: [{ duration: 2, keyframes: [
+            { time: null, properties: { x: 99 } },
+            { time: '', properties: { x: 98 } },
+            { time: 0, properties: { x: null, y: '', scale: true } },
+            { time: '1', properties: { x: '12', y: 8 } },
+        ] }],
+    })] }));
+    assert.deepEqual(SS.findNode(scene, 'invalid-keyframe-values').node.animations[0].keyframes, [
+        { time: 1, properties: { x: 12, y: 8 } },
+    ], 'only finite, explicitly authored numeric time and transform values survive import');
 });
 
 await check('a versionless scene migrates; a newer one is read as far as it can be', () => {
@@ -458,7 +474,7 @@ await check('unsupported masks on 3D media planes are reported instead of silent
     }
 });
 
-await check('3D renderer fallbacks for unsupported authored values are reported', () => {
+await check('unsupported 3D authored values are reported before rendering', () => {
     const scene = SS.normalizeScene(SS.createScene({ duration: 2, nodes: [SS.createNode(NODE_TYPES.SHAPE, {
         id: 'scene-with-unsupported-values', duration: 2,
         template: { kind: '3d-scene', params: { scene: {
@@ -471,14 +487,14 @@ await check('3D renderer fallbacks for unsupported authored values are reported'
     // primitive, material side and blend mode should report fallbacks.
     assert.equal(issues.length, 3);
     assert.ok(issues.every(item => item.severity === 'warn'));
-    assert.match(issues[0].message, /render as a box/);
+    assert.match(issues[0].message, /will be skipped/);
     assert.match(issues[1].message, /front-sided/);
     assert.match(issues[2].message, /source-over/);
     assert.ok(issues.every(item => !/area light.*point light/i.test(item.message)),
         'supported area lights must not be reported as falling back to point lights');
 });
 
-await check('animation tracks and keyframes above renderer caps are reported before flattening', () => {
+await check('authored animations beyond ROKA generation caps remain valid and renderable', () => {
     const scene = SS.normalizeScene(SS.createScene({ duration: 3, nodes: [SS.createNode(NODE_TYPES.TEXT, {
         id: 'crowded-animation-layer', duration: 3, content: 'Tracks',
         animations: Array.from({ length: 17 }, (_, index) => ({
@@ -486,10 +502,13 @@ await check('animation tracks and keyframes above renderer caps are reported bef
             keyframes: Array.from({ length: index === 0 ? 25 : 2 }, (_, time) => ({ time, properties: { opacity: time ? 1 : 0 } })),
         })),
     })] }));
-    const limits = SV.validateScene(scene).issues.filter(issue => issue.code === SV.ISSUE_CODES.ANIMATION_RENDER_LIMIT);
-    assert.deepEqual(limits.map(issue => [issue.detail.label, issue.detail.actual, issue.detail.limit]), [
-        ['animation tracks', 17, 16], ['keyframes in animation 1', 25, 24],
-    ]);
+    const report = SV.validateScene(scene);
+    assert.ok(!report.issues.some(issue => issue.code === 'animation_render_limit'),
+        'generation limits must not be presented as renderer limits');
+    const animation = scene.nodes[0].animations[0];
+    assert.equal(animation.keyframes.length, 25, 'normalization preserves all authored keyframes');
+    assert.equal(sampleAnimation(animation, 24).opacity, 1,
+        'the final authored keyframe is sampled after the generation limit');
 });
 
 await check('a malformed scene reports its structure and stops there', () => {
@@ -781,6 +800,7 @@ await check('media overlays report and remove effects unsupported by their rende
             id: 'media-effects', duration: 2, source: { url: 'media.png' },
             effects: [
                 { kind: 'shadow', params: { color: '#000', blur: 8 } },
+                { kind: 'drop-shadow', params: { color: '#f00', blur: 5 } },
                 { kind: 'glow', params: { color: '#fff', intensity: 0.5 } },
                 { kind: 'gradient-fill', params: { from: '#fff', to: '#000' } },
                 { kind: 'stroke', params: { color: '#fff', width: 2 } },
@@ -803,7 +823,7 @@ await check('media overlays report and remove effects unsupported by their rende
     assert.ok(!report.issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_EFFECT && issue.nodeId === 'video-gradient' && issue.detail?.kind === 'gradient-fill'), 'gradient fill is supported on video layers now that preview and export both render it');
     assert.ok(report.issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_EFFECT && issue.nodeId === 'video-gradient' && issue.detail?.kind === 'stroke'));
     const fixed = SV.autoFixScene(s);
-    assert.deepEqual(SS.findNode(fixed.scene, 'media-effects').node.effects.map(effect => effect.kind), ['shadow', 'glow', 'gradient-fill', 'stroke', 'inner-shadow', 'contrast']);
+    assert.deepEqual(SS.findNode(fixed.scene, 'media-effects').node.effects.map(effect => effect.kind), ['shadow', 'drop-shadow', 'glow', 'gradient-fill', 'stroke', 'inner-shadow', 'contrast']);
     assert.deepEqual(SS.findNode(fixed.scene, 'video-gradient').node.effects.map(effect => effect.kind), ['shadow', 'glow', 'gradient-fill', 'inner-shadow']);
 });
 
@@ -819,6 +839,24 @@ await check('disabled effects stay in the stack without render warnings', () => 
     assert.ok(!report.issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_EFFECT && issue.nodeId === 'disabled-effect'));
     const fixed = SV.autoFixScene(s);
     assert.deepEqual(SS.findNode(fixed.scene, 'disabled-effect').node.effects, s.nodes[0].effects);
+});
+
+await check('grayscale and sepia are accepted on graphic scene layers', () => {
+    const scene = SS.normalizeScene(SS.createScene({
+        duration: 2,
+        nodes: [SS.createNode(NODE_TYPES.TEXT, {
+            id: 'graphic-color-effects', duration: 2, content: 'Tone',
+            effects: [
+                { kind: 'grayscale', params: { amount: 0.8 } },
+                { kind: 'sepia', params: { amount: 0.6 } },
+            ],
+        })],
+    }));
+    const report = SV.validateScene(scene);
+    assert.ok(!report.issues.some(issue => issue.code === SV.ISSUE_CODES.UNSUPPORTED_EFFECT),
+        'supported color filters should not be rejected by scene validation');
+    assert.deepEqual(SS.flattenScene(scene).placements[0].clip.effects.map(effect => effect.kind),
+        ['grayscale', 'sepia'], 'both effects remain attached when the scene flattens into its renderable layer');
 });
 
 await check('animation timing is brought inside its own layer', () => {

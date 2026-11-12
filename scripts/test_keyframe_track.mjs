@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { resolveMotionAt, resolvedToCSS, sampleAnimation, sampleKeyframeTrack } from '../client/src/motion/MotionResolver.js';
-import { resolveMotionAt as resolveWorkerMotionAt } from '../render-worker/revideo/src/motion/MotionResolver.js';
+import { resolveMotionAt as resolveWorkerMotionAt, sampleAnimation as sampleWorkerAnimation } from '../render-worker/revideo/src/motion/MotionResolver.js';
 import { evaluateKeyframes } from '../client/src/motion/CameraMotionCompiler.js';
 import { clipToMotionLayer } from '../client/src/motion/ClipAdapter.js';
 import { buildCompositionPlan } from '../client/src/motion/Compositor.js';
@@ -8,15 +8,60 @@ import { createNode, createScene, flattenScene, NODE_TYPES } from '../client/src
 import { isKnownEasing, resolveEasing } from '../client/src/motion/Easing.js';
 import { evaluateMotionExpression, validateMotionExpression } from '../client/src/motion/MotionExpression.js';
 import { EffectNode } from '../client/src/effects/EffectNode.js';
-import { resolveEffectAtTime } from '../client/src/motion/EffectTiming.js';
+import { resolveEffectAtTime, resolveEffectParameter } from '../client/src/motion/EffectTiming.js';
 import { compilePath } from '../client/src/motion/SceneMotion.js';
 import { pointsToBezierSpline } from '../client/src/motion/SpatialMotion.js';
-import { animationsToParamTracks, paramTracksToAnimations, applyKeyframeOp, buildEditorModel } from '../client/src/motion/KeyframeBridge.js';
+import { remapSceneObjectTime, resolveOverlayVideoSourceTime } from '../client/src/motion/TimeRemap.js';
+import { animationsToParamTracks, paramTracksToAnimations, applyKeyframeOp, buildEditorModel, MOTION_PARAM_NAMES } from '../client/src/motion/KeyframeBridge.js';
+import { ANIMATABLE_PROPS } from '../client/src/motion/MotionSchema.js';
+import { ANIMATABLE_PROPS as WORKER_ANIMATABLE_PROPS } from '../render-worker/revideo/src/motion/MotionSchema.js';
 import { appendMotionPathPoint, createMotionPath, MAX_MOTION_PATH_POINTS, removeMotionPathPoint, updateMotionPathPoint } from '../client/src/motion/MotionPath.js';
 import fs from 'node:fs';
 
 const linear = [{ time: 0, value: 2 }, { time: 2, value: 6 }];
+assert.deepEqual(MOTION_PARAM_NAMES, ANIMATABLE_PROPS,
+  'the keyframe editor exposes every property the motion schema accepts, in the same order');
+assert.deepEqual(WORKER_ANIMATABLE_PROPS, ANIMATABLE_PROPS,
+  'browser and render worker accept the same animated property set');
 assert.equal(sampleKeyframeTrack(linear, 1, 0), 4);
+assert.equal(sampleKeyframeTrack([
+  { time: 0, value: 2 }, { time: 1, value: 6, easing: 'hold' },
+], 0.999, 0), 2, 'Hold easing keeps the outgoing value until the next keyframe');
+assert.equal(sampleKeyframeTrack([
+  { time: 0, value: 2 }, { time: 1, value: 6, easing: 'hold' },
+], 1, 0), 6, 'Hold easing switches exactly at the incoming keyframe');
+assert.equal(sampleKeyframeTrack([
+  { time: null, value: 99 }, { time: '', value: 98 }, { time: 1, value: null },
+  { time: 2, value: true },
+], 0, 12), 12, 'malformed direct track entries are ignored instead of coercing to zero or one');
+assert.equal(sampleKeyframeTrack([{ time: 0, value: 2 }, { time: 2, value: 6 }], 1), 4,
+  'valid numeric tracks continue interpolating after malformed entries are filtered');
+assert.equal(sampleKeyframeTrack([{ time: '3', value: '6' }], 0), 6,
+  'explicit numeric string keys remain compatible with imported timeline data');
+const malformedAnimation = { keyframes: [
+  { time: null, properties: { x: 99 } },
+  { time: 0, properties: { x: null, y: true, scale: '' } },
+] };
+assert.deepEqual(sampleAnimation(malformedAnimation, 0), {},
+  'direct property animations ignore malformed empty, null, and boolean values');
+assert.deepEqual(sampleWorkerAnimation(malformedAnimation, 0), {},
+  'render worker property animations ignore the same malformed values');
+const heldAnimation = { startTime: 0, duration: 1, easing: 'linear', keyframes: [
+  { time: 0, properties: { x: 0 } }, { time: 1, easing: 'hold', properties: { x: 100 } },
+] };
+assert.equal(sampleAnimation(heldAnimation, 0.9).x, 0, 'motion animation Hold remains flat before its incoming key');
+assert.equal(sampleWorkerAnimation(heldAnimation, 0.9).x, 0, 'worker animation Hold matches preview');
+assert.equal(sampleWorkerAnimation(heldAnimation, 1).x, 100, 'worker animation Hold switches at the key time');
+assert.equal(remapSceneObjectTime({ speed: 2, duration: 10, keyframes: [
+  { time: null, value: 9 }, { time: '', value: '' },
+] }, 3, 10), 6, 'an invalid source-time curve falls back to the authored playback speed');
+assert.equal(remapSceneObjectTime({ speed: false, duration: 10, offset: ' ' }, 3, 10), 3,
+  'malformed boolean playback speed and whitespace offset fall back without freezing the source clock');
+assert.equal(remapSceneObjectTime({ speed: '2', duration: 10, offset: '1' }, 3, 10), 7,
+  'numeric string playback controls remain supported for imported timeline data');
+assert.equal(resolveOverlayVideoSourceTime({ start: 4, duration: 10, offset: 2, speed: 1,
+  timeRemap: { speed: 2, duration: 10, keyframes: [{ time: null, value: 9 }] },
+}, 7), 5, 'overlay export uses legacy source timing when no valid remap curve exists');
 
 const authoredPath = createMotionPath(4);
 assert.equal(authoredPath.duration, 4, 'new paths span the clip duration');
@@ -44,6 +89,14 @@ assert.ok(Math.abs(pathGeometry[0].x - 0.375) < 0.002 && Math.abs(pathGeometry[1
   'the exported composition geometry carries the motion-path displacement, not just the preview resolver');
 assert.ok(Math.abs((pathGeometry[0].x + pathGeometry[1].x) / 2 - 0.475) < 0.002,
   'the export geometry interpolates through the authored motion-path midpoint');
+const holdPlan = buildCompositionPlan([
+  { id: 'base', type: 'video', order: 0, clips: [{ id: 'hold-base', type: 'video', start: 0, duration: 2, url: 'base.mp4' }] },
+  { id: 'graphics', type: 'overlay', order: 1, clips: [{ id: 'hold-overlay', type: 'image', start: 0, duration: 2, url: 'overlay.png', x: 25, y: 50,
+    keyframes: { x: [{ time: 0, value: 25 }, { time: 1, value: 75, easing: 'hold' }] } }] },
+], { width: 1080, height: 1920, fps: 30 });
+const heldGeometry = holdPlan.overlays.find(overlay => overlay.clipId === 'hold-overlay')?.geometry || [];
+assert.deepEqual(heldGeometry.map(({ t, x }) => [t, x]), [[0, 0.125], [1, 0.625]],
+  'export geometry retains the authored position until the Hold keyframe boundary');
 
 const unevenMotionPath = {
   points: [[0, 0], [5, 0], [100, 0], [100, 100]],
@@ -82,6 +135,18 @@ const animatedVectorEffect = resolveEffectAtTime({
 }, 1);
 assert.deepEqual(animatedVectorEffect.params.color.value, [0.5, 0.25, 0.5],
   'wrapped vector effect parameters keep animated color channels in the shared preview/export timing resolver');
+assert.equal(resolveEffectParameter({ params: { amount: '' } }, 'amount', 0.75), 0.75,
+  'an empty imported effect parameter falls back instead of coercing to zero');
+assert.equal(resolveEffectParameter({ params: { amount: null } }, 'amount', 0.75), 0.75,
+  'a null imported effect parameter falls back instead of coercing to zero');
+assert.equal(resolveEffectParameter({ params: { amount: false } }, 'amount', 0.75), 0.75,
+  'a boolean imported effect parameter falls back instead of coercing to zero or one');
+assert.deepEqual(resolveEffectParameter({ params: { color: [null, 0.5, 1] } }, 'color', [0.2, 0.3, 0.4]),
+  [0.2, 0.3, 0.4], 'an effect color vector with a null channel falls back as a whole instead of inserting black');
+assert.equal(resolveEffectAtTime({ kind: 'brightness', startTime: false, endTime: true,
+  params: { amount: { value: 0.5, keyframes: [{ time: 0, value: 0.25 }, { time: 2, value: 0.75 }] } },
+}, 1).params.amount.value, 0.5,
+  'malformed boolean effect windows are ignored and invalid parameter keys preserve the authored base value');
 assert.equal(sampleKeyframeTrack([{ time: 0, value: 0 }, { time: 1, value: 1, easing: 'ease-in' }], 0.5), 0.25);
 const customBezier = 'cubic-bezier(0.42, 0, 0.58, 1)';
 assert.equal(isKnownEasing(customBezier), true, 'custom Bézier strings are accepted by the canonical easing engine');

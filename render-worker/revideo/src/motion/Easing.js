@@ -228,6 +228,10 @@ const EASING_ALIASES = {
     'ease-in-out-circ': 'easeInOutCirc',
     'step-start':      'stepStart',
     'step-end':        'stepEnd',
+    // After Effects calls a constant segment a Hold keyframe. It is the same
+    // discrete curve as CSS step-end: retain the outgoing value until the
+    // incoming keyframe time, then switch in one frame.
+    hold:              'stepEnd',
     'back-in':         'backIn',
     'back-in-out':     'backInOut',
     'anticipate':      'backIn',

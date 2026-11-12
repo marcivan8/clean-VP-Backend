@@ -40,6 +40,33 @@ assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type
 assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type: 'text', content: 'Hello', start: 0, duration: 2,
   effects: [{ kind: 'hue', keyframes: { degrees: [{ time: 0, value: 0 }, { time: 2, value: 90 }] } }] }] }), true,
   'supported keyframed effects can use Revideo’s animated filter adapter');
+assert.equal(isRevideoTrackSupported({ type: 'overlay', clips: [{ id: 'shadow-opacity', type: 'image', url: '/logo.png', start: 0, duration: 2,
+  effects: [{ kind: 'shadow', params: { color: '#000000', opacity: 0.5 }, keyframes: {
+    opacity: [{ time: 0, value: 0 }, { time: 2, value: 1 }],
+  } }] }] }), true,
+  'keyframed shadow opacity stays on Revideo because its shadow color alpha is animated');
+assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type: 'text', content: 'Hello', start: 0, duration: 2,
+  effects: [{ kind: 'shadow', params: { color: '#000000', blur: 8, x: 1, y: 2 }, keyframes: {
+    blur: [{ time: 0, value: 2 }, { time: 2, value: 12 }],
+  } }] }] }), true,
+  'drop shadows and supported animated shadow controls use the Revideo node-shadow path');
+assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type: 'text', content: 'Hello', start: 0, duration: 2,
+  effects: [
+    { kind: 'shadow', params: { color: '#000000', blur: 4, x: 1, y: 1 } },
+    { kind: 'drop-shadow', params: { color: '#ff0000', blur: 12, x: 4, y: 8 } },
+  ] }] }), false,
+  'multiple shadows retain their independent color, blur and offset on the full compositor path instead of being collapsed into one Revideo shadow');
+assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type: 'text', content: 'Hello', start: 0, duration: 2,
+  effects: [
+    { kind: 'shadow', params: { color: '#000000', blur: 4 } },
+    { kind: 'drop-shadow', enabled: false, params: { color: '#ff0000', blur: 12 } },
+  ] }] }), true,
+  'disabled extra shadows do not force a capable clip off the Revideo path');
+assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type: 'text', content: 'Hello', start: 0, duration: 2,
+  effects: [{ kind: 'shadow', params: { color: '#000000' }, keyframes: {
+    color: [{ time: 0, value: '#000000' }, { time: 2, value: '#ffffff' }],
+  } }] }] }), false,
+  'animated shadow colors stay on the compositor path until color interpolation is implemented');
 assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type: 'text', content: 'Hello', start: 4, duration: 4,
   effects: [{ kind: 'blur_gaussian', startTime: 4, endTime: 8, outputWindows: [{ start: 0, end: 1 }, { start: 3, end: 4 }] }] }] }), true,
   'supported effects with valid retimed output windows can use Revideo');
