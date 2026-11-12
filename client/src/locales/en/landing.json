@@ -209,17 +209,19 @@
         "locked": []
       },
       "pro": {
-        "tagline": "Edit without limits. Bring your team.",
+        "tagline": "Edit without limits. Four hour footage, unlimited AI.",
         "cta": "Get Pro",
         "features": [
           "Everything in Creator",
           "Videos up to 4 hours",
           "Projects kept while subscribed",
           "Unlimited AI operations",
+          "Early access to new features"
+        ],
+        "soon": [
           "Priority processing queue",
           "2 team seats",
-          "Virality scoring + performance analysis",
-          "Early access to new features"
+          "Virality scoring + performance analysis"
         ],
         "locked": []
       }
@@ -446,7 +448,8 @@
     "pricing": {
       "popular": "MOST POPULAR",
       "redirecting": "Redirecting",
-      "footnote": "Cancel at any time. A plan changes what you can run next, never what you already exported."
+      "footnote": "Cancel at any time. A plan changes what you can run next, never what you already exported.",
+      "soonLabel": "In development, not included yet"
     },
     "faq": {
       "title": "Questions worth answering.",

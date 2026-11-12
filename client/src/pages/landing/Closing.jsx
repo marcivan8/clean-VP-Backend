@@ -154,6 +154,15 @@ export const PricingV2 = () => {
                         const data = plans[meta.key] || {};
                         const features = data.features || [];
                         const locked = data.locked || [];
+                        // R163 — features that are PUBLISHED but NOT BUILT get their
+                        // own list and their own label, because `locked` already
+                        // means something else: "this plan does not include it".
+                        // Rendering an unbuilt feature as either a check (included)
+                        // or a greyed check (not in this plan) was the same claim
+                        // the Oct GDPR audit flagged on Pro's seats and queue, and
+                        // R162 decided a plan matrix should say "not built yet" in
+                        // plain sight instead.
+                        const soon = data.soon || [];
 
                         return (
                             <div
@@ -229,6 +238,35 @@ export const PricingV2 = () => {
                                         </li>
                                     ))}
                                 </ul>
+
+                                {soon.length > 0 && (
+                                    <div style={{
+                                        marginTop: 22, paddingTop: 16,
+                                        borderTop: '1px solid var(--vl-line)',
+                                    }}>
+                                        <div className="vl-mono" style={{
+                                            fontSize: 10, letterSpacing: '0.12em',
+                                            color: 'var(--vl-ink-4)', marginBottom: 10,
+                                            textTransform: 'uppercase',
+                                        }}>{t('v2.pricing.soonLabel')}</div>
+                                        <ul style={{
+                                            listStyle: 'none', margin: 0, padding: 0,
+                                            display: 'flex', flexDirection: 'column', gap: 9,
+                                        }}>
+                                            {soon.map((f) => (
+                                                <li key={f} style={{
+                                                    display: 'flex', alignItems: 'flex-start', gap: 10,
+                                                    fontSize: 13,
+                                                }}>
+                                                    <span style={{ flex: 'none', marginTop: 2 }}>
+                                                        <Icon name="clock" size={13} color="var(--vl-ink-4)" />
+                                                    </span>
+                                                    <span style={{ color: 'var(--vl-ink-4)', lineHeight: 1.5 }}>{f}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
                             </div>
                         );
                     })}

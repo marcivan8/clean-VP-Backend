@@ -226,5 +226,64 @@ assert.match(toolsCode, /if \(response\.status === 402\)/, 'VideoEditorTools che
 
 console.log('  ok  Shorts and Stock panels strictly gated across UI, engine, and layout');
 
+// ── R163: a plan may not SELL what is not built ─────────────────────────────
+//
+// The Oct GDPR audit found Pro advertising "2 team seats" and a "priority
+// processing queue" with no code behind either, and R163 found a third:
+// "Virality scoring + performance analysis" — viralEngine/ has seven modules
+// and no caller, and ViralIntelligencePanel.jsx has no importer.
+//
+// The guard is deliberately shaped so it fails in BOTH directions. A claim on
+// this list must not appear in any plan's `features` (that is the
+// over-promise), and it must still appear in `soon` (so the fix cannot be
+// "quietly delete the row and tell nobody"). When one of these is genuinely
+// built, remove it from UNBUILT here in the same change that ships it — that
+// is the point at which it may move back into `features`.
+const UNBUILT_CLAIMS = [
+    { en: 'Priority processing queue',                  fr: 'File de traitement prioritaire',
+      why: 'no queue-priority code in jobs/ or services/' },
+    { en: '2 team seats',                               fr: "2 sièges d'équipe",
+      why: 'no organizations/organization_members model, no seat billing' },
+    { en: 'Virality scoring + performance analysis',    fr: 'Score de viralité + analyse de performance',
+      why: 'viralEngine/ has no caller; ViralIntelligencePanel.jsx has no importer' },
+];
+
+for (const lang of ['en', 'fr']) {
+    const landingJson = JSON.parse(read(`../client/src/locales/${lang}/landing.json`));
+    const plans = landingJson.pricing.plans;
+
+    for (const claim of UNBUILT_CLAIMS) {
+        const text = claim[lang];
+        for (const [planKey, plan] of Object.entries(plans)) {
+            assert.ok(!(plan.features || []).includes(text),
+                `${lang} ${planKey}.features sells "${text}" but it is not built (${claim.why}). ` +
+                'Move it to the plan\'s `soon` list, or remove it from UNBUILT_CLAIMS in this test ' +
+                'if the change that ships it is this one.');
+            assert.ok(!(plan.locked || []).includes(text),
+                `${lang} ${planKey}.locked lists "${text}", which reads as "not in this plan" ` +
+                'rather than "not built". It belongs in `soon`.');
+        }
+        assert.ok((plans.pro.soon || []).includes(text),
+            `${lang} pro.soon must still carry "${text}" so an unbuilt promise stays visible ` +
+            'rather than being silently dropped.');
+    }
+
+    // The Pro tagline carried the seats promise in prose ("Bring your team").
+    assert.ok(!/bring your team|invitez votre équipe/i.test(plans.pro.tagline),
+        `${lang} pro.tagline still promises team seats in prose: "${plans.pro.tagline}"`);
+
+    assert.ok(landingJson.v2.pricing.soonLabel,
+        `${lang} v2.pricing.soonLabel missing — the soon list would render unlabelled`);
+    assert.ok(!/—/.test(landingJson.v2.pricing.soonLabel), `${lang} soonLabel has em dash`);
+}
+
+// The pricing card must actually render the list, with its label.
+const closingCode = read('../client/src/pages/landing/Closing.jsx');
+assert.match(closingCode, /const soon = data\.soon \|\| \[\]/, 'PricingV2 must read the soon list');
+assert.match(closingCode, /soon\.map\(/, 'PricingV2 must render the soon list');
+assert.match(closingCode, /v2\.pricing\.soonLabel/, 'PricingV2 must label the soon list');
+
+console.log('  ok  No plan sells an unbuilt feature; the three known ones render as not-yet-built');
+
 console.log('\nALL SUBSCRIPTION TIER GATING TESTS PASSED!');
 

@@ -209,17 +209,19 @@
         "locked": []
       },
       "pro": {
-        "tagline": "Montez sans limites. Invitez votre équipe.",
+        "tagline": "Montez sans limites. Des rushes de quatre heures, l'IA en illimité.",
         "cta": "Obtenir Pro",
         "features": [
           "Tout dans Créateur",
           "Vidéos jusqu'à 4 heures",
           "Projets conservés pendant l'abonnement",
           "Opérations IA illimitées",
+          "Accès anticipé aux nouvelles fonctionnalités"
+        ],
+        "soon": [
           "File de traitement prioritaire",
           "2 sièges d'équipe",
-          "Score de viralité + analyse de performance",
-          "Accès anticipé aux nouvelles fonctionnalités"
+          "Score de viralité + analyse de performance"
         ],
         "locked": []
       }
@@ -446,7 +448,8 @@
     "pricing": {
       "popular": "LE PLUS CHOISI",
       "redirecting": "Redirection",
-      "footnote": "Annulable à tout moment. Un plan change ce que vous pouvez lancer ensuite, jamais ce que vous avez déjà exporté."
+      "footnote": "Annulable à tout moment. Un plan change ce que vous pouvez lancer ensuite, jamais ce que vous avez déjà exporté.",
+      "soonLabel": "En développement, pas encore inclus"
     },
     "faq": {
       "title": "Les questions qui méritent une réponse.",
