@@ -1,4 +1,9 @@
 /**
+ * NOT MOUNTED TODAY (R163). No importer. It overlaps agent/ValidationService.js,
+ * which IS in the live path, so the open question is not "wire this up" but
+ * "which of the two is the validator" — answer that before importing either.
+ */
+/**
  * TimelineValidator.js
  *
  * Validates timeline state invariants after every AI action.

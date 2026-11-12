@@ -1,4 +1,10 @@
 /**
+ * NOT REACHABLE TODAY (R163). Same story as ExecutionSupervisor: reachable only
+ * from the deleted agent/AgentSystem.js bootstrap. Kept rather than deleted
+ * because the recovery strategies here are real, and because EditJobManager's
+ * resume path (R131) is the natural place to call them from.
+ */
+/**
  * ErrorRecoveryAgent - Failure Handler for Viral Pilot
  * 
  * Listens for job failures and suggests remediation actions.

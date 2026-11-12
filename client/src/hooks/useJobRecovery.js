@@ -1,4 +1,16 @@
 /**
+ * NOT MOUNTED TODAY (R163). No importer — it was written to run on editor
+ * mount and nothing calls it.
+ *
+ * Kept, and not duplicated by anything: R131's `resume_failed_job` is a
+ * COMMAND the user asks for after an export fails, whereas this reconnects
+ * automatically to BullMQ jobs that were still running when the tab closed.
+ * The gap it covers is real — a job finishes in Redis and the user never sees
+ * the result. Mounting it means one `useJobRecovery()` call in IDELayout plus
+ * deciding what "applied automatically while you were away" should do to the
+ * undo stack, which is the part that needs a decision rather than wiring.
+ */
+/**
  * useJobRecovery.js
  *
  * On editor mount, checks localStorage for any BullMQ job IDs that were

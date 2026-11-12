@@ -1,4 +1,11 @@
 /**
+ * NOT MOUNTED TODAY (R163). No importer. The long-form work that did ship
+ * (R124 captions, R125 visual brief) took a different route through
+ * EditPlanner's step channel, so this chunked orchestrator was never called.
+ * Kept because the >30-minute timeout problem it solves is real and unsolved
+ * elsewhere; check it against the step channel before reviving it.
+ */
+/**
  * LongFormVideoProcessor.js
  * =========================
  * Orchestrates AI-assisted editing of long-form video (> 5 min).

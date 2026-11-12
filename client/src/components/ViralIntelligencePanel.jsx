@@ -1,3 +1,19 @@
+/**
+ * NOT MOUNTED TODAY (R163). No importer, and it reads the LEGACY
+ * store/useEditorStore (`viralAnalysis`, `isAnalyzing`), which nothing writes.
+ *
+ * It is the UI half of "Virality scoring + performance analysis", which R163
+ * moved out of Pro's published features into the plan's `soon` list precisely
+ * because this chain is broken end to end: viralEngine/ (7 modules, server
+ * side) has no caller and no API route, so there is nothing to render.
+ *
+ * Reviving it needs, in order: a route that runs viralEngine over a project's
+ * transcript and cut, state on useTimelineStore (not useEditorStore), this
+ * panel ported onto it, a rail entry, and then the claim can move back from
+ * `soon` into `features` in the landing.json of each locale — the gating
+ * test (scripts/test_subscription_tier_gating.mjs, UNBUILT_CLAIMS) enforces
+ * that order.
+ */
 import React, { useState } from 'react';
 import useEditorStore from '../store/useEditorStore.js';
 

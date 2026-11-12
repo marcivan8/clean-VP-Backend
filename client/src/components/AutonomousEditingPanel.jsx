@@ -1,4 +1,27 @@
 /**
+ * NOT MOUNTED TODAY, DELIBERATELY (R163).
+ *
+ * This panel is the ONLY caller of agent/AutonomousEditingMode.js — it carries
+ * its own prompt field and start button and subscribes to the engine's events,
+ * so rendering `<AutonomousEditingPanel />` once in IDELayout would make the
+ * whole step-by-step autonomous feature reachable. The roadmap called that
+ * "not a build, a mount", and it is right about the mechanics.
+ *
+ * It was still not mounted, for two reasons that are product decisions rather
+ * than wiring:
+ *
+ *  1. It is a SECOND autonomous engine beside StyleAutopilot, which is what
+ *     Auto mode actually runs today (and what the mobile flow drives). Two
+ *     engines doing "edit it for me" is the duplicate-path shape behind R14,
+ *     R16, R53 and R56.
+ *  2. It does not open a run id (see agent/autoRunContext.js), so its steps
+ *     would be metered as separate AI operations instead of one Auto run —
+ *     R148 fixed exactly that over-counting for StyleAutopilot.
+ *
+ * So: mounting is one line, and the decision in front of it is which engine is
+ * the product. Not an audit's call.
+ */
+/**
  * AutonomousEditingPanel — Phase 7
  * Floating overlay showing step-by-step autonomous editing progress.
  * Allows Continue / Edit / Skip / Abort at each step.

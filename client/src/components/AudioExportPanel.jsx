@@ -1,4 +1,9 @@
 /**
+ * NOT MOUNTED TODAY (R163). No importer, although its copy is still in
+ * editor.json under `audioExportPanel.*` in both locales. The `audio` rail tab
+ * renders MixerPanel; this would be a second section inside it, not a new tab.
+ */
+/**
  * client/src/components/AudioExportPanel.jsx
  *
  * Panel for exporting project audio as mp3/wav/aac/m4a.

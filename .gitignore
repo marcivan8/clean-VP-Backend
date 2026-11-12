@@ -39,3 +39,7 @@ artifacts/
 
 # revideo render-worker build output (mirrors the ignored client/dist)
 render-worker/revideo/dist
+
+# Dev-server and build logs. client/frontend.log was sitting untracked in the
+# working tree at R163, one broad `git add -A` away from being committed.
+*.log

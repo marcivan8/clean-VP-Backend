@@ -1,3 +1,8 @@
+/**
+ * NOT MOUNTED TODAY (R163). No importer. A development overlay for render
+ * quality; kept because it is cheap and occasionally wanted while tuning the
+ * preview, but nothing ships it to users.
+ */
 import React from 'react';
 import useTimelineStore from '../../store/useTimelineStore';
 import classNames from 'classnames';

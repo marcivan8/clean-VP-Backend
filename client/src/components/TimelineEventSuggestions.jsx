@@ -1,4 +1,10 @@
 /**
+ * NOT MOUNTED TODAY (R163). No importer. Detected-moment suggestions now reach
+ * the user through the assistant's suggestion chips (SuggestionEngine) rather
+ * than an overlay on the timeline — and after R160 a phone has no timeline to
+ * overlay at all.
+ */
+/**
  * client/src/components/TimelineEventSuggestions.jsx
  *
  * Displays SFX recommendations tied to detected timeline events

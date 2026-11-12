@@ -1,4 +1,14 @@
 /**
+ * NOT REACHABLE TODAY (R163). Its only importer was agent/AgentSystem.js, the
+ * bootstrap that wired this, ErrorRecoveryAgent and UserApprovalAgent together
+ * and that nothing ever called. AgentSystem was deleted; this was kept because
+ * it is real watchdog logic, not scaffolding.
+ *
+ * To use it, call it from wherever an execution actually begins
+ * (MediaExecutionEngine / EditJobManager) rather than restoring a bootstrap
+ * module — that indirection is what hid the fact that none of it ran.
+ */
+/**
  * ExecutionSupervisor - Watchdog Agent for Viral Pilot
  * 
  * Monitors active jobs and enforces execution constraints.
