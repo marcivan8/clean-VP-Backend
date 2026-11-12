@@ -1,7 +1,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import React, { useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap, Smartphone, Lock } from 'lucide-react';
+import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap, Smartphone, Lock, Users } from 'lucide-react';
 import classNames from 'classnames';
 import { Player } from '@revideo/player-react';
 import { Video as RevideoVideo, Audio as RevideoAudio, Media as RevideoMedia } from '@revideo/2d';
@@ -32,13 +32,18 @@ import useDeviceType from '../hooks/useDeviceType';
 import MixerPanel from '../components/Sidebar/MixerPanel';
 import InterviewEditPanel from '../components/InterviewEditPanel';
 // R61 — the Motion tab. NOTE: adding a panel here requires BOTH this import
-// AND an entry in the tab array below. This file also contains two render
-// branches ('interview', 'marketplace') whose tab buttons were trimmed from
-// that array. A tab button is not the only way in: setActiveTab() is also
-// called by assistant suggestions (SuggestionEngine `tab`) and clip clicks, so
-// a branch that renders an unimported component crashes the whole editor (the
-// old 'effects' branch did exactly that). Add both halves or the panel is dead
-// on arrival.
+// AND an entry in PanelRail's RAIL_TABS. A tab button is not the only way in:
+// setActiveTab() is also called by assistant suggestions (SuggestionEngine
+// `tab`) and clip clicks, so a branch that renders an unimported component
+// crashes the whole editor (the old 'effects' branch did exactly that). Add
+// both halves or the panel is dead on arrival.
+//
+// R163 — the reverse also happened and went unnoticed for longer: 'interview'
+// and 'marketplace' had render branches and NO way in. 'interview' was a real
+// 394-line panel against a live route, so it got a rail button. 'marketplace'
+// was four hardcoded fake extensions ("Motion Graphics - installed: false")
+// and was deleted; the booking/UGC marketplaces designed in R162 are a
+// different thing entirely and must not inherit this branch's name.
 import MotionPanel from '../components/MotionPanel';
 import ScenePanel from '../components/ScenePanel.jsx';
 import ABTestPanel from '../components/ABTestPanel.jsx';
@@ -2660,7 +2665,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                         {isMobile && (
                             <div className="relative border-b" style={{ borderColor: "var(--line-soft)" }}>
                                 <div ref={tabBarRef} className="p-2 flex gap-1 overflow-x-auto no-scrollbar">
-                                    {['media', 'captions', 'transcript', 'color', 'motion', 'shorts', 'iterations', 'assets', 'audio', 'transform', 'settings'].map(tab => (
+                                    {['media', 'captions', 'transcript', 'color', 'motion', 'shorts', 'iterations', 'assets', 'audio', 'interview', 'transform', 'settings'].map(tab => (
                                         <button
                                             key={tab}
                                             // R105 anchors: the tour points at `tab-shorts`, hints at
@@ -2697,6 +2702,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                                             {tab === 'iterations' && <span style={{ fontSize: 14 }}>🔁</span>}
                                             {tab === 'assets'     && <Sparkles className="w-4 h-4" />}
                                             {tab === 'audio'      && <span style={{ fontSize: 14 }}>🎤</span>}
+                                            {tab === 'interview'  && <Users    className="w-4 h-4" />}
                                             {tab === 'transform'  && <Move     className="w-4 h-4" />}
                                             {tab === 'settings'   && <Settings className="w-4 h-4" />}
                                             {t(`ideLayout.tabs.${tab}`)}
@@ -2892,31 +2898,6 @@ const IDELayout = ({ mode = 'editor' }) => {
                             {activeTab === 'audio' && <section className="p-4 border-b border-border/50"><MixerPanel /></section>}
 
                             {activeTab === 'transform' && <TransformPanel />}
-
-                            {activeTab === 'marketplace' && (
-                                <section className="p-4 border-b border-border/50">
-                                    <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold mb-3">{t('ideLayout.extensions.title')}</div>
-                                    {[
-                                        { id: 'ext-1', name: t('ideLayout.extensions.autoCaptions.name'), desc: t('ideLayout.extensions.autoCaptions.desc'), icon: '💬', installed: true },
-                                        { id: 'ext-2', name: t('ideLayout.extensions.motionGraphics.name'), desc: t('ideLayout.extensions.motionGraphics.desc'), icon: '✨', installed: false },
-                                        { id: 'ext-3', name: t('ideLayout.extensions.soundFxLibrary.name'), desc: t('ideLayout.extensions.soundFxLibrary.desc'), icon: '🔊', installed: false },
-                                        { id: 'ext-4', name: t('ideLayout.extensions.socialTemplates.name'), desc: t('ideLayout.extensions.socialTemplates.desc'), icon: '📱', installed: true },
-                                    ].map(ext => (
-                                        <div key={ext.id} className="flex items-center justify-between p-3 rounded-lg border border-border/50 hover:border-primary/30 hover:bg-secondary/20 transition-all cursor-pointer group mb-2">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center text-lg">{ext.icon}</div>
-                                                <div>
-                                                    <div className="text-sm font-medium">{ext.name}</div>
-                                                    <div className="text-[10px] text-muted-foreground">{ext.desc}</div>
-                                                </div>
-                                            </div>
-                                            <button className={classNames("px-3 py-1 text-[10px] rounded-full font-medium transition-colors", ext.installed ? "bg-green-500/20 text-green-400" : "bg-primary/10 text-primary hover:bg-primary/20")}>
-                                                {ext.installed ? t('ideLayout.extensions.installed') : t('ideLayout.extensions.install')}
-                                            </button>
-                                        </div>
-                                    ))}
-                                </section>
-                            )}
 
                             {activeTab === 'settings' && <section className="p-4"><SettingsPanel onReplayWalkthrough={replayOnboardingWalkthrough} showReplayWalkthrough={!isMobile} /></section>}
                         </div>

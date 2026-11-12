@@ -282,7 +282,15 @@ check('the switcher icons are not 10px any more', () => {
     const strip = ide.slice(ide.indexOf("{tab === 'media'      && <Layers"), ide.indexOf("{tab === 'settings'   && <Settings") + 120);
     assert.ok(!/w-2\.5 h-2\.5/.test(strip), '10px icons beside 12px type');
     assert.ok(!/fontSize: 9/.test(strip), 'a 9px emoji');
-    assert.equal((strip.match(/w-4 h-4/g) || []).length, 8, 'the eight lucide icons');
+    // R163 — a hardcoded count broke the moment a panel was added to the
+    // switcher (`interview`, which had a render branch and no way in). The
+    // check is about SIZE, not population: every lucide icon in the strip is
+    // 16px and none is the old 10px.
+    const lucide = strip.match(/className="(w-[\d.]+ h-[\d.]+)"/g) || [];
+    assert.ok(lucide.length >= 8, `expected the switcher's icons, found ${lucide.length}`);
+    for (const cls of lucide) {
+        assert.ok(/w-4 h-4|w-3 h-3/.test(cls), `a switcher icon is not 16px: ${cls}`);
+    }
 });
 
 check('sheet labels, chips and rows carry readable type', () => {

@@ -31,7 +31,7 @@
 import React from 'react';
 import {
     Layers, Type, FileText, Palette, Zap, Smartphone,
-    Repeat, Sparkles, Mic, Move, Settings, Lock,
+    Repeat, Sparkles, Mic, Move, Settings, Lock, Users,
 } from 'lucide-react';
 import classNames from 'classnames';
 
@@ -48,6 +48,13 @@ export const RAIL_TABS = [
     { id: 'motion',     Icon: Zap },
     { id: 'assets',     Icon: Sparkles },
     { id: 'audio',      Icon: Mic },
+    // R163 — InterviewEditPanel (394 lines, against the live
+    // POST /api/interview/rhythm-zoom) had a render branch in IDELayout and no
+    // way to reach it: no rail button, and nothing calls
+    // setActiveTab('interview'). Its own pre-flight checks handle a project
+    // with fewer than two clips or no captions, so it is safe to offer
+    // unconditionally rather than guessing when a cut is an interview.
+    { id: 'interview',  Icon: Users },
     { id: 'transform',  Icon: Move },
     { id: 'shorts',     Icon: Smartphone, paid: true },
     { id: 'iterations', Icon: Repeat },
@@ -108,9 +115,12 @@ const PanelRail = ({ activeTab, collapsed, onSelect, isFree, t }) => {
      * Which button holds the rail's single tab stop.
      *
      * Normally the open panel. But IDELayout can set `activeTab` to a panel
-     * that is not in the rail at all (`marketplace`, `interview`, opened from
-     * elsewhere), and then no button would match — leaving the rail with no
-     * tab stop and no way in from the keyboard. The first icon takes it then.
+     * that is not in the rail at all (`scene` and `background` are opened from
+     * a clip, not from here), and then no button would match — leaving the
+     * rail with no tab stop and no way in from the keyboard. The first icon
+     * takes it then. Kept as a guard rather than an assertion: this is the
+     * cheap half of the 'interview'/'marketplace' problem R163 found, and the
+     * next panel opened from elsewhere should not break the keyboard.
      */
     const allIds = [...RAIL_TABS, ...RAIL_FOOTER_TABS].map((tab) => tab.id);
     const focusId = allIds.includes(activeTab) ? activeTab : allIds[0];

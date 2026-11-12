@@ -117,9 +117,7 @@
       "audio": "audio",
       "transform": "transformation",
       "settings": "paramètres",
-      "effects": "effets",
       "interview": "interview",
-      "marketplace": "extensions",
       "motion": "animation",
       "shorts": "shorts",
       "iterations": "itérations"
@@ -164,27 +162,6 @@
       "motionPathEaseOut": "Décélération",
       "motionPathCustomBezier": "Bézier personnalisée",
       "reset": "Réinitialiser la transformation"
-    },
-    "extensions": {
-      "title": "Extensions",
-      "installed": "Installé",
-      "install": "Installer",
-      "autoCaptions": {
-        "name": "Sous-titres automatiques",
-        "desc": "Génère des sous-titres avec l'IA"
-      },
-      "motionGraphics": {
-        "name": "Motion Graphics",
-        "desc": "Modèles d'animation prêts à l'emploi"
-      },
-      "soundFxLibrary": {
-        "name": "Bibliothèque d'effets sonores",
-        "desc": "Plus de 10 000 sons libres de droits"
-      },
-      "socialTemplates": {
-        "name": "Modèles pour réseaux sociaux",
-        "desc": "Modèles pour TikTok, Reels"
-      }
     }
   },
   "assistant": {
@@ -352,6 +329,7 @@
     "easingEaseInOut": "Accélération/décélération",
     "easingStepStart": "Départ par palier",
     "easingStepEnd": "Arrivée par palier",
+    "easingHold": "Maintien",
     "easingCustomSteps": "Paliers personnalisés",
     "easingBounce": "Rebond",
     "keyframeCount_one": "{{count}} image clé",
@@ -1073,7 +1051,11 @@
       "textAlign": "Alignement du texte",
       "frontColor": "Couleur de face",
       "extrusionColor": "Couleur d’extrusion",
-      "alignments": { "left": "Gauche", "center": "Centré", "right": "Droite" },
+      "alignments": {
+        "left": "Gauche",
+        "center": "Centré",
+        "right": "Droite"
+      },
       "cameraAnimation": "Animation de la caméra",
       "cameraProperty": "Propriété de caméra à animer",
       "addCameraKeyframe": "Définir une image clé caméra à la tête de lecture",
@@ -1258,13 +1240,26 @@
       "particleSize": "Taille",
       "particleSpeed": "Vitesse",
       "particleShape": "Forme des particules",
-      "particleShapes": { "circle": "Cercle", "square": "Carré", "diamond": "Losange", "star": "Étoile" },
+      "particleShapes": {
+        "circle": "Cercle",
+        "square": "Carré",
+        "diamond": "Losange",
+        "star": "Étoile"
+      },
       "particleColor": "Couleur des particules",
       "particleSimulation": "Émetteur et comportement des particules",
       "emitterShape": "Forme de l’émetteur",
-      "emitterShapes": { "point": "Point", "box": "Boîte", "sphere": "Sphère", "ring": "Anneau" },
+      "emitterShapes": {
+        "point": "Point",
+        "box": "Boîte",
+        "sphere": "Sphère",
+        "ring": "Anneau"
+      },
       "emissionMode": "Mode d’émission",
-      "emissionModes": { "continuous": "Continu", "burst": "Impulsion" },
+      "emissionModes": {
+        "continuous": "Continu",
+        "burst": "Impulsion"
+      },
       "emitterPosition": "Position de l’émetteur",
       "emitterSize": "Dimensions de l’émetteur",
       "emitterRadii": "Rayons de l’émetteur",
@@ -1308,9 +1303,20 @@
       "audioDisabled": "Désactivé",
       "audioTarget": "Réagir sur",
       "audioTargets": {
-        "scale": "Échelle", "rotationX": "Rotation X", "rotationY": "Rotation Y", "rotationZ": "Rotation Z",
-        "opacity": "Opacité", "positionX": "Position X", "positionY": "Position Y", "positionZ": "Position Z",
-        "radius": "Rayon", "height": "Hauteur", "tube": "Épaisseur", "sizeX": "Taille X", "sizeY": "Taille Y", "sizeZ": "Taille Z"
+        "scale": "Échelle",
+        "rotationX": "Rotation X",
+        "rotationY": "Rotation Y",
+        "rotationZ": "Rotation Z",
+        "opacity": "Opacité",
+        "positionX": "Position X",
+        "positionY": "Position Y",
+        "positionZ": "Position Z",
+        "radius": "Rayon",
+        "height": "Hauteur",
+        "tube": "Épaisseur",
+        "sizeX": "Taille X",
+        "sizeY": "Taille Y",
+        "sizeZ": "Taille Z"
       },
       "audioAmount": "Intensité",
       "proceduralMotion": "Expression de mouvement procédural",

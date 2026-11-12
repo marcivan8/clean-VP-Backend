@@ -117,9 +117,7 @@
       "audio": "audio",
       "transform": "transform",
       "settings": "settings",
-      "effects": "effects",
       "interview": "interview",
-      "marketplace": "marketplace",
       "motion": "motion",
       "shorts": "shorts",
       "iterations": "iterations"
@@ -164,27 +162,6 @@
       "motionPathEaseOut": "Ease out",
       "motionPathCustomBezier": "Custom Bézier",
       "reset": "Reset Transform"
-    },
-    "extensions": {
-      "title": "Extensions",
-      "installed": "Installed",
-      "install": "Install",
-      "autoCaptions": {
-        "name": "Auto Captions",
-        "desc": "Generate captions with AI"
-      },
-      "motionGraphics": {
-        "name": "Motion Graphics",
-        "desc": "Pre-built motion templates"
-      },
-      "soundFxLibrary": {
-        "name": "Sound FX Library",
-        "desc": "10,000+ royalty-free sounds"
-      },
-      "socialTemplates": {
-        "name": "Social Templates",
-        "desc": "Templates for TikTok, Reels"
-      }
     }
   },
   "assistant": {
@@ -352,6 +329,7 @@
     "easingEaseInOut": "Ease In Out",
     "easingStepStart": "Step Start",
     "easingStepEnd": "Step End",
+    "easingHold": "Hold",
     "easingCustomSteps": "Custom Steps",
     "easingBounce": "Bounce",
     "keyframeCount_one": "{{count}} keyframe",
@@ -1073,7 +1051,11 @@
       "textAlign": "Text alignment",
       "frontColor": "Front colour",
       "extrusionColor": "Extrusion colour",
-      "alignments": { "left": "Left", "center": "Center", "right": "Right" },
+      "alignments": {
+        "left": "Left",
+        "center": "Center",
+        "right": "Right"
+      },
       "cameraAnimation": "Camera animation",
       "cameraProperty": "Camera property to animate",
       "addCameraKeyframe": "Set camera keyframe at playhead",
@@ -1258,13 +1240,26 @@
       "particleSize": "Size",
       "particleSpeed": "Speed",
       "particleShape": "Particle shape",
-      "particleShapes": { "circle": "Circle", "square": "Square", "diamond": "Diamond", "star": "Star" },
+      "particleShapes": {
+        "circle": "Circle",
+        "square": "Square",
+        "diamond": "Diamond",
+        "star": "Star"
+      },
       "particleColor": "Particle colour",
       "particleSimulation": "Emitter and particle behavior",
       "emitterShape": "Emitter shape",
-      "emitterShapes": { "point": "Point", "box": "Box", "sphere": "Sphere", "ring": "Ring" },
+      "emitterShapes": {
+        "point": "Point",
+        "box": "Box",
+        "sphere": "Sphere",
+        "ring": "Ring"
+      },
       "emissionMode": "Emission mode",
-      "emissionModes": { "continuous": "Continuous", "burst": "Burst" },
+      "emissionModes": {
+        "continuous": "Continuous",
+        "burst": "Burst"
+      },
       "emitterPosition": "Emitter position",
       "emitterSize": "Emitter dimensions",
       "emitterRadii": "Emitter radii",
@@ -1308,9 +1303,20 @@
       "audioDisabled": "Disabled",
       "audioTarget": "React to",
       "audioTargets": {
-        "scale": "Scale", "rotationX": "Rotation X", "rotationY": "Rotation Y", "rotationZ": "Rotation Z",
-        "opacity": "Opacity", "positionX": "Position X", "positionY": "Position Y", "positionZ": "Position Z",
-        "radius": "Radius", "height": "Height", "tube": "Tube", "sizeX": "Size X", "sizeY": "Size Y", "sizeZ": "Size Z"
+        "scale": "Scale",
+        "rotationX": "Rotation X",
+        "rotationY": "Rotation Y",
+        "rotationZ": "Rotation Z",
+        "opacity": "Opacity",
+        "positionX": "Position X",
+        "positionY": "Position Y",
+        "positionZ": "Position Z",
+        "radius": "Radius",
+        "height": "Height",
+        "tube": "Tube",
+        "sizeX": "Size X",
+        "sizeY": "Size Y",
+        "sizeZ": "Size Z"
       },
       "audioAmount": "Amount",
       "proceduralMotion": "Procedural motion expression",

@@ -72,6 +72,34 @@ check('every panel in the rail has a render branch in IDELayout', () => {
     assert.deepEqual(missing, [], `no render branch for: ${missing.join(', ')}`);
 });
 
+// R163 — THE REVERSE DIRECTION. The header above has claimed "(or the
+// reverse)" since R108 and only ever checked rail → branch, which is how
+// 'interview' (a real 394-line panel against a live route) and 'marketplace'
+// (four hardcoded fake extensions) both sat in IDELayout with no way to reach
+// them. A render branch with no rail button is not a crash, so nothing
+// surfaced it: the panel is simply never seen again.
+check('every render branch in IDELayout is reachable from the rail', () => {
+    const branches = [...new Set([...LAYOUT.matchAll(/activeTab === '([a-z]+)'/g)].map(m => m[1]))];
+    // railIds already carries RAIL_FOOTER_TABS, so this is every way in.
+    const unreachable = branches.filter(id => !railIds.includes(id));
+    assert.deepEqual(unreachable, [], 
+        `render branch with no way in: ${unreachable.join(', ')}. ` +
+        'Either give it a rail entry or delete the branch — a panel nobody can ' +
+        'open is worse than no panel, because it reads as shipped.');
+});
+
+check('the mock extensions marketplace stays deleted', () => {
+    // It rendered four hardcoded fake extensions, one of which claimed
+    // "Motion Graphics — installed: false" about an engine that is built and
+    // shipping. R162 designs two REAL marketplaces (booking, UGC); neither
+    // should inherit this branch, its name or its locale keys.
+    assert.ok(!LAYOUT.includes("activeTab === 'marketplace'"), 'the mock branch is back');
+    for (const [loc, dict] of [['en', en], ['fr', fr]]) {
+        assert.ok(!dict.ideLayout?.extensions, `${loc}: the mock extension copy is back`);
+        assert.ok(!dict.ideLayout?.tabs?.marketplace, `${loc}: the dead tab label is back`);
+    }
+});
+
 check('every panel in the rail has a name in both locales', () => {
     for (const [loc, dict] of [['en', en], ['fr', fr]]) {
         const missing = railIds.filter(id => !dict.ideLayout?.tabs?.[id]);
