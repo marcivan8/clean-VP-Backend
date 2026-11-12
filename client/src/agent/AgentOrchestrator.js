@@ -1,4 +1,11 @@
 /**
+ * NOT MOUNTED TODAY (R165). No importer. It calls POST /api/ai/agent-plan,
+ * which is not how a plan is produced today: EditPlanner + CommandCompiler do
+ * it client-side and MediaExecutionEngine executes. Kept rather than deleted
+ * because the auth fix recorded below is the kind of thing that gets
+ * re-discovered the hard way, but nothing reaches this code.
+ */
+/**
  * AgentOrchestrator
  *
  * FIX: getAgentPlan() was calling fetch('/api/ai/agent-plan', ...) without an

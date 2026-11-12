@@ -1,4 +1,19 @@
 /**
+ * NOT MOUNTED TODAY (R165) — the BARREL is unused, the engine behind it is not.
+ *
+ * Nothing imports this file. Every consumer reaches into the modules directly
+ * (`from '../motion/MotionResolver.js'` and so on), which is why the engine is
+ * live while its front door is not: MotionResolver, LayerEffects, Scene3D,
+ * VectorGraphics, TimeRemap, CameraMotionCompiler and the rest all reach AI
+ * commands, Auto mode, the editor and the export.
+ *
+ * One module is reachable ONLY through this barrel and is therefore dead:
+ * SpringPhysics.js (223 lines, tested by test_motion_springs.mjs).
+ *
+ * Keeping the barrel is harmless and it documents the engine's public surface.
+ * Deleting it would strand SpringPhysics with no explanation, which is worse.
+ */
+/**
  * client/src/motion/ — the VIBED Motion Graphics engine.
  *
  * A unified, renderer-agnostic layer/animation model. Everything here is pure:

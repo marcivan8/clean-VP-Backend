@@ -1,4 +1,11 @@
 /**
+ * NOT MOUNTED TODAY (R165). Nothing imports this barrel, so the whole
+ * orchestrator/ folder — OrchestratorController, OrchestratorFSM,
+ * OrchestratorEvents, OrchestratorConfig — is reachable from nothing. The live
+ * edit lifecycle runs through agent/EditJobManager.js and
+ * agent/MediaExecutionEngine.js instead.
+ */
+/**
  * Orchestrator Module
  * Event-driven controller for edit request lifecycle management.
  * 

@@ -1,3 +1,33 @@
+/**
+ * NOT MOUNTED TODAY (R165) — and it is the root of the largest unreachable
+ * cluster in the client.
+ *
+ * Nothing imports this file. The live preview is rendered by IDELayout's own
+ * preview stage with <BaseClipOverlay />, <TextOverlay /> and
+ * <GraphicOverlay /> (which draws TemplateCanvas) on top of it. TextOverlay's
+ * own header already noted this about CaptionOverlay.
+ *
+ * What hangs off it, reachable through nothing else:
+ *   engine/PlaybackEngine.js  → engine/VideoWorker.js, MasterClock, RingBuffer,
+ *                               MP4Demuxer, audioResample, webglContextLifecycle
+ *   effects/index.js          → EffectPipeline, EffectRenderer, EffectGraph,
+ *                               engines/{GPU,CPU,AI}Effects, presets/*
+ *   Player/CaptionOverlay.jsx, DebugOverlay, FatigueAlert, ObjectLayerOverlay
+ *
+ * That is roughly 4,500 lines of WebGL effect runtime plus the custom WebCodecs
+ * playback engine. The consequence worth knowing: this file is the ONLY place
+ * that ever sets `gpuPreview: true` (see motion/TimelineVisualEffects.js's
+ * isEffectHandledByGpuPreview), so in the live editor every GPU effect falls
+ * back to its CSS/SVG approximation, and only renders through the real filter
+ * graph at export time, where the SERVER compositor
+ * (server/compositor/CompositorCompiler.js) does the work independently.
+ *
+ * So the engine is not broken and not unused — the AI sets effects through
+ * VideoEditorTools' apply_motion_effect_stack, the preview approximates them
+ * and the export renders them. What is unreachable is this client-side
+ * WebGL/WebCodecs path. Reviving it is a real decision (two playback engines,
+ * two effect renderers), not a wiring fix.
+ */
 import React, { useRef, useState, useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';

@@ -1,4 +1,9 @@
 /**
+ * NOT MOUNTED TODAY (R165). No importer — flagged as such since R156's audit
+ * and still true. Beat-matched sync and music auto-ducking now live in the
+ * audio-engine and the mixer path; this is the earlier standalone attempt.
+ */
+/**
  * client/src/agent/AudioDirector.js
  *
  * Creative Suite: Beat-Matched Synchronization and Intelligent Music Auto-Ducking.
