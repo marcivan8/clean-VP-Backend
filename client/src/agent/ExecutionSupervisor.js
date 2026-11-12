@@ -1,8 +1,9 @@
 /**
  * NOT REACHABLE TODAY (R163). Its only importer was agent/AgentSystem.js, the
- * bootstrap that wired this, ErrorRecoveryAgent and UserApprovalAgent together
- * and that nothing ever called. AgentSystem was deleted; this was kept because
- * it is real watchdog logic, not scaffolding.
+ * bootstrap that wired this and ErrorRecoveryAgent together and that nothing
+ * ever called. AgentSystem was deleted; this was kept because it is real
+ * watchdog logic, not scaffolding. (R165 removed the third module that
+ * bootstrap wired, UserApprovalAgent, along with the autonomous cluster.)
  *
  * To use it, call it from wherever an execution actually begins
  * (MediaExecutionEngine / EditJobManager) rather than restoring a bootstrap

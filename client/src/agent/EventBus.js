@@ -68,13 +68,6 @@ export const EVENT_TYPES = {
     TRANSCRIPTION_FAILED: 'transcription:failed',    // { filename, error }
     ANALYSIS_READY: 'analysis:ready',           // { filename, analysis, wordCount }
 
-    // Phase 7: Autonomous Editing Mode
-    AUTONOMOUS_PLAN_READY: 'autonomous:plan_ready',
-    AUTONOMOUS_STEP_READY: 'autonomous:step_ready',
-    AUTONOMOUS_STEPS_UPDATED: 'autonomous:steps_updated',
-    AUTONOMOUS_STATUS: 'autonomous:status',
-    AUTONOMOUS_SESSION_ENDED: 'autonomous:session_ended',
-
     // Phase 7: A/B Iteration System
     ITERATION_STARTED: 'iteration:started',
     ITERATION_COMPLETE: 'iteration:complete',
