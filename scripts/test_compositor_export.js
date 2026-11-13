@@ -1085,7 +1085,7 @@ if (!FFMPEG) {
         kind: 'glow', params: { threshold: 0.01, intensity: 1, radius: 20, color: '#00ff00' },
     }] }];
     const glowPlan = planFor([vclip({ id: 'glow-child', start: 0, duration: 3,
-        extra: { x: 50, y: 50, compositionStack: glowStack } })]);
+        extra: { x: 50, y: 50, scale: 1.25, compositionStack: glowStack } })]);
     const glowGraph = compileCompositionPlan(glowPlan, [{ overlayId: glowPlan.overlays[0].id, inputIndex: 1 }]);
     const glowOut = path.join(dir, 'isolated-glow.mp4');
     const glowRender = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',

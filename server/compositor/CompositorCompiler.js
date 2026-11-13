@@ -231,8 +231,11 @@ function compileIsolatedGroupEffects(group, groupToken = 'group', frame = { widt
                         if (Number(window.start) >= start && Number(window.start) <= end) commandTimes.add(Number(window.start));
                         if (Number(window.end) >= start && Number(window.end) <= end) commandTimes.add(Number(window.end));
                     }
-                    const commands = [...commandTimes].sort((a, b) => a - b).map(time =>
-                        `${n4(time)} ${target} sigma ${n4(Math.max(0, Math.min(50, valueAt(time))))}`);
+                    const commands = [...commandTimes].sort((a, b) => a - b).flatMap(time => {
+                        const s = n4(Math.max(0, Math.min(50, valueAt(time))));
+                        const t = n4(time);
+                        return [`${t} gblur@${target} sigma ${s}`, `${t} gblur sigma ${s}`, `${t} ${target} sigma ${s}`];
+                    });
                     const initial = n4(Math.max(0, Math.min(50, valueAt(start))));
                     // Isolated composition buffers are RGBA. Blur all four
                     // planes so the alpha edge softens along with RGB; leaving
@@ -756,8 +759,11 @@ function compileOverlaySource(ov, inputIdx, label, frame, options = {}) {
             return points.at(-1).value;
         };
         const target = `ov${String(ov.id || inputIdx).replace(/[^a-zA-Z0-9_]/g, '_')}_motion_blur`;
-        const commands = [...commandTimes].sort((a, b) => a - b)
-            .map(time => `${n4(time)} ${target} sigma ${n4(valueAt(time))}`);
+        const commands = [...commandTimes].sort((a, b) => a - b).flatMap(time => {
+            const s = n4(valueAt(time));
+            const t = n4(time);
+            return [`${t} gblur@${target} sigma ${s}`, `${t} gblur sigma ${s}`, `${t} ${target} sigma ${s}`];
+        });
         parts.push(`sendcmd=c='${commands.join(';')}',gblur@${target}=sigma=${n4(valueAt(start))}`);
     } else if (blur > 0.05) {
         parts.push(`gblur=sigma=${n4(blur)}`);
@@ -825,8 +831,11 @@ function compileOverlaySource(ov, inputIdx, label, frame, options = {}) {
                         }
                         return boundedRadiusPoints.at(-1).value;
                     };
-                    const commands = [...commandTimes].sort((a, b) => a - b)
-                        .map(time => `${n4(time)} ${target} sigma ${n4(valueAt(time))}`);
+                    const commands = [...commandTimes].sort((a, b) => a - b).flatMap(time => {
+                        const s = n4(valueAt(time));
+                        const t = n4(time);
+                        return [`${t} gblur@${target} sigma ${s}`, `${t} gblur sigma ${s}`, `${t} ${target} sigma ${s}`];
+                    });
                     parts.push(`sendcmd=c='${commands.join(';')}',gblur@${target}=sigma=${n4(valueAt(start))}`);
                 } else {
                     parts.push(`gblur=sigma=${n4(radiusValue)}`);
@@ -1438,8 +1447,11 @@ function compileGroupShadow(effect, frame, animated = {}, groupToken = 'group') 
                 return sorted.at(-1).value;
             };
             const target = `${String(groupToken).replace(/[^a-zA-Z0-9_]/g, '_')}_shadow_blur`;
-            blurCommands = [...times].sort((a, b) => a - b).map(time =>
-                `${n4(time)} ${target} sigma ${n4(Math.max(0, Math.min(100, valueAt(time))) * scale / 2)}`);
+            blurCommands = [...times].sort((a, b) => a - b).flatMap(time => {
+                const s = n4(Math.max(0, Math.min(100, valueAt(time))) * scale / 2);
+                const t = n4(time);
+                return [`${t} gblur@${target} sigma ${s}`, `${t} gblur sigma ${s}`, `${t} ${target} sigma ${s}`];
+            });
             initialSigma = Math.max(0.5, valueAt(from) * scale / 2);
             blurCommands = { target, commands: blurCommands };
         }
@@ -1546,8 +1558,11 @@ function compileAlphaEffectSource(ov, inputIdx, label, frame, effect) {
             return track.points.at(-1).value;
         };
         const target = `${String(label).replace(/[^a-zA-Z0-9_]/g, '_')}_radius`;
-        const commands = [...times].sort((a, b) => a - b).map(time =>
-            `${n4(time)} ${target} sigma ${n4(valueAt(time) * scale / 2)}`);
+        const commands = [...times].sort((a, b) => a - b).flatMap(time => {
+            const s = n4(valueAt(time) * scale / 2);
+            const t = n4(time);
+            return [`${t} gblur@${target} sigma ${s}`, `${t} gblur sigma ${s}`, `${t} ${target} sigma ${s}`];
+        });
         return `sendcmd=c='${commands.join(';')}',gblur@${target}=sigma=${n4(valueAt(start) * scale / 2)}`;
     };
     const fallback = kind === 'glow' ? [114, 217, 255] : [0, 0, 0];
@@ -1806,7 +1821,7 @@ function compileCompositionPlan(plan, inputs, options = {}) {
                 const ramp = `clip(((0.2126*r(X,Y)+0.7152*g(X,Y)+0.0722*b(X,Y)-(${thresholdValue}))/max(1,255-(${thresholdValue})))\\,0\\,1)`;
                 const target = `comp${String(groupSerial)}_glow_${processedIndex}`.replace(/[^a-zA-Z0-9_]/g, '_');
                 const radiusFilter = Array.isArray(glow.radiusCommands) && glow.radiusCommands.length > 1
-                    ? `sendcmd=c='${glow.radiusCommands.map(([time, value]) => `${time} ${target} sigma ${value}`).join(';')}',gblur@${target}=sigma=${glow.radiusCommands[0][1]}:planes=15`
+                    ? `sendcmd=c='${glow.radiusCommands.flatMap(([time, value]) => [`${time} gblur@${target} sigma ${value}`, `${time} gblur sigma ${value}`, `${time} ${target} sigma ${value}`]).join(';')}',gblur@${target}=sigma=${glow.radiusCommands[0][1]}:planes=15`
                     : `gblur=sigma=${n4(glow.radius)}:planes=15`;
                 chains.push(`[${processed}]split[${baseLabel}][${bloomLabel}]`);
                 chains.push(`[${bloomLabel}]geq=r='${glow.red}':g='${glow.green}':b='${glow.blue}':a='alpha(X,Y)*${ramp}*(${intensityValue})',${radiusFilter}[${blurredLabel}]`);
