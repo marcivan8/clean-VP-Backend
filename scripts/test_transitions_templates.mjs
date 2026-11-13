@@ -30,7 +30,10 @@ const TR = require(path.join(ROOT, 'server/compositor/TemplateRenderer.js'));
 const CC = require(path.join(ROOT, 'server/compositor/CompositorCompiler.js'));
 let Canvas = null;
 try { Canvas = require('@napi-rs/canvas'); } catch (_) { Canvas = null; }
-const ffmpeg = ['ffmpeg', '/usr/bin/ffmpeg'].find(b => spawnSync(b, ['-version']).status === 0) || null;
+let ffmpeg = ['ffmpeg', '/usr/bin/ffmpeg'].find(b => spawnSync(b, ['-version']).status === 0) || null;
+if (!ffmpeg) {
+    try { ffmpeg = require('ffmpeg-static'); } catch { }
+}
 
 // ── 1. Curves ─────────────────────────────────────────────────────────────
 for (const type of FX.TRANSITION_TYPES) {

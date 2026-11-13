@@ -67,6 +67,9 @@ function piecewise(samples, tv) {
         const seg = span > 1e-4 ? `${n4(a.v)}+(${n4(b.v - a.v)})*(${tv}-${n4(a.t)})/${n4(span)}` : n4(b.v);
         expr = `if(lt(${tv},${n4(b.t)}),${seg},${expr})`;
     }
+    if (samples.length > 0) {
+        expr = `if(lt(${tv},${n4(samples[0].t)}),${n4(samples[0].v)},${expr})`;
+    }
     return expr;
 }
 
@@ -115,23 +118,25 @@ function compileTransitions(windows, opts) {
 
         // 2. Blur, sigma per frame via sendcmd (gblur options are runtime commands).
         if (any('blurX', v => v > 1e-6) || any('blurY', v => v > 1e-6)) {
-            const name = `gblur@tb${i}`;
-            chain.push(`${name}=sigma=0.01:sigmaV=0.01:steps=2:enable='${enable}'`);
+            const name = `tb${i}`;
+            chain.push(`gblur@${name}=sigma=0.01:sigmaV=0.01:steps=2:enable='${enable}'`);
             for (const s of samples) {
                 const sx = Math.max(0.01, s.fx.blurX * W);
                 const sy = Math.max(0.01, s.fx.blurY * W);
                 cmds.push(`${n4(s.t)} ${name} sigma ${n4(sx)}, ${name} sigmaV ${n4(sy)};`);
             }
+            cmds.push(`${n4(w.to)} ${name} sigma 0.01, ${name} sigmaV 0.01;`);
         }
 
         // 3. Red/blue split.
         if (any('chroma', v => Math.abs(v) > 1e-6)) {
-            const name = `rgbashift@tc${i}`;
-            chain.push(`${name}=rh=0:bh=0:edge=smear:enable='${enable}'`);
+            const name = `tc${i}`;
+            chain.push(`rgbashift@${name}=rh=0:bh=0:edge=smear:enable='${enable}'`);
             for (const s of samples) {
                 const px = Math.round(s.fx.chroma * W);
                 cmds.push(`${n4(s.t)} ${name} rh ${px}, ${name} bh ${-px};`);
             }
+            cmds.push(`${n4(w.to)} ${name} rh 0, ${name} bh 0;`);
         }
 
         // 4. Flash / dip, the CSS overlay blend expressed through eq:
@@ -179,7 +184,8 @@ function compileTransitions(windows, opts) {
     const parts = [];
     let cmdPath = null;
     if (cmds.length > 0) {
-        cmdPath = path.join(opts.tmpDir, 'transition_cmds.txt');
+        const cmdId = Math.random().toString(36).slice(2);
+        cmdPath = path.join(opts.tmpDir, `transition_cmds_${cmdId}.txt`);
         fs.writeFileSync(cmdPath, cmds.join('\n') + '\n', 'utf8');
         tempFiles.push(cmdPath);
     }
@@ -187,7 +193,18 @@ function compileTransitions(windows, opts) {
     if (cmdPath) head.push(`sendcmd=f='${cmdPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "'\\''")}'`);
     const baseChain = [...head, ...chain];
     let current = 'tfx0';
-    parts.push(`[0:v]${baseChain.length ? baseChain.join(',') : 'null'}[${current}]`);
+
+    if (baseChain.length > 0) {
+        // Isolate transition filters to an fx branch and overlay onto clean base video
+        // during transition windows. This guarantees that frames outside the transition
+        // windows remain 100% bit-exact and avoid global colorspace/filter side effects.
+        const globalEnable = list.map(w => `between(t,${n4(w.from)},${n4(w.to)})`).join('+');
+        parts.push(`[0:v]split[b0][fx0_in]`);
+        parts.push(`[fx0_in]${baseChain.join(',')}[fx0_out]`);
+        parts.push(`[b0][fx0_out]overlay=0:0:enable='${globalEnable}'[${current}]`);
+    } else {
+        parts.push(`[0:v]null[${current}]`);
+    }
 
     inputs.forEach((inp, k) => {
         const idx = k + 1;
