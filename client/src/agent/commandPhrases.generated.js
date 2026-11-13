@@ -59,9 +59,11 @@ export const COMMAND_PHRASE = Object.freeze({
     "add_blur_zone": "add a blur zone",
     "add_shadow": "Add a shadow",
     "animate_automatically": "Animate automatically",
+    "apply_aesthetic_preset": "dark luxury look",
     "apply_angle": "Apply camera angles",
     "apply_lut": "Apply a LUT",
     "apply_motion_effect_stack": "add motion effects to footage",
+    "apply_motion_expression": "Apply motion expression",
     "clear_lut": "clear the lut",
     "color_grade": "Colour grade",
     "compose_motion": "Design the motion",
@@ -77,6 +79,9 @@ export const COMMAND_PHRASE = Object.freeze({
     "reset_crop": "Reset framing",
     "rhythm_zoom": "Add zoom rhythm",
     "sandwich_text": "Place text behind speaker",
+    "set_layer_parent": "Link layer to parent",
+    "set_track_matte": "Set track matte",
+    "set_vector_trim": "Animate vector trim path",
     "track_speaker": "Track the speaker",
     "zoom_speaker": "Zoom to the speaker"
 });

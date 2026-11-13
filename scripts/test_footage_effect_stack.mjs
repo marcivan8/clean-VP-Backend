@@ -8,6 +8,7 @@ import { TIMELINE_EFFECTS, resolveTimelineEffectFilter, resolveTimelineEffectTra
 import { resolveEffectAtTime } from '../client/src/motion/EffectTiming.js';
 import { matteFilterGraph } from '../client/src/motion/MatteSettings.js';
 import { EFFECT_DEFINITIONS } from '../client/src/effects/EffectRegistry.js';
+import { ENGINE_TYPES } from '../client/src/effects/EffectNode.js';
 import { listEasingNames, resolveEasing } from '../client/src/motion/Easing.js';
 import { createGpuClipEffectConfigs } from '../client/src/effects/ClipEffectAdapter.js';
 import { EffectPipeline } from '../client/src/effects/EffectPipeline.js';
@@ -131,6 +132,17 @@ assert.deepEqual(stackedGlowDefinitions.map(({ id }) => id), ['vibed-highlight-g
   'the preview emits one SVG filter definition for every active effect instance');
 assert.deepEqual(stackedGlowDefinitions.map(({ params }) => params.glow.radius), [3, 12],
   'stacked SVG filters retain their own authored parameters');
+const stackedDirectionalBlurs = [
+  { kind: 'blur_motion', params: { intensity: 0.2, angle: 0 } },
+  { kind: 'blur_motion', params: { intensity: 0.8, angle: 90 } },
+];
+assert.equal(resolveTimelineEffectFilter(stackedDirectionalBlurs), 'url(#vibed-motion-blur-0) url(#vibed-motion-blur-1)',
+  'stacked directional blurs target their own SVG definitions rather than a shared legacy filter');
+const stackedDirectionalBlurDefinitions = resolveTimelineSvgEffectInstances(stackedDirectionalBlurs);
+assert.deepEqual(stackedDirectionalBlurDefinitions.map(({ id }) => id), ['vibed-motion-blur-0', 'vibed-motion-blur-1'],
+  'each directional blur emits a distinct SVG definition');
+assert.deepEqual(stackedDirectionalBlurDefinitions.map(({ params }) => params.motion.amount), [0.2, 0.8],
+  'each directional blur definition retains its own sampled strength');
 const reorderedEffects = [
   { kind: 'brightness', order: 20, params: { amount: 1.4 } },
   { kind: 'contrast', order: 10, params: { amount: 1.8 } },
@@ -159,6 +171,7 @@ assert.equal(invertedOrderRender.status, 0, `FFmpeg renders the alternate effect
 assert.ok(Math.abs(invertedOrderRender.stdout[0] - reorderedRender.stdout[0]) > 20,
   'changing authored effect order changes the rendered pixels, proving the order is executed');
 const gpuBlurEffects = [
+  { kind: 'invert', params: { amount: 0.65 } },
   { id: 'radial', kind: 'blur_radial', params: { intensity: 0.6, centerX: 0.25, centerY: 0.7, samples: 8 } },
   { id: 'directional', kind: 'motion-blur', params: { intensity: 0.8, angle: 45, samples: 24 } },
   { kind: 'glow', params: { intensity: 1, color: '#00C8FF' } },
@@ -172,13 +185,34 @@ const gpuBlurEffects = [
 ];
 const gpuConfigs = createGpuClipEffectConfigs('clip-main', gpuBlurEffects);
 assert.deepEqual(gpuConfigs.map(({ type }) => type), [
-  'blur_radial', 'blur_motion', 'glow', 'film_grain', 'glitch', 'rgb_split', 'color_grade', 'blur_gaussian', 'vignette',
+  'invert', 'blur_radial', 'blur_motion', 'glow', 'film_grain', 'glitch', 'rgb_split', 'color_grade', 'blur_gaussian', 'vignette',
 ], 'shader-backed footage effects map to their GPU shaders while disabled effects stay out of the GPU graph');
-assert.equal(gpuConfigs[3].params.intensity, 0.5, 'legacy grain amount is normalized to shader intensity');
-assert.equal(gpuConfigs[3].keyframes.intensity[0].value, 1, 'legacy grain amount keyframes are normalized too');
-assert.equal(gpuConfigs[4].params.intensity, 0.5, 'legacy glitch amount is normalized to shader intensity');
-assert.deepEqual(gpuConfigs[5].params.centerX, 0.5, 'legacy chromatic aberration receives the shader center default');
-assert.deepEqual(gpuConfigs[2].params.color, [0, 200 / 255, 1], 'hex glow color is converted to normalized GPU color');
+assert.equal(resolveTimelineEffectFilter([{ kind: 'invert', params: { amount: 0.65 } }]), 'invert(0.65)',
+  'timeline preview applies controllable inversion');
+const invertExport = compileTimelineVisualEffects([{ kind: 'invert', params: { amount: 0.5 } }]).join(',');
+assert.match(invertExport, /geq=r=/, 'partial inversion compiles through the FFmpeg footage export path');
+const invertRender = spawnSync(ffmpeg, [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=0x646464:s=2x2:d=1',
+  '-vf', invertExport, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1',
+], { timeout: 20000 });
+assert.equal(invertRender.status, 0, `FFmpeg renders partial inversion: ${invertRender.stderr?.toString() || invertRender.error?.message || ''}`);
+assert.ok(Math.abs(invertRender.stdout[0] - 127) <= 4,
+  `50% inversion of gray 100 produces approximately 127, received ${invertRender.stdout[0]}`);
+const transparentInvertFixture = 'color=c=red@0.5:s=2x2:d=1,format=rgba';
+const transparentInvert = spawnSync(ffmpeg, [
+  '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', transparentInvertFixture,
+  '-vf', compileTimelineVisualEffects([{ kind: 'invert', params: { amount: 1 } }]).join(','),
+  '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgba', 'pipe:1',
+], { encoding: null, timeout: 20000 });
+assert.equal(transparentInvert.status, 0,
+  `FFmpeg applies invert to RGBA footage: ${transparentInvert.stderr?.toString() || transparentInvert.error?.message || ''}`);
+assert.equal(transparentInvert.stdout[3], 127,
+  'full inversion preserves source alpha while changing RGB');
+assert.equal(gpuConfigs[4].params.intensity, 0.5, 'legacy grain amount is normalized to shader intensity');
+assert.equal(gpuConfigs[4].keyframes.intensity[0].value, 1, 'legacy grain amount keyframes are normalized too');
+assert.equal(gpuConfigs[5].params.intensity, 0.5, 'legacy glitch amount is normalized to shader intensity');
+assert.deepEqual(gpuConfigs[6].params.centerX, 0.5, 'legacy chromatic aberration receives the shader center default');
+assert.deepEqual(gpuConfigs[3].params.color, [0, 200 / 255, 1], 'hex glow color is converted to normalized GPU color');
 const clipLocalConfig = createGpuClipEffectConfigs('clip-local', [{
   kind: 'vignette',
   params: { intensity: { value: 0.2 }, radius: { value: 0.4, keyframes: [
@@ -503,10 +537,10 @@ assert.deepEqual(resolveTimelineFadeOverlays([{ ...fadeIn[0], enabled: false }],
   'disabled fade effects do not appear in preview');
 const graphicPreviewSource = readFileSync(new URL('../client/src/components/Player/GraphicOverlay.jsx', import.meta.url), 'utf8');
 const videoPreviewSource = readFileSync(new URL('../client/src/components/Player/VideoPlayer.jsx', import.meta.url), 'utf8');
-assert.match(graphicPreviewSource, /resolveTimelineFadeOverlays\(clip\.effects, currentTime, effectContext\)/,
-  'media overlay preview renders footage fade color layers');
-assert.match(videoPreviewSource, /resolveTimelineFadeOverlays\(activeClip\?\.effects, currentTime, effectContext\)/,
-  'main footage preview renders footage fade color layers');
+assert.match(graphicPreviewSource, /resolveTimelineFadeOverlays\(renderClip\.effects, currentTime, effectContext\)/,
+  'media overlay preview renders footage fade color layers from the graph-aware projected effect stack');
+assert.match(videoPreviewSource, /resolveTimelineFadeOverlays\(previewClipEffects, currentTime, effectContext\)/,
+  'main footage preview renders footage fade color layers after resolving its graph-aware effect stack');
 const vignettePreview = resolveTimelineVignetteStyle([{ type: 'vignette', params: { intensity: { value: 0.6 }, radius: { value: 0.8 }, softness: { value: 0.4 }, color: { value: [0.1, 0.2, 0.3] } } }]);
 assert.match(vignettePreview.background, /radial-gradient/);
 assert.equal(resolveTimelineVignetteStyle([{ type: 'vignette', enabled: false }]), null, 'disabled vignette is absent from preview');
@@ -826,8 +860,8 @@ const animatedOverlayGlitch = compileOverlaySource({
   } }],
 }, 1, 'animated_glitch_overlay', { width: 96, height: 96, fps: 2 });
 assert.ok(animatedOverlayGlitch.includes('floor(X/(if(lt(T,1),12+(52)*(T-0)/1,64)))')
-  && animatedOverlayGlitch.includes(')*40') && animatedOverlayGlitch.includes('sin(Y*PI)'),
-  'scene overlay glitch samples intensity and block size and applies its color-shift and scanline controls');
+  && animatedOverlayGlitch.includes(')*0.1*W') && animatedOverlayGlitch.includes('sin((Y+0.5)*PI)'),
+  'scene overlay glitch samples intensity and block size, uses bounded frame-relative shifts, and draws scanlines');
 const animatedOverlayGlitchRender = spawnSync(ffmpeg, [
   '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=96x96:r=2:d=1',
   '-f', 'lavfi', '-i', 'testsrc2=size=96x96:rate=2:duration=1',
@@ -1251,6 +1285,10 @@ for (const [id, definition] of Object.entries(EFFECT_DEFINITIONS)) {
   const retiming = id === 'speed_change' && resolveTimelineSpeedEffect([effect], 0, 3)?.speed > 0;
   assert.ok(videoFilters.length || audioFilters.length || warnings.length || retiming,
     `catalogued ${id} has an export implementation or an explicit warning`);
+  if (definition.engine === ENGINE_TYPES.GPU) {
+    assert.ok(videoFilters.length, `GPU effect ${id} compiles into the primary-footage export graph`);
+    assert.deepEqual(warnings, [], `GPU effect ${id} is not silently downgraded to a skipped export warning`);
+  }
 }
 const staticGrain = compileTimelineVisualEffects([{ kind: 'film_grain', params: { intensity: 0.2, size: 2.5, seed: 41, animated: false } }]);
 const hyphenatedFilmGrain = compileTimelineVisualEffects([{ kind: 'film-grain', params: { intensity: 0.2, size: 2.5, seed: 41, animated: false } }]);
@@ -1258,7 +1296,8 @@ assert.deepEqual(hyphenatedFilmGrain, staticGrain, 'the hyphenated footage film-
 assert.deepEqual(collectTimelineEffectWarnings([{ name: 'Film grain alias', effects: [{ kind: 'film-grain', params: { intensity: 0.2 } }] }]), [], 'the film-grain alias is not falsely reported as skipped');
 assert.deepEqual(collectTimelineEffectWarnings([{ name: 'Color treatment', effects: [
   { kind: 'grayscale', params: { amount: 1 } }, { kind: 'sepia', params: { amount: 0.7 } },
-] }]), [], 'grayscale and sepia are not falsely reported as unsupported export effects');
+  { kind: 'invert', params: { amount: 0.65 } },
+] }]), [], 'grayscale, sepia, and invert are not falsely reported as unsupported export effects');
 const animatedGrain = compileTimelineVisualEffects([{ kind: 'film_grain', params: { intensity: 0.2, size: 1, seed: 41, animated: { value: true } } }]);
 assert.ok(staticGrain[0].includes('floor(X/2.5000)') && staticGrain[0].includes('41*7.1') && !staticGrain[0].includes('floor(T*30)'), 'film grain export applies authored size and seed while holding the pattern when animation is disabled');
 assert.ok(animatedGrain[0].includes('floor(X/1.0000)') && animatedGrain[0].includes('floor(T*30)'), 'wrapped animation control advances the seeded grain at 30 fps');
@@ -1308,10 +1347,12 @@ assert.deepEqual(
   'film grain preserves fully transparent RGB and alpha during export',
 );
 const glitchExport = compileTimelineVisualEffects([{ kind: 'glitch', params: { intensity: { value: 0.5 }, blockSize: { value: 24 }, colorShift: { value: true }, scanlines: { value: true } } }]);
-assert.ok(glitchExport.some(filter => filter.includes('geq=') && filter.includes('floor(T*12)')), 'glitch exports timed horizontal displacement bands like the live preview');
+assert.ok(glitchExport.some(filter => filter.includes('geq=') && filter.includes('floor(T*12)') && filter.includes('sin((Y+0.5)*PI)')),
+  'glitch exports seeded timed block displacement and scanlines like the live preview');
 assert.ok(!glitchExport.some(filter => filter.startsWith('noise=') || filter.startsWith('chromashift=') || filter.startsWith('drawgrid=')), 'glitch does not substitute noise, RGB split, or scanlines for the preview effect');
 const basicGlitch = compileTimelineVisualEffects([{ kind: 'glitch', params: { intensity: 0.5 } }]);
-assert.ok(basicGlitch.some(filter => filter.includes('geq=') && filter.includes('*(20.0000)')), 'glitch intensity maps to the preview displacement distance');
+assert.ok(basicGlitch.some(filter => filter.includes('geq=') && filter.includes('(0.5000)*0.1*W')),
+  'glitch intensity maps to a bounded fraction of the frame width, matching the live GPU preview');
 const glitchRender = spawnSync(ffmpeg, [
   '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=96x64:rate=8:duration=0.5',
   '-vf', glitchExport.join(','), '-f', 'null', '-',

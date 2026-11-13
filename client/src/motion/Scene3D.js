@@ -13,9 +13,10 @@ import { evaluateMotionExpression, validateMotionExpression } from './MotionExpr
 import { sceneImageTextureCache } from './SceneImageTextureCache.js';
 import { renderScene3DGpu } from './Scene3DGPU.js';
 import { remapSceneObjectTime } from './TimeRemap.js';
-import { sampleProceduralParticle } from './ProceduralParticles.js';
+import { MAX_PROCEDURAL_PARTICLES, normalizeParticleColorCurve, normalizeParticleLifeCurve, sampleProceduralParticle } from './ProceduralParticles.js';
 import { sampleAudioEnvelope } from './AudioReactive.js';
 import { MAX_MOTION_BLUR_SAMPLES } from './MotionLimits.js';
+import { isKnownEasing } from './Easing.js';
 export { remapSceneObjectTime, resolveSceneVideoSourceTime, maxSceneObjectSourceTime, getSceneShutterSampleTimes } from './TimeRemap.js';
 
 /** Shared editor/renderer defaults so a new camera keyframe starts from the value actually rendered. */
@@ -35,7 +36,7 @@ export const MAX_SCENE_LIGHTS = 8;
 // Particle sprites do not expand into mesh triangles, so their population has
 // its own bound. Keep the cap high enough for layered atmosphere while staying
 // comfortably below the 16-bit depth-owner index range used by the compositor.
-export const MAX_SCENE_PARTICLES = 2_000;
+export const MAX_SCENE_PARTICLES = MAX_PROCEDURAL_PARTICLES;
 export const MAX_MESH_VERTICES = 5000;
 export const MAX_MESH_FACES = 5000;
 // Bound per-frame geometry work. A single authored n-gon can expand into many
@@ -309,6 +310,73 @@ export function getScene3DCompatibilityWarnings(scene = {}) {
     const particleShape = scene.particles?.shape;
     if (particleShape != null && !SCENE3D_PARTICLE_SHAPES.includes(particleShape)) {
         warnings.push({ message: `3D particles use unsupported shape “${particleShape}”; they will render as circles.` });
+    }
+    const particleSizeCurve = scene.particles?.sizeOverLife;
+    if (particleSizeCurve !== undefined) {
+        if (!Array.isArray(particleSizeCurve)) {
+            warnings.push({ message: '3D particle size-over-life data must be an array of time/value stops; the base particle size will be used.' });
+        } else {
+            const invalidStops = particleSizeCurve.slice(0, 32).filter(stop =>
+                !Number.isFinite(Number(stop?.time ?? stop?.progress)) || !Number.isFinite(Number(stop?.value))).length;
+            if (invalidStops) {
+                warnings.push({ message: `3D particle size-over-life curve contains ${invalidStops} invalid stop(s); they will be ignored.` });
+            }
+            const invalidEasings = particleSizeCurve.slice(0, 32).filter(stop => stop?.easing != null
+                && !isKnownEasing(String(stop.easing))).length;
+            if (invalidEasings) warnings.push({ message: `3D particle size-over-life curve contains ${invalidEasings} unsupported easing value(s); those segments will use linear easing.` });
+            if (particleSizeCurve.length > 32) {
+                warnings.push({ message: `3D particle size-over-life curve has ${particleSizeCurve.length} stops; the renderer supports 32 and will ignore the rest.` });
+            }
+            const outOfRange = particleSizeCurve.slice(0, 32).some(stop => {
+                const time = Number(stop?.time ?? stop?.progress);
+                const value = Number(stop?.value);
+                return Number.isFinite(time) && (time < 0 || time > 1)
+                    || Number.isFinite(value) && (value < 0 || value > 30);
+            });
+            if (outOfRange) {
+                warnings.push({ message: '3D particle size-over-life stops must use normalized time from 0 to 1 and size from 0 to 30; values will be clamped.' });
+            }
+        }
+    }
+    const particleOpacityCurve = scene.particles?.opacityOverLife;
+    if (particleOpacityCurve !== undefined) {
+        if (!Array.isArray(particleOpacityCurve)) {
+            warnings.push({ message: '3D particle opacity-over-life data must be an array of time/value stops; the standard lifetime fade will be used.' });
+        } else {
+            const invalidStops = particleOpacityCurve.slice(0, 32).filter(stop =>
+                !Number.isFinite(Number(stop?.time ?? stop?.progress)) || !Number.isFinite(Number(stop?.value))).length;
+            if (invalidStops) warnings.push({ message: `3D particle opacity-over-life curve contains ${invalidStops} invalid stop(s); they will be ignored.` });
+            const invalidEasings = particleOpacityCurve.slice(0, 32).filter(stop => stop?.easing != null
+                && !isKnownEasing(String(stop.easing))).length;
+            if (invalidEasings) warnings.push({ message: `3D particle opacity-over-life curve contains ${invalidEasings} unsupported easing value(s); those segments will use linear easing.` });
+            if (particleOpacityCurve.length > 32) warnings.push({ message: `3D particle opacity-over-life curve has ${particleOpacityCurve.length} stops; the renderer supports 32 and will ignore the rest.` });
+            const outOfRange = particleOpacityCurve.slice(0, 32).some(stop => {
+                const time = Number(stop?.time ?? stop?.progress);
+                const value = Number(stop?.value);
+                return Number.isFinite(time) && (time < 0 || time > 1)
+                    || Number.isFinite(value) && (value < 0 || value > 1);
+            });
+            if (outOfRange) warnings.push({ message: '3D particle opacity-over-life stops must use normalized time from 0 to 1 and opacity from 0 to 1; values will be clamped.' });
+        }
+    }
+    const particleColorCurve = scene.particles?.colorOverLife;
+    if (particleColorCurve !== undefined) {
+        if (!Array.isArray(particleColorCurve)) {
+            warnings.push({ message: '3D particle color-over-life data must be an array of normalized time/color stops; the base particle color will be used.' });
+        } else {
+            const invalidStops = particleColorCurve.slice(0, 32).filter(stop =>
+                !Number.isFinite(Number(stop?.time ?? stop?.progress))
+                || !/^#?(?:[\da-f]{3}|[\da-f]{6})$/i.test(String(stop?.color ?? ''))).length;
+            if (invalidStops) warnings.push({ message: `3D particle color-over-life curve contains ${invalidStops} invalid stop(s); they will be ignored.` });
+            const invalidEasings = particleColorCurve.slice(0, 32).filter(stop => stop?.easing != null
+                && !isKnownEasing(String(stop.easing))).length;
+            if (invalidEasings) warnings.push({ message: `3D particle color-over-life curve contains ${invalidEasings} unsupported easing value(s); those segments will use linear easing.` });
+            if (particleColorCurve.length > 32) warnings.push({ message: `3D particle color-over-life curve has ${particleColorCurve.length} stops; the renderer supports 32 and will ignore the rest.` });
+            if (particleColorCurve.slice(0, 32).some(stop => {
+                const time = Number(stop?.time ?? stop?.progress);
+                return Number.isFinite(time) && (time < 0 || time > 1);
+            })) warnings.push({ message: '3D particle color-over-life stops must use normalized time from 0 to 1; values will be clamped.' });
+        }
     }
     return warnings.map(({ messageOwner, ...warning }) => warning);
 }
@@ -2337,6 +2405,9 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
     }
     const particleConfig = scene.particles || {};
     const particleCount = Math.round(clamp(n(particleConfig.count, 0), 0, MAX_SCENE_PARTICLES));
+    const particleSizeCurve = normalizeParticleLifeCurve(particleConfig.sizeOverLife);
+    const particleOpacityCurve = normalizeParticleLifeCurve(particleConfig.opacityOverLife);
+    const particleColorCurve = normalizeParticleColorCurve(particleConfig.colorOverLife);
     const seed = resolveParticleSeed(particleConfig);
     const particleReactive = particleConfig.audioReactive || {};
     const particleWaveform = scene.audioWaveformsByAsset?.[particleReactive.assetId];
@@ -2348,7 +2419,9 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
         return value - Math.floor(value);
     };
     const hasParticleSimulation = !!(particleConfig.emitter || particleConfig.velocity || particleConfig.gravity
-        || particleConfig.lifetime != null || particleConfig.turbulence != null || particleConfig.loop === false);
+        || particleConfig.lifetime != null || particleConfig.turbulence != null || particleConfig.loop === false
+        || Array.isArray(particleConfig.sizeOverLife) || Array.isArray(particleConfig.opacityOverLife)
+        || Array.isArray(particleConfig.colorOverLife));
     for (let i = 0; i < particleCount; i++) {
         if (faces.length >= MAX_SCENE_TRIANGLES) break;
         const spread = clamp(n(particleConfig.spread, 3.8) * particleSpreadScale, 0, 80);
@@ -2365,7 +2438,7 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
             } }
             : emitter;
         const simulated = hasParticleSimulation
-            ? sampleProceduralParticle({ ...particleConfig, ...(reactiveEmitter ? { emitter: reactiveEmitter } : {}), spread, speed }, i, time)
+            ? sampleProceduralParticle({ ...particleConfig, ...(reactiveEmitter ? { emitter: reactiveEmitter } : {}), spread, speed }, i, time, particleSizeCurve, particleOpacityCurve, particleColorCurve)
             : null;
         if (hasParticleSimulation && !simulated) continue;
         const phase = (rand(i, 1) + time * speed / Math.max(0.5, duration)) % 1;
@@ -2379,7 +2452,7 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
             * (particleReactive.target === 'size' ? Math.max(0, 1 + particleAmount) : 1), 0.5, 30) * projected.scale;
         const baseOpacity = simulated ? simulated.opacity : 0.25 + rand(i, 4) * 0.65;
         const opacity = clamp(baseOpacity * (particleReactive.target === 'opacity' ? Math.max(0, 1 + particleAmount) : 1), 0, 1);
-        faces.push({ z: projected.z, order: objects.length + i, particle: true, shape: SCENE3D_PARTICLE_SHAPES.includes(particleConfig.shape) ? particleConfig.shape : 'circle', point: projected, radius, color: particleConfig.color || '#C4B5FD', opacity });
+        faces.push({ z: projected.z, order: objects.length + i, particle: true, shape: SCENE3D_PARTICLE_SHAPES.includes(particleConfig.shape) ? particleConfig.shape : 'circle', point: projected, radius, color: simulated?.color || particleConfig.color || '#C4B5FD', opacity });
     }
     // The fallback painter still handles unsupported/oversized surfaces. On
     // normal scene canvases the z-buffer pass below handles opaque, transparent,
@@ -2408,9 +2481,16 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
         }
         if (face.text) { face.draw(ctx); continue; }
         if (face.particle) {
+            // Particles are source-over sprites, independent of the blend mode
+            // used by the preceding face. Isolate canvas state so a particle's
+            // opacity/composite settings cannot affect later faces if another
+            // drawing branch is extended without resetting its own state.
+            ctx.save();
             ctx.globalAlpha = face.opacity;
+            ctx.globalCompositeOperation = 'source-over';
             ctx.fillStyle = face.color;
             traceParticlePath(ctx, face.shape, face.point.x, face.point.y, face.radius); ctx.fill();
+            ctx.restore();
             continue;
         }
         if (face.image) {

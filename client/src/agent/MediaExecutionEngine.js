@@ -1158,7 +1158,12 @@ export class MediaExecutionEngine {
         }
 
         switch (action) {
-            case 'apply_motion_effect_stack': {
+            case 'apply_motion_effect_stack':
+            case 'apply_motion_expression':
+            case 'set_track_matte':
+            case 'set_layer_parent':
+            case 'set_vector_trim':
+            case 'apply_aesthetic_preset': {
                 // Reuse ROKA's schema validation, target resolution, shared
                 // preview/export capability checks, and persisted-state QA.
                 const { VideoEditorTools } = await import('./VideoEditorTools.js');

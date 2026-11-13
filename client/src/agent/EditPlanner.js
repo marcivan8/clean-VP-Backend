@@ -444,6 +444,72 @@ export class EditPlanner {
                         : 'Resolve the requested footage effects' },
                 ]);
             }
+            case 'apply_motion_expression': {
+                const prompt = String(intent.originalPrompt || '');
+                const constraints = intent.constraints || {};
+                let property = constraints.property || 'scale';
+                if (/\b(rotation|rotate|spin|angle)\b/i.test(prompt)) property = 'rotation';
+                else if (/\b(opacity|fade|alpha)\b/i.test(prompt)) property = 'opacity';
+                else if (/\b(blur)\b/i.test(prompt)) property = 'blur';
+                else if (/\b(x\b|horizontal)\b/i.test(prompt)) property = 'x';
+                else if (/\b(y\b|vertical)\b/i.test(prompt)) property = 'y';
+                else if (/\b(scale|zoom|size)\b/i.test(prompt)) property = 'scale';
+
+                let expression = constraints.expression || "wiggle(2, 8)";
+                if (/\b(bass|pulse with (the )?bass|audio reactive|sound reactive|pulse with (the )?music)\b/i.test(prompt)) {
+                    expression = "1 + audioAmp('bass') * 0.22";
+                } else if (/\b(pingpong|ping-pong|ping pong|loop( out)? pingpong)\b/i.test(prompt)) {
+                    expression = "loopOut('pingpong')";
+                } else if (/\b(wiggle)\b/i.test(prompt)) {
+                    const match = prompt.match(/wiggle\((\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?)\)/i);
+                    expression = match ? `wiggle(${match[1]}, ${match[2]})` : "wiggle(2, 8)";
+                } else if (/\b(spring)\b/i.test(prompt)) {
+                    expression = "spring(time, 180, 14, 1)";
+                }
+
+                return this.buildPlan(planId, 'apply_motion_expression', [
+                    { step_id: 'step_1', action: 'apply_motion_expression', args: { property, expression, target: constraints.target || 'clip' }, reason: `Apply ${expression} expression to ${property}` },
+                ]);
+            }
+            case 'set_track_matte': {
+                const prompt = String(intent.originalPrompt || '');
+                const constraints = intent.constraints || {};
+                let mode = constraints.mode || 'alpha';
+                if (/\b(alpha-inverted|alpha inverted|inverted alpha)\b/i.test(prompt)) mode = 'alpha-inverted';
+                else if (/\b(luma-inverted|luma inverted|inverted luma)\b/i.test(prompt)) mode = 'luma-inverted';
+                else if (/\b(luma|luminance)\b/i.test(prompt)) mode = 'luma';
+                else if (/\b(alpha)\b/i.test(prompt)) mode = 'alpha';
+
+                return this.buildPlan(planId, 'set_track_matte', [
+                    { step_id: 'step_1', action: 'set_track_matte', args: { mode, sourceLayerId: constraints.sourceLayerId || null, target: constraints.target || 'clip' }, reason: `Apply ${mode} track matte to layer` },
+                ]);
+            }
+            case 'set_layer_parent': {
+                const constraints = intent.constraints || {};
+                return this.buildPlan(planId, 'set_layer_parent', [
+                    { step_id: 'step_1', action: 'set_layer_parent', args: { parentId: constraints.parentId || null, target: constraints.target || 'clip' }, reason: 'Link layer to parent transform' },
+                ]);
+            }
+            case 'set_vector_trim': {
+                const constraints = intent.constraints || {};
+                return this.buildPlan(planId, 'set_vector_trim', [
+                    { step_id: 'step_1', action: 'set_vector_trim', args: { trimEnd: constraints.trimEnd ?? 1.0, trimStart: constraints.trimStart ?? 0, drawOn: true, target: constraints.target || 'clip' }, reason: 'Animate kinetic vector trim path draw-on' },
+                ]);
+            }
+            case 'apply_aesthetic_preset': {
+                const prompt = String(intent.originalPrompt || '').toLowerCase();
+                let preset = 'vox';
+                if (/\b(ali abdaal|abdaal|clean minimal)\b/.test(prompt)) preset = 'ali_abdaal';
+                else if (/\b(mrbeast|mr beast|hyper retention)\b/.test(prompt)) preset = 'mrbeast';
+                else if (/\b(iman gadzhi|gadzhi|dark luxury)\b/.test(prompt)) preset = 'iman_gadzhi';
+                else if (/\b(apple|apple minimal|showcase)\b/.test(prompt)) preset = 'apple_minimal';
+                else if (/\b(hormozi|alex hormozi|bold punch)\b/.test(prompt)) preset = 'hormozi';
+                else if (/\b(vox|documentary)\b/.test(prompt)) preset = 'vox';
+
+                return this.buildPlan(planId, 'apply_aesthetic_preset', [
+                    { step_id: 'step_1', action: 'apply_aesthetic_preset', args: { preset }, reason: `Apply ${preset.replace('_', ' ')} aesthetic styling` },
+                ]);
+            }
             case 'apply_style_recipe': {
                 const recipeId = recipeFromText(intent.originalPrompt)
                     // R91: "apply my style" → the recipe of the style picked under the chat box.

@@ -55,6 +55,138 @@ function isEffectActiveAtTime(effect, time) {
     return !(Number.isFinite(start) && time < start) && !(Number.isFinite(end) && time >= end);
 }
 
+/**
+ * Resolve the part of an authored effect graph that the DOM preview can render
+ * without changing its meaning. The live player is deliberately a CSS/SVG
+ * stack, so it may only consume a graph when it is one unambiguous linear
+ * chain. Export has dedicated DAG renderers for footage and generated raster
+ * graphics, but the live editor still must not turn a fork/join into an
+ * arbitrary ordered stack: that silently drops a branch or changes a
+ * composite blend.
+ *
+ * The returned effects intentionally retain their authored keyframes and
+ * active windows. The normal timeline resolvers evaluate those at draw time.
+ */
+export function resolveTimelineEffectGraphPreview(effectGraph) {
+    const empty = {
+        hasGraph: false,
+        supported: true,
+        effects: [],
+        warning: null,
+    };
+    if (!effectGraph) return empty;
+
+    const nodes = Array.isArray(effectGraph.nodes) ? effectGraph.nodes.filter(Boolean) : [];
+    const connections = Array.isArray(effectGraph.connections) ? effectGraph.connections.filter(Boolean) : [];
+    if (!nodes.length) return { ...empty, hasGraph: true };
+
+    const byId = new Map();
+    for (const node of nodes) {
+        const id = String(node?.id || '');
+        if (!id || byId.has(id)) {
+            return {
+                hasGraph: true,
+                supported: false,
+                effects: [],
+                warning: 'This effect graph is invalid and cannot be rendered accurately in this preview.',
+            };
+        }
+        byId.set(id, node);
+    }
+
+    const incoming = new Map(nodes.map(node => [String(node.id), []]));
+    const outgoing = new Map(nodes.map(node => [String(node.id), []]));
+    for (const edge of connections) {
+        const from = String(edge?.from || '');
+        const to = String(edge?.to || '');
+        if (!byId.has(from) || !byId.has(to)) {
+            return {
+                hasGraph: true,
+                supported: false,
+                effects: [],
+                warning: 'This effect graph has a broken connection and cannot be rendered accurately in this preview.',
+            };
+        }
+        incoming.get(to).push(edge);
+        outgoing.get(from).push(edge);
+    }
+
+    // Disconnected authored nodes with no edges are an intentional linear
+    // stack, matching EffectGraph.fromLinearChain's serialized compatibility
+    // mode. A standalone composite is never a valid image effect, however.
+    if (!connections.length) {
+        if (nodes.some(node => (node.type || node.kind) === 'composite')) {
+            return {
+                hasGraph: true,
+                supported: false,
+                effects: [],
+                warning: 'This composite effect needs two branches and cannot be rendered accurately in this preview.',
+            };
+        }
+        return {
+            hasGraph: true,
+            supported: true,
+            effects: nodes
+                .filter(node => node.enabled !== false && node.engine !== 'ai')
+                .slice()
+                .sort((left, right) => (Number(left.order) || 0) - (Number(right.order) || 0)),
+            warning: null,
+        };
+    }
+
+    const hasForkOrJoin = nodes.some(node => incoming.get(String(node.id)).length > 1 || outgoing.get(String(node.id)).length > 1);
+    if (hasForkOrJoin || nodes.some(node => (node.type || node.kind) === 'composite')) {
+        return {
+            hasGraph: true,
+            supported: false,
+            effects: [],
+            warning: 'This branched effect graph cannot be accurately reproduced in the editor preview.',
+        };
+    }
+
+    const roots = nodes.filter(node => incoming.get(String(node.id)).length === 0);
+    const sinks = nodes.filter(node => outgoing.get(String(node.id)).length === 0);
+    if (roots.length !== 1 || sinks.length !== 1) {
+        return {
+            hasGraph: true,
+            supported: false,
+            effects: [],
+            warning: 'This effect graph is disconnected and cannot be rendered accurately in this preview.',
+        };
+    }
+
+    const ordered = [];
+    const visited = new Set();
+    let id = String(roots[0].id);
+    while (id) {
+        if (visited.has(id)) {
+            return {
+                hasGraph: true,
+                supported: false,
+                effects: [],
+                warning: 'This effect graph contains a cycle and cannot be rendered accurately in this preview.',
+            };
+        }
+        visited.add(id);
+        ordered.push(byId.get(id));
+        id = outgoing.get(id)[0]?.to ? String(outgoing.get(id)[0].to) : '';
+    }
+    if (visited.size !== nodes.length) {
+        return {
+            hasGraph: true,
+            supported: false,
+            effects: [],
+            warning: 'This effect graph is disconnected and cannot be rendered accurately in this preview.',
+        };
+    }
+    return {
+        hasGraph: true,
+        supported: true,
+        effects: ordered.filter(node => node.enabled !== false && node.engine !== 'ai'),
+        warning: null,
+    };
+}
+
 function isEffectHandledByGpuPreview(effect, context = {}) {
     if (!context.gpuPreview) return false;
     const kind = effect?.kind || effect?.type;
@@ -175,11 +307,16 @@ export function resolveTimelineEffectFilter(effects = [], time = 0, context = {}
                 // approximation reads as directional blur, so leave this to
                 // the GPU path or the native fallback's canvas renderer.
                 case 'blur_radial': return '';
-                case 'blur_motion': return `url(#vibed-motion-blur)`;
+                // Every SVG-backed effect has a distinct definition. Using the
+                // legacy shared id here made `blur_motion` ignore its own
+                // sampled angle/intensity whenever it appeared with another
+                // SVG effect (and made stacked motion blurs share settings).
+                case 'blur_motion': return `url(#${filterId})`;
                 case 'brightness': return `brightness(${Number.isFinite(amount) ? Math.max(0, Math.min(2, amount)) : 1})`;
                 case 'contrast': return `contrast(${Number.isFinite(amount) ? Math.max(0, Math.min(4, amount)) : 1})`;
                 case 'saturation': case 'saturate': return `saturate(${Number.isFinite(amount) ? Math.max(0, Math.min(5, amount)) : 1})`;
                 case 'hue': case 'hue-rotate': return `hue-rotate(${Math.max(-360, Math.min(360, read('degrees', amount) || 0))}deg)`;
+                case 'invert': return `invert(${Math.max(0, Math.min(1, amount))})`;
                 case 'color_grade': {
                     const hue = Math.max(-180, Math.min(180, read('hueRotate', 0)));
                     const temperature = Math.max(-100, Math.min(100, read('temperature', 0)));

@@ -9,6 +9,19 @@
 import { EffectNode, createEffectNode } from './EffectNode.js';
 import { effectRegistry } from './EffectRegistry.js';
 
+const COMPOSITE_BLEND_MODES = Object.freeze([
+    'source-over', 'multiply', 'screen', 'darken', 'lighten', 'difference',
+    'addition', 'overlay', 'color-dodge', 'color-burn', 'hard-light',
+    'soft-light', 'exclusion', 'hue', 'saturation', 'color', 'luminosity',
+]);
+
+function normalizeCompositeBlendMode(value) {
+    const mode = String(value ?? 'source-over').trim().toLowerCase();
+    if (mode === 'normal') return 'source-over';
+    if (mode === 'add' || mode === 'plus-lighter') return 'addition';
+    return mode;
+}
+
 // ============================================================================
 // EFFECT GRAPH CLASS
 // ============================================================================
@@ -48,14 +61,16 @@ export class EffectGraph {
             const compositeParams = {};
             const suppliedParams = nodeOrConfig.params || {};
             const schemas = {
-                mode: { value: 'normal', type: 'select', options: ['normal', 'multiply', 'screen', 'add', 'overlay', 'darken', 'lighten'], label: 'Blend Mode' },
+                mode: { value: 'source-over', type: 'select', options: COMPOSITE_BLEND_MODES, label: 'Blend Mode' },
                 opacity: { value: 1, min: 0, max: 1, type: 'float', label: 'Opacity' },
             };
             for (const [key, schema] of Object.entries(schemas)) {
                 const supplied = suppliedParams[key];
+                const suppliedValue = supplied && typeof supplied === 'object' && !Array.isArray(supplied) && 'value' in supplied
+                    ? supplied.value : supplied;
                 compositeParams[key] = supplied && typeof supplied === 'object' && !Array.isArray(supplied) && 'value' in supplied
-                    ? { ...schema, ...supplied }
-                    : { ...schema, value: supplied ?? schema.value };
+                    ? { ...schema, ...supplied, ...(key === 'mode' ? { value: normalizeCompositeBlendMode(suppliedValue), options: COMPOSITE_BLEND_MODES } : {}) }
+                    : { ...schema, value: key === 'mode' ? normalizeCompositeBlendMode(suppliedValue) : (supplied ?? schema.value) };
             }
             for (const [key, value] of Object.entries(suppliedParams)) {
                 if (!Object.hasOwn(schemas, key)) compositeParams[key] = value;
@@ -73,6 +88,12 @@ export class EffectGraph {
         } else {
             // Create generic node
             node = createEffectNode(nodeOrConfig);
+        }
+
+        // Normalize composites hydrated from saved EffectNode instances too.
+        if (node.type === 'composite' && node.params?.mode) {
+            node.params.mode.value = normalizeCompositeBlendMode(node.params.mode.value);
+            node.params.mode.options = COMPOSITE_BLEND_MODES;
         }
 
         this.nodes.set(node.id, node);
@@ -329,7 +350,13 @@ export class EffectGraph {
     getExecutionPlan() {
         const topology = this.getTopologyPlan();
         if (!topology.valid) throw new Error(topology.errors.join('; '));
-        if (!this.connections.length) return { ...topology, graph: this };
+        if (!this.connections.length) {
+            const standaloneComposite = topology.orderedNodes.find(node => node.type === 'composite');
+            if (standaloneComposite) {
+                throw new Error(`Composite node "${standaloneComposite.name || standaloneComposite.id}" requires base and overlay inputs`);
+            }
+            return { ...topology, graph: this };
+        }
         // Check reachability before enforcing a single sink. An orphan node
         // creates extra roots and sinks too, but that is a disconnected graph
         // with a concrete repair (reconnect/remove the orphan), not merely an

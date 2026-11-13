@@ -53,10 +53,19 @@ const W = FX.transitionWindows([
     { id: 'b', start: 0.2, duration: 3, transition: { type: 'flash', duration: 0.4 } },
     { id: 'c', start: 5, duration: 2 },
 ]);
-assert.equal(W[0].before, 0.2);
+assert.equal(W[0].before, 0.1);
 assert.equal(W[0].after, 0.5);
 assert.equal(W[1].after, 0);
-ok('windows are clamped to short clips, and a cut into a gap only plays the outgoing half');
+const shortMiddle = FX.transitionWindows([
+    { id: 'long-a', start: 0, duration: 2, transition: { type: 'dip', duration: 0.6 } },
+    { id: 'short-b', start: 2, duration: 0.2, transition: { type: 'flash', duration: 0.6 } },
+    { id: 'long-c', start: 2.2, duration: 2 },
+]);
+assert.ok(shortMiddle[0].to <= shortMiddle[1].from,
+    'neighboring transition windows do not overlap across a short middle clip');
+assert.ok(FX.fxAtTime(shortMiddle, 2.15).flash > 0,
+    'the later transition renders in its own non-overlapping window');
+ok('windows reserve each short clip half for each neighboring transition and gaps only play outgoing halves');
 for (const [txt, want] of [['add a whip', 'whip-left'], ['whip right please', 'whip-right'], ['speed lines', 'speed-lines'], ['un fondu au noir', 'dip'], ['zoom', 'zoom-punch'], ['glitch', 'glitch']]) {
     assert.equal(FX.transitionFromText(txt), want, txt);
 }

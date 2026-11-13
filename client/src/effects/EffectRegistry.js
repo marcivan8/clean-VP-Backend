@@ -358,12 +358,32 @@ export const EFFECT_DEFINITIONS = {
                 value: true,
                 type: PARAM_TYPES.BOOL,
                 label: 'Scanlines'
+            },
+            seed: {
+                value: 17,
+                min: 0,
+                max: 1000,
+                step: 1,
+                type: PARAM_TYPES.INT,
+                label: 'Seed'
             }
         },
         shader: 'glitch'
     },
 
     // === Color Effects ===
+    invert: {
+        name: 'Invert Colors',
+        engine: ENGINE_TYPES.GPU,
+        category: EFFECT_CATEGORIES.COLOR,
+        description: 'Invert RGB values while preserving transparency',
+        icon: 'contrast',
+        params: {
+            amount: { value: 1, min: 0, max: 1, step: 0.01, type: PARAM_TYPES.FLOAT, label: 'Amount' },
+        },
+        shader: 'invert',
+    },
+
     color_grade: {
         name: 'Color Grade',
         engine: ENGINE_TYPES.GPU,

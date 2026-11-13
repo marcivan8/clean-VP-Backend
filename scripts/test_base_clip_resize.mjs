@@ -47,6 +47,16 @@ const { clampScale, scaleFromDistanceRatio, startResizeGesture } = await import(
     const scaled = baseClipScreenBox({ clipX: 0, clipY: 0, scale: 2, srcW: 1080, srcH: 1920, canvasWidth: 1080, canvasHeight: 1920 });
     assert.ok(Math.abs(scaled.widthPct - 200) < 1e-6, `expected ~200%, got ${scaled.widthPct}`);
     ok('clip.scale multiplies the fitted size directly (same meaning as overlay clips)');
+
+    const stretchedAndMirrored = baseClipScreenBox({
+        clipX: 0, clipY: 0, scale: 1, scaleX: -1.5, scaleY: 0.5,
+        srcW: 1080, srcH: 1920, canvasWidth: 1080, canvasHeight: 1920,
+    });
+    assert.ok(Math.abs(stretchedAndMirrored.widthPct - 150) < 1e-6,
+        `expected mirrored horizontal width 150%, got ${stretchedAndMirrored.widthPct}`);
+    assert.ok(Math.abs(stretchedAndMirrored.heightPct - 50) < 1e-6,
+        `expected vertical height 50%, got ${stretchedAndMirrored.heightPct}`);
+    ok('axis-scale and mirrors produce a matching positive-size interaction surface');
 }
 
 // ── 3 · screenDeltaToCanvasDelta: screen-px drag → canvas-px delta ────────

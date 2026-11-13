@@ -4,7 +4,7 @@
  * and integration with presets.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
     Sparkles,
@@ -27,7 +27,8 @@ import {
     Film,
     SparklesIcon
 } from 'lucide-react';
-import { useEffects, usePresets, useEffectRegistry } from '../../hooks/useEffects';
+import { useEffects, useEffectRegistry } from '../../hooks/useEffects';
+import { isHandAppliableEffect } from '../../effects/handAppliable.js';
 import EffectControls from './EffectControls';
 import PresetBrowser from './PresetBrowser';
 
@@ -48,14 +49,18 @@ const CATEGORY_ICONS = {
  */
 const EffectItem = ({
     effect,
+    index,
+    count,
     isExpanded,
     onToggle,
     onRemove,
     onExpandToggle,
     onUpdateParams,
     onAddKeyframe,
+    onMove,
     playhead
 }) => {
+    const { t } = useTranslation('editor');
     const { getDefinition } = useEffectRegistry();
     const definition = getDefinition(effect.type);
 
@@ -68,8 +73,37 @@ const EffectItem = ({
         `}>
             {/* Header */}
             <div className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/5"
-                onClick={() => onExpandToggle(effect.id)}>
-                <GripVertical className="w-4 h-4 text-muted-foreground cursor-grab" />
+                onClick={() => onExpandToggle(effect.id)}
+                draggable
+                onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onMove.start(index); }}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => { e.preventDefault(); onMove.drop(index); }}
+                onDragEnd={() => onMove.end()}>
+                {/*
+                  R166 — this handle used to be a GripVertical with `cursor-grab`
+                  and nothing behind it: the panel destructured `reorderEffects`
+                  from the hook and never called it. An effect STACK is ordered —
+                  a blur before a glow is not the same frame as a glow before a
+                  blur — so the affordance was promising the one thing the panel
+                  could not do. It now drags, and because native drag is not
+                  keyboard-reachable it is also a real button with ArrowUp and
+                  ArrowDown.
+                */}
+                <button
+                    type="button"
+                    aria-label={t('effects.reorderEffect', { name: definition?.name || effect.type })}
+                    className="p-0.5 -m-0.5 rounded cursor-grab focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const to = e.key === 'ArrowUp' ? index - 1 : index + 1;
+                        if (to >= 0 && to < count) onMove.to(index, to);
+                    }}
+                >
+                    <GripVertical className="w-4 h-4 text-muted-foreground" />
+                </button>
 
                 <Icon className="w-4 h-4 text-primary" />
 
@@ -137,20 +171,33 @@ const EffectItem = ({
 const AddEffectMenu = ({ onAdd, onClose }) => {
     const { t } = useTranslation('editor');
     const [search, setSearch] = useState('');
-    const { categories, getByCategory, search: searchEffects } = useEffectRegistry();
+    const { categories, search: searchEffects } = useEffectRegistry();
 
+    // getCategorized() and search() both return DEFINITION OBJECTS carrying
+    // their own `type` — not [type, def] pairs, which is what this menu used to
+    // destructure. Every button rendered with an undefined key and an undefined
+    // name, and clicking one called onAdd(undefined).
     const filteredCategories = useMemo(() => {
-        if (!search) return categories;
+        // Only effects that render on a live path — see effects/handAppliable.js
+        // for which are excluded and why. Same rule the AI's
+        // apply_motion_effect_stack applies, so the two surfaces cannot drift.
+        const keep = (defs) => (Array.isArray(defs) ? defs : []).filter(def => isHandAppliableEffect(def?.type));
 
-        const results = searchEffects(search);
+        if (!search) {
+            const offered = {};
+            for (const [cat, defs] of Object.entries(categories || {})) {
+                const kept = keep(defs);
+                if (kept.length > 0) offered[cat] = kept;
+            }
+            return offered;
+        }
+
         const grouped = {};
-
-        results.forEach(([type, def]) => {
+        for (const def of keep(searchEffects(search))) {
             const cat = def.category || 'other';
             if (!grouped[cat]) grouped[cat] = [];
-            grouped[cat].push([type, def]);
-        });
-
+            grouped[cat].push(def);
+        }
         return grouped;
     }, [search, categories, searchEffects]);
 
@@ -189,10 +236,10 @@ const AddEffectMenu = ({ onAdd, onClose }) => {
                                 {t(`effects.categories.${category}`, category)}
                             </div>
                             <div className="grid grid-cols-2 gap-1">
-                                {(Array.isArray(effects) ? effects : Object.entries(effects)).map(([type, def]) => (
+                                {(Array.isArray(effects) ? effects : []).map((def) => (
                                     <button
-                                        key={type}
-                                        onClick={() => { onAdd(type); onClose(); }}
+                                        key={def.type}
+                                        onClick={() => { onAdd(def.type); onClose(); }}
                                         className="flex items-center gap-2 px-3 py-2 text-sm text-left rounded-lg hover:bg-white/5 transition-colors"
                                     >
                                         <span className="flex-1 truncate">{def.name}</span>
@@ -239,6 +286,34 @@ const EffectsPanel = ({
         reorderEffects,
         clearEffects
     } = useEffects(targetId, { playbackEngine });
+
+    const moveTo = useCallback((from, to) => {
+        const ids = effects.map(e => e.id);
+        if (from < 0 || to < 0 || from >= ids.length || to >= ids.length || from === to) return;
+        const next = [...ids];
+        next.splice(to, 0, next.splice(from, 1)[0]);
+        reorderEffects(next);
+    }, [effects, reorderEffects]);
+
+    /**
+     * Reordering, for both the drag and the keyboard.
+     *
+     * `reorderEffects` takes the full ordered id list, so a move is computed
+     * from the current order rather than tracked incrementally — two drops in
+     * a row cannot then disagree about where an effect is.
+     */
+    const dragFrom = useRef(null);
+    const move = useMemo(() => ({
+        start: (index) => { dragFrom.current = index; },
+        end: () => { dragFrom.current = null; },
+        drop: (index) => {
+            const from = dragFrom.current;
+            dragFrom.current = null;
+            if (from == null || from === index) return;
+            moveTo(from, index);
+        },
+        to: (from, to) => moveTo(from, to),
+    }), [moveTo]);
 
     const handleExpandToggle = (effectId) => {
         setExpandedEffects(prev => {
@@ -324,16 +399,19 @@ const EffectsPanel = ({
                                 <p className="text-xs opacity-60 mt-1">{t('effects.clickToAddEffect')}</p>
                             </div>
                         ) : (
-                            effects.map(effect => (
+                            effects.map((effect, index) => (
                                 <EffectItem
                                     key={effect.id}
                                     effect={effect}
+                                    index={index}
+                                    count={effects.length}
                                     isExpanded={expandedEffects.has(effect.id)}
                                     onToggle={toggleEffect}
                                     onRemove={removeEffect}
                                     onExpandToggle={handleExpandToggle}
                                     onUpdateParams={updateEffectParams}
                                     onAddKeyframe={addKeyframe}
+                                    onMove={move}
                                     playhead={playhead}
                                 />
                             ))

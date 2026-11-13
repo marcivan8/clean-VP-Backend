@@ -34,18 +34,23 @@ export function fitContainSize(mediaW, mediaH, canvasWidth, canvasHeight) {
  * screen pixels, so the box tracks correctly across window resizes without
  * needing a resize observer.
  *
- * @returns {{leftPct:number, topPct:number, widthPct:number}} centre-anchored:
- *   pair with `transform: translate(-50%, -50%)`, width in %, height left to
- *   the media element's own intrinsic aspect ratio (`height: 'auto'`) — same
- *   technique GraphicOverlay.jsx already uses for overlay clips.
+ * @returns {{leftPct:number, topPct:number, widthPct:number, heightPct:number}}
+ *   centre-anchored: pair with `transform: translate(-50%, -50%)`. Axis
+ *   scales are absolute clip values; a negative axis is a mirror, so its
+ *   magnitude determines the hit target's dimensions.
  */
-export function baseClipScreenBox({ clipX = 0, clipY = 0, scale = 1, srcW, srcH, canvasWidth, canvasHeight }) {
+export function baseClipScreenBox({ clipX = 0, clipY = 0, scale = 1, scaleX, scaleY, srcW, srcH, canvasWidth, canvasHeight }) {
     const fitted = fitContainSize(srcW, srcH, canvasWidth, canvasHeight);
-    const safeScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
+    const safeScale = Number.isFinite(scale) && scale !== 0 ? scale : 1;
+    // A legacy clip's scaleX/Y is already absolute (not relative to scale).
+    // If absent it inherits the uniform scale. This mirrors project.tsx.
+    const absoluteScaleX = Number.isFinite(scaleX) && scaleX !== 0 ? scaleX : safeScale;
+    const absoluteScaleY = Number.isFinite(scaleY) && scaleY !== 0 ? scaleY : safeScale;
     const leftPct = 50 + (canvasWidth ? (Number(clipX) || 0) / canvasWidth * 100 : 0);
     const topPct = 50 + (canvasHeight ? (Number(clipY) || 0) / canvasHeight * 100 : 0);
-    const widthPct = canvasWidth ? (fitted.w * safeScale) / canvasWidth * 100 : 0;
-    return { leftPct, topPct, widthPct };
+    const widthPct = canvasWidth ? (fitted.w * Math.abs(absoluteScaleX)) / canvasWidth * 100 : 0;
+    const heightPct = canvasHeight ? (fitted.h * Math.abs(absoluteScaleY)) / canvasHeight * 100 : 0;
+    return { leftPct, topPct, widthPct, heightPct };
 }
 
 /**

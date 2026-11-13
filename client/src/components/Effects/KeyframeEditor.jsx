@@ -1,11 +1,12 @@
 /**
  * KeyframeEditor.jsx
- * Visual keyframe timeline for animating effect parameters.
+ * Visual keyframe timeline & Bézier Graph Editor for animating effect & motion parameters.
  */
 
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { sampleKeyframeTrack } from '../../motion/MotionResolver.js';
+import { resolveEasing, cubicBezier, clamp } from '../../motion/Easing.js';
 import {
     Key,
     Plus,
@@ -13,11 +14,13 @@ import {
     ChevronDown,
     ChevronRight,
     Diamond,
-    Circle
+    Circle,
+    SlidersHorizontal,
+    Activity
 } from 'lucide-react';
 
 // Easing curves
-const EASING_OPTIONS = [
+export const EASING_OPTIONS = [
     { value: 'linear', labelKey: 'effects.easingLinear', path: 'M0,1 L1,0' },
     { value: 'ease-in', labelKey: 'effects.easingEaseIn', path: 'M0,1 C0.42,1 1,0 1,0' },
     { value: 'ease-out', labelKey: 'effects.easingEaseOut', path: 'M0,1 C0,1 0.58,0 1,0' },
@@ -36,14 +39,28 @@ const EASING_OPTIONS = [
     { value: '__custom_bezier__', labelKey: 'effects.easingCustomBezier', path: 'M0,1 C0.25,1 0.25,0 1,0' }
 ];
 
-const DEFAULT_BEZIER = [0.25, 0.1, 0.25, 1];
-const BEZIER_CONTROL_NAMES = ['X1', 'Y1', 'X2', 'Y2'];
-const readBezierControls = (easing) => {
+export const GRAPH_CURVE_PRESETS = [
+    { id: 'linear', label: 'Linear', easing: 'linear', bezier: [0.33, 0.33, 0.67, 0.67] },
+    { id: 'ease-out', label: 'Expo Out', easing: 'cubic-bezier(0.16, 1, 0.3, 1)', bezier: [0.16, 1, 0.3, 1] },
+    { id: 'ease-in-out', label: 'Smooth Ease', easing: 'cubic-bezier(0.42, 0, 0.2, 1)', bezier: [0.42, 0, 0.2, 1] },
+    { id: 'snap-back', label: 'Anticipate', easing: 'cubic-bezier(0.34, 1.45, 0.64, 1)', bezier: [0.34, 1.45, 0.64, 1] },
+    { id: 'spring-snappy', label: 'Snappy Spring', easing: 'spring(300, 18, 1)' },
+    { id: 'spring-bouncy', label: 'Elastic Spring', easing: 'spring(220, 11, 1)' },
+    { id: 'quad-inout', label: 'Quart InOut', easing: 'cubic-bezier(0.76, 0, 0.24, 1)', bezier: [0.76, 0, 0.24, 1] },
+    { id: 'hold', label: 'Hold Frame', easing: 'hold' },
+];
+
+export const DEFAULT_BEZIER = [0.25, 0.1, 0.25, 1];
+export const BEZIER_CONTROL_NAMES = ['X1', 'Y1', 'X2', 'Y2'];
+
+export const readBezierControls = (easing) => {
     const match = /^\s*cubic-bezier\(([^)]+)\)\s*$/i.exec(String(easing || ''));
     const values = match?.[1].split(',').map(value => Number(value.trim()));
     return values?.length === 4 && values.every(Number.isFinite) ? values : [...DEFAULT_BEZIER];
 };
-const encodeBezierControls = (values) => `cubic-bezier(${values.map(value => Number(value.toFixed(3))).join(', ')})`;
+
+export const encodeBezierControls = (values) => `cubic-bezier(${values.map(value => Number(value.toFixed(3))).join(', ')})`;
+
 const DEFAULT_STEPS = { count: 4, position: 'jump-end' };
 const readStepControls = easing => {
     const match = /^\s*steps\(\s*(\d+)\s*(?:,\s*(start|end|jump-start|jump-end|jump-none|jump-both)\s*)?\)\s*$/i.exec(String(easing || ''));
@@ -132,7 +149,8 @@ const KeyframeTrack = ({
     onUpdateKeyframe,
     onRemoveKeyframe,
     selectedKeyframe,
-    onSelectKeyframe
+    onSelectKeyframe,
+    onOpenGraph
 }) => {
     const { t } = useTranslation('editor');
     const [isExpanded, setIsExpanded] = useState(false);
@@ -156,8 +174,6 @@ const KeyframeTrack = ({
         const x = e.clientX - rect.left;
         const time = (x / rect.width) * duration;
 
-        // Preserve the exact value visible at this time so inserting a key
-        // does not create a jump in an already animated parameter.
         const baseValue = effect.params?.[paramName]?.value ?? paramDef.value;
         const value = sampleKeyframeTrack(keyframes, time, baseValue);
         onAddKeyframe(paramName, time, value);
@@ -215,7 +231,7 @@ const KeyframeTrack = ({
         <div className="border-b border-border last:border-b-0">
             {/* Header */}
             <div
-                className="flex items-center gap-2 px-3 py-2 hover:bg-white/5 cursor-pointer"
+                className="flex items-center gap-2 px-3 py-2 hover:bg-white/5 cursor-pointer select-none"
                 onClick={() => setIsExpanded(!isExpanded)}
             >
                 {isExpanded ?
@@ -223,7 +239,19 @@ const KeyframeTrack = ({
                     <ChevronRight className="w-3 h-3 text-muted-foreground" />
                 }
                 <span className="text-xs flex-1">{paramDef.label || paramName}</span>
-                <span className="text-[10px] text-muted-foreground">
+                <button
+                    type="button"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenGraph?.(paramName);
+                    }}
+                    title="Open Bézier Graph Curve Editor"
+                    className="px-1.5 py-0.5 text-[10px] text-sky-400 hover:text-sky-300 hover:bg-sky-500/10 rounded flex items-center gap-1 transition-colors"
+                >
+                    <Activity className="w-2.5 h-2.5" />
+                    Curve
+                </button>
+                <span className="text-[10px] text-muted-foreground font-mono">
                     {t('effects.keyframeCount', { count: keyframes.length })}
                 </span>
             </div>
@@ -236,7 +264,7 @@ const KeyframeTrack = ({
             >
                 {/* Playhead indicator */}
                 <div
-                    className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-10"
+                    className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-10 pointer-events-none"
                     style={{ left: `${(playhead / duration) * 100}%` }}
                 />
 
@@ -248,36 +276,12 @@ const KeyframeTrack = ({
                         paramName={paramName}
                         timelineWidth={trackWidth}
                         duration={duration}
-                        isSelected={isSelected && selectedKeyframe.time === kf.time}
+                        isSelected={selectedKeyframe?.paramName === paramName && selectedKeyframe?.time === kf.time}
                         onSelect={onSelectKeyframe}
                         onDrag={handleDragKeyframe}
-                        onDoubleClick={(kf) => onRemoveKeyframe(paramName, kf.time)}
+                        onDoubleClick={() => setIsExpanded(true)}
                     />
                 ))}
-
-                {/* Interpolation lines between keyframes */}
-                {keyframes.length > 1 && (
-                    <svg className="absolute inset-0 w-full h-full pointer-events-none">
-                        {keyframes.slice(0, -1).map((kf, idx) => {
-                            const nextKf = keyframes[idx + 1];
-                            const x1 = (kf.time / duration) * 100;
-                            const x2 = (nextKf.time / duration) * 100;
-                            return (
-                                <line
-                                    key={idx}
-                                    x1={`${x1}%`}
-                                    y1="50%"
-                                    x2={`${x2}%`}
-                                    y2="50%"
-                                    stroke="currentColor"
-                                    strokeWidth="1"
-                                    strokeDasharray={kf.easing === 'linear' ? 'none' : '2,2'}
-                                    className="text-primary/50"
-                                />
-                            );
-                        })}
-                    </svg>
-                )}
             </div>
 
             {/* Expanded value/easing editor */}
@@ -392,7 +396,275 @@ const KeyframeTrack = ({
 };
 
 /**
- * Main Keyframe Editor component
+ * Bézier Graph Editor View with draggable tangent handles & presets
+ */
+export const BezierGraphEditor = ({
+    paramName,
+    paramDef,
+    keyframes = [],
+    duration,
+    playhead,
+    onAddKeyframe,
+    onUpdateKeyframe,
+    onRemoveKeyframe,
+    selectedKeyframe,
+    onSelectKeyframe,
+}) => {
+    const sortedKfs = useMemo(() => {
+        return [...keyframes].sort((a, b) => a.time - b.time);
+    }, [keyframes]);
+
+    const activeKf = useMemo(() => {
+        if (sortedKfs.length === 0) return null;
+        if (selectedKeyframe?.paramName === paramName) {
+            const found = sortedKfs.find(k => Math.abs(k.time - selectedKeyframe.time) < 1e-4);
+            if (found) return found;
+        }
+        return sortedKfs[0];
+    }, [sortedKfs, selectedKeyframe, paramName]);
+
+    const isCustomBezier = /^\s*cubic-bezier\(/i.test(String(activeKf?.easing || ''));
+    const activeBezier = useMemo(() => {
+        return readBezierControls(activeKf?.easing);
+    }, [activeKf?.easing]);
+
+    const [draggingHandle, setDraggingHandle] = useState(null);
+    const svgRef = useRef(null);
+
+    const curvePathD = useMemo(() => {
+        const W = 280;
+        const H = 130;
+        const padX = 24;
+        const padY = 22;
+        const plotW = W - padX * 2;
+        const plotH = H - padY * 2;
+        const pts = [];
+        const steps = 48;
+        const easingFn = isCustomBezier
+            ? cubicBezier(activeBezier[0], activeBezier[1], activeBezier[2], activeBezier[3])
+            : resolveEasing(activeKf?.easing || 'linear');
+
+        for (let i = 0; i <= steps; i++) {
+            const u = i / steps;
+            const val = easingFn(u);
+            const px = padX + u * plotW;
+            const py = H - padY - val * plotH;
+            pts.push(`${i === 0 ? 'M' : 'L'} ${px.toFixed(1)} ${py.toFixed(1)}`);
+        }
+        return pts.join(' ');
+    }, [activeKf?.easing, isCustomBezier, activeBezier]);
+
+    const handleSvgPointerMove = useCallback((e) => {
+        if (!draggingHandle || !activeKf || !svgRef.current) return;
+        const rect = svgRef.current.getBoundingClientRect();
+        const W = 280;
+        const H = 130;
+        const padX = 24;
+        const padY = 22;
+        const plotW = W - padX * 2;
+        const plotH = H - padY * 2;
+
+        const svgX = ((e.clientX - rect.left) / Math.max(1, rect.width)) * W;
+        const svgY = ((e.clientY - rect.top) / Math.max(1, rect.height)) * H;
+
+        const nx = clamp((svgX - padX) / plotW, 0.02, 0.98);
+        const ny = clamp((H - padY - svgY) / plotH, -0.4, 1.5);
+
+        const nextBezier = [...activeBezier];
+        if (draggingHandle === 'h1') {
+            nextBezier[0] = Number(nx.toFixed(2));
+            nextBezier[1] = Number(ny.toFixed(2));
+        } else {
+            nextBezier[2] = Number(nx.toFixed(2));
+            nextBezier[3] = Number(ny.toFixed(2));
+        }
+
+        onUpdateKeyframe(
+            paramName,
+            activeKf.time,
+            activeKf.time,
+            activeKf.value,
+            encodeBezierControls(nextBezier)
+        );
+    }, [draggingHandle, activeKf, activeBezier, paramName, onUpdateKeyframe]);
+
+    return (
+        <div className="flex-1 min-h-0 flex items-stretch gap-3 p-3 overflow-hidden bg-[#0A0E17] text-slate-200">
+            {/* Left: Keyframe segment list */}
+            <div className="w-48 space-y-2 overflow-y-auto shrink-0 border-r border-slate-800/60 pr-2">
+                <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>Keyframes</span>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            const val = sampleKeyframeTrack(sortedKfs, playhead, paramDef?.value ?? 0);
+                            onAddKeyframe(paramName, playhead, val, 'linear');
+                        }}
+                        className="text-sky-400 hover:text-sky-300 text-[10px] flex items-center gap-0.5"
+                    >
+                        <Plus className="w-3 h-3" /> Add @ playhead
+                    </button>
+                </div>
+
+                {sortedKfs.length > 0 ? (
+                    <div className="space-y-1">
+                        {sortedKfs.map((kf, idx) => {
+                            const isSel = activeKf?.time === kf.time;
+                            return (
+                                <div
+                                    key={`${kf.time}-${idx}`}
+                                    className={`px-2 py-1.5 rounded border text-xs flex items-center justify-between gap-1 transition-colors ${
+                                        isSel
+                                            ? 'bg-sky-500/20 border-sky-500/60 text-sky-200'
+                                            : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+                                    }`}
+                                >
+                                    <button
+                                        type="button"
+                                        onClick={() => onSelectKeyframe(kf.time, paramName)}
+                                        className="text-left font-mono text-[11px] flex-1 cursor-pointer truncate"
+                                    >
+                                        K{idx + 1} · {kf.time.toFixed(2)}s → {Number(kf.value).toFixed(2)}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        aria-label={`Delete keyframe K${idx + 1}`}
+                                        onClick={() => onRemoveKeyframe(paramName, kf.time)}
+                                        className="text-slate-500 hover:text-rose-400 cursor-pointer p-0.5"
+                                    >
+                                        <Trash2 className="w-3 h-3" />
+                                    </button>
+                                </div>
+                            );
+                        })}
+                    </div>
+                ) : (
+                    <p className="text-xs text-slate-500">
+                        No keyframes on this track. Click &quot;Add @ playhead&quot; above to add one.
+                    </p>
+                )}
+            </div>
+
+            {/* Middle: SVG Curve Canvas */}
+            <div className="flex-1 min-w-0 bg-slate-950 border border-slate-800 rounded-lg flex flex-col items-center justify-center relative p-2 select-none">
+                <svg
+                    ref={svgRef}
+                    data-testid="bezier-graph-svg"
+                    viewBox="0 0 280 130"
+                    onPointerMove={handleSvgPointerMove}
+                    onPointerUp={() => setDraggingHandle(null)}
+                    onPointerLeave={() => setDraggingHandle(null)}
+                    className="w-full h-full max-w-md select-none touch-none"
+                >
+                    <rect x="24" y="22" width="232" height="86" fill="none" stroke="#1E293B" strokeWidth="1" />
+                    <line x1="24" y1="65" x2="256" y2="65" stroke="#1E293B" strokeDasharray="3 3" />
+                    <line x1="140" y1="22" x2="140" y2="108" stroke="#1E293B" strokeDasharray="3 3" />
+
+                    <path d={curvePathD} fill="none" stroke="#38BDF8" strokeWidth="2.5" />
+
+                    {activeKf && (
+                        <>
+                            <line
+                                x1="24"
+                                y1="108"
+                                x2={24 + activeBezier[0] * 232}
+                                y2={108 - activeBezier[1] * 86}
+                                stroke="#F59E0B"
+                                strokeWidth="1.2"
+                            />
+                            <line
+                                x1="256"
+                                y1="22"
+                                x2={24 + activeBezier[2] * 232}
+                                y2={108 - activeBezier[3] * 86}
+                                stroke="#A855F7"
+                                strokeWidth="1.2"
+                            />
+                            <circle
+                                cx={24 + activeBezier[0] * 232}
+                                cy={108 - activeBezier[1] * 86}
+                                r="5.5"
+                                fill="#F59E0B"
+                                className="cursor-grab active:cursor-grabbing hover:scale-125 transition-transform"
+                                onPointerDown={(e) => {
+                                    e.currentTarget.setPointerCapture?.(e.pointerId);
+                                    setDraggingHandle('h1');
+                                }}
+                            />
+                            <circle
+                                cx={24 + activeBezier[2] * 232}
+                                cy={108 - activeBezier[3] * 86}
+                                r="5.5"
+                                fill="#A855F7"
+                                className="cursor-grab active:cursor-grabbing hover:scale-125 transition-transform"
+                                onPointerDown={(e) => {
+                                    e.currentTarget.setPointerCapture?.(e.pointerId);
+                                    setDraggingHandle('h2');
+                                }}
+                            />
+                        </>
+                    )}
+                </svg>
+                <div className="w-full flex justify-between px-6 text-[10px] font-mono text-slate-500">
+                    <span>0.0s (Start)</span>
+                    <span>1.0s (End)</span>
+                </div>
+            </div>
+
+            {/* Right: Presets & Value Editor */}
+            <div className="w-52 space-y-2.5 overflow-y-auto shrink-0 border-l border-slate-800/60 pl-2">
+                <div className="text-[11px] font-medium text-slate-400">
+                    {activeKf
+                        ? isCustomBezier
+                            ? `cubic-bezier(${activeBezier.join(', ')})`
+                            : `Easing: ${activeKf.easing || 'linear'}`
+                        : 'Select a keyframe'}
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                    {GRAPH_CURVE_PRESETS.map((preset) => (
+                        <button
+                            key={preset.id}
+                            type="button"
+                            disabled={!activeKf}
+                            onClick={() => {
+                                if (!activeKf) return;
+                                onUpdateKeyframe(
+                                    paramName,
+                                    activeKf.time,
+                                    activeKf.time,
+                                    activeKf.value,
+                                    preset.easing
+                                );
+                            }}
+                            className="px-2 py-1.5 text-[11px] font-medium text-left rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 disabled:opacity-40 cursor-pointer truncate transition-colors"
+                        >
+                            {preset.label}
+                        </button>
+                    ))}
+                </div>
+
+                {activeKf && (
+                    <div className="pt-2 border-t border-slate-800/80 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-400">Value:</span>
+                            <input
+                                type="number"
+                                value={activeKf.value}
+                                onChange={(e) => onUpdateKeyframe(paramName, activeKf.time, activeKf.time, parseFloat(e.target.value) || 0, activeKf.easing)}
+                                className="w-20 px-2 py-1 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-slate-200"
+                                step={paramDef?.type === 'int' ? 1 : 0.01}
+                            />
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+/**
+ * Main Keyframe Editor component with Dopesheet and Bézier Graph Editor modes
  */
 const KeyframeEditor = ({
     effect,
@@ -404,14 +676,15 @@ const KeyframeEditor = ({
     onRemoveKeyframe
 }) => {
     const { t } = useTranslation('editor');
+    const [mode, setMode] = useState('dopesheet'); // 'dopesheet' | 'graph'
     const [selectedKeyframe, setSelectedKeyframe] = useState(null);
+    const [activeGraphParam, setActiveGraphParam] = useState(null);
 
     const handleSelectKeyframe = useCallback((time, paramName) => {
         setSelectedKeyframe({ time, paramName });
     }, []);
 
     const handleUpdateKeyframe = useCallback((paramName, oldTime, newTime, value, easing) => {
-        // If time changed, need to remove old and add new
         if (oldTime !== newTime) {
             onRemoveKeyframe(effect.id, paramName, oldTime);
         }
@@ -435,7 +708,6 @@ const KeyframeEditor = ({
     const params = definition.params || {};
     const keyframes = effect.keyframes || {};
 
-    // Only show animatable params
     const animatableParams = Object.entries(params).filter(([_, def]) =>
         def.type === 'float' || def.type === 'FLOAT' || def.type === 'int' || def.type === 'INT'
     );
@@ -449,67 +721,132 @@ const KeyframeEditor = ({
         );
     }
 
+    const effectiveGraphParam = activeGraphParam || animatableParams[0][0];
+    const effectiveGraphDef = params[effectiveGraphParam] || { value: 0 };
+    const effectiveGraphKeyframes = keyframes[effectiveGraphParam] || [];
+
     return (
-        <div className="bg-card border border-border rounded-xl overflow-hidden">
-            {/* Header */}
-            <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-black/20">
+        <div className="bg-card border border-border rounded-xl overflow-hidden flex flex-col">
+            {/* Header with Mode Switch */}
+            <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-black/30">
                 <div className="flex items-center gap-2">
-                    <Key className="w-4 h-4 text-primary" />
-                    <span className="text-sm font-medium">{t('effects.keyframeEditor')}</span>
+                    <button
+                        type="button"
+                        onClick={() => setMode('dopesheet')}
+                        className={`px-2 py-1 text-xs font-medium rounded flex items-center gap-1.5 cursor-pointer transition-colors ${
+                            mode === 'dopesheet'
+                                ? 'bg-primary/20 text-primary border border-primary/40'
+                                : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                    >
+                        <SlidersHorizontal className="w-3.5 h-3.5" />
+                        Dope Sheet
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setMode('graph')}
+                        className={`px-2 py-1 text-xs font-medium rounded flex items-center gap-1.5 cursor-pointer transition-colors ${
+                            mode === 'graph'
+                                ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
+                                : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                    >
+                        <Activity className="w-3.5 h-3.5" />
+                        Bézier Graph
+                    </button>
                 </div>
-                <span className="text-xs text-muted-foreground font-mono">
-                    {playhead.toFixed(2)}s / {duration.toFixed(2)}s
-                </span>
-            </div>
 
-            {/* Parameter tracks */}
-            <div className="divide-y divide-border">
-                {animatableParams.map(([paramName, paramDef]) => (
-                    <KeyframeTrack
-                        key={paramName}
-                        paramName={paramName}
-                        paramDef={paramDef}
-                        keyframes={keyframes[paramName] || []}
-                        effect={effect}
-                        duration={duration}
-                        playhead={playhead}
-                        onAddKeyframe={(pn, time, value) =>
-                            onAddKeyframe(effect.id, pn, time, value, 'linear')
-                        }
-                        onUpdateKeyframe={handleUpdateKeyframe}
-                        onRemoveKeyframe={handleRemoveKeyframe}
-                        selectedKeyframe={selectedKeyframe}
-                        onSelectKeyframe={handleSelectKeyframe}
-                    />
-                ))}
-            </div>
-
-            {/* Timeline ruler */}
-            <div className="h-6 bg-secondary/30 border-t border-border relative">
-                {/* Time markers */}
-                {[...Array(11)].map((_, i) => {
-                    const time = (i / 10) * duration;
-                    return (
-                        <div
-                            key={i}
-                            className="absolute top-0 h-2 w-px bg-border"
-                            style={{ left: `${i * 10}%` }}
+                <div className="flex items-center gap-3">
+                    {mode === 'graph' && (
+                        <select
+                            value={effectiveGraphParam}
+                            onChange={(e) => setActiveGraphParam(e.target.value)}
+                            className="px-2 py-0.5 text-xs bg-secondary border border-border rounded text-foreground font-mono"
                         >
-                            <span className="absolute top-2 -translate-x-1/2 text-[9px] text-muted-foreground font-mono">
-                                {time.toFixed(1)}s
-                            </span>
-                        </div>
-                    );
-                })}
-
-                {/* Playhead */}
-                <div
-                    className="absolute top-0 bottom-0 w-0.5 bg-red-500"
-                    style={{ left: `${(playhead / duration) * 100}%` }}
-                >
-                    <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-red-500 rotate-45" />
+                            {animatableParams.map(([name, def]) => (
+                                <option key={name} value={name}>
+                                    {def.label || name} ({(keyframes[name] || []).length} kf)
+                                </option>
+                            ))}
+                        </select>
+                    )}
+                    <span className="text-xs text-muted-foreground font-mono">
+                        {playhead.toFixed(2)}s / {duration.toFixed(2)}s
+                    </span>
                 </div>
             </div>
+
+            {/* Mode Body */}
+            {mode === 'dopesheet' ? (
+                <>
+                    {/* Parameter tracks */}
+                    <div className="divide-y divide-border">
+                        {animatableParams.map(([paramName, paramDef]) => (
+                            <KeyframeTrack
+                                key={paramName}
+                                paramName={paramName}
+                                paramDef={paramDef}
+                                keyframes={keyframes[paramName] || []}
+                                effect={effect}
+                                duration={duration}
+                                playhead={playhead}
+                                onAddKeyframe={(pn, time, value) =>
+                                    onAddKeyframe(effect.id, pn, time, value, 'linear')
+                                }
+                                onUpdateKeyframe={handleUpdateKeyframe}
+                                onRemoveKeyframe={handleRemoveKeyframe}
+                                selectedKeyframe={selectedKeyframe}
+                                onSelectKeyframe={handleSelectKeyframe}
+                                onOpenGraph={(pn) => {
+                                    setActiveGraphParam(pn);
+                                    setMode('graph');
+                                }}
+                            />
+                        ))}
+                    </div>
+
+                    {/* Timeline ruler */}
+                    <div className="h-6 bg-secondary/30 border-t border-border relative select-none">
+                        {[...Array(11)].map((_, i) => {
+                            const time = (i / 10) * duration;
+                            return (
+                                <div
+                                    key={i}
+                                    className="absolute top-0 h-2 w-px bg-border"
+                                    style={{ left: `${i * 10}%` }}
+                                >
+                                    <span className="absolute top-2 -translate-x-1/2 text-[9px] text-muted-foreground font-mono">
+                                        {time.toFixed(1)}s
+                                    </span>
+                                </div>
+                            );
+                        })}
+
+                        {/* Playhead */}
+                        <div
+                            className="absolute top-0 bottom-0 w-0.5 bg-red-500 pointer-events-none"
+                            style={{ left: `${(playhead / duration) * 100}%` }}
+                        >
+                            <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-red-500 rotate-45" />
+                        </div>
+                    </div>
+                </>
+            ) : (
+                <BezierGraphEditor
+                    paramName={effectiveGraphParam}
+                    paramDef={effectiveGraphDef}
+                    keyframes={effectiveGraphKeyframes}
+                    duration={duration}
+                    playhead={playhead}
+                    onAddKeyframe={(pn, time, value, easing) =>
+                        onAddKeyframe(effect.id, pn, time, value, easing || 'linear')
+                    }
+                    onUpdateKeyframe={handleUpdateKeyframe}
+                    onRemoveKeyframe={handleRemoveKeyframe}
+                    selectedKeyframe={selectedKeyframe}
+                    onSelectKeyframe={handleSelectKeyframe}
+                />
+            )}
         </div>
     );
 };

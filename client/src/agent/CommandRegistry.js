@@ -255,6 +255,67 @@ export const COMMANDS = [
         destructive: false,
     },
 
+    // ── AE Motion Engine Mastery Commands ──────────────────────────────────
+    {
+        id: 'apply_motion_expression',
+        category: 'transform',
+        label: 'Apply motion expression',
+        summary: 'Applies an After Effects motion expression (wiggle, loopOut pingpong, audioAmp bass, spring) to a layer property.',
+        phrases: ['apply motion expression', 'add motion expression', 'add expression to layer', 'apply expression',
+                  'add wiggle expression', 'wiggle expression', 'pulse with bass', 'audio reactive expression',
+                  'pulse with the music', 'loop with pingpong', 'loop out pingpong', 'loop pingpong expression',
+                  'spring expression', 'ajoute une expression', 'expression de mouvement', 'effet audio reactif',
+                  'boucle pingpong'],
+        negative: ['remove', 'clear', 'supprime', 'enleve'],
+        destructive: false,
+    },
+    {
+        id: 'set_track_matte',
+        category: 'transform',
+        label: 'Set track matte',
+        summary: 'Sets an alpha or luminance track matte mask to cut out or reveal the target layer.',
+        phrases: ['set track matte', 'apply track matte', 'alpha track matte', 'alpha matte',
+                  'alpha inverted matte', 'luma track matte', 'luma matte', 'luma inverted matte',
+                  'cut out text using video', 'cut out text with video', 'stencil reveal',
+                  'masque de piste', 'masque alpha', 'masque luma'],
+        negative: ['remove', 'clear', 'supprime'],
+        destructive: false,
+    },
+    {
+        id: 'set_layer_parent',
+        category: 'transform',
+        label: 'Link layer to parent',
+        summary: 'Parents a child layer to a host layer so it tracks its transform with relative coordinates.',
+        phrases: ['parent layer', 'link layer', 'parent to layer', 'link to badge', 'follow parent layer',
+                  'link layer to parent', 'parent layer to', 'lier le calque', 'parenter le calque'],
+        negative: ['unparent', 'unlink', 'remove'],
+        destructive: false,
+    },
+    {
+        id: 'set_vector_trim',
+        category: 'transform',
+        label: 'Animate vector trim path',
+        summary: 'Animates vector trim paths (trimStart, trimEnd, trimOffset) for kinetic draw-on strokes and borders.',
+        phrases: ['trim path', 'animate trim path', 'draw on stroke', 'draw on path', 'animate outline',
+                  'draw on arrow', 'draw on line', 'kinetic stroke draw', 'tracer le chemin', 'animer le contour'],
+        negative: ['video trim', 'timeline trim', 'cut silence', 'crop'],
+        destructive: false,
+    },
+    {
+        id: 'apply_aesthetic_preset',
+        category: 'transform',
+        label: 'Apply creator aesthetic look',
+        summary: 'Applies complete creator aesthetic styling (Vox documentary, Ali Abdaal minimal, MrBeast hyper-retention, Iman Gadzhi dark luxury, Apple minimal, Hormozi bold).',
+        phrases: ['edit like vox', 'vox documentary style', 'vox style', 'documentary look',
+                  'edit like ali abdaal', 'ali abdaal style', 'ali abdaal minimal', 'clean minimal style',
+                  'edit like mrbeast', 'mrbeast style', 'hyper retention edit', 'mrbeast punch',
+                  'edit like iman gadzhi', 'iman gadzhi dark luxury', 'dark luxury look', 'iman gadzhi style',
+                  'apple minimal style', 'apple product showcase', 'alex hormozi bold style', 'hormozi style',
+                  'style vox', 'style documentaire vox', 'style ali abdaal', 'style mrbeast', 'style iman gadzhi'],
+        negative: ['recipe', 'podcast recipe', 'travel recipe', 'explainer recipe', 'punchy recipe'],
+        destructive: false,
+    },
+
     // ── R92: free background removal (vision/MatteBaker.js) ────────────────
     {
         id: 'remove_background',
@@ -1057,7 +1118,7 @@ export function extractParams(cmd, prompt) {
             if (/\ball\b|\bevery\b|\bwhole\b|\btous\b|\btoutes\b|\bchaque\b/.test(text)) value = 'all';
             else if (/\bthis\b|\bselected\b|\bhere\b/.test(text)) value = 'clip';
         } else if (p.type === 'enum') {
-            value = (p.values || []).find(v => text.includes(String(v).toLowerCase()));
+            value = (p.values || []).find(v => text.includes(String(v).toLowerCase()) || text.includes(String(v).replace(/_/g, ' ').toLowerCase()));
         } else if (p.type === 'text') {
             const q = String(prompt || '').match(/["“]([^"”]+)["”]/);
             if (q) {

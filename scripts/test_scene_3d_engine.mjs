@@ -5,9 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderTemplateFrames } from '../server/compositor/TemplateRenderer.js';
-import { drawScene3D, remapSceneObjectTime, resolveSceneVideoSourceTime, maxSceneObjectSourceTime, getSceneShutterSampleTimes, sampleAudioEnvelope, composeSceneRotation, composeSceneTransform, normalizeScene3D, normalizeSceneMesh, MAX_MESH_TRIANGLES, MAX_SCENE_TRIANGLES, getScene3DRenderLimitWarnings, getScene3DCompatibilityWarnings, resolveParticleSeed, SCENE3D_CAMERA_DEFAULTS, SCENE3D_PRIMITIVES, SCENE3D_BLEND_MODES } from '../client/src/motion/Scene3D.js';
+import { drawScene3D, remapSceneObjectTime, resolveSceneVideoSourceTime, maxSceneObjectSourceTime, getSceneShutterSampleTimes, sampleAudioEnvelope, composeSceneRotation, composeSceneTransform, normalizeScene3D, normalizeSceneMesh, MAX_MESH_TRIANGLES, MAX_SCENE_TRIANGLES, MAX_SCENE_PARTICLES, getScene3DRenderLimitWarnings, getScene3DCompatibilityWarnings, resolveParticleSeed, SCENE3D_CAMERA_DEFAULTS, SCENE3D_PRIMITIVES, SCENE3D_BLEND_MODES } from '../client/src/motion/Scene3D.js';
 import { evaluateMotionExpression } from '../client/src/motion/MotionExpression.js';
-import { sampleProceduralParticle, sampleProceduralParticles } from '../client/src/motion/ProceduralParticles.js';
+import { normalizeParticleColorCurve, normalizeParticleLifeCurve, sampleParticleColorOverLife, setParticleColorCurveEasing, setParticleLifeCurveEndpoint, setParticleLifeCurveEasing, sampleProceduralParticle, sampleProceduralParticles } from '../client/src/motion/ProceduralParticles.js';
 import { canRenderScene3DGpu } from '../client/src/motion/Scene3DGPU.js';
 
 const gpuEligibleTriangle = { projected: [{ x: 0, y: 0, z: 1 }, { x: 1, y: 0, z: 1 }, { x: 0, y: 1, z: 1 }], color: '#FFFFFF' };
@@ -227,6 +227,22 @@ assert.match(getScene3DCompatibilityWarnings({ objects: [{ id: 'empty-topology',
   'a custom mesh with no valid faces is reported as unrenderable');
 assert.match(getScene3DCompatibilityWarnings({ particles: { shape: 'triangle' } })[0]?.message || '', /unsupported shape.*circles/,
   'unsupported particle shapes are disclosed before rendering falls back to circles');
+assert.match(getScene3DCompatibilityWarnings({ particles: { sizeOverLife: [{ time: 'bad', value: 12 }] } })[0]?.message || '',
+  /size-over-life curve contains 1 invalid stop/,
+  'invalid particle size-over-life stops are disclosed instead of silently falling back');
+assert.match(getScene3DCompatibilityWarnings({ particles: { opacityOverLife: [{ time: 0.5, value: 2 }] } })[0]?.message || '',
+  /opacity-over-life.*clamped/,
+  'out-of-range particle opacity curves are disclosed before render');
+assert.match(getScene3DCompatibilityWarnings({ particles: { colorOverLife: [{ time: 'bad', color: '#ff0000' }] } })[0]?.message || '',
+  /color-over-life curve contains 1 invalid stop/,
+  'invalid particle color stops are disclosed instead of silently falling back');
+assert.deepEqual(getScene3DCompatibilityWarnings({ particles: {
+  sizeOverLife: [{ time: 0, value: 1, easing: 'made-up-size-easing' }, { time: 1, value: 8 }],
+  opacityOverLife: [{ time: 0, value: 0, easing: 'made-up-easing' }, { time: 1, value: 1 }],
+} }).map(warning => warning.message), [
+  '3D particle size-over-life curve contains 1 unsupported easing value(s); those segments will use linear easing.',
+  '3D particle opacity-over-life curve contains 1 unsupported easing value(s); those segments will use linear easing.',
+], 'unsupported particle easing fallbacks are disclosed before preview/export');
 assert.deepEqual(getScene3DCompatibilityWarnings({ lights: [{ type: 'area', width: 40, height: 40 }] }), [],
   'area emitters are a supported light type with supported dimensions');
 assert.equal(getScene3DCompatibilityWarnings({
@@ -879,6 +895,10 @@ assert.deepEqual(sampleProceduralParticles(proceduralConfig, 0.7), sampleProcedu
   'particle layouts are deterministic when scrubbing and rendering the same frame');
 assert.equal(sampleProceduralParticles(proceduralConfig, 0.7).length, proceduralConfig.count,
   'the continuous emitter maintains the authored particle count');
+assert.equal(sampleProceduralParticles({ count: 501, seed: 2, speed: 0, spread: 0 }, 0).length, 501,
+  'the procedural sampling helper does not truncate scenes at its former 500-particle cap');
+assert.equal(sampleProceduralParticles({ count: 2_001, seed: 2, speed: 0, spread: 0 }, 0).length, MAX_SCENE_PARTICLES,
+  'the procedural sampling helper shares the scene renderer 2,000-particle safety ceiling');
 assert.deepEqual(sampleProceduralParticle({ ...proceduralConfig, emitter: { shape: 'point', position: { x: 1, y: 2, z: 3 } }, velocity: {}, gravity: {}, turbulence: 0 }, 0, 0).position,
   { x: 1, y: 2, z: 3 }, 'point emitters start at their authored world-space position');
 const ballisticConfig = { ...proceduralConfig, emitter: { shape: 'point', mode: 'burst' }, velocity: { y: 1 }, gravity: { y: -2 }, turbulence: 0, loop: false };
@@ -886,6 +906,49 @@ const ballisticStart = sampleProceduralParticle(ballisticConfig, 0, 0.5);
 const ballisticLater = sampleProceduralParticle(ballisticConfig, 0, 1);
 assert.ok(ballisticLater.position.y < ballisticStart.position.y,
   'gravity changes the trajectory of emitted particles over time');
+const particleSizeCurve = { count: 1, seed: 3, size: 2, lifetime: 2, loop: false,
+  emitter: { shape: 'point', mode: 'burst' }, velocity: {}, gravity: {}, turbulence: 0,
+  sizeOverLife: [{ time: 1, value: 0 }, { time: 0, value: 10 }] };
+assert.equal(sampleProceduralParticle(particleSizeCurve, 0, 1).size, 5,
+  'particle size interpolates through authored size-over-life stops regardless of their input order');
+assert.equal(sampleProceduralParticle({ ...particleSizeCurve, sizeOverLife: [
+  { time: 0, value: 0, easing: 'easeIn' }, { time: 1, value: 10 },
+] }, 0, 1).size, 2.5,
+  'particle life-curve segments use the shared easing resolver');
+assert.equal(sampleProceduralParticle(particleSizeCurve, 0, 1, normalizeParticleLifeCurve(particleSizeCurve.sizeOverLife)).size, 5,
+  'prepared particle size curves preserve sampler output for batched rendering');
+const cappedLifeCurve = setParticleLifeCurveEndpoint(Array.from({ length: 32 }, (_, index) => ({ time: index / 31, value: index })), 1, 7);
+assert.equal(cappedLifeCurve.length, 32, 'editing a particle curve endpoint stays within the renderer stop limit');
+assert.equal(normalizeParticleLifeCurve(cappedLifeCurve).at(-1).value, 7,
+  'an edited endpoint remains in the normalized 32-stop curve');
+const easedParticleCurve = setParticleLifeCurveEndpoint([
+  { time: 0, value: 0 }, { time: 0.5, value: 4, easing: 'easeInCubic' }, { time: 1, value: 8 },
+], 1, 12);
+assert.equal(normalizeParticleLifeCurve(easedParticleCurve)[1].easing, 'easeInCubic',
+  'editing a particle endpoint preserves easing on interior life-curve stops');
+const particleEaseTrack = setParticleLifeCurveEasing([
+  { time: 0, value: 0 }, { time: 1, value: 10 },
+], 0, 'easeOut');
+assert.equal(sampleProceduralParticle({ ...particleSizeCurve, sizeOverLife: particleEaseTrack }, 0, 1).size, 7.5,
+  'particle curve easing can be authored at the start stop and affects interpolation');
+assert.equal(sampleProceduralParticle({ ...particleSizeCurve, sizeOverLife: [{ time: 'bad', value: 30 }] }, 0, 1).size, 2,
+  'invalid size-over-life stops fail soft to the authored base size');
+const opacityLifeCurve = { ...particleSizeCurve, opacityOverLife: [{ time: 0, value: 1 }, { time: 1, value: 0 }] };
+assert.equal(sampleProceduralParticle(opacityLifeCurve, 0, 1).opacity, 0.5,
+  'particle opacity interpolates over normalized lifetime');
+assert.equal(sampleProceduralParticle({ ...opacityLifeCurve, opacityOverLife: [{ time: 0, value: 4 }] }, 0, 0.5).opacity, 1,
+  'particle opacity curves clamp to the supported alpha range');
+const colorLifeCurve = [{ time: 1, color: '#0000ff' }, { time: 0, color: '#ff0000' }];
+assert.equal(sampleParticleColorOverLife(colorLifeCurve, 0.5), '#800080',
+  'particle colors interpolate in RGB across normalized lifetime');
+assert.equal(sampleParticleColorOverLife([{ time: 0, color: '#000', easing: 'easeIn' }, { time: 1, color: '#fff' }], 0.5), '#404040',
+  'particle color interpolation uses shared easing');
+assert.equal(sampleParticleColorOverLife(setParticleColorCurveEasing([{ time: 0, color: '#000' }, { time: 1, color: '#fff' }], 0, 'easeOut'), 0.5), '#bfbfbf',
+  'particle color curve easing can be edited while retaining the stops');
+assert.equal(sampleProceduralParticle({ ...particleSizeCurve, colorOverLife: colorLifeCurve }, 0, 1).color, '#800080',
+  'deterministic particle samples carry their animated color');
+assert.equal(normalizeParticleColorCurve([{ time: 'bad', color: '#fff' }, { time: 0.5, color: 'not-a-color' }]).length, 0,
+  'malformed color stops are ignored safely');
 const burst = { count: 4, seed: 4, lifetime: 1, loop: false, emitter: { shape: 'point', mode: 'burst' } };
 assert.equal(sampleProceduralParticles(burst, 0.5).length, 4, 'a one-shot burst remains alive inside its lifetime');
 assert.equal(sampleProceduralParticles(burst, 1).length, 0, 'a one-shot burst expires after its lifetime');
@@ -909,18 +972,27 @@ assert.ok(continuousLater.position.x > continuousAtStart.position.x,
 const ringSamples = sampleProceduralParticles({ ...proceduralConfig, count: 32, emitter: { shape: 'ring', size: { x: 2, z: 2 }, innerRatio: 0.8 }, velocity: {}, gravity: {}, turbulence: 0 }, 0);
 assert.ok(ringSamples.every(particle => Math.hypot(particle.position.x, particle.position.z) >= 1.55),
   'ring emitters preserve their authored inner radius');
-function renderedProceduralParticleFrame(time, loop = true) {
+function renderedProceduralParticleFrame(time, loop = true, curves = {}) {
   const canvas = Canvas.createCanvas(240, 240);
   drawScene3D(canvas.getContext('2d'), {
     camera: { z: 7, fov: 780 }, shadows: { enabled: false },
     particles: { count: 1, seed: 12, size: 0.06, speed: 1, lifetime: 2, fadeIn: 0, fadeOut: 0,
-      loop, emitter: { shape: 'point', mode: 'burst' }, velocity: { x: 1, y: 0.5, z: 0 } },
+      loop, ...curves, emitter: { shape: 'point', mode: 'burst' }, velocity: { x: 1, y: 0.5, z: 0 } },
     objects: [],
   }, time, 2, 240, 240, {});
   return canvas.getContext('2d').getImageData(0, 0, 240, 240).data;
 }
 assert.notDeepEqual(renderedProceduralParticleFrame(0.25), renderedProceduralParticleFrame(0.75),
   'procedural emitter motion changes the rendered scene pixels over time');
+assert.notDeepEqual(renderedProceduralParticleFrame(0.75, true, { sizeOverLife: [{ time: 0, value: 0.5 }, { time: 1, value: 0.5 }] }),
+  renderedProceduralParticleFrame(0.75, true, { sizeOverLife: [{ time: 0, value: 1.5 }, { time: 1, value: 1.5 }] }),
+  'the 3D renderer applies size-over-life to the particle footprint');
+assert.notDeepEqual(renderedProceduralParticleFrame(0.75, true, { opacityOverLife: [{ time: 0, value: 0 }, { time: 1, value: 0 }] }),
+  renderedProceduralParticleFrame(0.75, true, { opacityOverLife: [{ time: 0, value: 1 }, { time: 1, value: 1 }] }),
+  'the 3D renderer applies opacity-over-life to particle alpha');
+assert.notDeepEqual(renderedProceduralParticleFrame(0.75, true, { color: '#ff0000', colorOverLife: [{ time: 0, color: '#ff0000' }, { time: 1, color: '#ff0000' }] }),
+  renderedProceduralParticleFrame(0.75, true, { color: '#ff0000', colorOverLife: [{ time: 0, color: '#0000ff' }, { time: 1, color: '#0000ff' }] }),
+  'the 3D renderer applies animated particle color to rendered pixels');
 assert.deepEqual(renderedProceduralParticleFrame(0.25), renderedProceduralParticleFrame(2.25),
   'a looping burst remains visible and repeats its trajectory after a full particle lifetime');
 const expiredOneShotFrame = renderedProceduralParticleFrame(2.25, false);

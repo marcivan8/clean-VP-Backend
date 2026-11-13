@@ -458,6 +458,14 @@ section('6 · The adapter keeps existing clips working (backwards compatibility)
 
     const updates = M.motionLayerToClipUpdates(layer);
     check('writing back produces ordinary clip fields', updates.start === 5 && updates.duration === 2 && Array.isArray(updates.animations));
+    const axisUpdates = M.motionLayerToClipUpdates({ scale: 1.2, scaleX: -0.8, scaleY: 1.35 });
+    check('writing back converts relative motion axes to the clip’s absolute signed axes',
+        axisUpdates.scale === 1.2 && axisUpdates.scaleX === -0.96 && axisUpdates.scaleY === 1.62,
+        'MotionLayer axes are relative to scale; serializing them directly makes squash/stretch/mirror drift on reload');
+    const roundTripAxes = M.clipToMotionLayer({ id: 'axis-roundtrip', type: 'image', start: 0, duration: 1, ...axisUpdates });
+    check('independent signed axes survive the clip → layer → clip round trip',
+        roundTripAxes.scale === 1.2 && roundTripAxes.scaleX === -0.8 && roundTripAxes.scaleY === 1.35,
+        'a mirror or non-uniform transform must be stable across repeated edits and project reloads');
     check('writing back does NOT emit endTime',
         updates.endTime === undefined,
         'the timeline is start+duration everywhere; writing both invites them to disagree');

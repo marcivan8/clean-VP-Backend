@@ -1,7 +1,7 @@
 import MasterClock from './MasterClock';
 import RingBuffer from './RingBuffer';
 import { EffectPipeline, EffectRenderer, GPUEffectEngine } from '../effects';
-import { createGpuClipEffectConfigs } from '../effects/ClipEffectAdapter.js';
+import { createGpuClipEffectConfigs, createGpuClipEffectGraph } from '../effects/ClipEffectAdapter.js';
 import { mapSourceIntervalToTimelineSegments, mapSourceTimeToTimeline, mapTimelineTimeToRate, mapTimelineTimeToSource } from '../timeline/retimeMap.js';
 import { resampleMonoPcm } from './audioResample.js';
 import { handleWebGLContextLost, handleWebGLContextRestored } from './webglContextLifecycle.js';
@@ -920,22 +920,34 @@ class PlaybackEngine {
      * effects. CSS remains responsible for effects without a matching shader;
      * mapped effects use their actual preview algorithms.
      */
-    setClipEffects(clipId, effects = [], placement = {}) {
+    setClipEffects(clipId, effects = [], placement = {}, effectGraph = null) {
         if (!this.effectsPipeline) return false;
+        const graphPayload = createGpuClipEffectGraph(clipId, effectGraph, effects, placement);
         const configs = createGpuClipEffectConfigs(clipId, effects, placement);
-        const signature = JSON.stringify({ clipId, configs, startTime: placement.startTime, duration: placement.duration });
+        const signature = JSON.stringify({ clipId, configs, graphPayload, startTime: placement.startTime, duration: placement.duration });
         if (signature === this.clipEffectSignature) return true;
 
         for (const effectId of this.clipEffectIds) this.effectsPipeline.removeEffect(effectId);
         this.clipEffectIds = [];
         this.clipEffectSignature = signature;
-        this.clipEffectTargetId = configs.length ? clipId : null;
-        this.clipEffectPlacement = configs.length ? {
+        const hasPreviewEffects = graphPayload?.nodes?.length || configs.length;
+        this.clipEffectTargetId = hasPreviewEffects ? clipId : null;
+        this.clipEffectPlacement = hasPreviewEffects ? {
             id: clipId,
             clipId,
             startTime: Number(placement.startTime) || 0,
             duration: Math.max(0, Number(placement.duration) || 0),
         } : null;
+
+        if (graphPayload?.nodes?.length) {
+            const graph = this.effectsPipeline.replaceTargetGraph(clipId, graphPayload);
+            this.clipEffectIds = graph ? [...graph.nodes.keys()] : [];
+            return true;
+        }
+
+        // Clear a graph installed by the prior active clip before rebuilding a
+        // normal stack. This avoids stale branch nodes surviving clip changes.
+        this.effectsPipeline.replaceTargetGraph(clipId, null);
 
         for (const config of configs) {
             const effect = this.effectsPipeline.addEffect(config);

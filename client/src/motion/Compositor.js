@@ -58,6 +58,7 @@
 import { clipToMotionLayer } from './ClipAdapter.js';
 import { resolveMotionAt } from './MotionResolver.js';
 import { getEffectKeyframeTrack, resolveEffectParameter } from './EffectTiming.js';
+import { resolveTimelineEffectGraphPreview } from './TimelineVisualEffects.js';
 import { LAYER_KINDS } from './MotionSchema.js';
 import { remapSceneObjectTime } from './TimeRemap.js';
 import { MAX_MOTION_BLUR_SAMPLES } from './MotionLimits.js';
@@ -649,6 +650,11 @@ export function buildCompositionPlan(tracks, opts = {}) {
     const timeMap = buildTimeMap(baseTrack?.clips || []);
 
     const overlays = [];
+    // Rasterized graphics accept the normal ordered effect stack directly.
+    // A branched graph is carried separately so the worker can render the
+    // graph against the generated RGBA frame sequence *before* ordinary layer
+    // geometry/compositing. That preserves fork/join semantics instead of
+    // flattening a composite into a made-up order.
     const compositionOpacityCache = new Map();
     const compositionEffectCache = new Map();
     // zIndex counts up from 1: the base track is 0 and is not in this list.
@@ -657,6 +663,22 @@ export function buildCompositionPlan(tracks, opts = {}) {
     for (const track of overlayTracks) {
         for (const clip of (track.clips || [])) {
             if (!clip || !(Number(clip.duration) > 0)) continue;
+
+            // A linear graph can be projected into the ordinary stack (and is
+            // therefore shown in the live SVG/CSS preview). Preserve a graph
+            // that cannot be projected so export can execute its true DAG on
+            // a local RGBA sequence before this plan composites it. This is
+            // source-agnostic: uploaded footage, images and generated layers
+            // all use the same verified raster prepass.
+            const graphPreview = clip.effectGraph
+                ? resolveTimelineEffectGraphPreview(clip.effectGraph)
+                : { effects: [] };
+            const requiresGraphRasterPass = graphPreview.hasGraph && !graphPreview.supported;
+            const canRasterizeGraph = requiresGraphRasterPass;
+            const authoredEffects = [
+                ...graphPreview.effects,
+                ...(Array.isArray(clip.effects) ? clip.effects : []),
+            ];
 
             const groupOpacity = (clip.compositionStack || []).reduce((product, group) =>
                 product * Math.max(0, Math.min(1, Number(group?.opacity ?? 1))), 1);
@@ -691,7 +713,10 @@ export function buildCompositionPlan(tracks, opts = {}) {
             let sourceTimeMap = null;
             let sourceTimeSegments = null;
             let sourceTimeMapWarning = null;
-            if (clip.type === 'video' && Array.isArray(clip.timeRemap?.keyframes) && clip.timeRemap.keyframes.length) {
+            if (clip.type === 'video' && (
+                (Array.isArray(clip.timeRemap?.keyframes) && clip.timeRemap.keyframes.length)
+                || (typeof clip.timeRemap?.expression === 'string' && clip.timeRemap.expression.trim())
+            )) {
                 const duration = Math.max(0, Number(clip.duration) || 0);
                 const sampleCount = Math.max(2, Math.min(1800, Math.ceil(duration * fps)));
                 const sampled = Array.from({ length: sampleCount + 1 }, (_, index) => {
@@ -699,6 +724,7 @@ export function buildCompositionPlan(tracks, opts = {}) {
                     return {
                         source: remapSceneObjectTime(clip.timeRemap, localTime, duration || 1),
                         output: timelineToOutputTime(timeMap, layer.startTime + localTime) - startOut,
+                        timeline: layer.startTime + localTime,
                     };
                 }).filter(point => Number.isFinite(point.source) && Number.isFinite(point.output));
                 const direction = Math.sign(sampled.at(-1)?.source - sampled[0]?.source);
@@ -735,6 +761,7 @@ export function buildCompositionPlan(tracks, opts = {}) {
                                 return {
                                     outputStart: Number(segment[0].output.toFixed(6)),
                                     outputEnd: Number(segment.at(-1).output.toFixed(6)),
+                                    timelineStart: Number(segment[0].timeline.toFixed(6)),
                                     sourceTimeMap: hasMovement
                                         ? simplifySourceTimeMap(points, 0.5 / fps)
                                         : [{ source: points[0].source, output: 0 }],
@@ -850,7 +877,7 @@ export function buildCompositionPlan(tracks, opts = {}) {
                     frameRate: Math.max(1, Math.min(120, Number(clip.motionBlur.frameRate) || 30)),
                 } } : {}),
                 ...(clip.blendMode && clip.blendMode !== 'source-over' ? { blendMode: clip.blendMode } : {}),
-                ...(Array.isArray(clip.effects) && clip.effects.length ? { effects: sampleEffectTracks(clip.effects, layer, timeMap, { fps }).map(effect => {
+                ...(authoredEffects.length ? { effects: sampleEffectTracks(authoredEffects, layer, timeMap, { fps }).map(effect => {
                     const { type: _legacyType, ...preserved } = effect;
                     return {
                         ...preserved,
@@ -865,6 +892,18 @@ export function buildCompositionPlan(tracks, opts = {}) {
                         ...(effect.enabled !== undefined ? { enabled: effect.enabled } : {}),
                     };
                 }) } : {}),
+                // An unsupported live-preview graph remains intact for the
+                // worker's RGBA raster pass. It is not duplicated for a
+                // linear graph because those nodes already live in `effects`.
+                ...(canRasterizeGraph ? {
+                    effectGraph: clip.effectGraph,
+                    // Effect-graph windows/keyframes are authored on the
+                    // project timeline, whereas `outputStart` can move when
+                    // the base edit contains removed or retimed ranges. Keep
+                    // the authoring origin so the worker can render the
+                    // generated local frame sequence on the correct clock.
+                    timelineStart: Number(layer.startTime) || 0,
+                } : {}),
                 ...(clip.sceneMask ? { sceneMask: { ...clip.sceneMask } } : {}),
             };
             if (sourceTimeSegments) {
@@ -874,6 +913,10 @@ export function buildCompositionPlan(tracks, opts = {}) {
                     sourceTimeMap: segment.sourceTimeMap,
                     outputStart: Number((startOut + segment.outputStart).toFixed(4)),
                     outputEnd: Number((startOut + segment.outputEnd).toFixed(4)),
+                    // This split represents a later span of the original
+                    // clip. Keep graph windows/keyframes on that authored
+                    // source timeline when the worker rasterizes the segment.
+                    timelineStart: Number(segment.timelineStart),
                 }));
             } else {
                 overlays.push(overlayPlan);
@@ -1029,6 +1072,10 @@ export function validateCompositionPlan(plan) {
         errors.push('plan.frame must have finite positive width and height');
     }
     if (!Array.isArray(plan.overlays)) errors.push('plan.overlays must be an array');
+    if (plan.warnings != null && (!Array.isArray(plan.warnings)
+        || plan.warnings.some(warning => typeof warning !== 'string' || !warning.trim() || warning.length > 600))) {
+        errors.push('plan.warnings must be short non-empty strings');
+    }
 
     (plan.overlays || []).forEach((ov, i) => {
         const vector = ov.source?.vector;
@@ -1050,6 +1097,11 @@ export function validateCompositionPlan(plan) {
         }
         if (ov.effects != null && (!Array.isArray(ov.effects) || ov.effects.some(effect => !validClientEffectSamples(effect)))) {
             errors.push(`overlays[${i}]: effect samples are malformed or exceed the render budget`);
+        }
+        if (ov.effectGraph != null) {
+            if (!hasNumericValue(ov.timelineStart) || Number(ov.timelineStart) < 0) {
+                errors.push(`overlays[${i}]: effect graph timelineStart must be finite and non-negative`);
+            }
         }
         if (ov.compositionStack != null && (!Array.isArray(ov.compositionStack) || ov.compositionStack.some(group =>
             !group || typeof group.id !== 'string' || !group.id || !hasNumericValue(group.opacity) || Number(group.opacity) < 0 || Number(group.opacity) > 1

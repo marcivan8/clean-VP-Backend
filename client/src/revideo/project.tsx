@@ -5,6 +5,7 @@ import { waitFor, useScene, all, any, createRef } from '@revideo/core';
 import { clipToMotionLayer } from '../motion/ClipAdapter.js';
 import { resolveMotionAt, sampleKeyframeTrack } from '../motion/MotionResolver.js';
 import { composeAnimatedCrop } from '../motion/CameraMotionCompiler.js';
+import { createRevideoEffectFilters, resolveRevideoPreviewEffects } from './EffectAdapter.js';
 
 /**
  * PATCH: DependencyContext.collectPromise uses Promise.all in consumePromises(),
@@ -226,6 +227,10 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     // Reactive callbacks calling tracksSignal() inside filter lambdas
                     // cause "scene not available" errors in Revideo's signal context.
                     const g = clip.grading;
+                    const previewEffects = resolveRevideoPreviewEffects(clip);
+                    const effectFilters = createRevideoEffectFilters(
+                        previewEffects.effects, clip.start, clip.duration, () => playback.time,
+                    );
 
                     // ── Virtual multicam / reframe crop (clip.virtualCam) ────────────────
                     // {cropX, cropY, cropW, cropH} are UV fractions of the source
@@ -251,15 +256,27 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                         const motion = motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight);
                         return isOverlay
                             ? overlayScaleBase * motion.scale * motion.scaleX
-                            : videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motion.scale, clip.scale ?? 1)
-                                * motion.scaleX * evaluateKF(kf.scaleX, clipLocalTime(playback.time, clip.start), 1) * vcZoom;
+                            : videoCameraScale(
+                                kf,
+                                clipLocalTime(playback.time, clip.start),
+                                motionLayer ? motion.scale : null,
+                                motionLayer ? 1 : (clip.scaleX ?? clip.scale ?? 1),
+                            )
+                                * (motionLayer ? motion.scaleX : 1)
+                                * evaluateKF(kf.scaleX, clipLocalTime(playback.time, clip.start), 1) * vcZoom;
                     };
                     const totalScaleY = () => {
                         const motion = motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight);
                         return isOverlay
                             ? overlayScaleBase * motion.scale * motion.scaleY
-                            : videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motion.scale, clip.scale ?? 1)
-                                * motion.scaleY * evaluateKF(kf.scaleY, clipLocalTime(playback.time, clip.start), 1) * vcZoom;
+                            : videoCameraScale(
+                                kf,
+                                clipLocalTime(playback.time, clip.start),
+                                motionLayer ? motion.scale : null,
+                                motionLayer ? 1 : (clip.scaleY ?? clip.scale ?? 1),
+                            )
+                                * (motionLayer ? motion.scaleY : 1)
+                                * evaluateKF(kf.scaleY, clipLocalTime(playback.time, clip.start), 1) * vcZoom;
                     };
 
                     const posX = () => {
@@ -316,12 +333,15 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                                 ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).opacity
                                     + evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1) - (clip.opacity ?? 1)
                                 : evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
-                            filters={g ? [
-                                brightness((g.brightness ?? 100) / 100),
-                                contrast((g.contrast ?? 100) / 100),
-                                saturate((g.saturate ?? 100) / 100),
-                                hue(g.hueRotate ?? 0),
-                            ] : []}
+                            filters={[
+                                ...(g ? [
+                                    brightness((g.brightness ?? 100) / 100),
+                                    contrast((g.contrast ?? 100) / 100),
+                                    saturate((g.saturate ?? 100) / 100),
+                                    hue(g.hueRotate ?? 0),
+                                ] : []),
+                                ...effectFilters,
+                            ]}
                         />
                         </Node>
                     );
@@ -371,6 +391,40 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     const overlayScaleBase = canvasWidth * 0.25 / Math.max(1, fitted.w);
 
                     const g = clip.grading;
+                    const previewEffects = resolveRevideoPreviewEffects(clip);
+                    const effectFilters = createRevideoEffectFilters(
+                        previewEffects.effects, clip.start, clip.duration, () => playback.time,
+                    );
+
+                    // Image layers obey the exact same transform contract as
+                    // video layers: `scale` is the uniform factor and
+                    // `scaleX`/`scaleY` are independent axis multipliers.
+                    // The former image implementation only used `scale`, so
+                    // an authored stretch/squash (or an expression/parent
+                    // transform producing one) snapped back to uniform scale
+                    // as soon as the Revideo preview took over.
+                    const imageScaleX = () => {
+                        if (isOverlay) {
+                            const motion = motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight);
+                            return overlayScaleBase * motion.scale * motion.scaleX;
+                        }
+                        if (motionLayer) {
+                            const motion = motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight);
+                            return motion.scale * motion.scaleX;
+                        }
+                        return evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1);
+                    };
+                    const imageScaleY = () => {
+                        if (isOverlay) {
+                            const motion = motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight);
+                            return overlayScaleBase * motion.scale * motion.scaleY;
+                        }
+                        if (motionLayer) {
+                            const motion = motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight);
+                            return motion.scale * motion.scaleY;
+                        }
+                        return evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1);
+                    };
 
                     layerRefs[track.id]().add(
                         <Node ref={wrapperRef}>
@@ -383,7 +437,7 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                                 if (isOverlay) {
                                     const motion = motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight);
                                     const centreX = ((Number.isFinite(clip.x) ? clip.x : 50) / 100) * canvasWidth + motion.dx;
-                                    return centreX - fitted.w * overlayScaleBase * motion.scale / 2;
+                                    return centreX - fitted.w * imageScaleX() / 2;
                                 }
                                 return motionLayer ? (clip.x || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dx : evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0);
                             }}
@@ -391,24 +445,23 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                                 if (isOverlay) {
                                     const motion = motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight);
                                     const centreY = ((Number.isFinite(clip.y) ? clip.y : 50) / 100) * canvasHeight + motion.dy;
-                                    return centreY - fitted.h * overlayScaleBase * motion.scale / 2;
+                                    return centreY - fitted.h * imageScaleY() / 2;
                                 }
                                 return motionLayer ? (clip.y || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dy : evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0);
                             }}
-                            scaleX={() => isOverlay
-                                ? overlayScaleBase * motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale
-                                : motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
-                            scaleY={() => isOverlay
-                                ? overlayScaleBase * motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale
-                                : motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
+                            scaleX={imageScaleX}
+                            scaleY={imageScaleY}
                             rotation={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).rotation : evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
                             opacity={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).opacity : evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
-                            filters={g ? [
-                                brightness((g.brightness ?? 100) / 100),
-                                contrast((g.contrast ?? 100) / 100),
-                                saturate((g.saturate ?? 100) / 100),
-                                hue(g.hueRotate ?? 0),
-                            ] : []}
+                            filters={[
+                                ...(g ? [
+                                    brightness((g.brightness ?? 100) / 100),
+                                    contrast((g.contrast ?? 100) / 100),
+                                    saturate((g.saturate ?? 100) / 100),
+                                    hue(g.hueRotate ?? 0),
+                                ] : []),
+                                ...effectFilters,
+                            ]}
                         />
                         </Node>
                     );

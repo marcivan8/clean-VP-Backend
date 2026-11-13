@@ -14,7 +14,13 @@ export function resolveRevideoEffectParameter(effect, key, fallback, clipStart =
     const localTime = numeric(time, start) - start;
     const raw = effect?.params?.[key];
     const base = numeric(raw, fallback);
-    const source = effect?.keyframes?.[key] || raw?.keyframes;
+    const authoredTrack = effect?.keyframes?.[key];
+    const parameterTrack = raw?.keyframes;
+    // A serialized empty effect-level track is not an override. Older effect
+    // projects can still keep their populated keyframes on the parameter.
+    const source = (Array.isArray(authoredTrack) && authoredTrack.length ? authoredTrack : null)
+        || (Array.isArray(parameterTrack) && parameterTrack.length ? parameterTrack : null)
+        || (Array.isArray(authoredTrack) ? authoredTrack : parameterTrack);
     let value = base;
     if (Array.isArray(source) && source.length) {
         const track = source.map(frame => ({

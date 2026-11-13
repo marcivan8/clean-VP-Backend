@@ -1176,8 +1176,9 @@ const useTimelineStore = create(
             updateClip: (trackId, clipId, updates, options = { skipHistory: false }) => {
                 if (!options.skipHistory) get()._saveHistory();
 
-                // clipId in legacy API is actually a placement ID
-                const placement = timelineManager.getState().entities.placements[clipId];
+                // clipId in legacy API is usually a placement ID; also support entity clipId
+                const placement = timelineManager.getState().entities.placements[clipId]
+                    || Object.values(timelineManager.getState().entities.placements).find(p => p.clipId === clipId);
                 if (!placement) {
                     console.warn(`[useTimelineStore] updateClip: placement ${clipId} not found`);
                     return;
@@ -1270,6 +1271,13 @@ const useTimelineStore = create(
                 // persistence-contract rule: `null` is legitimate (removing
                 // a blur zone), so `!== undefined` not a truthiness check.
                 if (updates.blurZone !== undefined) clipUpdates.blurZone = updates.blurZone;
+                // After Effects engine capabilities
+                if (updates.expressions !== undefined) clipUpdates.expressions = updates.expressions;
+                if (updates.trackMatte !== undefined) clipUpdates.trackMatte = updates.trackMatte;
+                if (updates.parentId !== undefined) clipUpdates.parentId = updates.parentId;
+                if (updates.trim !== undefined) clipUpdates.trim = updates.trim;
+                if (updates.blendMode !== undefined) clipUpdates.blendMode = updates.blendMode;
+                if (updates.accentColor !== undefined) clipUpdates.accentColor = updates.accentColor;
 
                 if (Object.keys(clipUpdates).length > 0 && placement.clipId) {
                     timelineManager.dispatch(

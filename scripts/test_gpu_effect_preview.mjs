@@ -7,7 +7,7 @@ import { EffectPipeline } from '../client/src/effects/EffectPipeline.js';
 import { EffectGraph } from '../client/src/effects/EffectGraph.js';
 import { initEffectsEngine } from '../client/src/effects/index.js';
 import { handleWebGLContextLost, handleWebGLContextRestored } from '../client/src/engine/webglContextLifecycle.js';
-import { createGpuClipEffectConfigs, isGpuClipEffect } from '../client/src/effects/ClipEffectAdapter.js';
+import { createGpuClipEffectConfigs, createGpuClipEffectGraph, isGpuClipEffect } from '../client/src/effects/ClipEffectAdapter.js';
 import { resolveTimelineEffectFilter, resolveTimelineSvgEffectInstances, resolveTimelineSvgEffectParams, resolveTimelineVignetteStyle } from '../client/src/motion/TimelineVisualEffects.js';
 import exportProcessor from '../jobs/exportProcessor.js';
 import { cssFilterToColorMatrix, scaleCssFilterIntensity } from '../client/src/effects/lutPreview.js';
@@ -160,8 +160,10 @@ assert.match(renderSource, /sourceClipId:\s*this\.effectSourceClipId/,
   'the decoded source clip identity reaches the effect renderer');
 assert.match(source, /setEffectSourceClipId\(clipId\)/,
   'PlaybackEngine exposes source-clip routing to the player');
-assert.match(source, /setClipEffects\(clipId, effects = \[\], placement = \{\}\)/,
-  'PlaybackEngine adapts direct clip effects into the shared GPU effect graph');
+assert.match(source, /setClipEffects\(clipId, effects = \[\], placement = \{\}, effectGraph = null\)/,
+  'PlaybackEngine accepts an authored footage DAG instead of flattening it into a stack');
+assert.match(source, /createGpuClipEffectGraph\(clipId, effectGraph, effects, placement\)/,
+  'PlaybackEngine adapts authored graph nodes for the shared GPU effect graph');
 assert.match(source, /previewPlacements\.push\(this\.clipEffectPlacement\)/,
   'direct clip effects render even when no legacy timeline placement has been hydrated');
 assert.match(source, /addEventListener\?\.\('webglcontextlost',\s*this\._handleWebGLContextLost/,
@@ -265,8 +267,10 @@ assert.equal(contextLossLoopStops, 1, 'a late context-loss event after destroy i
 const playerSource = fs.readFileSync(new URL('../client/src/components/Player/VideoPlayer.jsx', import.meta.url), 'utf8');
 assert.match(playerSource, /setEffectSourceClipId\?\.\(activeClip\?\.id\)/,
   'VideoPlayer tells the effect renderer which clip its decoded frame represents');
-assert.match(playerSource, /setClipEffects\?\.\(activeClip\?\.id, activeClip\?\.effects \|\| \[\]/,
-  'VideoPlayer routes direct footage effects to the decoded clip shader graph');
+assert.match(playerSource, /const engineEffects = activeClip\?\.effectGraph[\s\S]*?setClipEffects\?\.\(activeClip\?\.id, engineEffects,[\s\S]*?activeClip\?\.effectGraph \|\| null\)/,
+  'VideoPlayer routes the untouched footage DAG to the decoded clip shader graph');
+assert.match(playerSource, /resolveTimelineEffectGraphPreview\(activeClip\?\.effectGraph\)/,
+  'VideoPlayer does not flatten a persisted effect DAG before previewing it');
 
 const calls = [];
 const previewCapabilities = Object.create(GPUEffectEngine.prototype);
@@ -361,7 +365,10 @@ for (const [mode, expectedId] of gpuCompositeModes) {
   assert.equal(resolveGpuCompositeModeId(mode), expectedId, `GPU composition resolves ${mode} to its canonical shader branch`);
 }
 assert.equal(resolveGpuCompositeModeId(undefined), 0, 'an omitted blend mode defaults to canonical source-over');
-for (const unsupportedMode of ['normal', 'add', 'plus-lighter', 'unrecognized-mode']) assert.equal(resolveGpuCompositeModeId(unsupportedMode), null,
+assert.equal(resolveGpuCompositeModeId('normal'), 0, 'legacy normal blend aliases canonical source-over');
+assert.equal(resolveGpuCompositeModeId('add'), 3, 'legacy add blend aliases canonical addition');
+assert.equal(resolveGpuCompositeModeId('plus-lighter'), 3, 'CSS plus-lighter blend aliases canonical addition');
+for (const unsupportedMode of ['unrecognized-mode']) assert.equal(resolveGpuCompositeModeId(unsupportedMode), null,
   'unsupported GPU composite modes are detectable instead of being mistaken for a supported mode');
 for (const modeId of Array.from({ length: 17 }, (_, index) => index)) {
   assert.match(radialShader, new RegExp(`u_mode == ${modeId}\\b`), `GPU composite shader implements blend mode ${modeId}`);
@@ -547,7 +554,7 @@ for (const [mode, expectedId] of gpuCompositeModes) {
 assert.deepEqual(compositeModeUniforms, gpuCompositeModes.map(([, expectedId]) => expectedId),
   'the preview compositor sends every supported blend mode to its matching GPU shader branch');
 const drawsBeforeUnsupportedMode = drawRecords.length;
-assert.equal(gpu.processComposite({ getParamsAt: () => ({ mode: 'plus-lighter', opacity: 1 }) }, textureA, textureB, 0), textureA,
+assert.equal(gpu.processComposite({ getParamsAt: () => ({ mode: 'unrecognized-mode', opacity: 1 }) }, textureA, textureB, 0), textureA,
   'an unsupported blend mode preserves the base frame rather than silently rendering source-over');
 assert.equal(drawRecords.length, drawsBeforeUnsupportedMode,
   'an unsupported blend mode does not execute a misleading composite pass');
@@ -564,7 +571,8 @@ const branchGraph = new EffectGraph();
 branchGraph.addNode({ id: 'graph-source', type: 'glow', engine: 'gpu' });
 branchGraph.addNode({ id: 'graph-base', type: 'color_grade', engine: 'gpu' });
 branchGraph.addNode({ id: 'graph-overlay', type: 'vignette', engine: 'gpu' });
-branchGraph.addNode({ id: 'graph-merge', type: 'composite', engine: 'gpu' });
+const graphMerge = branchGraph.addNode({ id: 'graph-merge', type: 'composite', engine: 'gpu', params: { mode: 'plus-lighter' } });
+assert.equal(graphMerge.getParam('mode'), 'addition', 'plus-lighter composite mode is canonicalized before GPU graph planning');
 branchGraph.connect('graph-source', 'graph-base')
   .connect('graph-source', 'graph-overlay')
   .connect('graph-base', 'graph-merge', 'base')
@@ -747,6 +755,40 @@ assert.deepEqual(createGpuClipEffectConfigs('fade-test', [
   { kind: 'fade_in' }, { kind: 'fade_out' }, { kind: 'vignette' },
 ]).map(effect => effect.type), ['vignette'],
   'dedicated color/alpha fade overlays do not also enter the base clip GPU effect chain');
+const previewDag = createGpuClipEffectGraph('dag-clip', {
+  nodes: [
+    { id: 'root', type: 'glow', params: { intensity: 0.4 } },
+    { id: 'left', type: 'blur', params: { radius: 5 } },
+    { id: 'right', type: 'rgb_split', params: { amount: 0.2 } },
+    { id: 'merge', type: 'composite', params: { mode: 'screen', opacity: 0.8 } },
+  ],
+  connections: [
+    { from: 'root', to: 'left' }, { from: 'root', to: 'right' },
+    { from: 'left', to: 'merge', port: 'base' }, { from: 'right', to: 'merge', port: 'overlay' },
+  ],
+}, [{ id: 'finish', kind: 'vignette', params: { intensity: 0.3 } }], { startTime: 3, duration: 5 });
+const authoredId = name => `clip-preview:dag-clip:graph:${name}`;
+assert.deepEqual(previewDag.connections.slice(0, 4), [
+  { from: authoredId('root'), to: authoredId('left') }, { from: authoredId('root'), to: authoredId('right') },
+  { from: authoredId('left'), to: authoredId('merge'), port: 'base' }, { from: authoredId('right'), to: authoredId('merge'), port: 'overlay' },
+], 'the playback adapter preserves authored fork/join connections under clip-safe IDs');
+assert.equal(previewDag.nodes.find(node => node.metadata?.authoredGraphNodeId === 'left').type, 'blur_gaussian',
+  'authored footage nodes are translated to their actual GPU shader type');
+assert.ok(previewDag.nodes.find(node => node.metadata?.authoredGraphNodeId === 'merge' && node.type === 'composite'),
+  'a graph composite remains an explicit GPU join rather than a fake linear filter');
+const appendedFinish = previewDag.nodes.find(node => node.id.startsWith('clip-preview:dag-clip:direct:'));
+assert.ok(appendedFinish, 'direct clip effects append after the graph output');
+assert.ok(previewDag.connections.some(edge => edge.from === authoredId('merge') && edge.to === appendedFinish.id),
+  'direct clip effects follow the graph sink without changing graph topology');
+const previewGraphReplacementPipeline = new EffectPipeline();
+previewGraphReplacementPipeline.replaceTargetGraph('dag-clip', previewDag);
+assert.equal(previewGraphReplacementPipeline.getGraphForTarget('dag-clip').getExecutionPlan().joins.length, 1,
+  'pipeline graph replacement retains the authored composite join');
+assert.equal(previewGraphReplacementPipeline.getEffect(authoredId('merge')).targetId, 'dag-clip',
+  'replaced graph nodes are registered in the canonical effect index');
+previewGraphReplacementPipeline.replaceTargetGraph('dag-clip', null);
+assert.equal(previewGraphReplacementPipeline.getGraphForTarget('dag-clip'), undefined,
+  'clearing an active DAG removes stale nodes before a clip stack is rebuilt');
 assert.equal(isGpuClipEffect('shake'), false,
   'camera shake stays on the timeline transform path instead of being double-applied as a pixel shader');
 const previewableEffects = Object.keys(EFFECT_DEFINITIONS).filter(type => type !== 'shake' && isGpuClipEffect(type));
@@ -883,6 +925,15 @@ assert.equal(invalidGraphPipeline.processPreview(unprocessedPreviewTexture, 'bra
 assert.equal(invalidGraphWarnings.length, 1, 'invalid graph warnings are deduplicated per target and cause');
 assert.equal(invalidGraphWarnings[0].type, 'effect_graph_preview_unavailable');
 assert.match(invalidGraphWarnings[0].message, /one input and one output/);
+const standaloneCompositeWarnings = [];
+const standaloneCompositePipeline = new EffectPipeline({ onPreviewWarning: warning => standaloneCompositeWarnings.push(warning) });
+const standaloneCompositeGraph = new EffectGraph();
+standaloneCompositeGraph.addNode({ id: 'standalone-merge', type: 'composite', engine: 'gpu' });
+standaloneCompositePipeline.effectsByTarget.set('standalone-composite-target', standaloneCompositeGraph);
+assert.equal(standaloneCompositePipeline.processPreview(unprocessedPreviewTexture, 'standalone-composite-target', 0),
+  unprocessedPreviewTexture, 'a composite without graph inputs is rejected instead of entering the linear effect chain');
+assert.equal(standaloneCompositeWarnings.length, 1, 'missing composite inputs are surfaced as a recoverable graph warning');
+assert.match(standaloneCompositeWarnings[0].message, /requires base and overlay inputs/);
 const compositeGraphWarnings = [];
 let processedGraphPlan = null;
 const compositeGraphPipeline = new EffectPipeline({
@@ -898,6 +949,36 @@ assert.equal(compositeGraphPreview.id, 'composite-graph-preview',
   'a valid branched graph is sent to the DAG renderer instead of being skipped');
 assert.equal(processedGraphPlan.joins[0].type, 'composite', 'the graph plan preserves its explicit merge operation');
 assert.equal(compositeGraphWarnings.length, 0, 'supported branch preview does not emit an invalid-graph warning');
+
+const unsupportedCompositeWarnings = [];
+let unsupportedCompositeWasRendered = false;
+const unsupportedCompositePipeline = new EffectPipeline({
+  gpuEngine: {
+    supportsPreviewEffect: () => true,
+    processGraph: () => { unsupportedCompositeWasRendered = true; return { id: 'incorrect-composite-preview' }; },
+  },
+  onPreviewWarning: warning => unsupportedCompositeWarnings.push(warning),
+});
+const unsupportedCompositeGraph = new EffectGraph();
+unsupportedCompositeGraph.addNode({ id: 'unsupported-root', type: 'glow', engine: 'gpu' });
+unsupportedCompositeGraph.addNode({ id: 'unsupported-base', type: 'color_grade', engine: 'gpu' });
+unsupportedCompositeGraph.addNode({ id: 'unsupported-overlay', type: 'vignette', engine: 'gpu' });
+const unsupportedJoin = unsupportedCompositeGraph.addNode({ id: 'unsupported-merge', type: 'composite', engine: 'gpu' });
+unsupportedJoin.setParam('mode', 'unrecognized-mode');
+unsupportedCompositeGraph.connect('unsupported-root', 'unsupported-base')
+  .connect('unsupported-root', 'unsupported-overlay')
+  .connect('unsupported-base', 'unsupported-merge', 'base')
+  .connect('unsupported-overlay', 'unsupported-merge', 'overlay');
+unsupportedCompositePipeline.effectsByTarget.set('unsupported-composite-target', unsupportedCompositeGraph);
+assert.equal(unsupportedCompositePipeline.processPreview(unprocessedPreviewTexture, 'unsupported-composite-target', 0.5),
+  unprocessedPreviewTexture, 'an unsupported blend mode fails closed to the unprocessed source frame');
+assert.equal(unsupportedCompositeWasRendered, false, 'invalid composite modes never enter the graph renderer');
+assert.equal(unsupportedCompositeWarnings.length, 1, 'unsupported composite modes are surfaced to the preview warning channel');
+assert.match(unsupportedCompositeWarnings[0].message, /unrecognized-mode/);
+assert.equal(unsupportedCompositePipeline.processPreview(unprocessedPreviewTexture, 'unsupported-composite-target', 1),
+  unprocessedPreviewTexture, 'playback stays safe on later frames with an unsupported composite mode');
+assert.equal(unsupportedCompositeWarnings.length, 1, 'unsupported composite mode warnings are deduplicated during playback');
+
 missingRendererPipeline.getActiveEffects = () => [];
 assert.equal(missingRendererPipeline.processPreview(unprocessedPreviewTexture, 'no-effects-target', 2), unprocessedPreviewTexture);
 assert.equal(missingRendererWarnings.length, 1, 'no warning is emitted when the target has no active GPU effects');

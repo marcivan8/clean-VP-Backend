@@ -11,11 +11,15 @@ import {
     TimelineActions,
     ACTION_TYPES
 } from '../timeline/TimelineStateManager.js';
-import {
-    presetLibrary,
-    effectRegistry,
-    EFFECT_CATEGORIES
-} from '../effects';
+// R166 — imported from the modules directly, NOT from '../effects'.
+// That barrel also pulls EffectPipeline, EffectRenderer and the GPU/CPU/AI
+// engines (the client WebGL runtime, which R165 found is reachable from
+// nothing and is deliberately staying that way). This hook only needs the
+// registry and the preset library, neither of which touches a canvas, so
+// importing them by name keeps ~4,500 lines of unreachable renderer out of
+// the editor bundle while the effects UI goes live.
+import { effectRegistry, EFFECT_CATEGORIES } from '../effects/EffectRegistry.js';
+import { presetLibrary } from '../effects/presets/PresetLibrary.js';
 import { TIMELINE_EVENTS } from '../timeline/TimelineEvents.js';
 
 // ============================================================================
@@ -270,7 +274,12 @@ export function usePresets() {
  */
 export function useEffectRegistry() {
     const allEffects = useMemo(() => effectRegistry.getAll(), []);
-    const categories = useMemo(() => effectRegistry.getCategories(), []);
+    // R166 — getCategorized(), not getCategories(). The latter has never
+    // existed on EffectRegistry, so this threw a TypeError the moment anything
+    // rendered useEffectRegistry(). Nothing ever did: EffectsPanel was its only
+    // consumer and was itself unreachable (R165), which is how a crash sat in
+    // the tree untouched.
+    const categories = useMemo(() => effectRegistry.getCategorized(), []);
 
     const getByCategory = useCallback((category) => {
         return effectRegistry.getByCategory(category);

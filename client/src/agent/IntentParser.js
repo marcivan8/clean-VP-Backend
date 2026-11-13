@@ -681,7 +681,11 @@ export class IntentParser {
         // registry pass can match it, then localParse can misroute it as
         // build_from_rushes.
         const wholeCommand = resolveCommand(prompt).match;
-        if (['create_video_from_assets', 'create_video_from_script'].includes(wholeCommand?.id)) return null;
+        // These are complete operations that intentionally accept compound
+        // details. Splitting a footage effect stack at "and" turns one stack
+        // into separate clauses (and "film grain" alone is not a full intent),
+        // which previously deferred the command to the legacy filter parser.
+        if (['create_video_from_assets', 'create_video_from_script', 'apply_motion_effect_stack', 'apply_aesthetic_preset', 'apply_motion_expression', 'set_track_matte', 'set_vector_trim', 'set_layer_parent'].includes(wholeCommand?.id)) return null;
         if ((lowerPrompt.includes('clean') || lowerPrompt.includes('remove silence'))
             && (lowerPrompt.includes('dynamic') || lowerPrompt.includes('zoom rhythm'))
             && !/\b(multicam|multi-cam|multi camera|multi-camera)\b/.test(lowerPrompt)) {

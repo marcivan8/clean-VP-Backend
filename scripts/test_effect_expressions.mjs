@@ -32,6 +32,8 @@ const legacyKeyframedEffect = {
 };
 assert.equal(resolveEffectAtTime(legacyKeyframedEffect, 5).params.amount.value, 5,
     'an empty effect-level track does not mask the populated parameter-level compatibility track');
+assert.equal(resolveRevideoEffectParameter(legacyKeyframedEffect, 'amount', 0, 0, 5, 10), 5,
+    'the render worker uses the same parameter-level keyframe fallback as browser preview');
 assert.equal(resolveRevideoEffectParameter({ params: { amount: false } }, 'amount', 0.75), 0.75,
     'render-worker effect controls do not coerce boolean base values into zero or one');
 assert.equal(resolveRevideoEffectParameter({ params: { amount: ' ' } }, 'amount', 0.75), 0.75,
@@ -122,6 +124,32 @@ for (const [expression, expected] of [
     assert.equal(evaluateWorkerMotionExpression(expression, variables), clientValue,
         `${expression} matches in browser preview and Revideo export`);
     assert.equal(validateMotionExpression(expression).valid, true, `${expression} is accepted by authoring validation`);
+}
+for (const [expression, expected] of [
+    ['pow(3, 2)', 9],
+    ['hypot(3, 4)', 5],
+    ['hypot(3)', 3],
+    ['min(7, 2, 9, 4)', 2],
+    ['max(-3, 0, 8, 5)', 8],
+    ['atan2(1, 1)', Math.PI / 4],
+    ['degreesToRadians(180)', Math.PI],
+    ['radiansToDegrees(pi)', 180],
+    ['mod(-1, 5)', 4],
+    ['fract(-1.25)', 0.75],
+    ['sign(-3)', -1],
+    ['exp(0)', 1],
+    ['log(e)', 1],
+]) {
+    const variables = { t: 0.5, time: 0.5, duration: 1, progress: 0.5, value: 0.5 };
+    const clientValue = evaluateMotionExpression(expression, variables);
+    assert.ok(Math.abs(clientValue - expected) < 1e-10, `${expression} evaluates to its expected value`);
+    assert.equal(evaluateWorkerMotionExpression(expression, variables), clientValue,
+        `${expression} matches in browser preview and Revideo export`);
+    assert.equal(validateMotionExpression(expression).valid, true, `${expression} is accepted by authoring validation`);
+}
+for (const expression of ['pow(2)', 'atan2(1)', 'hypot(1, 2, 3, 4)', 'degreesToRadians(1, 2)', 'min()', 'max()']) {
+    assert.equal(evaluateMotionExpression(expression), null, `client rejects invalid function arity: ${expression}`);
+    assert.equal(evaluateWorkerMotionExpression(expression), null, `worker rejects invalid function arity: ${expression}`);
 }
 assert.equal(evaluateMotionExpression('ease(0.5, 0, 1)', { t: 0.5 }), null,
     'keyframe remappers reject incomplete argument lists');
@@ -257,5 +285,34 @@ const filters = exportProcessor.compileTimelineVisualEffects([sampledEffect], { 
 assert.ok(filters.some(filter => filter.includes('eq=brightness=')));
 assert.ok(filters.some(filter => filter.includes('0.500000')));
 assert.ok(filters.some(filter => filter.includes('1.500000')));
+
+// Advanced AE expression tests
+const kfSample = [{ time: 0, value: 10 }, { time: 2, value: 50 }];
+for (const evalFn of [evaluateMotionExpression, evaluateWorkerMotionExpression]) {
+    // 1. loopOut modes
+    assert.equal(evalFn('loopOut("cycle")', { t: 1, keyframes: kfSample, value: 30 }), 30);
+    assert.equal(evalFn('loopOut("cycle")', { t: 3, keyframes: kfSample, value: 30 }), 30);
+    assert.equal(evalFn('loopOut("pingpong")', { t: 3, keyframes: kfSample, value: 30 }), 30);
+    assert.equal(evalFn('loopOut("offset")', { t: 3, keyframes: kfSample, value: 30 }), 70);
+    assert.equal(evalFn('loopOut("continue")', { t: 3, keyframes: kfSample, value: 30 }), 70);
+
+    // 2. audioAmp bands
+    const audioCtx = { audio: { bass: 0.9, mid: 0.5, treble: 0.2, all: 0.6 }, value: 10 };
+    assert.equal(evalFn('value + audioAmp("bass") * 20', audioCtx), 28);
+    assert.equal(evalFn('audioAmp("treble")', audioCtx), 0.2);
+
+    // 3. Ternary & logical comparisons
+    assert.equal(evalFn('progress >= 0.5 ? 100 : 0', { progress: 0.75 }), 100);
+    assert.equal(evalFn('progress >= 0.5 ? 100 : 0', { progress: 0.25 }), 0);
+    assert.equal(evalFn('(progress > 0.2 && progress < 0.8) ? 1 : 0', { progress: 0.5 }), 1);
+    assert.equal(evalFn('(progress > 0.2 && progress < 0.8) ? 1 : 0', { progress: 0.9 }), 0);
+    assert.equal(evalFn('!progress ? 10 : 20', { progress: 0 }), 10);
+}
+
+for (const valFn of [validateMotionExpression, validateWorkerMotionExpression]) {
+    assert.equal(valFn('loopOut("pingpong")').valid, true);
+    assert.equal(valFn('value + audioAmp("bass") * 10').valid, true);
+    assert.equal(valFn('progress > 0.5 ? 100 : 0').valid, true);
+}
 
 console.log('Effect expression checks passed');

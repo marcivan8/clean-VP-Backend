@@ -1,5 +1,20 @@
 import assert from 'node:assert/strict';
 import { EffectPipeline } from '../client/src/effects/EffectPipeline.js';
+import { EffectGraph } from '../client/src/effects/EffectGraph.js';
+import { resolveGpuCompositeModeId } from '../client/src/effects/engines/GPUEffects.js';
+
+const authoredGraph = new EffectGraph();
+const defaultComposite = authoredGraph.addNode({ id: 'default-composite', type: 'composite' });
+assert.equal(defaultComposite.getParam('mode'), 'source-over', 'new composites default to the preview/export-compatible normal blend');
+assert.equal(defaultComposite.params.mode.options.length, 17, 'the authoring menu exposes the complete canonical blend mode set');
+assert.ok(defaultComposite.params.mode.options.every(mode => resolveGpuCompositeModeId(mode) != null),
+    'every selectable composite mode is implemented by the live GPU preview');
+assert.equal(authoredGraph.addNode({ id: 'legacy-normal', type: 'composite', params: { mode: 'normal' } }).getParam('mode'), 'source-over',
+    'legacy normal blend settings migrate to source-over');
+assert.equal(authoredGraph.addNode({ id: 'legacy-add', type: 'composite', params: { mode: 'add' } }).getParam('mode'), 'addition',
+    'legacy additive blend settings migrate to addition');
+assert.equal(authoredGraph.addNode({ id: 'css-add', type: 'composite', params: { mode: 'plus-lighter' } }).getParam('mode'), 'addition',
+    'CSS plus-lighter settings migrate to the engine additive blend mode');
 
 const targetId = 'branch-target';
 const pipeline = new EffectPipeline();

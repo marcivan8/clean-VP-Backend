@@ -1,6 +1,7 @@
 import { sampleKeyframeTrack } from './MotionResolver.js';
 import { clamp } from './Easing.js';
 import { MAX_MOTION_BLUR_SAMPLES } from './MotionLimits.js';
+import { evaluateMotionExpression } from './MotionExpression.js';
 
 const number = (value, fallback = 0) => value !== null && value !== undefined
     && typeof value !== 'boolean' && !(typeof value === 'string' && value.trim() === '')
@@ -43,13 +44,28 @@ export function remapSceneObjectTime(remap = {}, time = 0, duration = 1) {
     const defaultOffset = speed < 0 ? (remap.mode === 'loop' ? reverseLoopStart : span) : 0;
     // An authored curve maps composition-local time directly to source seconds
     // and takes precedence over the simpler speed and offset controls.
+    const expression = typeof remap.expression === 'string' ? remap.expression.trim() : '';
     const keyframes = Array.isArray(remap.keyframes) ? remap.keyframes : [];
     const hasTimeCurve = keyframes.some(point => validCurveNumber(point?.time)
         && validCurveNumber(point?.value));
-    let localTime = hasTimeCurve
-        ? sampleKeyframeTrack(keyframes, number(time), number(keyframes.find(point => validCurveNumber(point?.time)
+    const localTimeInput = number(time);
+    const curveValue = hasTimeCurve
+        ? sampleKeyframeTrack(keyframes, localTimeInput, number(keyframes.find(point => validCurveNumber(point?.time)
             && validCurveNumber(point?.value))?.value))
-        : number(time) * speed + number(remap.offset, defaultOffset);
+        : localTimeInput * speed + number(remap.offset, defaultOffset);
+    // A safe procedural expression maps composition-local time directly to
+    // source seconds. Like transform expressions, it takes precedence over
+    // keyframes, then uses the same loop/ping-pong/clamp handling below.
+    const expressionValue = expression
+        ? evaluateMotionExpression(expression, {
+            t: localTimeInput,
+            time: localTimeInput,
+            duration: Math.max(0, number(duration)),
+            progress: number(duration) > 0 ? clamp(localTimeInput / number(duration), 0, 1) : 0,
+            value: curveValue,
+        })
+        : null;
+    let localTime = expressionValue ?? curveValue;
     if (span > 0 && remap.mode === 'loop') localTime = ((localTime % span) + span) % span;
     else if (span > 0 && remap.mode === 'ping-pong') {
         const cycle = ((localTime % (span * 2)) + span * 2) % (span * 2);
@@ -81,8 +97,9 @@ export function resolveOverlayVideoSourceTime(clip = {}, timelineTime = 0) {
     const sourceOffset = Math.max(0, number(clip.offset, 0));
     const legacySpeed = Number(clip.speed) > 0 ? Number(clip.speed) : 1;
     const remap = clip.timeRemap && typeof clip.timeRemap === 'object' ? clip.timeRemap : null;
-    const hasCurve = Array.isArray(remap?.keyframes) && remap.keyframes.some(point =>
-        validCurveNumber(point?.time) && validCurveNumber(point?.value));
+    const hasCurve = (typeof remap?.expression === 'string' && !!remap.expression.trim())
+        || (Array.isArray(remap?.keyframes) && remap.keyframes.some(point =>
+            validCurveNumber(point?.time) && validCurveNumber(point?.value)));
     if (!hasCurve) return sourceOffset + elapsed * legacySpeed;
 
     const duration = Math.max(0, number(clip.duration, 0));
@@ -96,8 +113,9 @@ export function resolveOverlayVideoSourceTime(clip = {}, timelineTime = 0) {
 /** Approximate the local playback rate for a keyframed overlay source clock. */
 export function resolveOverlayVideoPlaybackRate(clip = {}, timelineTime = 0) {
     const remap = clip.timeRemap && typeof clip.timeRemap === 'object' ? clip.timeRemap : null;
-    const hasCurve = Array.isArray(remap?.keyframes) && remap.keyframes.some(point =>
-        validCurveNumber(point?.time) && validCurveNumber(point?.value));
+    const hasCurve = (typeof remap?.expression === 'string' && !!remap.expression.trim())
+        || (Array.isArray(remap?.keyframes) && remap.keyframes.some(point =>
+            validCurveNumber(point?.time) && validCurveNumber(point?.value)));
     if (!hasCurve) return Number(clip.speed) > 0 ? Number(clip.speed) : 1;
     const start = number(clip.start ?? clip.startTime, 0);
     const elapsed = Math.max(0, number(timelineTime) - start);

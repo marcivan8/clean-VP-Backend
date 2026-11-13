@@ -120,7 +120,8 @@
       "interview": "interview",
       "motion": "animation",
       "shorts": "shorts",
-      "iterations": "itérations"
+      "iterations": "itérations",
+      "effects": "effets"
     },
     "colorGrading": {
       "title": "Étalonnage",
@@ -378,7 +379,11 @@
     "easingExpoOut": "Expo sortie",
     "easingBackOut": "Dépassement",
     "parameters": "Paramètres",
-    "reset": "Réinitialiser"
+    "reset": "Réinitialiser",
+    "animatedParams": "{{count}} animés",
+    "effectsCount": "{{count}} effets",
+    "keyframeCount": "{{count}} images clés",
+    "reorderEffect": "Réordonner {{name}}"
   },
   "player": {
     "pacingAlert": "Alerte de rythme",
@@ -1269,6 +1274,16 @@
       "turbulenceFrequency": "Fréquence de turbulence",
       "particleFadeIn": "Apparition (secondes)",
       "particleFadeOut": "Disparition (secondes)",
+      "particleSizeOverLife": "Taille et opacité au fil du temps",
+      "particleSizeAtBirth": "Taille à la naissance",
+      "particleSizeAtEnd": "Taille à la fin",
+      "particleOpacityAtBirth": "Opacité à la naissance",
+      "particleOpacityAtEnd": "Opacité à la fin",
+      "particleSizeEasing": "Lissage de la taille",
+      "particleOpacityEasing": "Lissage de l’opacité",
+      "particleColorAtBirth": "Couleur à la naissance",
+      "particleColorAtEnd": "Couleur en fin de vie",
+      "particleColorEasing": "Lissage de la couleur",
       "loopParticles": "Répéter les cycles de particules",
       "particleVelocity": "Vitesse par seconde",
       "particleGravity": "Accélération par seconde au carré",
@@ -1286,9 +1301,14 @@
       "keyframedRotation": "Animer la rotation avec des images clés",
       "timeRemapping": "Remappage temporel",
       "timeRemapCurve": "Courbe du temps source",
+      "timeRemapExpression": "Expression du temps source",
+      "timeRemapExpressionPlaceholder": "t * 1.5",
+      "timeRemapExpressionHelp": "Renvoyez le temps source en secondes avec t, time, duration, progress (0–1) et value. L’expression remplace les images clés.",
+      "timeRemapExpressionInvalid": "Cette expression est invalide. L’aperçu et l’export reviennent aux images clés, ou à la vitesse et au décalage.",
+      "clearExpression": "Effacer l’expression",
       "sourceTime": "Temps source (secondes)",
       "sourceSpan": "Durée source (secondes)",
-      "curveOverridesSpeedOffset": "La courbe contrôle le temps source tant que ses images clés existent.",
+      "curveOverridesSpeedOffset": "Les courbes et expressions contrôlent le temps source. Les expressions sont prioritaires.",
       "clearCurve": "Effacer la courbe",
       "timeSpeed": "Vitesse",
       "timeOffset": "Décalage (s)",
@@ -1320,7 +1340,7 @@
       },
       "audioAmount": "Intensité",
       "proceduralMotion": "Expression de mouvement procédural",
-      "expressionHelp": "Utilisez t, time, duration ou progress (0–1), pi ou e, les opérations arithmétiques, sin, cos, tan, abs, ceil, floor, round, min, max, sqrt, clamp, smoothstep, noise ou wiggle."
+      "expressionHelp": "Utilisez t, time, duration, progress (0–1), value, pi ou e, les opérations arithmétiques, trigonométrie, pow, hypot, conversion d’angle, mod, fract, clamp, smoothstep, noise ou wiggle."
     }
   },
   "vector": {
@@ -1563,7 +1583,30 @@
     "phase_enter": "Entrée",
     "phase_hold": "Maintien",
     "phase_exit": "Sortie",
-    "reviewPhaseAlt": "Phase {{phase}} du temps {{beat}}"
+    "reviewPhaseAlt": "Phase {{phase}} du temps {{beat}}",
+    "parent": "Calque parent",
+    "parentNone": "Aucun",
+    "constraints": "Contraintes",
+    "trackTarget": "Cible de suivi",
+    "lookAtTarget": "Cible visée",
+    "targetNone": "Aucune",
+    "trackMatte": "Masque de suivi (Track Matte)",
+    "matteMode": "Mode de masque",
+    "matteSource": "Source du masque",
+    "matteNone": "Aucun",
+    "matteAlpha": "Alpha",
+    "matteAlphaInverted": "Alpha inversé",
+    "matteLuma": "Luminance",
+    "matteLumaInverted": "Luminance inversée",
+    "trimPaths": "Tracés vectoriels (Trim)",
+    "trimStart": "Début de tracé %",
+    "trimEnd": "Fin de tracé %",
+    "trimOffset": "Décalage de tracé",
+    "expressions": "Expressions de mouvement",
+    "selectProperty": "Propriété",
+    "expressionPreset": "Préréglage",
+    "expressionCode": "Code de l’expression",
+    "particleBudget": "Budget de particules (max 1500)"
   },
   "hints": {
     "dismiss": "Fermer",

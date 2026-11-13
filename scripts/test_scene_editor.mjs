@@ -678,6 +678,7 @@ await check('3D scene camera, mesh, particles, and audio-reactive settings survi
             emitter: { mode: 'burst', shape: 'ring', position: { x: 0, y: 1, z: 0 }, innerRatio: 0.7 },
             velocity: { x: 0, y: 0.5, z: 0 }, gravity: { x: 0, y: -0.2, z: 0 },
             audioReactive: { assetId: 'music-asset', target: 'size', amount: 0.3 },
+            color: '#A78BFA', colorOverLife: [{ time: 0, color: '#A78BFA', easing: 'easeInOut' }, { time: 1, color: '#22D3EE' }],
         },
     };
     const source = [{ id: 'track-3d-scene', type: 'overlay', clips: [{
@@ -963,7 +964,7 @@ await check('text-on-path can be authored and adjusted in the scene editor', () 
 
 await check('3D procedural particle emitters and lifecycle controls are editable and localized', () => {
     const panel = read('client/src/components/TemplatePanel.jsx');
-    for (const property of ['particleSimulation', 'particleShape', 'particleShapes', 'emitterShape', 'emissionMode', 'emitterPosition', 'emitterSize', 'ringInnerRadius', 'particleLifetime', 'particleTurbulence', 'turbulenceFrequency', 'particleFadeIn', 'particleFadeOut', 'loopParticles', 'particleVelocity', 'particleGravity']) {
+    for (const property of ['particleSimulation', 'particleShape', 'particleShapes', 'emitterShape', 'emissionMode', 'emitterPosition', 'emitterSize', 'ringInnerRadius', 'particleLifetime', 'particleTurbulence', 'turbulenceFrequency', 'particleFadeIn', 'particleFadeOut', 'particleSizeAtBirth', 'particleSizeAtEnd', 'particleOpacityAtBirth', 'particleOpacityAtEnd', 'particleColorAtBirth', 'particleColorAtEnd', 'particleSizeEasing', 'particleOpacityEasing', 'particleColorEasing', 'loopParticles', 'particleVelocity', 'particleGravity']) {
         assert.match(panel, new RegExp(`templates\\.scene3d\\.${property}`), `${property} editor control`);
     }
     assert.match(panel, /update3DEmitter\(\{ position:/, 'emitter position persists into scene data');
@@ -974,7 +975,7 @@ await check('3D procedural particle emitters and lifecycle controls are editable
     assert.match(panel, /particles3d\.loop !== false/, 'looping is represented as an explicit saved particle option');
     for (const lang of ['en', 'fr']) {
         const words = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).templates?.scene3d;
-        for (const key of ['particleSimulation', 'particleShape', 'particleShapes', 'emitterShape', 'emitterShapes', 'emissionMode', 'emissionModes', 'emitterPosition', 'emitterSize', 'emitterRadii', 'ringInnerRadius', 'particleLifetime', 'particleTurbulence', 'turbulenceFrequency', 'particleFadeIn', 'particleFadeOut', 'loopParticles', 'particleVelocity', 'particleGravity']) {
+        for (const key of ['particleSimulation', 'particleShape', 'particleShapes', 'emitterShape', 'emitterShapes', 'emissionMode', 'emissionModes', 'emitterPosition', 'emitterSize', 'emitterRadii', 'ringInnerRadius', 'particleLifetime', 'particleTurbulence', 'turbulenceFrequency', 'particleFadeIn', 'particleFadeOut', 'particleSizeAtBirth', 'particleSizeAtEnd', 'particleOpacityAtBirth', 'particleOpacityAtEnd', 'particleColorAtBirth', 'particleColorAtEnd', 'particleSizeEasing', 'particleOpacityEasing', 'particleColorEasing', 'loopParticles', 'particleVelocity', 'particleGravity']) {
             assert.ok(words?.[key], `${lang}.templates.scene3d.${key}`);
         }
         for (const key of ['size', 'spread', 'speed', 'opacity']) assert.ok(words?.particleAudioTargets?.[key], `${lang}.templates.scene3d.particleAudioTargets.${key}`);
@@ -1118,12 +1119,16 @@ await check('3D source time remap curves can be authored at the playhead', () =>
     assert.match(panel, /seek3DTimeRemapKeyframe/);
     assert.match(panel, /timeRemapKeyframes3D\.length/);
     assert.match(panel, /templates\.scene3d\.sourceTime/);
-    assert.match(panel, /disabled: hasTimeRemapCurve3D/);
+    assert.match(panel, /disabled: hasTimeRemapCurve3D \|\| hasTimeRemapExpression3D/);
     assert.match(panel, /templates\.scene3d\.clearCurve/);
     assert.match(panel, /templates\.scene3d\.sourceSpan/);
+    assert.match(panel, /validateMotionExpression\(timeRemapExpression3D\)/);
+    assert.match(panel, /templates\.scene3d\.timeRemapExpression/);
+    assert.match(panel, /templates\.scene3d\.clearExpression/);
     for (const lang of ['en', 'fr']) {
         const words = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).templates?.scene3d;
-        for (const key of ['timeRemapCurve', 'sourceTime', 'sourceSpan', 'curveOverridesSpeedOffset', 'clearCurve']) {
+        for (const key of ['timeRemapCurve', 'sourceTime', 'sourceSpan', 'curveOverridesSpeedOffset', 'clearCurve',
+            'timeRemapExpression', 'timeRemapExpressionPlaceholder', 'timeRemapExpressionHelp', 'timeRemapExpressionInvalid', 'clearExpression']) {
             assert.ok(words?.[key], `${lang}.templates.scene3d.${key}`);
         }
     }
@@ -1214,6 +1219,81 @@ await check('excessively nested scene trees are bounded before rendering', () =>
     assert.ok(SS.listNodes(recovered).every(entry => entry.depth <= SS.MAX_SCENE_DEPTH),
         'normalization caps depth at the renderer-supported limit');
     assert.equal(SS.validateSceneShape(recovered).valid, true, 'the bounded scene is safe to render');
+});
+
+await check('scene graph diagnostics detect cycles, mattes, trim paths, and auto-fix repairs them', () => {
+    // 1. Parent cycle & orphan
+    const nodeA = SS.createNode(NODE_TYPES.TEXT, { id: 'node-a', content: 'A', parentId: 'node-b', duration: 2 });
+    const nodeB = SS.createNode(NODE_TYPES.TEXT, { id: 'node-b', content: 'B', parentId: 'node-a', duration: 2 });
+    const orphan = SS.createNode(NODE_TYPES.TEXT, { id: 'node-c', content: 'C', parentId: 'missing-parent', duration: 2 });
+
+    // 2. Constraint invalid targets
+    const constrained = SS.createNode(NODE_TYPES.TEXT, {
+        id: 'node-d', content: 'D', duration: 2,
+        constraints: { trackTargetId: 'node-d', lookAtTargetId: 'non-existent' },
+    });
+
+    // 3. Track matte self-ref and missing
+    const matteSelf = SS.createNode(NODE_TYPES.TEXT, {
+        id: 'node-e', content: 'E', duration: 2,
+        trackMatte: { mode: 'alpha', sourceLayerId: 'node-e' },
+    });
+    const matteMissing = SS.createNode(NODE_TYPES.TEXT, {
+        id: 'node-f', content: 'F', duration: 2,
+        trackMatte: { mode: 'luma', sourceLayerId: 'ghost-layer' },
+    });
+
+    // 4. Inverted trim paths
+    const trimInverted = SS.createNode(NODE_TYPES.SHAPE, {
+        id: 'node-g', name: 'Vector Path', duration: 2,
+        vector: { kind: 'rect', trimStart: 80, trimEnd: 20 },
+    });
+
+    // 5. Particle over budget
+    const particleOver = SS.createNode(NODE_TYPES.SHAPE, {
+        id: 'node-h', name: 'Particles', duration: 2,
+        particles: { count: 3000 },
+    });
+
+    // 6. Expression syntax error
+    const exprErr = SS.createNode(NODE_TYPES.TEXT, {
+        id: 'node-i', content: 'I', duration: 2,
+        expressions: { x: 'loopOut("cycle", unknownVar)' },
+    });
+
+    const malformedScene = SS.createScene({
+        id: 'diag-scene',
+        nodes: [nodeA, nodeB, orphan, constrained, matteSelf, matteMissing, trimInverted, particleOver, exprErr],
+    });
+
+    const diag = SV.validateScene(malformedScene);
+    const codes = diag.issues.map(i => i.code);
+
+    assert.ok(codes.includes(SV.ISSUE_CODES.PARENT_CYCLE), 'detects parent cycle');
+    assert.ok(codes.includes(SV.ISSUE_CODES.ORPHAN_PARENT_REF), 'detects orphan parent');
+    assert.ok(codes.includes(SV.ISSUE_CODES.CONSTRAINT_INVALID_TRACK_TARGET), 'detects invalid track target');
+    assert.ok(codes.includes(SV.ISSUE_CODES.CONSTRAINT_INVALID_LOOKAT_TARGET), 'detects invalid look-at target');
+    assert.ok(codes.includes(SV.ISSUE_CODES.TRACK_MATTE_SELF_REF), 'detects self-referential track matte');
+    assert.ok(codes.includes(SV.ISSUE_CODES.TRACK_MATTE_MISSING_SOURCE), 'detects missing track matte source');
+    assert.ok(codes.includes(SV.ISSUE_CODES.VECTOR_TRIM_INVERTED), 'detects inverted vector trim paths');
+    assert.ok(codes.includes(SV.ISSUE_CODES.PARTICLE_COUNT_OVER_BUDGET), 'detects particle count over budget');
+    assert.ok(codes.includes(SV.ISSUE_CODES.EXPRESSION_SYNTAX_ERROR), 'detects expression syntax errors');
+
+    // Run autoFixScene
+    const fixed = SV.autoFixScene(malformedScene);
+    assert.ok(fixed.fixes.length >= 7, 'autoFixScene resolves auto-fixable diagnostics');
+    const fixedNodes = SV.collectAllNodes(fixed.scene);
+    const byId = new Map(fixedNodes.map(n => [n.id, n]));
+
+    assert.equal(byId.get('node-a').parentId, null, 'breaks parent cycle');
+    assert.equal(byId.get('node-c').parentId, null, 'clears orphan parent link');
+    assert.equal(byId.get('node-d').constraints.trackTargetId, null, 'clears self track constraint');
+    assert.equal(byId.get('node-d').constraints.lookAtTargetId, null, 'clears missing look-at constraint');
+    assert.equal(byId.get('node-e').trackMatte.mode, 'none', 'resets self-matte to none');
+    assert.equal(byId.get('node-f').trackMatte.mode, 'none', 'resets missing matte to none');
+    assert.equal(byId.get('node-g').vector.trimStart, 20, 'fixes inverted trimStart');
+    assert.equal(byId.get('node-g').vector.trimEnd, 80, 'fixes inverted trimEnd');
+    assert.equal(byId.get('node-h').particles.count, 1500, 'clamps particle budget to 1500');
 });
 
 log(failures ? `\n${failures} FAILURE(S)` : '\nALL SCENE EDITOR CHECKS PASSED');

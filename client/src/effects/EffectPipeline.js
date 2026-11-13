@@ -9,7 +9,7 @@
 import { EffectNode, ENGINE_TYPES } from './EffectNode.js';
 import { EffectGraph } from './EffectGraph.js';
 import { effectRegistry } from './EffectRegistry.js';
-import { GPUEffectEngine } from './engines/GPUEffects.js';
+import { GPUEffectEngine, resolveGpuCompositeModeId } from './engines/GPUEffects.js';
 import { CPUEffectEngine } from './engines/CPUEffects.js';
 import { AIEffectEngine } from './engines/AIEffects.js';
 import { resolveEffectParameter } from '../motion/EffectTiming.js';
@@ -490,6 +490,37 @@ export class EffectPipeline {
         return this.effectsByTarget.get(targetId);
     }
 
+    /**
+     * Replace the complete authored graph for one target. This is used by the
+     * playback adapter for footage effect DAGs: addEffect() is deliberately
+     * stack-oriented, so rebuilding a fork/join through it would reconnect
+     * nodes as a linear chain. Keeping this operation explicit makes graph
+     * topology, the flat node index and preview execution share one source.
+     */
+    replaceTargetGraph(targetId, serializedGraph) {
+        if (!targetId) return null;
+        const previous = this.effectsByTarget.get(targetId);
+        for (const [effectId, effect] of previous?.nodes || []) {
+            if (this.allEffects.get(effectId) === effect) this.allEffects.delete(effectId);
+        }
+        if (!serializedGraph?.nodes?.length) {
+            this.effectsByTarget.delete(targetId);
+            this._notifyChange('replace_graph', { targetId, graph: null });
+            return null;
+        }
+
+        const graph = EffectGraph.deserialize(serializedGraph);
+        for (const [effectId, effect] of graph.nodes) {
+            effect.targetId = targetId;
+            effect.targetType = 'placement';
+            this.allEffects.set(effectId, effect);
+        }
+        this.effectsByTarget.set(targetId, graph);
+        this._previewWarnings.clear();
+        this._notifyChange('replace_graph', { targetId, graph });
+        return graph;
+    }
+
     // ========================================================================
     // TIMELINE QUERIES
     // ========================================================================
@@ -645,6 +676,32 @@ export class EffectPipeline {
         if (graph?.connections.length && (topology?.branches.length || topology?.joins.length)) {
             const renderableIds = new Set(renderableEffects.map(effect => effect.id));
             if (typeof this.gpuEngine.processGraph === 'function') {
+                const unsupportedComposite = (topology.joins || []).map(node => {
+                    if (node?.type !== 'composite') return false;
+                    const params = node.getParamsAt(time, {
+                        ...context,
+                        clipStart: context.clipStart ?? context.placement?.startTime ?? context.placement?.start ?? 0,
+                        clipDuration: context.clipDuration ?? context.placement?.duration,
+                    });
+                    return { node, mode: params?.mode };
+                }).find(candidate => candidate && resolveGpuCompositeModeId(candidate.mode) == null);
+                if (unsupportedComposite) {
+                    const { node, mode } = unsupportedComposite;
+                    const key = `unsupported-composite-mode:${targetId}:${node.id}:${String(mode)}`;
+                    if (!this._previewWarnings.has(key)) {
+                        this._previewWarnings.add(key);
+                        const warning = {
+                            type: 'effect_graph_preview_unavailable',
+                            targetId,
+                            nodeId: node.id,
+                            message: `The effect graph uses unsupported blend mode “${String(mode)}”; its composite was skipped in preview.`,
+                            recoverable: true,
+                        };
+                        console.warn('[EffectPipeline]', warning.message, warning);
+                        this.onPreviewWarning?.(warning);
+                    }
+                    return texture;
+                }
                 return this.gpuEngine.processGraph(graph, texture, time,
                     { ...context, lutPreviewFilters }, effect => renderableIds.has(effect.id));
             }

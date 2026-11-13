@@ -138,6 +138,13 @@ You may also add raw "animations" when no verb fits: {"startTime": s, "anchor": 
 Animatable properties: x and y (offset in % of the frame, -120..120), scale (multiplier, 0..6), rotation (degrees), opacity (0..1), blur (px, 0..60), glow (px, 0..60), reveal (0..1, text type-on).
 Easings: linear, easeOutCubic, easeInOutSine, easeOutExpo, easeInExpo, backOut, backIn, spring, springGentle, springWobbly, springStiff, springSnappy, springSlow, "cubic-bezier(a,b,c,d)", "spring(stiffness,damping)", "steps(n)".
 
+AFTER EFFECTS MOTION ENGINE (optional per-layer capabilities):
+- expressions: e.g. {"scale": "1 + audioAmp('bass') * 0.2", "x": "wiggle(2, 8)", "rotation": "loopOut('pingpong')"}
+- trackMatte: e.g. {"mode": "alpha"|"alpha-inverted"|"luma"|"luma-inverted", "sourceLayerId": "<id>"}
+- parentId: e.g. "<parent layer id>" (child layers inherit parent transforms with cycle safety)
+- trim: e.g. {"trimStart": 0..1, "trimEnd": 0..1, "trimOffset": 0..360} for vector shapes and draw-on paths
+- blendMode: e.g. "source-over"|"multiply"|"screen"|"overlay"|"color-dodge"|"darken"|"lighten"
+
 Design rules:
 - Every layer gets ONE entrance at 0, and an exit unless it is shorter than 1 s.
 - Emphasis beats land on meaning (the key word, a number), not at random.
@@ -408,6 +415,45 @@ function cleanMotion(raw) {
     return { enter, emphasis, exit, energy, anticipate };
 }
 
+const VALID_BLEND_MODES = [
+    'source-over', 'multiply', 'screen', 'overlay', 'darken', 'lighten',
+    'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'difference',
+    'exclusion', 'hue', 'saturation', 'color', 'luminosity',
+];
+
+function cleanExpressions(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const cleaned = {};
+    const allowedProps = ['x', 'y', 'scale', 'scaleX', 'scaleY', 'rotation', 'opacity', 'blur', 'glow'];
+    for (const [k, v] of Object.entries(raw)) {
+        if (!allowedProps.includes(k)) continue;
+        if (typeof v === 'string' && v.trim().length > 0 && v.length <= 240) {
+            cleaned[k] = v.trim();
+        }
+    }
+    return Object.keys(cleaned).length > 0 ? cleaned : null;
+}
+
+function cleanTrackMatte(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const mode = ['alpha', 'alpha-inverted', 'luma', 'luma-inverted'].includes(raw.mode) ? raw.mode : null;
+    const sourceLayerId = typeof raw.sourceLayerId === 'string' ? raw.sourceLayerId.trim().slice(0, 80) : (typeof raw.targetLayerId === 'string' ? raw.targetLayerId.trim().slice(0, 80) : null);
+    if (!mode || !sourceLayerId) return null;
+    return { mode, sourceLayerId };
+}
+
+function cleanTrim(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const trimStart = Number.isFinite(Number(raw.trimStart)) ? Math.max(0, Math.min(1, Number(raw.trimStart))) : undefined;
+    const trimEnd = Number.isFinite(Number(raw.trimEnd)) ? Math.max(0, Math.min(1, Number(raw.trimEnd))) : undefined;
+    const trimOffset = Number.isFinite(Number(raw.trimOffset)) ? Math.max(0, Math.min(360, Number(raw.trimOffset))) : undefined;
+    const res = {};
+    if (trimStart !== undefined) res.trimStart = trimStart;
+    if (trimEnd !== undefined) res.trimEnd = trimEnd;
+    if (trimOffset !== undefined) res.trimOffset = trimOffset;
+    return Object.keys(res).length > 0 ? res : null;
+}
+
 function cleanBeat(raw, visualCatalog = {}) {
     if (!raw || typeof raw !== 'object') return null;
     const kind = BEAT_KINDS.includes(raw.kind) ? raw.kind : null;
@@ -439,6 +485,11 @@ function cleanBeat(raw, visualCatalog = {}) {
         ? { component: requestedVisual.component, preset: requestedVisual.preset }
         : null;
     const direction = cleanLine(raw.direction, { maxWords: 24, maxChars: 180 });
+    const expressions = cleanExpressions(raw.expressions);
+    const trackMatte = cleanTrackMatte(raw.trackMatte);
+    const parentId = typeof raw.parentId === 'string' && raw.parentId.trim() ? raw.parentId.trim().slice(0, 80) : null;
+    const trim = cleanTrim(raw.trim);
+    const blendMode = typeof raw.blendMode === 'string' && VALID_BLEND_MODES.includes(raw.blendMode.trim().toLowerCase()) ? raw.blendMode.trim().toLowerCase() : null;
 
     return {
         kind,
@@ -450,6 +501,11 @@ function cleanBeat(raw, visualCatalog = {}) {
         ...(motion ? { motion } : {}),
         ...(visual ? { visual } : {}),
         ...(direction ? { direction } : {}),
+        ...(expressions ? { expressions } : {}),
+        ...(trackMatte ? { trackMatte } : {}),
+        ...(parentId ? { parentId } : {}),
+        ...(trim ? { trim } : {}),
+        ...(blendMode ? { blendMode } : {}),
     };
 }
 
@@ -792,6 +848,7 @@ module.exports.buildShortPlanPrompt = buildShortPlanPrompt;
 module.exports.cleanShortPlan = cleanShortPlan;
 module.exports.buildScenePlanPrompt = buildScenePlanPrompt;
 module.exports.cleanScenePlan = cleanScenePlan;
+module.exports.cleanBeat = cleanBeat;
 module.exports.cleanSceneBackground = cleanSceneBackground;
 module.exports.buildMotionPrompt = buildMotionPrompt;
 module.exports.cleanLayers = cleanLayers;

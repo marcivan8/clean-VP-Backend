@@ -47,7 +47,7 @@ import ObjectLayerOverlay from './ObjectLayerOverlay'; // R67 — Object Intelli
 import TransitionLayer from './TransitionLayer.jsx';
 import { transitionTransform, transitionFilter } from './transitionStyle.js';
 import { transitionWindows, fxAtTime } from '../../motion/TransitionFX.js';
-import { combinePreviewFilters, resolveTimelineEffectFilter, resolveTimelineLutPreviewFilter, resolveTimelineEffectTransform, resolveTimelineFadeOverlays, resolveTimelineSvgEffectParams, resolveTimelineSvgEffectInstances, resolveTimelineVignetteStyle } from '../../motion/TimelineVisualEffects.js';
+import { combinePreviewFilters, resolveTimelineEffectFilter, resolveTimelineEffectGraphPreview, resolveTimelineLutPreviewFilter, resolveTimelineEffectTransform, resolveTimelineFadeOverlays, resolveTimelineSvgEffectParams, resolveTimelineSvgEffectInstances, resolveTimelineVignetteStyle } from '../../motion/TimelineVisualEffects.js';
 import { drawRadialBlur, previewCanvasSize } from '../../motion/RadialBlurPreview.js';
 import { useDeviceType } from '../../hooks/useDeviceType.js';
 import { createTimelineRetimeMap, mapSourceTimeToTimeline, mapTimelineTimeToRate, mapTimelineTimeToSource, serializeTimelineRetimeMap } from '../../timeline/retimeMap.js';
@@ -283,7 +283,22 @@ const VideoPlayer = () => {
         || videoTracks.filter(track => track.id !== videoTrack?.id)
             .flatMap(track => track.clips || []).find(isPlayableClip);
 
-    const clipLutIds = [...new Set((activeClip?.effects || [])
+    // The DOM/SVG fallback can consume only a linear graph. The WebGL playback
+    // engine receives the original DAG below, including branches/composites;
+    // never flatten a graph merely to make the CSS fallback look populated.
+    const effectGraphPreview = React.useMemo(
+        () => resolveTimelineEffectGraphPreview(activeClip?.effectGraph),
+        [activeClip?.effectGraph]
+    );
+    const previewClipEffects = React.useMemo(() => [
+        ...effectGraphPreview.effects,
+        ...(Array.isArray(activeClip?.effects) ? activeClip.effects : []),
+    ], [effectGraphPreview.effects, activeClip?.effects]);
+    const visiblePlaybackWarning = effectGraphPreview.warning
+        ? { type: 'effect_graph_preview_limited', message: effectGraphPreview.warning }
+        : playbackWarning;
+
+    const clipLutIds = [...new Set(previewClipEffects
         .filter(effect => effect && effect.enabled !== false && (effect.kind || effect.type || effect.id) === 'lut_apply')
         .map(effect => effect.params?.lutId?.value ?? effect.params?.lutId)
         .filter(Boolean).map(String))].sort();
@@ -318,14 +333,14 @@ const VideoPlayer = () => {
             duration:   activeClip.duration,
             offset:     activeClip.offset,
             speed:      activeClip.speed,
-            effects:    activeClip.effects,
+            effects:    previewClipEffects,
         };
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
         activeClip?.id, activeClip?.assetId, activeClip?.url,
         activeClip?.grading, activeClip?.volume, activeClip?.virtualCam,
         activeClip?.start, activeClip?.duration, activeClip?.offset,
-        activeClip?.speed, activeClip?.effects,
+        activeClip?.speed, previewClipEffects,
     ]);
 
     const retimeMap = React.useMemo(
@@ -552,10 +567,13 @@ const VideoPlayer = () => {
         // Sync grading, volume, and virtual-cam crop — runs for both playing and paused states.
         if (engineRef.current) {
             engineRef.current.setEffectSourceClipId?.(activeClip?.id);
-            engineRef.current.setClipEffects?.(activeClip?.id, activeClip?.effects || [], {
+            const engineEffects = activeClip?.effectGraph
+                ? (Array.isArray(activeClip?.effects) ? activeClip.effects : [])
+                : previewClipEffects;
+            engineRef.current.setClipEffects?.(activeClip?.id, engineEffects, {
                 startTime: Number(activeClip?.start) || 0,
                 duration: Number(activeClip?.duration) || 0,
-            });
+            }, activeClip?.effectGraph || null);
             // Update Grading Real-time
             if (activeClip && activeClip.grading) {
                 engineRef.current.setGrading({
@@ -941,7 +959,7 @@ const VideoPlayer = () => {
     const baseTransform = transitionTransform(tfx, transformStyle, transformOrigin);
     const timelineEffectTime = Math.max(0, currentTime - (Number(activeClip?.start) || 0));
     const shakeTransform = resolveTimelineEffectTransform(
-        activeClip?.effects,
+        previewClipEffects,
         timelineEffectTime,
         containerRef.current?.clientWidth || 1080,
         currentTime,
@@ -999,29 +1017,29 @@ const VideoPlayer = () => {
         return [previewBaseTransform, `translate(${x}%, ${y}%) scale(${scaleX}, ${scaleY})`].filter(Boolean).join(' ');
     })();
     const effectContext = { clipStart: Number(activeClip?.start ?? activeClip?.startTime) || 0, clipDuration: Number(activeClip?.duration) || 0 };
-    const effectFilter = resolveTimelineEffectFilter(activeClip?.effects, currentTime, effectContext);
-    const clipLutFilter = resolveTimelineLutPreviewFilter(activeClip?.effects, clipLutPreviewFilters, currentTime, effectContext);
+    const effectFilter = resolveTimelineEffectFilter(previewClipEffects, currentTime, effectContext);
+    const clipLutFilter = resolveTimelineLutPreviewFilter(previewClipEffects, clipLutPreviewFilters, currentTime, effectContext);
     const gpuClipEffectPreview = Boolean(!useFallbackPlayer && engineRef.current?.supportsClipEffectPreview?.());
     const gpuSupportedEffectTypes = gpuClipEffectPreview
         ? engineRef.current?.getSupportedClipEffectTypes?.() ?? []
         : null;
-    const canvasEffectFilter = resolveTimelineEffectFilter(activeClip?.effects, currentTime, {
+    const canvasEffectFilter = resolveTimelineEffectFilter(previewClipEffects, currentTime, {
         ...effectContext,
         gpuPreview: gpuClipEffectPreview,
         gpuSupportedEffectTypes,
     });
-    const canvasClipLutFilter = resolveTimelineLutPreviewFilter(activeClip?.effects, clipLutPreviewFilters, currentTime, {
+    const canvasClipLutFilter = resolveTimelineLutPreviewFilter(previewClipEffects, clipLutPreviewFilters, currentTime, {
         ...effectContext, gpuPreview: gpuClipEffectPreview, gpuSupportedEffectTypes,
     });
     const previewEffectContext = { ...effectContext, gpuPreview: gpuClipEffectPreview, gpuSupportedEffectTypes };
-    const svgEffectParams = resolveTimelineSvgEffectParams(activeClip?.effects, currentTime, previewEffectContext);
-    const svgEffectInstances = resolveTimelineSvgEffectInstances(activeClip?.effects, currentTime, previewEffectContext);
-    const vignetteStyle = resolveTimelineVignetteStyle(activeClip?.effects, currentTime, {
+    const svgEffectParams = resolveTimelineSvgEffectParams(previewClipEffects, currentTime, previewEffectContext);
+    const svgEffectInstances = resolveTimelineSvgEffectInstances(previewClipEffects, currentTime, previewEffectContext);
+    const vignetteStyle = resolveTimelineVignetteStyle(previewClipEffects, currentTime, {
         ...effectContext,
         gpuPreview: gpuClipEffectPreview,
         gpuSupportedEffectTypes,
     });
-    const fadeOverlays = resolveTimelineFadeOverlays(activeClip?.effects, currentTime, effectContext);
+    const fadeOverlays = resolveTimelineFadeOverlays(previewClipEffects, currentTime, effectContext);
     const frameWidthPx = containerRef.current?.clientWidth || 0;
     // Applying a LUT stores both its project id and an editable per-clip grade.
     // If this clip's grade came from that same LUT, the shader already renders
@@ -1257,11 +1275,11 @@ const VideoPlayer = () => {
                     <div style={{ fontSize: 11, opacity: 0.7 }}>{playbackError.message}</div>
                 </div>
             )}
-            {!proxyGenerating && playbackWarning && !playbackError && (
+            {!proxyGenerating && visiblePlaybackWarning && !playbackError && (
                 <div
                     role="status"
                     aria-live="polite"
-                    data-preview-warning={playbackWarning.type || 'preview-warning'}
+                    data-preview-warning={visiblePlaybackWarning.type || 'preview-warning'}
                     style={{
                         position: 'absolute',
                         top: 12,
@@ -1279,7 +1297,7 @@ const VideoPlayer = () => {
                         zIndex: 5,
                     }}
                 >
-                    {playbackWarning.message || t('player.previewWarning', 'Some effects may not appear in this preview.')}
+                    {visiblePlaybackWarning.message || t('player.previewWarning', 'Some effects may not appear in this preview.')}
                 </div>
             )}
         </div>

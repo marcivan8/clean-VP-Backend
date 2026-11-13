@@ -113,4 +113,13 @@ assert.equal(validation.success, true, validation.message);
 assert.ok(validation.outputs.some(output => output.action === 'apply_motion_effect_stack' && output.status === 'verified'),
     'active ROKA path verifies the stored effect stack before reporting the edit complete');
 
+const shake = await new VideoEditorTools().execute({
+    name: 'apply_motion_effect_stack',
+    args: { clipId: mainId, effects: [{ type: 'shake', params: { intensity: 12, frequency: 8, rotationAmount: 1.5, randomSeed: 12 } }] },
+});
+assert.equal(shake.success, true, shake.message);
+assert.equal(shake.details.verified, true, 'dedicated timeline transforms are verified after persistence');
+assert.ok(store.getState().tracks.find(track => track.id === videoTrackId).clips.find(clip => clip.id === mainId)
+    .effects.some(effect => effect.type === 'shake'), 'ROKA can apply the dedicated preview/export shake renderer');
+
 console.log('ROKA motion tools passed: callable and chat pipeline discovery, footage effects, custom keyframes, scene-backed components, targeting, verification, and invalid-request guards.');

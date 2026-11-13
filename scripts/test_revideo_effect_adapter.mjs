@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 const adapterPath = new URL('../render-worker/revideo/src/motion/EffectAdapter.js', import.meta.url);
 let source = await readFile(adapterPath, 'utf8');
 source = source
-  .replace("import { blur, brightness, contrast, grayscale, hue, saturate, sepia } from '@revideo/2d';", '')
+  .replace("import { blur, brightness, contrast, grayscale, hue, invert, saturate, sepia } from '@revideo/2d';", '')
   .replace("import { isEffectActiveAt } from './EffectWindows.js';", '')
   .replace("import { resolveRevideoEffectParameter } from './EffectParameters.js';", '')
   .replace('export default { createRevideoEffectFilters, createRevideoEffectShadowProps };', '');
@@ -15,7 +15,7 @@ const parametersUrl = pathToFileURL(new URL('../render-worker/revideo/src/motion
 const prelude = `
 const filter = name => value => ({ name, value });
 const blur = filter('blur'), brightness = filter('brightness'), contrast = filter('contrast');
-const grayscale = filter('grayscale'), hue = filter('hue'), saturate = filter('saturate'), sepia = filter('sepia');
+const grayscale = filter('grayscale'), hue = filter('hue'), invert = filter('invert'), saturate = filter('saturate'), sepia = filter('sepia');
 const { isEffectActiveAt } = await import(${JSON.stringify(windowsUrl)});
 const { resolveRevideoEffectParameter } = await import(${JSON.stringify(parametersUrl)});
 `;
@@ -68,6 +68,9 @@ const disabledEffects = [
 ];
 assert.equal(createRevideoEffectFilters(disabledEffects, 0, 4, () => 1).length, 1,
   'disabled filters are retained in the project but omitted from rendered output');
+const invertFilter = createRevideoEffectFilters([{ kind: 'invert', params: { amount: 0.65 } }], 0, 4, () => 1);
+assert.equal(invertFilter[0].name, 'invert', 'partial invert controls reach Revideo as a native CSS filter');
+assert.equal(invertFilter[0].value(), 0.65, 'Revideo evaluates the authored invert strength');
 const disabledShadow = createRevideoEffectShadowProps(disabledEffects, 0, 4, () => 1);
 assert.deepEqual(disabledShadow, {}, 'disabled shadows do not add shadow properties to the export node');
 

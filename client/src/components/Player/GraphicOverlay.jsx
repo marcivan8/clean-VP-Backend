@@ -22,7 +22,7 @@ import RotateHandle from './RotateHandle.jsx';
 import ResizeHandle from './ResizeHandle.jsx';
 import { hasLayoutFrame, frameToCss } from '../../motion/LayoutPresets.js';
 import TemplateCanvas from './TemplateCanvas.jsx';
-import { resolveTimelineFadeOpacity, resolveTimelineFadeOverlays, resolveTimelineVignetteStyle } from '../../motion/TimelineVisualEffects.js';
+import { resolveTimelineEffectGraphPreview, resolveTimelineFadeOpacity, resolveTimelineFadeOverlays, resolveTimelineVignetteStyle } from '../../motion/TimelineVisualEffects.js';
 import { vectorMatteDataUrl } from '../../motion/VectorGraphics.js';
 import { sceneMaskCss } from '../../motion/SceneMask.js';
 import { drawRadialBlur, previewCanvasSize } from '../../motion/RadialBlurPreview.js';
@@ -1226,6 +1226,14 @@ const GraphicOverlay = ({ placementFilter = 'all', onWarning = null }) => {
             {renderGroupedOverlayEntries(activeClips, activeClips.map(({ clip, trackId, trackType }) => {
                 const isActive = clip.id === activeClipId;
                 const asset = clip.assetId ? assets.find(item => item.id === clip.assetId) : null;
+                // Keep template/vector graphics on the exact same safe graph
+                // path as footage. Only a proven linear graph becomes a stack
+                // in the browser; complex DAGs remain untouched rather than
+                // being reordered or partially displayed.
+                const graphPreview = resolveTimelineEffectGraphPreview(clip.effectGraph);
+                const renderClip = graphPreview.effects.length
+                    ? { ...clip, effects: [...graphPreview.effects, ...(Array.isArray(clip.effects) ? clip.effects : [])] }
+                    : clip;
 
                 const layer = clipToMotionLayer(clip, { id: trackId, type: 'overlay' });
                 const resolvedMotion = layer
@@ -1292,11 +1300,11 @@ const GraphicOverlay = ({ placementFilter = 'all', onWarning = null }) => {
                 if (hasLayoutFrame(clip)) {
                     const css = frameToCss(clip.frame);
                     const effectContext = { clipStart: Number(clip.start ?? clip.startTime) || 0, clipDuration: Number(clip.duration) || 0 };
-                    const framedFilter = overlayFilterCss(0, scaleShadow(clip.shadow, shadowScale), clip.effects, clip.id, currentTime, clip);
-                    const framedShake = resolveShakeTransform(clip.effects, currentTime, clip, shadowScale);
-                    const vignetteStyle = resolveTimelineVignetteStyle((clip.effects || []).map(effect => resolveEffectAtTime(effect, currentTime, effectContext)).filter(Boolean), currentTime, effectContext);
-                    const fadeOverlays = resolveTimelineFadeOverlays(clip.effects, currentTime, effectContext);
-                    const alphaFade = isVideo ? 1 : resolveTimelineFadeOpacity(clip.effects, currentTime, effectContext);
+                    const framedFilter = overlayFilterCss(0, scaleShadow(clip.shadow, shadowScale), renderClip.effects, clip.id, currentTime, renderClip);
+                    const framedShake = resolveShakeTransform(renderClip.effects, currentTime, renderClip, shadowScale);
+                    const vignetteStyle = resolveTimelineVignetteStyle((renderClip.effects || []).map(effect => resolveEffectAtTime(effect, currentTime, effectContext)).filter(Boolean), currentTime, effectContext);
+                    const fadeOverlays = resolveTimelineFadeOverlays(renderClip.effects, currentTime, effectContext);
+                    const alphaFade = isVideo ? 1 : resolveTimelineFadeOpacity(renderClip.effects, currentTime, effectContext);
                     const mediaStyle = {
                         ...css.media,
                         opacity: motion.opacity * alphaFade,
@@ -1313,10 +1321,10 @@ const GraphicOverlay = ({ placementFilter = 'all', onWarning = null }) => {
                             className={`absolute select-none ${isActive ? 'ring-1 ring-primary ring-inset' : ''}`}
                             style={{ ...css.box, ...sceneMaskCss(clip.sceneMask), ...(revealClip ? { clipPath: revealClip } : {}), ...matteStyle, ...(clip.blendMode && clip.blendMode !== 'source-over' ? { mixBlendMode: clip.blendMode === 'addition' ? 'plus-lighter' : clip.blendMode } : {}), pointerEvents: 'auto', touchAction: 'none', cursor: isActive ? 'grab' : 'pointer' }}
                         >
-                            <LayerEffectFilters clip={clip} scale={shadowScale} currentTime={currentTime} />
+                            <LayerEffectFilters clip={renderClip} scale={shadowScale} currentTime={currentTime} />
                             {isVideo
-                                ? <OverlayVideo clip={clip} src={src} currentTime={currentTime} isPlaying={isPlaying} style={mediaStyle} />
-                                : <OverlayImage clip={clip} src={src} style={mediaStyle} framed currentTime={currentTime} />}
+                                ? <OverlayVideo clip={renderClip} src={src} currentTime={currentTime} isPlaying={isPlaying} style={mediaStyle} />
+                                : <OverlayImage clip={renderClip} src={src} style={mediaStyle} framed currentTime={currentTime} />}
                             {isVideo && fadeOverlays.map((fade, index) => <div key={`fade-${index}`} aria-hidden="true" style={{ position: 'absolute', inset: 0, backgroundColor: fade.color, opacity: fade.opacity, pointerEvents: 'none' }} />)}
                             {vignetteStyle && <div aria-hidden="true" style={vignetteStyle} />}
                         </div>
@@ -1327,11 +1335,11 @@ const GraphicOverlay = ({ placementFilter = 'all', onWarning = null }) => {
                 // handle (a child) can sit on the sticker's corner; opacity and
                 // blur stay on the media so the handle itself never fades.
                     const effectContext = { clipStart: Number(clip.start ?? clip.startTime) || 0, clipDuration: Number(clip.duration) || 0 };
-                    const overlayFilter = overlayFilterCss(motion.blur, scaleShadow(clip.shadow, shadowScale), clip.effects, clip.id, currentTime, clip);
-                const shakeTransform = resolveShakeTransform(clip.effects, currentTime, clip, shadowScale);
-                const vignetteStyle = resolveTimelineVignetteStyle((clip.effects || []).map(effect => resolveEffectAtTime(effect, currentTime, effectContext)).filter(Boolean), currentTime, effectContext);
-                const fadeOverlays = resolveTimelineFadeOverlays(clip.effects, currentTime, effectContext);
-                const alphaFade = isVideo ? 1 : resolveTimelineFadeOpacity(clip.effects, currentTime, effectContext);
+                    const overlayFilter = overlayFilterCss(motion.blur, scaleShadow(clip.shadow, shadowScale), renderClip.effects, clip.id, currentTime, renderClip);
+                const shakeTransform = resolveShakeTransform(renderClip.effects, currentTime, renderClip, shadowScale);
+                const vignetteStyle = resolveTimelineVignetteStyle((renderClip.effects || []).map(effect => resolveEffectAtTime(effect, currentTime, effectContext)).filter(Boolean), currentTime, effectContext);
+                const fadeOverlays = resolveTimelineFadeOverlays(renderClip.effects, currentTime, effectContext);
+                const alphaFade = isVideo ? 1 : resolveTimelineFadeOpacity(renderClip.effects, currentTime, effectContext);
                 const mediaStyle = {
                     display: 'block',
                     width: '100%',
@@ -1362,15 +1370,15 @@ const GraphicOverlay = ({ placementFilter = 'all', onWarning = null }) => {
                             cursor: 'move',
                         }}
                     >
-                        <LayerEffectFilters clip={clip} scale={shadowScale} currentTime={currentTime} />
+                        <LayerEffectFilters clip={renderClip} scale={shadowScale} currentTime={currentTime} />
                         {isTemplate
-                            ? <TemplateCanvas clip={clip} currentTime={currentTime}
+                            ? <TemplateCanvas clip={renderClip} currentTime={currentTime}
                                 motionBlurMotion={transformBlurContext}
                                 onWarning={onWarning}
                                 style={{ opacity: transformBlurContext ? alphaFade : motion.opacity * alphaFade, pointerEvents: 'none', ...(shakeTransform ? { transform: shakeTransform, transformOrigin: 'center' } : {}), ...(overlayFilter ? { filter: overlayFilter } : {}) }} />
                             : isVideo
-                            ? <OverlayVideo clip={clip} src={src} currentTime={currentTime} isPlaying={isPlaying} style={mediaStyle} motionContext={transformBlurContext} />
-                            : <OverlayImage clip={clip} src={src} style={mediaStyle} currentTime={currentTime} motionContext={transformBlurContext} />}
+                            ? <OverlayVideo clip={renderClip} src={src} currentTime={currentTime} isPlaying={isPlaying} style={mediaStyle} motionContext={transformBlurContext} />
+                            : <OverlayImage clip={renderClip} src={src} style={mediaStyle} currentTime={currentTime} motionContext={transformBlurContext} />}
                         {isVideo && fadeOverlays.map((fade, index) => <div key={`fade-${index}`} aria-hidden="true" style={{ position: 'absolute', inset: 0, backgroundColor: fade.color, opacity: fade.opacity, pointerEvents: 'none' }} />)}
                         {vignetteStyle && <div aria-hidden="true" style={vignetteStyle} />}
                         {isActive && (

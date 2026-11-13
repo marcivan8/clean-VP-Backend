@@ -17,7 +17,11 @@ assert.ok(ffmpeg, 'FFmpeg is available for the 3D export integration check');
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 function loadCompositor() {
-    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'TimeRemap', 'MotionPresets', 'MotionExpression', 'EffectTiming', 'CaptionModel', 'ClipAdapter', 'Compositor'];
+    // Keep this dependency order aligned with the production composition-plan
+    // harness. `Compositor` now shares the guarded effect-graph resolver with
+    // preview, so testing it in a partially assembled module graph can mask a
+    // real integration error.
+    const order = ['MotionLimits', 'Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionExpression', 'SpatialMotion', 'AudioReactive', 'MotionResolver', 'TimeRemap', 'MotionPresets', 'EffectTiming', 'TimelineVisualEffects', 'CaptionModel', 'ClipAdapter', 'Compositor'];
     let combined = '';
     for (const name of order) {
         let source = fs.readFileSync(path.join(root, `client/src/motion/${name}.js`), 'utf8');

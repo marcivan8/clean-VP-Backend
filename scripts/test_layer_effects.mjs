@@ -30,8 +30,10 @@ assert.match(overlayImageSource, /resolveEffectAtTime\(effect, currentTime, effe
 assert.match(overlayPreviewSource.slice(overlayPreviewSource.indexOf('function cssGradient'), overlayPreviewSource.indexOf('function effectColorCss')),
   /Array\.isArray\(rawColor\)[\s\S]*effectColorCss\(rawColor\)/,
   'video and image CSS gradient previews accept normalized RGB array color stops');
-assert.match(overlayPreviewSource, /<OverlayImage clip=\{clip\} src=\{src\} style=\{mediaStyle\} currentTime=\{currentTime\}(?: motionContext=\{transformBlurContext\})? \/>/,
+assert.match(overlayPreviewSource, /<OverlayImage clip=\{(?:clip|renderClip)\} src=\{src\} style=\{mediaStyle\} currentTime=\{currentTime\}(?: motionContext=\{transformBlurContext\})? \/>/,
   'unframed image overlay passes the live playhead and optional temporal-blur context into its effect renderer');
+assert.match(overlayPreviewSource, /resolveTimelineEffectGraphPreview\(clip\.effectGraph\)[\s\S]*effects: \[\.\.\.graphPreview\.effects/,
+  'graphic preview folds only the shared safe linear effect-graph projection into its effect stack');
 const overlayVideoSource = overlayPreviewSource.slice(overlayPreviewSource.indexOf('const OverlayVideo ='), overlayPreviewSource.indexOf('function cssGradient'));
 assert.match(overlayVideoSource, /const gradients = .*clip\.effects[\s\S]*resolveEffectAtTime\(effect, currentTime, effectContext\)/,
   'video overlay gradient fills sample animated parameters and authored time windows at preview time');
@@ -62,11 +64,12 @@ const mediaEffectScene = createScene({ duration: 2, nodes: [createNode(NODE_TYPE
   id: 'media-effects', start: 0, duration: 2, source: { assetId: 'footage-1' },
   effects: [{ kind: 'vignette', params: { intensity: 0.5 } }, { kind: 'glitch', params: { intensity: 0.2 } },
     { kind: 'fade_in', params: { duration: 0.5 } }, { kind: 'fade_out', params: { duration: 0.4 } },
-    { kind: 'grayscale', params: { amount: 0.5 } }, { kind: 'sepia', params: { amount: 0.5 } }],
+    { kind: 'grayscale', params: { amount: 0.5 } }, { kind: 'sepia', params: { amount: 0.5 } },
+    { kind: 'invert', params: { amount: 0.5 } }],
 })] });
 assert.equal(validateScene(mediaEffectScene, { assets: [{ id: 'footage-1' }], skipCollisions: true }).issues.some(issue => issue.code === ISSUE_CODES.UNSUPPORTED_EFFECT), false,
   'implemented footage effects are recognized by scene validation');
-assert.deepEqual(autoFixScene(mediaEffectScene, { assets: [{ id: 'footage-1' }], skipCollisions: true }).scene.nodes[0].effects.map(effect => effect.kind), ['vignette', 'glitch', 'fade_in', 'fade_out', 'grayscale', 'sepia'],
+assert.deepEqual(autoFixScene(mediaEffectScene, { assets: [{ id: 'footage-1' }], skipCollisions: true }).scene.nodes[0].effects.map(effect => effect.kind), ['vignette', 'glitch', 'fade_in', 'fade_out', 'grayscale', 'sepia', 'invert'],
   'auto-fix preserves supported footage effects');
 const scene = createScene({ duration: 1, nodes: [createNode(NODE_TYPES.SHAPE, {
   duration: 1, effects, vector: { kind: 'circle', w: 120, h: 120, fill: '#FF355E' },
@@ -96,6 +99,11 @@ assert.ok(shadowAlpha(0.8) > shadowAlpha(0.2) + 100,
   'Canvas layer shadow opacity controls actual alpha coverage, matching export');
 assert.ok(GRAPHIC_EFFECT_KINDS.includes('grayscale') && GRAPHIC_EFFECT_KINDS.includes('sepia'),
   'grayscale and sepia are declared executable graphic effects');
+assert.ok(GRAPHIC_EFFECT_KINDS.includes('invert'), 'invert is declared for graphic layers');
+assert.notDeepEqual(render([]), render([{ kind: 'invert', params: { amount: 1 } }]),
+  'invert changes graphic RGB pixels while retaining the layer alpha');
+assert.deepEqual(render([]), render([{ kind: 'invert', params: { amount: 0 } }]),
+  'zero-strength invert leaves graphic pixels unchanged');
 assert.ok(GRAPHIC_EFFECT_KINDS.includes('fade_in') && GRAPHIC_EFFECT_KINDS.includes('fade_out'),
   'fade effects are declared executable graphic effects');
 const fadeGraphicScene = createScene({ duration: 1, nodes: [createNode(NODE_TYPES.SHAPE, {
@@ -242,6 +250,11 @@ const sparseAnimatedBrightness = [{ kind: 'brightness', keyframes: { amount: [
 ] } }];
 assert.notDeepEqual(render(sparseAnimatedBrightness, 0), render(sparseAnimatedBrightness, 1),
   'graphic layer effects materialize top-level keyframes when the parameter is absent');
+const parameterTrackBrightness = [{ kind: 'brightness', params: { amount: { value: 1, keyframes: [
+  { time: 0, value: 0.25 }, { time: 1, value: 1.75, easing: 'linear' },
+] } }, keyframes: { amount: [] } }];
+assert.deepEqual(render(parameterTrackBrightness, 0.5), render(sparseAnimatedBrightness, 0.5),
+  'an empty effect-level track does not mask populated parameter-level keyframes in the preview');
 const sparseExpressionBrightness = [{ kind: 'brightness', expressions: { amount: '1 + t' } }];
 assert.notDeepEqual(render(sparseExpressionBrightness, 0), render(sparseExpressionBrightness, 1),
   'graphic layer effects materialize top-level expressions when the parameter is absent');
@@ -261,6 +274,21 @@ assert.notDeepEqual(render([]), render([{ kind: 'color_grade', params: { tempera
 assert.notDeepEqual(render([]), render([{ kind: 'vignette', params: { intensity: 0.9, radius: 0.35, softness: 0.2 } }]), 'vignette changes graphic layer pixels');
 assert.notDeepEqual(render([{ kind: 'glitch', params: { amount: 24, seed: 3 } }], 0), render([{ kind: 'glitch', params: { amount: 24, seed: 3 } }], 0.5), 'glitch varies with frame time');
 assert.notDeepEqual(render([]), render([{ kind: 'glitch', params: { intensity: { value: 0.8 }, seed: 3 } }], 0), 'glitch resolves registry-wrapped intensity parameters');
+assert.notDeepEqual(
+  render([{ kind: 'glitch', params: { amount: 32, blockSize: 8, colorShift: true, scanlines: true, seed: 17 } }], 0.4),
+  render([{ kind: 'glitch', params: { amount: 32, blockSize: 64, colorShift: false, scanlines: false, seed: 17 } }], 0.4),
+  'graphic glitch uses its block size, channel separation and scanline controls');
+function glitchAlpha(stack) {
+  const canvas = Canvas.createCanvas(160, 160);
+  const ctx = canvas.getContext('2d');
+  drawLayerWithEffects(ctx, stack, drawCtx => drawVectorFrame(drawCtx, { kind: 'circle', w: 120, h: 120, fill: '#FF355E' }, 1, 1), null, 0.4);
+  const pixels = ctx.getImageData(0, 0, 160, 160).data;
+  return Array.from({ length: pixels.length / 4 }, (_, index) => pixels[index * 4 + 3]);
+}
+assert.deepEqual(
+  glitchAlpha([{ kind: 'glitch', params: { amount: 32, blockSize: 8, seed: 17 } }]),
+  glitchAlpha([]),
+  'graphic glitch displaces RGB without changing the transparent layer silhouette');
 assert.notDeepEqual(render([]), render([{ kind: 'blur_radial', params: { intensity: 0.8, centerX: 0.1, centerY: 0.2, samples: 12 } }]), 'radial blur changes graphic layer pixels');
 assert.ok(GRAPHIC_EFFECT_KINDS.includes('drop-shadow'), 'drop-shadow alias is declared for graphic scene layers');
 assert.notDeepEqual(render([]), render([{ kind: 'drop-shadow', params: { color: '#ff0000', blur: 8, x: 4, y: 4 } }]),

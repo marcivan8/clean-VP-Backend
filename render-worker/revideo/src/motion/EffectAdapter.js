@@ -1,8 +1,8 @@
-import { blur, brightness, contrast, grayscale, hue, saturate, sepia } from '@revideo/2d';
+import { blur, brightness, contrast, grayscale, hue, invert, saturate, sepia } from '@revideo/2d';
 import { isEffectActiveAt } from './EffectWindows.js';
 import { resolveRevideoEffectParameter } from './EffectParameters.js';
 
-const FILTERS = { blur, brightness, contrast, grayscale, hue, saturate, sepia };
+const FILTERS = { blur, brightness, contrast, grayscale, hue, invert, saturate, sepia };
 
 function numeric(value, fallback) {
     const raw = value && typeof value === 'object' && !Array.isArray(value) && 'value' in value ? value.value : value;
@@ -26,6 +26,9 @@ export function createRevideoEffectFilters(effects, clipStart = 0, duration = 0,
             )));
         };
         switch (kind) {
+            case 'invert':
+                result.push(invert(activeValue('amount', read('value', 1), 0, 0, 1)));
+                break;
             case 'blur': case 'blur_gaussian':
                 result.push(blur(activeValue('radius', read('amount', 0), 0, 0, 50)));
                 break;

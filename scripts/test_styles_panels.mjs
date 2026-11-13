@@ -200,10 +200,12 @@ await check('the menu and the mode toggle are styled, and share the composer she
 log('\n-- 2b. Every MOUNTED panel is on the kit --');
 
 // The panels a person can actually open, and where each one is mounted. The
-// point of the list is the MOUNTED part: EffectsPanel/EffectControls were
-// converted in R116 and are referenced by nothing, so that work is invisible
-// and does not belong here.
+// point of the list is the MOUNTED part. EffectControls was converted in R116
+// and referenced by nothing until R166 mounted the effects panel; it is listed
+// rather than EffectsPanel because the sliders live in it, and the kit check
+// is about controls, not about the list that hosts them.
 const MOUNTED_PANELS = [
+    ['EffectControls',   'client/src/components/Effects/EffectControls.jsx'],
     ['TextPanel',        'client/src/components/TextPanel.jsx'],
     ['TransformPanel',   'client/src/components/TransformPanel.jsx'],
     ['MotionPanel',      'client/src/components/MotionPanel.jsx'],
@@ -242,13 +244,14 @@ await check('the panels that mount others are wired to the real components', () 
     assert.ok(/<KeyframeEditor\b/.test(read('../client/src/components/TransformPanel.jsx')));
 });
 
-await check('EffectsPanel is NOT claimed as shipped UI', () => {
-    // R116 converted it; nothing mounts it. Saying so in the test is cheaper
-    // than someone re-deriving it from a grep in six months.
-    const all = ['client/src/layouts/IDELayout.jsx', 'client/src/components/MotionPanel.jsx']
-        .map(f => read(`../${f}`)).join('\n');
-    assert.ok(!/EffectsPanel/.test(all),
-        'EffectsPanel is mounted now - add it to MOUNTED_PANELS above');
+await check('EffectsPanel is mounted through its host, and only there', () => {
+    // R166 mounted it. Until then this check asserted the opposite, and told
+    // whoever mounted it to add it to MOUNTED_PANELS, which is what happened.
+    const layout = read('../client/src/layouts/IDELayout.jsx');
+    assert.ok(/<EffectsPanelHost \/>/.test(layout), 'the effects panel is no longer mounted');
+    // The host keeps the playhead subscription out of IDELayout, so the layout
+    // must not render the panel directly.
+    assert.ok(!/<EffectsPanel\b/.test(layout), 'IDELayout renders EffectsPanel directly, bypassing the host');
 });
 
 log('\n-- 2c. The transform panel keeps what only it had --');

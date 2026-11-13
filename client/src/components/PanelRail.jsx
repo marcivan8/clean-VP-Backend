@@ -31,7 +31,7 @@
 import React from 'react';
 import {
     Layers, Type, FileText, Palette, Zap, Smartphone,
-    Repeat, Sparkles, Mic, Move, Settings, Lock, Users,
+    Repeat, Sparkles, Mic, Move, Settings, Lock, Users, Wand2,
 } from 'lucide-react';
 import classNames from 'classnames';
 
@@ -46,6 +46,12 @@ export const RAIL_TABS = [
     { id: 'transcript', Icon: FileText },
     { id: 'color',      Icon: Palette },
     { id: 'motion',     Icon: Zap },
+    // R166 — the effects panel. EffectsPanel, EffectControls and PresetBrowser
+    // were written against live infrastructure (useEffects -> timelineManager
+    // + effectRegistry) and reachable from nothing: their only importer was a
+    // barrel nobody imported, so the 20-effect registry the AI can already
+    // apply had no hand control at all.
+    { id: 'effects',    Icon: Wand2 },
     { id: 'assets',     Icon: Sparkles },
     { id: 'audio',      Icon: Mic },
     // R163 — InterviewEditPanel (394 lines, against the live

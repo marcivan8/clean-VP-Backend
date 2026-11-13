@@ -59,6 +59,12 @@ assert.equal(remapSceneObjectTime({ speed: false, duration: 10, offset: ' ' }, 3
   'malformed boolean playback speed and whitespace offset fall back without freezing the source clock');
 assert.equal(remapSceneObjectTime({ speed: '2', duration: 10, offset: '1' }, 3, 10), 7,
   'numeric string playback controls remain supported for imported timeline data');
+assert.equal(remapSceneObjectTime({ duration: 10, speed: 2, keyframes: [
+  { time: 0, value: 0 }, { time: 10, value: 10 },
+], expression: 'duration - t' }, 3, 10), 7,
+  'procedural time-remap expressions override the keyframed source curve');
+assert.equal(remapSceneObjectTime({ duration: 10, expression: 'duration * progress' }, 3, 10), 3,
+  'time-remap expressions receive local time, duration, and normalized progress');
 assert.equal(resolveOverlayVideoSourceTime({ start: 4, duration: 10, offset: 2, speed: 1,
   timeRemap: { speed: 2, duration: 10, keyframes: [{ time: null, value: 9 }] },
 }, 7), 5, 'overlay export uses legacy source timing when no valid remap curve exists');

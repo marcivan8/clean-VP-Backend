@@ -13,6 +13,11 @@ export function describeToolCapabilities(definitions = []) {
         const sceneDesign = name === 'design_scene';
         const motionComponent = name === 'add_motion_component';
         const customMotion = name === 'compose_motion';
+        const motionExpression = name === 'apply_motion_expression';
+        const trackMatte = name === 'set_track_matte';
+        const layerParent = name === 'set_layer_parent';
+        const vectorTrim = name === 'set_vector_trim';
+        const aestheticPreset = name === 'apply_aesthetic_preset';
         const effects = readOnly
             ? ['Reads project or media analysis; does not modify the timeline.']
             : footageEffects
@@ -23,7 +28,17 @@ export function describeToolCapabilities(definitions = []) {
                         ? ['Creates a scene-backed motion component and places its editable layers on the timeline.']
                         : customMotion
                             ? ['Adds validated keyframe animation to compatible timeline layers.']
-                            : ['May modify the active project timeline or asset state.'];
+                            : motionExpression
+                                ? ['Applies an evaluated sandbox motion expression (wiggle, loopOut, audioAmp, spring) to target property.']
+                                : trackMatte
+                                    ? ['Configures alpha or luminance track matte mask to cut out or reveal target layer.']
+                                    : layerParent
+                                        ? ['Links child layer to parent layer with relative coordinate inheritance and cycle check.']
+                                        : vectorTrim
+                                            ? ['Configures trimStart, trimEnd, and trimOffset kinetic stroke animation on vector layers.']
+                                            : aestheticPreset
+                                                ? ['Applies a complete creator aesthetic look across color grade, effect rack, and typography.']
+                                                : ['May modify the active project timeline or asset state.'];
         const verification = readOnly
             ? 'Return typed findings or an explicit empty result with evidence/status.'
             : footageEffects
@@ -32,7 +47,17 @@ export function describeToolCapabilities(definitions = []) {
                     ? 'Verify that the returned scene ID exists and that its expected timeline layers were placed before reporting success.'
                     : customMotion
                         ? 'Verify that at least one target layer now has the requested animation; report failure if no compatible layer was changed.'
-                        : 'Return success only after the operation reports completion; verify the resulting timeline or asset postcondition.';
+                        : motionExpression
+                            ? 'Verify that the expression is syntactically valid and saved to the target clip expressions map.'
+                            : trackMatte
+                                ? 'Verify that both target and source layers exist and trackMatte is configured.'
+                                : layerParent
+                                    ? 'Verify that parent exists, no cyclic reference is created, and parentId is applied.'
+                                    : vectorTrim
+                                        ? 'Verify that trim properties or kinetic draw-on keyframes are applied to target clip.'
+                                        : aestheticPreset
+                                            ? 'Verify that color grade, effects rack, and typography updates are saved.'
+                                            : 'Return success only after the operation reports completion; verify the resulting timeline or asset postcondition.';
         const params = definition.parameters || {};
         return {
             name,

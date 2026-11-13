@@ -958,6 +958,7 @@ export class TimelineStateManager {
                         textShadow: clip.textShadow,
                         stroke: clip.stroke,
                         color: clip.color,
+                        accentColor: clip.accentColor,
                         textAlign: clip.textAlign,
                         animation: clip.animation,
                         position: clip.position,
@@ -1035,6 +1036,11 @@ export class TimelineStateManager {
                         opacity: clip.opacity,
                         // Virtual multicam crop metadata
                         virtualCam: clip.virtualCam,
+                        // After Effects engine capabilities
+                        trackMatte: clip.trackMatte ?? null,
+                        parentId: clip.parentId ?? null,
+                        trim: clip.trim ?? null,
+                        blendMode: clip.blendMode ?? null,
                     };
                 })
             };
@@ -1099,6 +1105,7 @@ export class TimelineStateManager {
                                 textDecoration: legacyClip.textDecoration,
                                 textShadow: legacyClip.textShadow,
                                 stroke: legacyClip.stroke,
+                                accentColor: legacyClip.accentColor,
                                 textAlign: legacyClip.textAlign,
                                 position: legacyClip.position,
                                 style: legacyClip.style,
@@ -1158,6 +1165,11 @@ export class TimelineStateManager {
                                 transition: legacyClip.transition,
                                 // Virtual multicam crop metadata
                                 virtualCam: legacyClip.virtualCam,
+                                // After Effects engine capabilities
+                                trackMatte: legacyClip.trackMatte ?? null,
+                                parentId: legacyClip.parentId ?? null,
+                                trim: legacyClip.trim ?? null,
+                                blendMode: legacyClip.blendMode ?? null,
                             }
                         }
                     });

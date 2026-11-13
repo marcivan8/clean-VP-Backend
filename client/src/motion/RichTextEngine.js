@@ -119,7 +119,7 @@ function drawRichTextOnPath(ctx, layout, motionMap, unit, pathSpec) {
         ctx.save();
         ctx.globalAlpha *= motion.opacity;
         ctx.translate(x, y);
-        ctx.rotate(point.angle);
+        ctx.rotate(point.angle + (Number(motion.rotation) || 0) * Math.PI / 180);
         const animatedScale = Number.isFinite(Number(motion.scale)) ? Number(motion.scale) : 1;
         ctx.scale(animatedScale * scaleToFit, animatedScale * scaleToFit);
         ctx.font = `${glyph.run.fontStyle} ${glyph.run.fontWeight} ${glyph.run.fontSize}px "${glyph.run.fontFamily}", sans-serif`;
@@ -431,6 +431,28 @@ function finalizeLayout(rawLayout, containerOpts) {
     };
 }
 
+function sampleTextRangeSelectorWeight(index, count, selector) {
+    if (!selector || typeof selector !== 'object' || count < 1) return 1;
+    const start = Number.isFinite(Number(selector.start)) ? clamp(Number(selector.start), 0, 100) : 0;
+    const end = Number.isFinite(Number(selector.end)) ? clamp(Number(selector.end), 0, 100) : 100;
+    const offset = Number.isFinite(Number(selector.offset)) ? Number(selector.offset) : 0;
+    const wrap = value => ((value % 100) + 100) % 100;
+    const from = wrap(start + offset);
+    const span = start === end ? 0 : end - start >= 100 ? 100 : ((end - start + 100) % 100);
+    const position = ((index + 0.5) / count) * 100;
+    const distance = (position - from + 100) % 100;
+    if (span === 0 || distance > span) return 0;
+    const t = span > 0 ? clamp(distance / span, 0, 1) : 0;
+    switch (String(selector.shape || 'square').toLowerCase()) {
+        case 'ramp-up': case 'rampup': return t;
+        case 'ramp-down': case 'rampdown': return 1 - t;
+        case 'triangle': return 1 - Math.abs(2 * t - 1);
+        case 'round': return Math.sqrt(Math.max(0, 1 - (2 * t - 1) ** 2));
+        case 'smooth': return t * t * (3 - 2 * t);
+        default: return 1;
+    }
+}
+
 // ── Typography Animation Sampling ─────────────────────────────────────────────
 
 /**
@@ -453,19 +475,26 @@ function finalizeLayout(rawLayout, containerOpts) {
  *     easing: string (e.g. 'easeOutBack', 'easeOutCubic'),
  *   }
  * @param {number} localTime Current time in seconds (0..sceneDuration)
- * @returns {Map<number, object>} Map of index -> { scale, opacity, translateY, translateX }
+ *   from/to: optional per-unit transform endpoints (scale, opacity, translateX,
+ *            translateY in px, rotation in degrees), order: forward|reverse|center,
+ *            startDelay: seconds.
+ *   rangeSelector: optional 0..100 start/end/offset and square, ramp-up,
+ *                  ramp-down, triangle, round or smooth weighting.
+ * @returns {Map<number, object>} Map of index -> { scale, opacity, translateY, translateX, rotation }
  */
 export function sampleTypographyMotion(layout, animSpec = {}, localTime = 0, clipDuration = animSpec.clipDuration) {
     const results = new Map();
-    if (!layout || !animSpec.preset) return results;
+    if (!layout) return results;
 
     const {
-        preset = 'slideUp',
         unit = 'char',
         stagger = 0.035,
         duration = 0.28,
-        easing = preset === 'pop' ? 'easeOutBack' : 'easeOutCubic',
     } = animSpec;
+    const preset = typeof animSpec.preset === 'string' ? animSpec.preset : 'none';
+    const easing = animSpec.easing || (preset === 'pop' ? 'easeOutBack' : 'easeOutCubic');
+    if (preset === 'none' && !animSpec.from && !animSpec.to && !animSpec.exit?.preset
+        && !Array.isArray(animSpec.emphasis)) return results;
 
     const items = unit === 'word' ? layout.words : layout.glyphs;
     const easeFn = resolveEasing(easing);
@@ -474,12 +503,17 @@ export function sampleTypographyMotion(layout, animSpec = {}, localTime = 0, cli
         const item = items[i];
         const key = unit === 'word' ? item.wordIndex : item.charIndex;
         if (key < 0) continue;
+        const selectorWeight = sampleTextRangeSelectorWeight(i, items.length,
+            animSpec.rangeSelector || animSpec.selector);
 
-        const startTime = i * stagger;
+        const animationOrder = animSpec.order === 'reverse' ? items.length - 1 - i
+            : animSpec.order === 'center' ? Math.abs(i - (items.length - 1) / 2)
+                : i;
+        const startTime = Math.max(0, Number(animSpec.startDelay) || 0) + animationOrder * stagger;
         const progress = duration > 0 ? clamp((localTime - startTime) / duration, 0, 1) : 1;
         const eased = easeFn(progress);
 
-        let transform = { scale: 1, opacity: 1, translateY: 0, translateX: 0 };
+        let transform = { scale: 1, opacity: 1, translateY: 0, translateX: 0, rotation: 0 };
 
         switch (preset) {
             case 'typewriter':
@@ -510,6 +544,24 @@ export function sampleTypographyMotion(layout, animSpec = {}, localTime = 0, cli
                 break;
         }
 
+        // Authored unit-level endpoints override named preset channels. This
+        // keeps the preset useful for unspecified channels while allowing
+        // range-selector-style animation without splitting text into clips.
+        const from = animSpec.from && typeof animSpec.from === 'object' ? animSpec.from : null;
+        const to = animSpec.to && typeof animSpec.to === 'object' ? animSpec.to : null;
+        if (from || to) {
+            const channels = ['scale', 'opacity', 'translateX', 'translateY', 'rotation'];
+            for (const channel of channels) {
+                if (!(from && Object.hasOwn(from, channel)) && !(to && Object.hasOwn(to, channel))) continue;
+                const defaultValue = channel === 'scale' || channel === 'opacity' ? 1 : 0;
+                const authoredFrom = from?.[channel];
+                const authoredTo = to?.[channel];
+                const fromValue = authoredFrom != null && Number.isFinite(Number(authoredFrom)) ? Number(authoredFrom) : defaultValue;
+                const toValue = authoredTo != null && Number.isFinite(Number(authoredTo)) ? Number(authoredTo) : defaultValue;
+                transform[channel] = fromValue + (toValue - fromValue) * eased;
+            }
+        }
+
         const exit = animSpec.exit;
         if (exit?.preset && Number(clipDuration) > 0) {
             const exitDuration = Math.max(0.05, Number(exit.duration) || 0.24);
@@ -523,6 +575,7 @@ export function sampleTypographyMotion(layout, animSpec = {}, localTime = 0, cli
                 if (exit.preset === 'shrink') transform.scale *= 1 - exitEase * 0.35;
                 if (exit.preset === 'drop') transform.translateY += exitEase * (Number(exit.distance) || 28);
                 if (exit.preset === 'wipe') transform.translateX += exitEase * (Number(exit.distance) || 32) * (exit.direction === 'left' ? -1 : 1);
+                if (Number.isFinite(Number(exit.rotation))) transform.rotation += exitEase * Number(exit.rotation);
             }
         }
 
@@ -535,8 +588,19 @@ export function sampleTypographyMotion(layout, animSpec = {}, localTime = 0, cli
             if (beat.preset === 'pulse') transform.scale *= 1 + Math.max(0, wave) * 0.12 * strength;
             if (beat.preset === 'shake') transform.translateX += wave * 4 * strength;
             if (beat.preset === 'lift') transform.translateY -= Math.max(0, wave) * 5 * strength;
+            if (beat.preset === 'rotate') transform.rotation += wave * (Number(beat.degrees) || 8) * strength;
         }
 
+        transform.scale = 1 + (transform.scale - 1) * selectorWeight;
+        transform.opacity = 1 + (transform.opacity - 1) * selectorWeight;
+        transform.translateX *= selectorWeight;
+        transform.translateY *= selectorWeight;
+        transform.rotation *= selectorWeight;
+
+        // Canvas ignores globalAlpha assignments outside [0, 1], leaving its
+        // previous value in place. Keep overshooting easing curves and authored
+        // endpoints from producing stale alpha state in the glyph renderer.
+        transform.opacity = Number.isFinite(transform.opacity) ? clamp(transform.opacity, 0, 1) : 1;
         results.set(key, transform);
     }
 
@@ -581,11 +645,14 @@ export function drawRichText(ctx, layout, opts = {}) {
 
             const wx = word.x + offsetX + motion.translateX;
             const wy = word.y + offsetY + motion.translateY;
+            const transformX = wx + word.width / 2;
+            const transformY = wy - word.run.fontSize / 2;
 
-            if (motion.scale !== 1) {
-                ctx.translate(wx + word.width / 2, wy - word.run.fontSize / 2);
-                ctx.scale(motion.scale, motion.scale);
-                ctx.translate(-(wx + word.width / 2), -(wy - word.run.fontSize / 2));
+            if (motion.scale !== 1 || motion.rotation) {
+                ctx.translate(transformX, transformY);
+                if (motion.rotation) ctx.rotate((Number(motion.rotation) || 0) * Math.PI / 180);
+                if (motion.scale !== 1) ctx.scale(motion.scale, motion.scale);
+                ctx.translate(-transformX, -transformY);
             }
 
             ctx.font = `${word.run.fontStyle} ${word.run.fontWeight} ${word.run.fontSize}px "${word.run.fontFamily}", sans-serif`;
@@ -620,11 +687,14 @@ export function drawRichText(ctx, layout, opts = {}) {
 
             const gx = glyph.x + offsetX + motion.translateX;
             const gy = glyph.y + offsetY + motion.translateY;
+            const transformX = gx + glyph.width / 2;
+            const transformY = gy - glyph.run.fontSize / 2;
 
-            if (motion.scale !== 1) {
-                ctx.translate(gx + glyph.width / 2, gy - glyph.run.fontSize / 2);
-                ctx.scale(motion.scale, motion.scale);
-                ctx.translate(-(gx + glyph.width / 2), -(gy - glyph.run.fontSize / 2));
+            if (motion.scale !== 1 || motion.rotation) {
+                ctx.translate(transformX, transformY);
+                if (motion.rotation) ctx.rotate((Number(motion.rotation) || 0) * Math.PI / 180);
+                if (motion.scale !== 1) ctx.scale(motion.scale, motion.scale);
+                ctx.translate(-transformX, -transformY);
             }
 
             ctx.font = `${glyph.run.fontStyle} ${glyph.run.fontWeight} ${glyph.run.fontSize}px "${glyph.run.fontFamily}", sans-serif`;
@@ -819,7 +889,14 @@ export function drawRichTextFrame(ctx, graphic = {}, localTime = 0, opts = {}) {
     });
     const animSpec = graphic.charAnim || null;
     const unit = animSpec?.unit === 'word' ? 'word' : 'char';
-    const motionMap = animSpec?.preset
+    // A named preset is only one way to animate rich text. Scene authors can
+    // also supply explicit per-unit endpoints (the equivalent of keyed
+    // animator values), lifecycle exits, or emphasis beats. Do not make those
+    // perfectly valid animations disappear merely because they have no preset
+    // label — the scene schema deliberately preserves custom-only animators.
+    const hasMotion = !!(animSpec && (animSpec.preset || animSpec.from || animSpec.to
+        || animSpec.exit?.preset || (Array.isArray(animSpec.emphasis) && animSpec.emphasis.length)));
+    const motionMap = hasMotion
         ? sampleTypographyMotion(layout, animSpec, Math.max(0, Number(localTime) || 0), Number(opts.duration ?? opts.durationSec ?? graphic.duration) || 0)
         : null;
     const drawnOnPath = graphic.textPath

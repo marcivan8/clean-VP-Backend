@@ -7,11 +7,22 @@ import { AIEffectEngine } from '../client/src/effects/engines/AIEffects.js';
 import { createGpuClipEffectConfigs, resolveGpuClipEffectType } from '../client/src/effects/ClipEffectAdapter.js';
 import { resolveTimelineEffectTransform, resolveTimelineFadeOverlays } from '../client/src/motion/TimelineVisualEffects.js';
 import { createTimelineRetimeMap } from '../client/src/timeline/retimeMap.js';
+import { GRAPHIC_EFFECT_KINDS } from '../client/src/motion/LayerEffects.js';
+import { EFFECT_KINDS } from '../client/src/motion/SceneSchema.js';
 
 const cpu = new CPUEffectEngine();
 const ai = new AIEffectEngine({ fallbackEnabled: false });
 const specialGpuRoutes = new Set(['shake', 'fade_in', 'fade_out']);
 const specialCpuRoutes = new Set(['speed_change', 'lut_apply', 'audio_normalize', 'audio_denoise']);
+
+// Registry entries are broader than graphic effects: audio, retiming, and AI
+// tools intentionally use their own pipelines. Every visual GPU effect,
+// however, must survive scene normalization and have a canvas-layer route.
+for (const [type, definition] of Object.entries(EFFECT_DEFINITIONS)) {
+  if (definition.engine !== ENGINE_TYPES.GPU) continue;
+  assert.ok(EFFECT_KINDS.includes(type), `${type} is accepted by the motion scene schema`);
+  assert.ok(GRAPHIC_EFFECT_KINDS.includes(type), `${type} has an executable graphic-layer renderer`);
+}
 
 for (const [type, definition] of Object.entries(EFFECT_DEFINITIONS)) {
   assert.equal(effectRegistry.get(type)?.type, type, `${type} is registered in the live effect registry`);

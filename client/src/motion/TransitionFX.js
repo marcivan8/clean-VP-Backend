@@ -259,8 +259,11 @@ export function transitionWindows(clips) {
         const cut = (Number(c.start) || 0) + Number(c.duration);
         const next = sorted[i + 1];
         const adjacent = next && Math.abs((Number(next.start) || 0) - cut) < 0.05;
-        const before = Math.min(half, Number(c.duration));
-        const after = adjacent ? Math.min(half, Number(next.duration)) : 0;
+        // Reserve at most half of each clip for either neighboring transition.
+        // Otherwise two transitions around a short middle clip overlap and
+        // fxAtTime's first-match rule silently hides the later transition.
+        const before = Math.min(half, Number(c.duration) / 2);
+        const after = adjacent ? Math.min(half, Number(next.duration) / 2) : 0;
         out.push({ clipId: c.id, type, cut, from: cut - before, to: cut + after, half, before, after });
     }
     return out;

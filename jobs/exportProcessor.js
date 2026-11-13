@@ -75,6 +75,219 @@ function runProgram(bin, args, cwd) {
             : reject(new Error(`${path.basename(bin)} exited ${code}: ${Buffer.concat(stderr).toString('utf8').slice(-4000)}`)));
     });
 }
+
+/**
+ * Render an authored effect DAG over a generated RGBA graphic sequence.
+ *
+ * Templates and vectors are drawn to PNGs before the composition compiler
+ * places/scales them on the output canvas. Applying a branched graph here keeps
+ * every branch in the layer's own coordinate space, preserves alpha, and uses
+ * the exact DAG compiler already used for primary footage. It deliberately
+ * returns another numbered PNG sequence: the regular compositor can then keep
+ * doing masks, motion blur, parent groups, blend modes, and transparency
+ * without a second special rendering path.
+ */
+async function renderGraphicEffectGraphSequence(sequence, effectGraph, {
+    tmpDir,
+    name,
+    fps,
+    duration,
+    clipStart,
+} = {}) {
+    if (!effectGraph || !sequence?.pattern) return sequence;
+    const frameRate = Math.max(1, Math.min(120, Number(fps) || 30));
+    const frameCount = Math.max(1, Math.round(Number(sequence.frames) || Math.ceil(Math.max(0.01, Number(duration) || 0.01) * frameRate)));
+    const width = Math.max(2, Math.round(Number(sequence.width) || 2));
+    const height = Math.max(2, Math.round(Number(sequence.height) || 2));
+    const outputDir = path.join(tmpDir, `graphic-effect-graph-${String(name || 'layer').replace(/[^a-zA-Z0-9_-]/g, '_')}`);
+    fs.mkdirSync(outputDir, { recursive: true });
+    const outputPattern = path.join(outputDir, 'f%05d.png');
+    const graphScript = path.join(outputDir, 'effect-graph.txt');
+    const graphOutput = 'graphic_effect_dag';
+    const finalOutput = 'graphic_effect_rgba';
+    const graph = [
+        ...compileTimelineVisualEffectDag(effectGraph, {
+            width,
+            height,
+            duration: Math.max(1 / frameRate, Number(duration) || frameCount / frameRate),
+            clipStart: Math.max(0, Number(clipStart) || 0),
+            complexGlow: true,
+        }, '0:v', graphOutput),
+        `[${graphOutput}]format=rgba[${finalOutput}]`,
+    ];
+    fs.writeFileSync(graphScript, graph.join(';'), 'utf8');
+    await runFfmpegArgs(ffmpegPath, [
+        '-hide_banner', '-loglevel', 'error',
+        '-framerate', String(frameRate), '-start_number', '0', '-i', sequence.pattern,
+        '-filter_complex_script', graphScript, '-map', `[${finalOutput}]`,
+        '-frames:v', String(frameCount), '-vsync', '0',
+        '-c:v', 'png', '-pix_fmt', 'rgba', '-compression_level', '3', '-y',
+        // This is an OUTPUT option. Keep it after the input so the generated
+        // sequence starts at f00000.png, matching TemplateRenderer and the
+        // image-sequence input the composition pass consumes next.
+        '-start_number', '0', outputPattern,
+    ]);
+    const files = fs.readdirSync(outputDir)
+        .filter(file => /^f\d+\.png$/i.test(file))
+        .sort((left, right) => Number(left.match(/\d+/)?.[0]) - Number(right.match(/\d+/)?.[0]))
+        .map(file => path.join(outputDir, file));
+    if (files.length !== frameCount) {
+        throw new Error(`effect graph produced ${files.length}/${frameCount} graphic frames`);
+    }
+    return {
+        ...sequence,
+        pattern: outputPattern,
+        files,
+    };
+}
+
+/**
+ * Prepare an uploaded overlay for the raster-DAG pass.
+ *
+ * The composition compiler normally owns video in-points, speed and time
+ * remapping. A branched effect graph needs to run *between* that source-time
+ * operation and layer geometry, however: feeding the graph an un-retimed
+ * source would make an effect window/keyframe disagree with the layer the
+ * user sees. Keep this deliberately small twin of the compiler's source-time
+ * block. It emits a LOCAL (zero-based) timeline; the regular compositor still
+ * applies outputStart, transform, masks, mattes and blend mode afterwards.
+ */
+function compileOverlaySourcePreparation(overlay) {
+    const sourceType = String(overlay?.source?.type || 'video');
+    if (sourceType !== 'video') return ['setpts=PTS-STARTPTS'];
+
+    const map = Array.isArray(overlay?.sourceTimeMap)
+        ? overlay.sourceTimeMap.filter(point => Number.isFinite(Number(point?.source)) && Number.isFinite(Number(point?.output)))
+        : [];
+    const speed = Number(overlay?.speed) > 0 ? Number(overlay.speed) : 1;
+    if (map.length === 1) {
+        // A vertical source-time curve is a deliberate freeze. The source is
+        // sought to the hold frame by the caller, then expanded locally.
+        return [
+            'trim=end_frame=1', 'setpts=PTS-STARTPTS',
+            'loop=loop=-1:size=1:start=0', 'setpts=PTS-STARTPTS',
+        ];
+    }
+    if (map.length > 1) {
+        const direction = Math.sign(Number(map.at(-1).source) - Number(map[0].source));
+        const reverse = direction < 0;
+        const sourceSpan = Math.max(1 / 120, Math.abs(Number(map.at(-1).source) - Number(map[0].source)));
+        const source = `(${Number(map[0].source).toFixed(6)}${reverse ? '-' : '+'}(PTS-STARTPTS)*TB)`;
+        let outputTime = Number(map.at(-1).output).toFixed(6);
+        for (let index = map.length - 2; index >= 0; index--) {
+            const from = map[index], to = map[index + 1];
+            const deltaSource = Number(to.source) - Number(from.source);
+            if (Math.abs(deltaSource) <= 1e-7) {
+                const boundary = reverse
+                    ? `gte(${source},${Number(from.source).toFixed(6)})`
+                    : `lte(${source},${Number(from.source).toFixed(6)})`;
+                outputTime = `if(${boundary},${Number(from.output).toFixed(6)},${outputTime})`;
+                continue;
+            }
+            if (Math.sign(deltaSource) !== direction) continue;
+            const slope = (Number(to.output) - Number(from.output)) / deltaSource;
+            const segment = `${Number(from.output).toFixed(6)}+(${source}-${Number(from.source).toFixed(6)})*${Number(slope).toFixed(8)}`;
+            outputTime = `if(${reverse ? 'gt' : 'lt'}(${source},${Number(to.source).toFixed(6)}),${segment},${outputTime})`;
+        }
+        return [
+            `trim=duration=${sourceSpan.toFixed(6)}`,
+            ...(reverse ? ['reverse'] : []),
+            'setpts=PTS-STARTPTS',
+            `setpts=(${outputTime.replace(/,/g, '\\,')})/TB`,
+        ];
+    }
+    return Math.abs(speed - 1) > 0.001
+        ? [`setpts=(PTS-STARTPTS)/${speed.toFixed(6)}`]
+        : ['setpts=PTS-STARTPTS'];
+}
+
+function overlayGraphSeek(overlay) {
+    if (overlay?.source?.type !== 'video') return 0;
+    const map = Array.isArray(overlay?.sourceTimeMap) ? overlay.sourceTimeMap : [];
+    const mapStart = map.length
+        ? Math.min(...map.map(point => Number(point?.source)).filter(Number.isFinite))
+        : 0;
+    return Math.max(0, (Number(overlay?.sourceOffset) || 0) + (Number.isFinite(mapStart) ? mapStart : 0));
+}
+
+/**
+ * Rasterize a complex graph on an uploaded image/video overlay.
+ *
+ * This is the media equivalent of renderGraphicEffectGraphSequence. It turns
+ * the source into a bounded local RGBA PNG sequence after its authored source
+ * timing, applies the true fork/join DAG, and leaves every subsequent layer
+ * operation to CompositorCompiler. PNGs are intentional: they preserve alpha
+ * and make this stage cacheable/recoverable independently of the final codec.
+ */
+async function renderOverlayEffectGraphSequence(sourcePath, overlay, {
+    tmpDir,
+    name,
+    fps,
+    duration,
+    clipStart,
+} = {}) {
+    if (!overlay?.effectGraph || !sourcePath) return null;
+    const frameRate = Math.max(1, Math.min(120, Number(fps) || 30));
+    const localDuration = Math.max(1 / frameRate, Number(duration) || 1 / frameRate);
+    const frameCount = Math.max(1, Math.ceil(localDuration * frameRate));
+    const dimensions = await getVideoDimensions(sourcePath);
+    const width = Math.max(2, Math.round(Number(dimensions?.width || overlay?.sourceWidth) || 1920));
+    const height = Math.max(2, Math.round(Number(dimensions?.height || overlay?.sourceHeight) || 1080));
+    const safeName = String(name || overlay.id || 'layer').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const outputDir = path.join(tmpDir, `overlay-effect-graph-${safeName}`);
+    fs.mkdirSync(outputDir, { recursive: true });
+    const outputPattern = path.join(outputDir, 'f%05d.png');
+    const graphScript = path.join(outputDir, 'effect-graph.txt');
+    const sourceLabel = 'overlay_graph_source';
+    const graphOutput = 'overlay_graph_dag';
+    const finalOutput = 'overlay_graph_rgba';
+    const sourceFilters = [
+        ...compileOverlaySourcePreparation(overlay),
+        `fps=${frameRate}`,
+        // A source map can deliberately hold a frame, and source footage can
+        // end a fraction before a requested timeline window. Match the normal
+        // compositor's stable end-of-source behavior rather than exposing a
+        // transparent one-frame flash in the prepass.
+        `tpad=stop_mode=clone:stop_duration=${localDuration.toFixed(6)}`,
+        `trim=duration=${localDuration.toFixed(6)}`,
+        'format=rgba',
+    ];
+    const graph = [
+        `[0:v]${sourceFilters.join(',')}[${sourceLabel}]`,
+        ...compileTimelineVisualEffectDag(overlay.effectGraph, {
+            width,
+            height,
+            duration: localDuration,
+            clipStart: Math.max(0, Number(clipStart) || 0),
+            complexGlow: true,
+        }, sourceLabel, graphOutput),
+        `[${graphOutput}]format=rgba[${finalOutput}]`,
+    ];
+    fs.writeFileSync(graphScript, graph.join(';'), 'utf8');
+    const args = ['-hide_banner', '-loglevel', 'error'];
+    if (overlay?.source?.type === 'image' || overlay?.source?.type === 'sticker') {
+        args.push('-loop', '1', '-framerate', String(frameRate), '-t', String(localDuration), '-i', sourcePath);
+    } else {
+        const seek = overlayGraphSeek(overlay);
+        if (seek > 0) args.push('-ss', String(seek));
+        args.push('-i', sourcePath);
+    }
+    args.push(
+        '-filter_complex_script', graphScript, '-map', `[${finalOutput}]`,
+        '-frames:v', String(frameCount), '-vsync', '0',
+        '-c:v', 'png', '-pix_fmt', 'rgba', '-compression_level', '3', '-y',
+        '-start_number', '0', outputPattern,
+    );
+    await runFfmpegArgs(ffmpegPath, args);
+    const files = fs.readdirSync(outputDir)
+        .filter(file => /^f\d+\.png$/i.test(file))
+        .sort((left, right) => Number(left.match(/\d+/)?.[0]) - Number(right.match(/\d+/)?.[0]))
+        .map(file => path.join(outputDir, file));
+    if (files.length !== frameCount) {
+        throw new Error(`effect graph produced ${files.length}/${frameCount} overlay frames`);
+    }
+    return { pattern: outputPattern, files, frames: frameCount, width, height };
+}
 // ─────────────────────────────────────────────────────────────────────────────
 
 const gcsBucket = storageConfig.bucket;
@@ -91,11 +304,12 @@ const isServerUsableUrl = (u) => u && !u.startsWith('blob:');
  * those capabilities, rather than claiming success after dropping features.
  */
 const REVVIDEO_SUPPORTED_EFFECTS = new Set([
-    'blur', 'blur_gaussian', 'brightness', 'contrast', 'saturation', 'saturate',
+    'blur', 'blur_gaussian', 'brightness', 'contrast', 'invert', 'saturation', 'saturate',
     'hue', 'hue-rotate', 'grayscale', 'sepia', 'shadow', 'drop-shadow',
 ]);
 const REVVIDEO_EFFECT_ANIMATABLE_PARAMS = {
     blur: new Set(['radius', 'amount']), blur_gaussian: new Set(['radius', 'amount']),
+    invert: new Set(['amount', 'value']),
     brightness: new Set(['amount', 'value']), contrast: new Set(['amount', 'value']),
     saturation: new Set(['amount', 'value']), saturate: new Set(['amount', 'value']),
     hue: new Set(['degrees', 'amount']), 'hue-rotate': new Set(['degrees', 'amount']),
@@ -326,11 +540,18 @@ function buildTransformFilters(clip, targetWidth, targetHeight) {
     const authoredScale = optionalFiniteNumber(clip.scale);
     const authoredScaleX = optionalFiniteNumber(clip.scaleX);
     const authoredScaleY = optionalFiniteNumber(clip.scaleY);
-    const scale = authoredScale !== null && authoredScale > 0 ? authoredScale : 1;
-    const scaleX = authoredScaleX !== null && authoredScaleX > 0 ? authoredScaleX : scale;
-    const scaleY = authoredScaleY !== null && authoredScaleY > 0 ? authoredScaleY : scale;
-    const w = even(fitted.w * scaleX);
-    const h = even(fitted.h * scaleY);
+    // Clip axes are signed: a negative horizontal/vertical value is an
+    // intentional mirror. Scale dimensions themselves must stay positive for
+    // FFmpeg, so preserve the sign as hflip/vflip after scaling. Previously
+    // the `> 0` checks silently replaced a mirror with the uniform scale,
+    // creating a preview/export mismatch for flipped footage.
+    const scale = authoredScale !== null && Math.abs(authoredScale) > 1e-8 ? authoredScale : 1;
+    const scaleX = authoredScaleX !== null && Math.abs(authoredScaleX) > 1e-8 ? authoredScaleX : scale;
+    const scaleY = authoredScaleY !== null && Math.abs(authoredScaleY) > 1e-8 ? authoredScaleY : scale;
+    const flipH = scaleX < 0;
+    const flipV = scaleY < 0;
+    const w = even(fitted.w * Math.abs(scaleX));
+    const h = even(fitted.h * Math.abs(scaleY));
     const rotation = optionalFiniteNumber(clip.rotation) ?? 0;
     const opacity = Math.max(0, Math.min(1, optionalFiniteNumber(clip.opacity) ?? 1));
     const radians = rotation * Math.PI / 180;
@@ -343,8 +564,8 @@ function buildTransformFilters(clip, targetWidth, targetHeight) {
     const overlayX = Math.round((targetWidth - rotatedW) / 2 + (Number(clip.x) || 0));
     const overlayY = Math.round((targetHeight - rotatedH) / 2 + (Number(clip.y) || 0));
     return {
-        scaleFilter: `scale=${w}:${h}:force_original_aspect_ratio=disable,setsar=1${alphaFilters}`,
-        overlayX, overlayY, w: rotatedW, h: rotatedH, sourceW: w, sourceH: h, rotation, opacity,
+        scaleFilter: `scale=${w}:${h}:force_original_aspect_ratio=disable,setsar=1${flipH ? ',hflip' : ''}${flipV ? ',vflip' : ''}${alphaFilters}`,
+        overlayX, overlayY, w: rotatedW, h: rotatedH, sourceW: w, sourceH: h, rotation, opacity, flipH, flipV,
     };
 }
 
@@ -1727,7 +1948,7 @@ function renderRetimeAudio(source, outputPath, retime, { offset = 0, duration, c
 
 const EXPORTABLE_TIMELINE_EFFECTS = new Set([
     'blur', 'blur_gaussian', 'blur_radial', 'blur_motion', 'motion-blur',
-    'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate', 'color_grade', 'grayscale', 'sepia',
+    'brightness', 'contrast', 'invert', 'saturation', 'saturate', 'hue', 'hue-rotate', 'color_grade', 'grayscale', 'sepia',
     'grain', 'film_grain', 'film-grain', 'chromatic-aberration', 'rgb_split', 'distortion', 'vignette',
     'glow', 'fade_in', 'fade_out', 'glitch', 'shake', 'speed_change', 'lut_apply',
     'audio_normalize', 'audio_denoise',
@@ -1982,6 +2203,17 @@ function compileTimelineVisualEffects(effects = [], { width = 1080, height = 192
                     filters.push(`format=rgba,geq=r='${channel('r', '0.393', '0.769', '0.189')}':g='${channel('g', '0.349', '0.686', '0.168')}':b='${channel('b', '0.272', '0.534', '0.131')}':a='alpha(X,Y)'`);
                     break;
                 }
+                case 'invert': {
+                    const value = animated('amount', amount, 0, 1);
+                    const strength = value
+                        ? `clip((${value.replace(/\bt\b/g, 'T')}),0,1)`
+                        : Math.max(0, Math.min(1, Number.isFinite(amount) ? amount : 1)).toFixed(6);
+                    // Per-channel geq keeps inversion at frame time, including
+                    // animated strength, while preserving the source alpha.
+                    const channel = name => `clip(${name}(X,Y)*(1-2*(${strength}))+255*(${strength}),0,255)`;
+                    filters.push(`format=rgba,geq=r='${channel('r')}':g='${channel('g')}':b='${channel('b')}':a='alpha(X,Y)'`);
+                    break;
+                }
                 case 'hue': case 'hue-rotate': {
                     const degrees = animated('degrees', Number(p.degrees ?? amount) || 0, -360, 360) || Math.max(-360, Math.min(360, Number(p.degrees ?? amount) || 0));
                     filters.push(`hue=h='${degrees}'`);
@@ -2170,13 +2402,13 @@ function compileTimelineVisualEffects(effects = [], { width = 1080, height = 192
                     const rawAmount = hasLegacyAmount ? read('amount', 8) : read('intensity', 0.2);
                     const intensityTrack = animated(hasLegacyAmount ? 'amount' : 'intensity', rawAmount,
                         hasLegacyAmount ? 0 : 0, hasLegacyAmount ? 32 : 1);
-                    const amount = Math.max(0, Math.min(32, hasLegacyAmount
-                        ? rawAmount
-                        : rawAmount * 40));
+                    const strength = Math.max(0, Math.min(1, hasLegacyAmount
+                        ? rawAmount / 32
+                        : rawAmount));
                     const seed = Math.max(0, Math.min(1000, read('seed', 17)));
-                    const sampledAmount = intensityTrack
-                        ? `(${intensityTrack.replace(/\bt\b/g, 'T')})*${hasLegacyAmount ? 1 : 40}`
-                        : amount.toFixed(4);
+                    const sampledStrength = intensityTrack
+                        ? `((${intensityTrack.replace(/\bt\b/g, 'T')})${hasLegacyAmount ? '/32' : ''})`
+                        : strength.toFixed(4);
                     const blockSize = Math.max(4, Math.min(128, read('blockSize', 32)));
                     const colorShift = effectParam(effect, 'colorShift', true) !== false;
                     const scanlines = effectParam(effect, 'scanlines', true) !== false;
@@ -2185,14 +2417,14 @@ function compileTimelineVisualEffects(effects = [], { width = 1080, height = 192
                     const blockY = `floor(Y/${blockSize.toFixed(4)})`;
                     const random = (x, y, salt = 0) => `mod(abs(sin((${x}+${salt})*12.9898+(${y}+${seed})*78.233)*43758.5453),1)`;
                     const blockRandom = random(`${blockX}+${frame}*0.17`, blockY);
-                    const displacement = `if(gt(${blockRandom},1-(${sampledAmount})/40*0.3),round((${random(blockX, blockY, 1)}-0.5)*(${sampledAmount})*0.1*W),0)`;
+                    const displacement = `if(gt(${blockRandom},1-(${sampledStrength})*0.3),round((${random(blockX, blockY, 1)}-0.5)*(${sampledStrength})*0.1*W),0)`;
                     const split = colorShift
-                        ? `if(gt(${random(blockX, blockY, 0.5)},0.7),(${random(blockX, blockY, 1)}-0.5)*(${sampledAmount})*0.02*W,0)`
+                        ? `if(gt(${random(blockX, blockY, 0.5)},0.7),(${random(blockX, blockY, 1)}-0.5)*(${sampledStrength})*0.02*W,0)`
                         : '0';
                     const redX = `clip(X+(${displacement})+(${split}),0,W-1)`;
                     const greenX = `clip(X+(${displacement}),0,W-1)`;
                     const blueX = `clip(X+(${displacement})-(${split}),0,W-1)`;
-                    const scanline = scanlines ? `(0.9+(sin(Y*PI)*0.5+0.5)*0.1)` : '1';
+                    const scanline = scanlines ? `(0.9+(sin((Y+0.5)*PI)*0.5+0.5)*0.1)` : '1';
                     filters.push(`format=rgba,geq=r='clip(r(${redX},Y)*${scanline},0,255)':g='clip(g(${greenX},Y)*${scanline},0,255)':b='clip(b(${blueX},Y)*${scanline},0,255)':a='alpha(X,Y)'`);
                     break;
                 }
@@ -3592,6 +3824,19 @@ module.exports = async function processExportJob(job) {
     let transparentGraphicsFrameCount = 0;
     let transparentCaptionLayers = null;
     const rawPlan = settings.compositionPlan || null;
+    // A plan may carry recoverable authoring limitations discovered on the
+    // client (for example a branched graph on a rasterized graphic layer).
+    // They are informational, but must survive to the finished export result:
+    // omitting a graph branch and returning an unqualified success would make
+    // the editor/export contract dishonest.
+    const compositionPlanWarnings = [...new Set((Array.isArray(rawPlan?.warnings) ? rawPlan.warnings : [])
+        .filter(warning => typeof warning === 'string' && warning.trim() && warning.length <= 600)
+        .map(warning => warning.trim()))];
+    if (compositionPlanWarnings.length) {
+        const shown = compositionPlanWarnings.slice(0, 3);
+        const remainder = compositionPlanWarnings.length - shown.length;
+        compositorWarning = `${shown.join(' ')}${remainder > 0 ? ` ${remainder} more composition warning(s).` : ''}`;
+    }
 
     // R63 — animated captions. Declared here, at function scope, NOT inside the
     // `if (textTracks.length > 0 && !useRevideo)` block further down where the
@@ -3637,8 +3882,39 @@ module.exports = async function processExportJob(job) {
             const skippedOverlayWarnings = [];
             const partialOverlayWarnings = [];
             const sceneLimitWarnings = [];
+            // Uploaded footage/images with a fork/join graph are rasterized
+            // into a local RGBA sequence before the normal compositor runs.
+            // Record those layers so their runtime plan does not apply source
+            // timing a second time (or leave an already-baked graph around).
+            const preRenderedGraphOverlayIds = new Set();
             for (let i = 0; i < overlays.length; i++) {
                 const ov = overlays[i];
+
+                // Templates/vectors already arrive as locally generated RGBA
+                // frames. Run their authored fork/join graph before geometry,
+                // masks and blend mode just as we do for uploaded media below.
+                const applyGeneratedGraphicEffectGraph = async (sequence) => {
+                    if (!ov.effectGraph) return sequence;
+                    try {
+                        return await renderGraphicEffectGraphSequence(sequence, ov.effectGraph, {
+                            tmpDir,
+                            name: `${i}-${ov.id}`,
+                            fps: targetFps,
+                            duration: Math.max(0.01, Number(ov.outputEnd) - Number(ov.outputStart)),
+                            // `effectGraph` stays in project-timeline time;
+                            // outputStart is a different clock once timeline
+                            // edits have removed/retimed ranges.
+                            clipStart: Number(ov.timelineStart) || 0,
+                        });
+                    } catch (graphErr) {
+                        // Preserve the unprocessed graphic as the recoverable
+                        // fallback, but make the failed graph impossible to
+                        // mistake for a complete render in the export result.
+                        console.warn(`  ⚠️  effect graph on generated graphic ${ov.id}:`, graphErr.message);
+                        partialOverlayWarnings.push(`Effect graph on graphic layer ${ov.id} could not be rendered: ${graphErr.message.slice(0, 220)}`);
+                        return sequence;
+                    }
+                };
 
                 if (ov.sourceTimeMapWarning) {
                     skippedOverlayWarnings.push(`Overlay ${ov.id} skipped: ${ov.sourceTimeMapWarning}`);
@@ -3661,8 +3937,9 @@ module.exports = async function processExportJob(job) {
                             name: `vector-${i}`,
                             motionBlur: ov.motionBlur,
                         });
+                        const renderedSequence = await applyGeneratedGraphicEffectGraph(seq);
                         inputs.push({ overlayId: ov.id, inputIndex: inputFiles.length + 1 });
-                        inputFiles.push({ path: seq.pattern, isImage: false, outputEnd: ov.outputEnd, sequenceFps: targetFps });
+                        inputFiles.push({ path: renderedSequence.pattern, isImage: false, outputEnd: ov.outputEnd, sequenceFps: targetFps });
                     } catch (vectorErr) {
                         console.warn(`  ⚠️  vector ${ov.id}: could not be drawn — layer skipped:`, vectorErr.message);
                         skippedOverlayWarnings.push(`Vector layer ${ov.id} could not be rendered`);
@@ -3795,8 +4072,9 @@ module.exports = async function processExportJob(job) {
                             mask: ov.sceneMask,
                             motionBlur: ov.motionBlur,
                         });
+                        const renderedSequence = await applyGeneratedGraphicEffectGraph(seq);
                         inputs.push({ overlayId: ov.id, inputIndex: inputFiles.length + 1 });
-                        inputFiles.push({ path: seq.pattern, isImage: false, outputEnd: ov.outputEnd, sequenceFps: targetFps });
+                        inputFiles.push({ path: renderedSequence.pattern, isImage: false, outputEnd: ov.outputEnd, sequenceFps: targetFps });
                     } catch (tplErr) {
                         console.warn(`  ⚠️  template ${ov.id}: could not be drawn — layer skipped:`, tplErr.message);
                         skippedOverlayWarnings.push(`Template layer ${ov.id} could not be rendered`);
@@ -3819,15 +4097,40 @@ module.exports = async function processExportJob(job) {
                     skippedOverlayWarnings.push(`Overlay ${ov.id} could not be loaded`);
                     continue;
                 }
+                let inputSource = src;
+                let rasterizedGraph = null;
+                if (ov.effectGraph) {
+                    try {
+                        rasterizedGraph = await renderOverlayEffectGraphSequence(src, ov, {
+                            tmpDir,
+                            name: `${i}-${ov.id}`,
+                            fps: targetFps,
+                            duration: Math.max(0.01, Number(ov.outputEnd) - Number(ov.outputStart)),
+                            // Graph windows/keyframes live on the authoring
+                            // timeline, not the output clock after cut/retime.
+                            clipStart: Number(ov.timelineStart) || 0,
+                        });
+                        inputSource = rasterizedGraph.pattern;
+                        preRenderedGraphOverlayIds.add(ov.id);
+                    } catch (graphErr) {
+                        // Keep the underlying layer exportable, but never hide
+                        // the fact that an authored complex graph was skipped.
+                        console.warn(`  ⚠️  effect graph on overlay ${ov.id}:`, graphErr.message);
+                        partialOverlayWarnings.push(`Effect graph on overlay layer ${ov.id} could not be rendered: ${graphErr.message.slice(0, 220)}`);
+                    }
+                }
                 // Input 0 is the base video, so overlay inputs start at 1.
                 inputs.push({ overlayId: ov.id, inputIndex: inputFiles.length + 1 });
                 inputFiles.push({
-                    path: src,
-                    isImage: ov.source?.type === 'image',
+                    path: inputSource,
+                    // A DAG-preprocessed source is a numbered PNG sequence,
+                    // even when its authored layer is an image/sticker.
+                    isImage: !rasterizedGraph && ov.source?.type === 'image',
                     outputEnd: ov.outputEnd,
+                    ...(rasterizedGraph ? { sequenceFps: targetFps } : {}),
                     // R88: a video overlay starts at its own in-point (clip.offset),
                     // not at the top of the file. Images/stickers have none.
-                    seek: ov.source?.type === 'video'
+                    seek: !rasterizedGraph && ov.source?.type === 'video'
                         ? Math.max(0, (Number(ov.sourceOffset) || 0) + (Array.isArray(ov.sourceTimeMap) && ov.sourceTimeMap.length
                             ? Math.min(...ov.sourceTimeMap.map(point => Number(point?.source) || 0))
                             : 0))
@@ -3835,7 +4138,20 @@ module.exports = async function processExportJob(job) {
                 });
             }
 
-            const compiled = compileCompositionPlan(rawPlan, inputs);
+            // The local sequence has already consumed source offset/speed/map
+            // and effectGraph. Geometry, masks, nesting, blend modes and the
+            // output-time window remain authored in the regular compiler.
+            const compositionPlan = preRenderedGraphOverlayIds.size
+                ? {
+                    ...rawPlan,
+                    overlays: rawPlan.overlays.map(overlay => {
+                        if (!preRenderedGraphOverlayIds.has(overlay.id)) return overlay;
+                        const { effectGraph, sourceTimeMap, sourceTimeMapWarning, ...runtimeOverlay } = overlay;
+                        return { ...runtimeOverlay, sourceOffset: 0, speed: 1 };
+                    }),
+                }
+                : rawPlan;
+            const compiled = compileCompositionPlan(compositionPlan, inputs);
             if (!compiled) {
                 const detail = skippedOverlayWarnings.slice(0, 3).join('; ');
                 const remainder = skippedOverlayWarnings.length - Math.min(3, skippedOverlayWarnings.length);
@@ -3864,7 +4180,7 @@ module.exports = async function processExportJob(job) {
             // layers over a transparent RGBA base. The ordinary PNG sequence
             // below remains the flattened finished video.
             if (['transparent-png-sequence', 'transparent-mov'].includes(String(settings.format || '').toLowerCase())) {
-                const alphaGraph = compileCompositionPlan(rawPlan, inputs, { preserveAlpha: true });
+                const alphaGraph = compileCompositionPlan(compositionPlan, inputs, { preserveAlpha: true });
                 if (!alphaGraph) throw new Error('no drawable graphic layers are available for a transparent sequence');
                 const duration = Math.max(0.1, Number(rawPlan.base?.totalDuration) || 0, cumulativeOut);
                 transparentGraphicsFrameCount = Math.max(1, Math.ceil(duration * targetFps));
@@ -4872,6 +5188,9 @@ module.exports.hasSelectiveGrade = hasSelectiveGrade;
 module.exports.compileClipColorGradeFilters = compileClipColorGradeFilters;
 module.exports.compileTimelineVisualEffectGraph = compileTimelineVisualEffectGraph;
 module.exports.compileTimelineVisualEffectDag = compileTimelineVisualEffectDag;
+module.exports.renderGraphicEffectGraphSequence = renderGraphicEffectGraphSequence;
+module.exports.renderOverlayEffectGraphSequence = renderOverlayEffectGraphSequence;
+module.exports.compileOverlaySourcePreparation = compileOverlaySourcePreparation;
 module.exports.compileTimelineAudioEffects = compileTimelineAudioEffects;
 module.exports.compileWindowedTimelineAudioEffects = compileWindowedTimelineAudioEffects;
 module.exports.applyWindowedTimelineAudioEffectsToFile = applyWindowedTimelineAudioEffectsToFile;

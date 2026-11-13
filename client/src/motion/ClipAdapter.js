@@ -243,6 +243,16 @@ export function motionLayerToClipUpdates(layer) {
     if (Number.isFinite(layer.x))         updates.x = layer.x;
     if (Number.isFinite(layer.y))         updates.y = layer.y;
     if (Number.isFinite(layer.scale))     updates.scale = layer.scale;
+    // MotionLayer axes are *relative* multipliers: the resolved horizontal
+    // scale is `scale * scaleX`. Timeline clips pre-date MotionLayer and
+    // persist their axes as absolute values. Convert at this boundary rather
+    // than writing the relative component directly; doing the latter makes a
+    // squash/stretch (and especially a mirror) shrink again on every
+    // read→edit→save cycle because clipToMotionLayer divides by `scale` on
+    // the way in.
+    const uniformScale = Number.isFinite(layer.scale) ? layer.scale : 1;
+    if (Number.isFinite(layer.scaleX))    updates.scaleX = uniformScale * layer.scaleX;
+    if (Number.isFinite(layer.scaleY))    updates.scaleY = uniformScale * layer.scaleY;
     if (Number.isFinite(layer.rotation))  updates.rotation = layer.rotation;
     if (Number.isFinite(layer.opacity))   updates.opacity = layer.opacity;
     if (Array.isArray(layer.animations))  updates.animations = layer.animations;

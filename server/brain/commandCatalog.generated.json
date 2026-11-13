@@ -183,8 +183,8 @@
       "execution": "This Brain response is advisory only; do not claim Auto ran or report an edit as complete."
     }
   },
-  "commandCount": 64,
-  "registryDeclaredCount": 62,
+  "commandCount": 69,
+  "registryDeclaredCount": 67,
   "supplementCount": 2,
   "commands": [
     {
@@ -1238,6 +1238,27 @@
       "macro": null
     },
     {
+      "id": "apply_aesthetic_preset",
+      "executes": "apply_aesthetic_preset",
+      "phrase": "dark luxury look",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Apply creator aesthetic look",
+      "summary": "Applies complete creator aesthetic styling (Vox documentary, Ali Abdaal minimal, MrBeast hyper-retention, Iman Gadzhi dark luxury, Apple minimal, Hormozi bold).",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "inputs": [],
+      "effects": "May update timeline or project state.",
+      "cost": "local",
+      "verification": "Require a checked execution result and verify the resulting timeline or asset state before reporting success.",
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
       "id": "apply_angle",
       "executes": "apply_angle",
       "phrase": "Apply camera angles",
@@ -1316,6 +1337,27 @@
       "registryDeclared": true,
       "label": "Apply footage effects",
       "summary": "Applies explicitly requested supported visual effects to the video clip under the playhead or selected video clips.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "inputs": [],
+      "effects": "May update timeline or project state.",
+      "cost": "local",
+      "verification": "Require a checked execution result and verify the resulting timeline or asset state before reporting success.",
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "apply_motion_expression",
+      "executes": "apply_motion_expression",
+      "phrase": "Apply motion expression",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Apply motion expression",
+      "summary": "Applies an After Effects motion expression (wiggle, loopOut pingpong, audioAmp bass, spring) to a layer property.",
       "requires": [
         "clips"
       ],
@@ -1689,6 +1731,69 @@
       "prefers": [
         "sceneAnalysis"
       ],
+      "provides": [],
+      "inputs": [],
+      "effects": "May update timeline or project state.",
+      "cost": "local",
+      "verification": "Require a checked execution result and verify the resulting timeline or asset state before reporting success.",
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "set_layer_parent",
+      "executes": "set_layer_parent",
+      "phrase": "Link layer to parent",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Link layer to parent",
+      "summary": "Parents a child layer to a host layer so it tracks its transform with relative coordinates.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "inputs": [],
+      "effects": "May update timeline or project state.",
+      "cost": "local",
+      "verification": "Require a checked execution result and verify the resulting timeline or asset state before reporting success.",
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "set_track_matte",
+      "executes": "set_track_matte",
+      "phrase": "Set track matte",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Set track matte",
+      "summary": "Sets an alpha or luminance track matte mask to cut out or reveal the target layer.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "inputs": [],
+      "effects": "May update timeline or project state.",
+      "cost": "local",
+      "verification": "Require a checked execution result and verify the resulting timeline or asset state before reporting success.",
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "set_vector_trim",
+      "executes": "set_vector_trim",
+      "phrase": "Animate vector trim path",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Animate vector trim path",
+      "summary": "Animates vector trim paths (trimStart, trimEnd, trimOffset) for kinetic draw-on strokes and borders.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
       "provides": [],
       "inputs": [],
       "effects": "May update timeline or project state.",

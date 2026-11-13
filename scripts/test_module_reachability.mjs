@@ -110,9 +110,22 @@ function resolveSpec(fromFile, spec) {
     return null;
 }
 
+/**
+ * Comments are stripped before scanning. A comment that quotes a relative path
+ * — and this codebase's comments quote them constantly, including the one in
+ * hooks/useEffects.js explaining which barrel it deliberately does NOT import
+ * — would otherwise register as a real import edge and mark a dead cluster
+ * live. That is the same class of false positive as matching by basename.
+ */
+function stripComments(src) {
+    return src
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/(^|[^:\\])\/\/[^\n]*/g, '$1');
+}
+
 const importers = new Map(files.map(f => [f, new Set()]));
 for (const f of files) {
-    const src = readFileSync(f, 'utf8');
+    const src = stripComments(readFileSync(f, 'utf8'));
     for (const re of [SPEC, WORKER_URL]) {
         for (const m of src.matchAll(re)) {
             const target = resolveSpec(f, m[1]);
@@ -161,6 +174,7 @@ const EXPECTED_DEAD = [
     'agent/ErrorRecoveryAgent.js',
     'agent/ExecutionSupervisor.js',
     'agent/LongFormVideoProcessor.js',
+    'agent/TimelineValidator.js',
     'agent/ToolExecutionResults.js',
     'agent/VersionManager.js',
     'agent/orchestrator/OrchestratorConfig.js',
@@ -170,10 +184,6 @@ const EXPECTED_DEAD = [
     'agent/orchestrator/index.js',
     'components/Assistant/composerTools.js',
     'components/AudioExportPanel.jsx',
-    'components/Effects/EffectControls.jsx',
-    'components/Effects/EffectsPanel.jsx',
-    'components/Effects/PresetBrowser.jsx',
-    'components/Effects/index.js',
     'components/Player/CaptionOverlay.jsx',
     'components/Player/DebugOverlay.jsx',
     'components/Player/FatigueAlert.jsx',
@@ -191,8 +201,6 @@ const EXPECTED_DEAD = [
     'effects/engines/CPUEffects.js',
     'effects/engines/GPUEffects.js',
     'effects/index.js',
-    'effects/presets/EffectPreset.js',
-    'effects/presets/PresetLibrary.js',
     'engine/MP4Demuxer.js',
     'engine/MasterClock.js',
     'engine/PlaybackEngine.js',
@@ -203,7 +211,6 @@ const EXPECTED_DEAD = [
     'engine/webglContextLifecycle.js',
     'hooks/index.js',
     'hooks/useAgentEvents.js',
-    'hooks/useEffects.js',
     'hooks/useJobRecovery.js',
     'hooks/useJobStatus.js',
     'motion/ArtDirector.js',
@@ -212,6 +219,7 @@ const EXPECTED_DEAD = [
     'motion/DirectorStoryteller.js',
     'motion/SpringPhysics.js',
     'motion/index.js',
+    'store/useEditorStore.js',
     'timeline/retimeMap.js',
     'utils/pendingJobs.js',
 ];

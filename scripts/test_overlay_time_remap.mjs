@@ -6,6 +6,19 @@ assert.equal(resolveOverlayVideoSourceTime({ start: 5, offset: 2, speed: 1.5 }, 
 assert.equal(resolveOverlayVideoPlaybackRate({ speed: 2 }, 4), 2,
     'legacy playback rate remains unchanged');
 
+const procedural = {
+    start: 10,
+    duration: 4,
+    offset: 1,
+    timeRemap: { duration: 8, expression: 't * 1.5' },
+};
+assert.equal(resolveOverlayVideoSourceTime(procedural, 12), 4,
+    'a procedural source-time expression maps local timeline time into source seconds');
+assert.ok(Math.abs(resolveOverlayVideoPlaybackRate(procedural, 12) - 1.5) < 0.02,
+    'native preview playback rate follows the procedural source-time expression');
+assert.equal(resolveOverlayVideoSourceTime({ ...procedural, timeRemap: { duration: 8, expression: 'window.alert(1)' } }, 12), 3,
+    'an invalid procedural expression safely falls back to legacy timing');
+
 const retimed = {
     start: 10,
     duration: 4,

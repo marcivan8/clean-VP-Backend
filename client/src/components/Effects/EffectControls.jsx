@@ -137,7 +137,7 @@ const SliderControl = ({
                     aria-label={`${label} expression formula`}
                     aria-invalid={!!expressionError}
                     aria-describedby={expressionError ? `${name}-expression-error` : undefined}
-                    title="Use t, time, duration, progress, value, wiggle(), or noise()"
+                    title="Use t, time, duration, progress, value, math functions, wiggle(), or noise()"
                     value={expressionDraft}
                     placeholder="0.5 + sin(t)"
                     onChange={event => { setExpressionDraft(event.target.value); setExpressionError(''); }}

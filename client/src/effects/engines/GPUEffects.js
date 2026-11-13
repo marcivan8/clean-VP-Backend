@@ -486,11 +486,12 @@ uniform bool u_colorShift;
 uniform bool u_scanlines;
 uniform float u_time;
 uniform vec2 u_resolution;
+uniform float u_seed;
 
 out vec4 outColor;
 
 float random(vec2 st) {
-    return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+    return mod(abs(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453), 1.0);
 }
 
 void main() {
@@ -498,18 +499,19 @@ void main() {
     
     // Block displacement
     vec2 blockCoord = floor(uv * u_resolution / u_blockSize);
-    float blockRandom = random(blockCoord + floor(u_time * 10.0));
+    float frame = floor(u_time * 12.0);
+    float blockRandom = random(blockCoord + vec2(frame * 0.17, u_seed));
     
     if (blockRandom > 1.0 - u_intensity * 0.3) {
-        uv.x += (random(blockCoord) - 0.5) * u_intensity * 0.1;
+        uv.x += (random(blockCoord + vec2(1.0, u_seed)) - 0.5) * u_intensity * 0.1;
     }
     
     // Sample color
     vec4 color = texture(u_image, uv);
     
     // Color shift
-    if (u_colorShift && random(blockCoord + 0.5) > 0.7) {
-        float shift = (random(blockCoord + 1.0) - 0.5) * u_intensity * 0.02;
+    if (u_colorShift && random(blockCoord + vec2(0.5, u_seed)) > 0.7) {
+        float shift = (random(blockCoord + vec2(1.0, u_seed)) - 0.5) * u_intensity * 0.02;
         color.r = texture(u_image, uv + vec2(shift, 0.0)).r;
         color.b = texture(u_image, uv - vec2(shift, 0.0)).b;
     }
@@ -524,6 +526,17 @@ void main() {
 }`,
 
     // === Color Grade ===
+    invert: `#version 300 es
+precision mediump float;
+in vec2 v_texCoord;
+uniform sampler2D u_image;
+uniform float u_amount;
+out vec4 outColor;
+void main() {
+    vec4 source = texture(u_image, v_texCoord);
+    outColor = vec4(mix(source.rgb, vec3(1.0) - source.rgb, clamp(u_amount, 0.0, 1.0)), source.a);
+}`,
+
     color_grade: `#version 300 es
 precision mediump float;
 
@@ -631,7 +644,8 @@ const GPU_COMPOSITE_MODE_IDS = Object.freeze({
 
 /** Return the shader mode for a supported blend name, or null if unsupported. */
 export function resolveGpuCompositeModeId(mode) {
-    const key = String(mode ?? 'source-over').trim().toLowerCase();
+    const raw = String(mode ?? 'source-over').trim().toLowerCase();
+    const key = raw === 'normal' ? 'source-over' : ['add', 'plus-lighter'].includes(raw) ? 'addition' : raw;
     return Object.hasOwn(GPU_COMPOSITE_MODE_IDS, key) ? GPU_COMPOSITE_MODE_IDS[key] : null;
 }
 
@@ -1139,6 +1153,10 @@ export class GPUEffectEngine {
         const samples = (key, fallback, min) => Math.round(number(key, fallback, min, 64));
         const boolean = (key, fallback) => Boolean(value(key, fallback));
         switch (type) {
+            case 'invert':
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_amount'), number('amount', 1, 0, 1));
+                break;
+
             case 'blur_gaussian':
                 gl.uniform1f(this._uniformLocation(gl, program, 'u_radius'), number('radius', 5, 0, 50));
                 gl.uniform1i(this._uniformLocation(gl, program, 'u_quality'), Math.min(32, samples('quality', 8, 4)));
@@ -1205,9 +1223,10 @@ export class GPUEffectEngine {
             case 'glitch':
                 gl.uniform1f(this._uniformLocation(gl, program, 'u_intensity'), number('intensity', 0.3, 0, 1));
                 gl.uniform1f(this._uniformLocation(gl, program, 'u_blockSize'), number('blockSize', 32, 4, 128));
-                gl.uniform1i(this._uniformLocation(gl, program, 'u_colorShift'), boolean('colorShift', false) ? 1 : 0);
-                gl.uniform1i(this._uniformLocation(gl, program, 'u_scanlines'), boolean('scanlines', false) ? 1 : 0);
+                gl.uniform1i(this._uniformLocation(gl, program, 'u_colorShift'), boolean('colorShift', true) ? 1 : 0);
+                gl.uniform1i(this._uniformLocation(gl, program, 'u_scanlines'), boolean('scanlines', true) ? 1 : 0);
                 gl.uniform1f(this._uniformLocation(gl, program, 'u_time'), Number.isFinite(Number(time)) ? Number(time) : 0);
+                gl.uniform1f(this._uniformLocation(gl, program, 'u_seed'), number('seed', 17, 0, 1000));
                 break;
 
             case 'color_grade':

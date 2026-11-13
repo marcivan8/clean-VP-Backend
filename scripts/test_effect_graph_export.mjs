@@ -1,12 +1,21 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
 import { EffectGraph } from '../client/src/effects/EffectGraph.js';
 import { EffectPipeline } from '../client/src/effects/EffectPipeline.js';
 
 const require = createRequire(import.meta.url);
-const { compileTimelineVisualEffectDag, compileTimelineVisualEffectGraph } = require('../jobs/exportProcessor.js');
+const {
+    compileTimelineVisualEffectDag,
+    compileTimelineVisualEffectGraph,
+    renderGraphicEffectGraphSequence,
+    renderOverlayEffectGraphSequence,
+    compileOverlaySourcePreparation,
+} = require('../jobs/exportProcessor.js');
 
 const clip = { id: 'clip-target', start: 0, duration: 1, effects: [] };
 const graph = new EffectGraph();
@@ -139,6 +148,90 @@ if (ffmpegPath) {
         ], { encoding: null, maxBuffer: 1024 * 1024 });
         assert.equal(blendRender.status, 0, `FFmpeg renders the ${mode} branch composite: ${String(blendRender.stderr || '')}`);
         assert.equal(blendRender.stdout.length, frameSize, `the ${mode} composite emits one full frame`);
+    }
+
+    // Generated template/vector layers arrive at the compositor as local PNG
+    // sequences. A branch graph must be evaluated against that RGBA sequence
+    // before layer geometry and masks, not flattened into its linear stack.
+    const graphicTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vibed-graphic-dag-'));
+    try {
+        const sourceDir = path.join(graphicTmp, 'source');
+        fs.mkdirSync(sourceDir, { recursive: true });
+        const sourcePattern = path.join(sourceDir, 'f%05d.png');
+        const graphicSource = spawnSync(ffmpegPath, [
+            '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=64x64:r=10:d=0.3',
+            '-frames:v', '3', '-start_number', '0', '-c:v', 'png', '-pix_fmt', 'rgba', '-y', sourcePattern,
+        ], { encoding: null, maxBuffer: 1024 * 1024 });
+        assert.equal(graphicSource.status, 0, `FFmpeg creates the RGBA graphic sequence: ${String(graphicSource.stderr || '')}`);
+        const graphicResult = await renderGraphicEffectGraphSequence({
+            pattern: sourcePattern, frames: 3, width: 64, height: 64,
+        }, exportedClip.effectGraph, {
+            tmpDir: graphicTmp, name: 'branched', fps: 10, duration: 0.3, clipStart: 4,
+        });
+        assert.equal(graphicResult.files.length, 3, 'the graphic DAG pass preserves the rendered sequence frame count');
+        assert.ok(graphicResult.files.every(file => fs.existsSync(file)), 'the graphic DAG pass writes every RGBA frame');
+        assert.ok(!fs.readFileSync(sourcePattern.replace('%05d', '00000')).equals(fs.readFileSync(graphicResult.files[0])),
+            'the branched graph changes generated graphic pixels before composition');
+
+        const windowedGraphicDag = structuredClone(exportedClip.effectGraph);
+        const graphRoot = windowedGraphicDag.nodes.find(node => node.id === 'root');
+        graphRoot.startTime = 4.1;
+        graphRoot.endTime = 4.2;
+        await renderGraphicEffectGraphSequence({
+            pattern: sourcePattern, frames: 3, width: 64, height: 64,
+        }, windowedGraphicDag, {
+            tmpDir: graphicTmp, name: 'timeline-clock', fps: 10, duration: 0.3, clipStart: 4,
+        });
+        const localGraphScript = fs.readFileSync(path.join(graphicTmp, 'graphic-effect-graph-timeline-clock', 'effect-graph.txt'), 'utf8');
+        assert.match(localGraphScript, /gte\(t,0\.100000\).*lt\(t,0\.200000\)/,
+            'generated graphic effect windows are converted from project time to their local PNG-sequence clock');
+
+        // Uploaded raster media takes the same true-DAG path. It must be
+        // processed after source timing but before any composition geometry;
+        // a PNG sequence preserves alpha for the normal layer compiler.
+        const imageOverlay = {
+            id: 'uploaded-image-dag', source: { type: 'image' }, effectGraph: exportedClip.effectGraph,
+            sourceOffset: 0, speed: 1,
+        };
+        const imageResult = await renderOverlayEffectGraphSequence(sourcePattern.replace('%05d', '00000'), imageOverlay, {
+            tmpDir: graphicTmp, name: 'uploaded-image', fps: 10, duration: 0.3, clipStart: 4,
+        });
+        assert.equal(imageResult.files.length, 3, 'an uploaded image DAG produces one local RGBA frame per output frame');
+        assert.ok(!fs.readFileSync(sourcePattern.replace('%05d', '00000')).equals(fs.readFileSync(imageResult.files[0])),
+            'the branch graph changes uploaded image pixels before composition');
+
+        const sourceVideo = path.join(graphicTmp, 'source-video.mp4');
+        const videoSource = spawnSync(ffmpegPath, [
+            '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=64x64:r=10:d=1',
+            '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-y', sourceVideo,
+        ], { encoding: null, maxBuffer: 1024 * 1024 });
+        assert.equal(videoSource.status, 0, `FFmpeg creates the overlay video source: ${String(videoSource.stderr || '')}`);
+        const videoOverlay = {
+            id: 'uploaded-video-dag', source: { type: 'video' }, effectGraph: exportedClip.effectGraph,
+            sourceOffset: 0, speed: 2,
+        };
+        const videoResult = await renderOverlayEffectGraphSequence(sourceVideo, videoOverlay, {
+            tmpDir: graphicTmp, name: 'uploaded-video', fps: 10, duration: 0.3, clipStart: 4,
+        });
+        assert.equal(videoResult.files.length, 3, 'an uploaded video DAG preserves the requested local frame count');
+        assert.ok(!fs.readFileSync(videoResult.files[0]).equals(fs.readFileSync(sourcePattern.replace('%05d', '00000'))),
+            'the branch graph is applied to uploaded video before composition');
+        assert.ok(compileOverlaySourcePreparation({ source: { type: 'video' }, speed: 2 }).join(',').includes('/2.000000'),
+            'uploaded-media prepass honors authored overlay speed');
+        assert.ok(compileOverlaySourcePreparation({
+            source: { type: 'video' }, sourceTimeMap: [{ source: 0.8, output: 0 }, { source: 0.2, output: 0.3 }],
+        }).join(',').includes('reverse'), 'uploaded-media prepass honors reverse source-time maps');
+        const reverseResult = await renderOverlayEffectGraphSequence(sourceVideo, {
+            ...videoOverlay,
+            id: 'uploaded-video-reverse-dag',
+            sourceTimeMap: [{ source: 0.8, output: 0 }, { source: 0.2, output: 0.3 }],
+        }, {
+            tmpDir: graphicTmp, name: 'uploaded-video-reverse', fps: 10, duration: 0.3, clipStart: 4,
+        });
+        assert.equal(reverseResult.files.length, 3,
+            'the uploaded-media DAG prepass renders every requested frame through a reverse source-time map');
+    } finally {
+        fs.rmSync(graphicTmp, { recursive: true, force: true });
     }
 } else {
     console.log('FFmpeg pixel render skipped: ffmpeg-static is unavailable');

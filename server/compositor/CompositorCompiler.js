@@ -318,6 +318,82 @@ function compileIsolatedGroupEffects(group, groupToken = 'group', frame = { widt
                 parts.push(`format=rgba,geq=r='${channel('r', '0.393', '0.769', '0.189')}':g='${channel('g', '0.349', '0.686', '0.168')}':b='${channel('b', '0.272', '0.534', '0.131')}':a='alpha(X,Y)'`);
                 break;
             }
+            case 'invert': {
+                const amount = Math.max(0, Math.min(1, read('amount', read('value', 1))));
+                const expression = String(sampled('amount') || n4(amount)).replace(/\bt\b/g, 'T');
+                const channel = name => `clip(${name}(X,Y)*(1-2*(${expression}))+255*(${expression}),0,255)`;
+                parts.push(`format=rgba,geq=r='${channel('r')}':g='${channel('g')}':b='${channel('b')}':a='alpha(X,Y)'`);
+                break;
+            }
+            case 'chromatic-aberration': case 'rgb_split': {
+                const radial = kind === 'rgb_split';
+                const maxAmount = radial ? 50 : 12;
+                const rawAmount = read('amount', radial ? 5 : 2);
+                const amount = Math.max(0, Math.min(maxAmount, rawAmount));
+                const asGeq = (key, fallback, min, max) => String(sampled(key) || n4(Math.max(min, Math.min(max, fallback))))
+                    .replace(/\bt\b/g, 'T').replace(/,/g, '\\,');
+                const shift = asGeq('amount', amount, 0, maxAmount);
+                const angle = `((${asGeq('angle', read('angle', 0), -360, 360)})*PI/180)`;
+                const centerX = asGeq('centerX', read('centerX', 0.5), 0, 1);
+                const centerY = asGeq('centerY', read('centerY', 0.5), 0, 1);
+                const dx = radial ? `(cos(${angle})*(${shift}))` : `(${shift})`;
+                const dy = radial ? `(sin(${angle})*(${shift}))` : '0';
+                const radialDistance = radial ? `sqrt(pow(X/W-(${centerX}),2)+pow(Y/H-(${centerY}),2))` : '1';
+                const redX = `clip(X+(${dx})*(${radialDistance}),0,W-1)`;
+                const redY = `clip(Y+(${dy})*(${radialDistance}),0,H-1)`;
+                const blueX = `clip(X-(${dx})*(${radialDistance}),0,W-1)`;
+                const blueY = `clip(Y-(${dy})*(${radialDistance}),0,H-1)`;
+                parts.push(`format=rgba,geq=r='r(${redX},${redY})':g='g(X,Y)':b='b(${blueX},${blueY})':a='alpha(X,Y)'`);
+                break;
+            }
+            case 'distortion': {
+                const rawAmount = read('amount', 0.018);
+                const amount = Math.max(0, Math.min(0.08, rawAmount));
+                const expression = key => String(sampled(key) || n4(key === 'amount' ? amount : read('phase', 0)))
+                    .replace(/\bt\b/g, 'T').replace(/,/g, '\\,');
+                const sampledAmount = expression('amount');
+                const sampledPhase = expression('phase');
+                const sx = `clip(X+sin(Y*0.045+(${sampledPhase}))*(${sampledAmount})*W,0,W-1)`;
+                const sy = `clip(Y+sin(X*0.04)*(${sampledAmount})*H,0,H-1)`;
+                parts.push(`format=rgba,geq=r='r(${sx},${sy})':g='g(${sx},${sy})':b='b(${sx},${sy})':a='alpha(${sx},${sy})'`);
+                break;
+            }
+            case 'glitch': {
+                const hasLegacyAmount = p.amount != null || effect.samples?.amount;
+                const control = hasLegacyAmount ? 'amount' : 'intensity';
+                const fallback = hasLegacyAmount ? 8 : 0.2;
+                const max = hasLegacyAmount ? 32 : 1;
+                const raw = read(control, fallback);
+                const value = Math.max(0, Math.min(max, raw));
+                const controlTrack = sampled(control);
+                const strength = controlTrack
+                    ? `((${String(controlTrack).replace(/\bt\b/g, 'T').replace(/,/g, '\\,')})${hasLegacyAmount ? '/32' : ''})`
+                    : n4(hasLegacyAmount ? value / 32 : value);
+                const rawBlockSize = read('blockSize', 32);
+                const blockSize = Math.max(4, Math.min(128, rawBlockSize));
+                const blockTrack = sampled('blockSize');
+                const block = blockTrack
+                    ? `(${String(blockTrack).replace(/\bt\b/g, 'T').replace(/,/g, '\\,')})`
+                    : n4(blockSize);
+                const seed = Math.max(0, Math.min(1000, read('seed', 17)));
+                const frame = 'floor(T*12)';
+                const blockX = `floor(X/(${block}))`;
+                const blockY = `floor(Y/(${block}))`;
+                const random = (x, y, salt = 0) => `mod(abs(sin((${x}+${salt})*12.9898+(${y}+${seed})*78.233)*43758.5453),1)`;
+                const blockRandom = random(`${blockX}+${frame}*0.17`, blockY);
+                const displacement = `if(gt(${blockRandom},1-(${strength})*0.3),round((${random(blockX, blockY, 1)}-0.5)*(${strength})*0.1*W),0)`;
+                const colorShift = (p.colorShift?.value ?? p.colorShift) !== false;
+                const scanlines = (p.scanlines?.value ?? p.scanlines) !== false;
+                const split = colorShift
+                    ? `if(gt(${random(blockX, blockY, 0.5)},0.7),(${random(blockX, blockY, 1)}-0.5)*(${strength})*0.02*W,0)`
+                    : '0';
+                const redX = `clip(X+(${displacement})+(${split}),0,W-1)`;
+                const greenX = `clip(X+(${displacement}),0,W-1)`;
+                const blueX = `clip(X+(${displacement})-(${split}),0,W-1)`;
+                const scanline = scanlines ? '(0.9+(sin((Y+0.5)*PI)*0.5+0.5)*0.1)' : '1';
+                parts.push(`format=rgba,geq=r='clip(r(${redX},Y)*${scanline},0,255)':g='clip(g(${greenX},Y)*${scanline},0,255)':b='clip(b(${blueX},Y)*${scanline},0,255)':a='alpha(X,Y)'`);
+                break;
+            }
             case 'vignette': {
                 const intensity = Math.max(0, Math.min(1, read('intensity', 0.5)));
                 const radius = Math.max(0.1, Math.min(1.5, read('radius', 0.7)));
@@ -877,6 +953,15 @@ function compileOverlaySource(ov, inputIdx, label, frame, options = {}) {
                 parts.push(`format=rgba,geq=r='${channel('r', '0.393', '0.769', '0.189')}':g='${channel('g', '0.349', '0.686', '0.168')}':b='${channel('b', '0.272', '0.534', '0.131')}':a='alpha(X,Y)'`);
                 break;
             }
+            case 'invert': {
+                const raw = Number(p.amount?.value ?? p.amount ?? p.value?.value ?? p.value);
+                const amount = Math.max(0, Math.min(1, Number.isFinite(raw) ? raw : 1));
+                const expression = effectExpr('amount', amount, 0, 1);
+                const strength = String(expression || n4(amount)).replace(/\bt\b/g, 'T');
+                const channel = name => `clip(${name}(X,Y)*(1-2*(${strength}))+255*(${strength}),0,255)`;
+                parts.push(`format=rgba,geq=r='${channel('r')}':g='${channel('g')}':b='${channel('b')}':a='alpha(X,Y)'`);
+                break;
+            }
             case 'hue': case 'hue-rotate': {
                 const raw = Number(p.degrees?.value ?? p.degrees ?? p.amount?.value ?? p.amount) || 0;
                 const expression = effectExpr(p.degrees !== undefined ? 'degrees' : 'amount', raw, -360, 360);
@@ -1023,12 +1108,12 @@ function compileOverlaySource(ov, inputIdx, label, frame, options = {}) {
                 const controlValue = Number.isFinite(rawControl)
                     ? Math.max(0, Math.min(hasLegacyAmount ? 32 : 1, rawControl))
                     : (hasLegacyAmount ? 8 : 0.2);
-                const amount = hasLegacyAmount ? controlValue : controlValue * 40;
+                const strength = hasLegacyAmount ? controlValue / 32 : controlValue;
                 const seed = Math.max(0, Math.min(1000, Number(p.seed?.value ?? p.seed) || 17));
                 const amountTrack = effectExpr(control, controlValue, 0, hasLegacyAmount ? 32 : 1);
-                const sampledAmount = amountTrack
-                    ? `(${amountTrack.replace(/\bt\b/g, 'T')})*${hasLegacyAmount ? 1 : 40}`
-                    : n4(amount);
+                const sampledStrength = amountTrack
+                    ? `((${amountTrack.replace(/\bt\b/g, 'T')})${hasLegacyAmount ? '/32' : ''})`
+                    : n4(strength);
                 const rawBlockSize = Number(p.blockSize?.value ?? p.blockSize ?? 32);
                 const blockSize = Number.isFinite(rawBlockSize) ? Math.max(4, Math.min(128, rawBlockSize)) : 32;
                 const blockSizeTrack = effectExpr('blockSize', blockSize, 4, 128);
@@ -1038,16 +1123,16 @@ function compileOverlaySource(ov, inputIdx, label, frame, options = {}) {
                 const blockY = `floor(Y/(${sampledBlockSize}))`;
                 const random = (x, y, salt = 0) => `mod(abs(sin((${x}+${salt})*12.9898+(${y}+${seed})*78.233)*43758.5453),1)`;
                 const blockRandom = random(`${blockX}+${frame}*0.17`, blockY);
-                const displacement = `if(gt(${blockRandom},1-(${sampledAmount})/40*0.3),round((${random(blockX, blockY, 1)}-0.5)*(${sampledAmount})*0.1*W),0)`;
+                const displacement = `if(gt(${blockRandom},1-(${sampledStrength})*0.3),round((${random(blockX, blockY, 1)}-0.5)*(${sampledStrength})*0.1*W),0)`;
                 const colorShift = (p.colorShift?.value ?? p.colorShift) !== false;
                 const scanlines = (p.scanlines?.value ?? p.scanlines) !== false;
                 const split = colorShift
-                    ? `if(gt(${random(blockX, blockY, 0.5)},0.7),(${random(blockX, blockY, 1)}-0.5)*(${sampledAmount})*0.02*W,0)`
+                    ? `if(gt(${random(blockX, blockY, 0.5)},0.7),(${random(blockX, blockY, 1)}-0.5)*(${sampledStrength})*0.02*W,0)`
                     : '0';
                 const redX = `clip(X+(${displacement})+(${split}),0,W-1)`;
                 const greenX = `clip(X+(${displacement}),0,W-1)`;
                 const blueX = `clip(X+(${displacement})-(${split}),0,W-1)`;
-                const scanline = scanlines ? '(0.9+(sin(Y*PI)*0.5+0.5)*0.1)' : '1';
+                const scanline = scanlines ? '(0.9+(sin((Y+0.5)*PI)*0.5+0.5)*0.1)' : '1';
                 parts.push(`format=rgba,geq=r='clip(r(${redX},Y)*${scanline},0,255)':g='clip(g(${greenX},Y)*${scanline},0,255)':b='clip(b(${blueX},Y)*${scanline},0,255)':a='alpha(X,Y)'`);
                 break;
             }
@@ -2065,7 +2150,7 @@ const SUPPORTED_BLEND_MODE_KINDS = Object.freeze([...BLEND_MODES]);
 const SUPPORTED_OVERLAY_EFFECTS = new Set([
     'gradient-fill', 'fade_in', 'fade_out', 'blur', 'blur_gaussian', 'blur_radial',
     'blur_motion', 'motion-blur', 'shake', 'brightness', 'contrast', 'saturation',
-    'saturate', 'hue', 'hue-rotate', 'grayscale', 'sepia', 'color_grade', 'grain', 'film_grain', 'film-grain',
+    'saturate', 'hue', 'hue-rotate', 'grayscale', 'sepia', 'invert', 'color_grade', 'grain', 'film_grain', 'film-grain',
     'chromatic-aberration', 'rgb_split', 'distortion', 'vignette', 'glitch', 'inner-shadow',
     // These are compiled as dedicated alpha/top/stroke passes rather than by
     // compileOverlaySource's main effect switch. They still need to pass the
@@ -2077,7 +2162,7 @@ const SUPPORTED_OVERLAY_EFFECTS = new Set([
 function validIsolatedGroupEffect(effect) {
     if (effect?.enabled === false) return true;
     const kind = effect?.kind || effect?.type;
-    if (!['gradient-fill', 'inner-shadow', 'stroke', 'shadow', 'drop-shadow', 'blur', 'blur_gaussian', 'brightness', 'contrast', 'saturation', 'saturate', 'grayscale', 'sepia', 'vignette', 'grain', 'film_grain', 'film-grain', 'hue', 'hue-rotate', 'color_grade', 'glow'].includes(kind)) return false;
+    if (!['gradient-fill', 'inner-shadow', 'stroke', 'shadow', 'drop-shadow', 'blur', 'blur_gaussian', 'brightness', 'contrast', 'saturation', 'saturate', 'grayscale', 'sepia', 'invert', 'chromatic-aberration', 'rgb_split', 'distortion', 'glitch', 'vignette', 'grain', 'film_grain', 'film-grain', 'hue', 'hue-rotate', 'color_grade', 'glow'].includes(kind)) return false;
     if (effect.keyframes || effect.expressions) return false;
     const samples = effect.samples;
     if (kind === 'gradient-fill') {
@@ -2202,6 +2287,60 @@ function validIsolatedGroupEffect(effect) {
             if (!Array.isArray(points) || points.length === 0 || points.length > 60 || points.some((point, index) => !point
                 || !hasNumericValue(point.t) || Number(point.t) < 0 || !hasNumericValue(point.value)
                 || Number(point.value) < limits[key][0] || Number(point.value) > limits[key][1]
+                || (index > 0 && Number(point.t) <= Number(points[index - 1]?.t)))) return false;
+        }
+        return effect.outputWindows == null || (Array.isArray(effect.outputWindows) && effect.outputWindows.every(window =>
+            window && hasNumericValue(window.start) && hasNumericValue(window.end) && Number(window.start) >= 0 && Number(window.end) > Number(window.start)));
+    }
+    if (kind === 'invert') {
+        const points = samples.amount;
+        if (!Array.isArray(points) || points.length === 0 || points.length > 60
+            || Object.keys(samples).some(key => key !== 'amount')
+            || points.some((point, index) => !point || !hasNumericValue(point.t) || Number(point.t) < 0
+                || !hasNumericValue(point.value) || Number(point.value) < 0 || Number(point.value) > 1
+                || (index > 0 && Number(point.t) <= Number(points[index - 1]?.t)))) return false;
+        return effect.outputWindows == null || (Array.isArray(effect.outputWindows) && effect.outputWindows.every(window =>
+            window && hasNumericValue(window.start) && hasNumericValue(window.end) && Number(window.start) >= 0 && Number(window.end) > Number(window.start)));
+    }
+    if (kind === 'chromatic-aberration' || kind === 'rgb_split') {
+        const limits = kind === 'rgb_split'
+            ? { amount: [0, 50], angle: [-360, 360], centerX: [0, 1], centerY: [0, 1] }
+            : { amount: [0, 12] };
+        if (!samples || !Object.keys(samples).length || Object.keys(samples).some(key => !limits[key])) return false;
+        for (const [key, points] of Object.entries(samples)) {
+            const [min, max] = limits[key];
+            if (!Array.isArray(points) || points.length === 0 || points.length > 60 || points.some((point, index) => !point
+                || !hasNumericValue(point.t) || Number(point.t) < 0 || !hasNumericValue(point.value)
+                || Number(point.value) < min || Number(point.value) > max
+                || (index > 0 && Number(point.t) <= Number(points[index - 1]?.t)))) return false;
+        }
+        return effect.outputWindows == null || (Array.isArray(effect.outputWindows) && effect.outputWindows.every(window =>
+            window && hasNumericValue(window.start) && hasNumericValue(window.end) && Number(window.start) >= 0 && Number(window.end) > Number(window.start)));
+    }
+    if (kind === 'distortion') {
+        const limits = { amount: [0, 0.08], phase: [-360, 360] };
+        if (!samples || !Object.keys(samples).length || Object.keys(samples).some(key => !limits[key])) return false;
+        for (const [key, points] of Object.entries(samples)) {
+            const [min, max] = limits[key];
+            if (!Array.isArray(points) || points.length === 0 || points.length > 60 || points.some((point, index) => !point
+                || !hasNumericValue(point.t) || Number(point.t) < 0 || !hasNumericValue(point.value)
+                || Number(point.value) < min || Number(point.value) > max
+                || (index > 0 && Number(point.t) <= Number(points[index - 1]?.t)))) return false;
+        }
+        return effect.outputWindows == null || (Array.isArray(effect.outputWindows) && effect.outputWindows.every(window =>
+            window && hasNumericValue(window.start) && hasNumericValue(window.end) && Number(window.start) >= 0 && Number(window.end) > Number(window.start)));
+    }
+    if (kind === 'glitch') {
+        if (samples == null) return effect.outputWindows == null;
+        if (!samples || typeof samples !== 'object' || Array.isArray(samples)) return false;
+        const control = Object.hasOwn(samples, 'amount') ? 'amount' : 'intensity';
+        const limits = { [control]: control === 'amount' ? [0, 32] : [0, 1], blockSize: [4, 128] };
+        if (!Object.keys(samples).length || Object.keys(samples).some(key => !limits[key])) return false;
+        for (const [key, points] of Object.entries(samples)) {
+            const [min, max] = limits[key];
+            if (!Array.isArray(points) || points.length === 0 || points.length > 60 || points.some((point, index) => !point
+                || !hasNumericValue(point.t) || Number(point.t) < 0 || !hasNumericValue(point.value)
+                || Number(point.value) < min || Number(point.value) > max
                 || (index > 0 && Number(point.t) <= Number(points[index - 1]?.t)))) return false;
         }
         return effect.outputWindows == null || (Array.isArray(effect.outputWindows) && effect.outputWindows.every(window =>
@@ -2351,6 +2490,10 @@ function validateCompositionPlanShape(plan, frameWidth, frameHeight) {
 
     if (!Array.isArray(plan.overlays)) return ['plan.overlays is not an array'];
     if (plan.overlays.length === 0) errors.push('plan has no overlays');
+    if (plan.warnings != null && (!Array.isArray(plan.warnings)
+        || plan.warnings.some(warning => typeof warning !== 'string' || !warning.trim() || warning.length > 600))) {
+        errors.push('plan warnings must be short non-empty strings');
+    }
 
     // Geometry is normalised, so a resolution change is harmless — but ASPECT
     // is baked in (a height fraction was derived from a width fraction using the
@@ -2413,6 +2556,14 @@ function validateCompositionPlanShape(plan, frameWidth, frameHeight) {
         if (ov.blendMode && !['source-over', ...BLEND_MODES].includes(ov.blendMode)) errors.push(`overlays[${i}] has unsupported blend mode ${ov.blendMode}`);
         if (ov.effects != null && (!Array.isArray(ov.effects) || ov.effects.some(effect => !validOverlayEffectSamples(effect)))) {
             errors.push(`overlays[${i}] has malformed or over-budget effect samples`);
+        }
+        // Complex graphs are rasterized onto a bounded local RGBA sequence
+        // before this compiler applies layer geometry. The worker accepts the
+        // same graph contract for uploaded media and generated graphics.
+        if (ov.effectGraph != null) {
+            if (!hasNumericValue(ov.timelineStart) || Number(ov.timelineStart) < 0) {
+                errors.push(`overlays[${i}] has an invalid effect graph timeline start`);
+            }
         }
         for (const effect of Array.isArray(ov.effects) ? ov.effects : []) {
             if (effect?.enabled === false) continue;

@@ -1,6 +1,6 @@
 /** Shared, serialisable canvas effects for scene graphic layers. */
 
-import { resolveEffectParameter } from './EffectTiming.js';
+import { getEffectKeyframeTrack, resolveEffectParameter } from './EffectTiming.js';
 
 // This is also consumed by SceneValidator. Keeping validation tied to the
 // renderer's executable set prevents scenes from being declared valid for an
@@ -8,7 +8,7 @@ import { resolveEffectParameter } from './EffectTiming.js';
 export const GRAPHIC_EFFECT_KINDS = Object.freeze([
     'shadow', 'drop-shadow', 'glow', 'blur', 'blur_gaussian', 'blur_radial', 'blur_motion',
     'shake', 'grain', 'gradient-fill', 'stroke', 'inner-shadow',
-    'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate', 'grayscale', 'sepia',
+    'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate', 'grayscale', 'sepia', 'invert',
     'chromatic-aberration', 'rgb_split', 'film_grain', 'film-grain', 'motion-blur',
     'distortion', 'color_grade', 'vignette', 'glitch', 'fade_in', 'fade_out',
 ]);
@@ -61,7 +61,7 @@ function sampleEffect(effect, timeSeconds, context = {}) {
     const params = effect?.params || {};
     const sampled = { ...params };
     for (const [key, raw] of Object.entries(params)) {
-        const track = effect?.keyframes?.[key] || raw?.keyframes;
+        const track = getEffectKeyframeTrack(effect, key, raw);
         const expression = effect?.expressions?.[key] ?? raw?.expression;
         if ((!Array.isArray(track) || !track.length) && typeof expression !== 'string') continue;
         const base = raw && typeof raw === 'object' && 'value' in raw ? raw.value : raw;
@@ -173,6 +173,7 @@ function applyCanvasEffect(layerCtx, scratchCtx, effect, timeSeconds = 0) {
         case 'hue': case 'hue-rotate': filter = `hue-rotate(${clamp(p.degrees ?? p.amount, -360, 360)}deg)`; break;
         case 'grayscale': filter = `grayscale(${clamp(p.amount ?? p.value ?? 1, 0, 1, 1)})`; break;
         case 'sepia': filter = `sepia(${clamp(p.amount ?? p.value ?? 1, 0, 1, 1)})`; break;
+        case 'invert': filter = `invert(${clamp(p.amount ?? p.value ?? 1, 0, 1, 1)})`; break;
         case 'shadow': case 'drop-shadow': {
             const [red, green, blue] = parseEffectColor(layerCtx, p.color || '#000000');
             shadow = {
@@ -469,20 +470,44 @@ function applyPixelEffects(ctx, effects, timeSeconds = 0) {
                     for (let c = 0; c < 3; c++) out[i + c] = src[i + c] * (1 - edge) + color[c] * edge;
                 }
             } else if (effect.kind === 'glitch') {
-                const amount = clamp(p.amount ?? readNumber(p.intensity, 0.2) * 40, 0, 32);
+                const rawAmount = readNumber(p.amount, NaN);
+                const strength = Number.isFinite(rawAmount)
+                    ? clamp(rawAmount / 32, 0, 1)
+                    : clamp(p.intensity ?? 0.2, 0, 1);
                 const frame = Math.floor(Math.max(0, readNumber(timeSeconds, 0)) * 12);
-                const seed = readNumber(p.seed, 17);
-                for (let y = 0; y < height; y++) {
-                    const wave = Math.sin(y * 12.9898 + frame * 78.233 + seed * 0.17);
-                    const active = Math.sin(y * 0.37 + frame * 2.1 + seed) > 0.72;
-                    const shift = active ? Math.round(wave * amount) : 0;
-                    for (let x = 0; x < width; x++) {
-                        const i = (y * width + x) * 4;
-                        const sx = Math.max(0, Math.min(width - 1, x + shift));
-                        const from = (y * width + sx) * 4;
-                        if (!src[i + 3] && !src[from + 3]) continue;
-                        out[i] = src[from]; out[i + 1] = src[from + 1]; out[i + 2] = src[from + 2]; out[i + 3] = src[from + 3];
-                    }
+                const seed = clamp(p.seed ?? 17, 0, 1000);
+                const blockSize = clamp(p.blockSize ?? 32, 4, 128);
+                const colorShift = (p.colorShift?.value ?? p.colorShift) !== false;
+                const scanlines = (p.scanlines?.value ?? p.scanlines) !== false;
+                // Match the compositor's deterministic block model so graphic
+                // layer previews and exports share the same glitch structure.
+                // Keep alpha at the destination pixel: the RGB displacement
+                // must not grow or tear the layer's transparent silhouette.
+                const random = (x, y, salt = 0) => {
+                    const value = Math.sin((x + salt) * 12.9898 + (y + seed) * 78.233) * 43758.5453;
+                    return Math.abs(value) % 1;
+                };
+                for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+                    const i = (y * width + x) * 4;
+                    const bx = Math.floor(x / blockSize), by = Math.floor(y / blockSize);
+                    const blockRandom = random(bx + frame * 0.17, by);
+                    const displacement = blockRandom > 1 - strength * 0.3
+                        ? Math.round((random(bx, by, 1) - 0.5) * strength * 0.1 * width)
+                        : 0;
+                    const split = colorShift && random(bx, by, 0.5) > 0.7
+                        ? (random(bx, by, 1) - 0.5) * strength * 0.02 * width
+                        : 0;
+                    const redX = Math.max(0, Math.min(width - 1, Math.round(x + displacement + split)));
+                    const greenX = Math.max(0, Math.min(width - 1, Math.round(x + displacement)));
+                    const blueX = Math.max(0, Math.min(width - 1, Math.round(x + displacement - split)));
+                    const red = (y * width + redX) * 4;
+                    const green = (y * width + greenX) * 4;
+                    const blue = (y * width + blueX) * 4;
+                    const scanline = scanlines ? 0.9 + (Math.sin((y + 0.5) * Math.PI) * 0.5 + 0.5) * 0.1 : 1;
+                    out[i] = src[red] * scanline;
+                    out[i + 1] = src[green + 1] * scanline;
+                    out[i + 2] = src[blue + 2] * scanline;
+                    out[i + 3] = src[i + 3];
                 }
             } else if (effect.kind === 'stroke') {
                 const radius = Math.round(clamp(p.width ?? p.amount ?? 2, 1, 12));

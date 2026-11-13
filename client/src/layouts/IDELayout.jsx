@@ -1,10 +1,12 @@
 import { useShallow } from 'zustand/react/shallow';
 import React, { useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap, Smartphone, Lock, Users } from 'lucide-react';
+import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap, Smartphone, Lock, Users, Wand2 } from 'lucide-react';
 import classNames from 'classnames';
 import { Player } from '@revideo/player-react';
 import { Video as RevideoVideo, Audio as RevideoAudio, Media as RevideoMedia } from '@revideo/2d';
+import { getUnsupportedRevideoEffectKinds, resolveRevideoPreviewEffects } from '../revideo/EffectAdapter.js';
+import { resolveTimelineEffectGraphPreview } from '../motion/TimelineVisualEffects.js';
 import { installIosMediaUnlock } from '../utils/iosMediaUnlock.js';
 import { useUserPlan } from '../hooks/useUserPlan.js';
 import project from '../revideo/project';
@@ -45,6 +47,7 @@ import InterviewEditPanel from '../components/InterviewEditPanel';
 // and was deleted; the booking/UGC marketplaces designed in R162 are a
 // different thing entirely and must not inherit this branch's name.
 import MotionPanel from '../components/MotionPanel';
+import EffectsPanelHost from '../components/Effects/EffectsPanelHost.jsx'; // R166
 import ScenePanel from '../components/ScenePanel.jsx';
 import ABTestPanel from '../components/ABTestPanel.jsx';
 import TransformPanel from '../components/TransformPanel';
@@ -189,6 +192,57 @@ const CONTEXTUAL_SUGGESTION = {
     vertical_social:   'make it more dynamic',
     short_clip:        'make it more dynamic',
     talking_head:      'make it more dynamic',
+};
+
+/**
+ * Revideo intentionally implements a native, real-time subset of the motion
+ * effect catalogue. Keep that limitation visible at the exact preview surface
+ * instead of allowing a user to believe a glow, grain, LUT, or DAG composite
+ * has been drawn when it will only be produced by export.
+ */
+const RevideoPreviewEffectNotice = ({ tracks }) => {
+    const currentTime = useTimelineStore(state => state.currentTime);
+    const notice = React.useMemo(() => {
+        const messages = new Set();
+        const unsupported = new Set();
+        for (const track of tracks || []) {
+            for (const clip of track?.clips || []) {
+                if (clip?.assistantReference === true
+                    || currentTime < (Number(clip.start) || 0)
+                    || currentTime >= (Number(clip.start) || 0) + Math.max(0, Number(clip.duration) || 0)) continue;
+                // Graphics are drawn by GraphicOverlay rather than Revideo,
+                // but they share the same linear-only DOM graph limit. Show
+                // that limitation in the unified preview notice too; otherwise
+                // a template can lose a composite branch with no explanation.
+                if (clip?.effectGraph) {
+                    const graphPreview = resolveTimelineEffectGraphPreview(clip.effectGraph);
+                    if (graphPreview.warning) messages.add(graphPreview.warning);
+                }
+                if (!['video', 'image'].includes(clip?.type)) continue;
+                const preview = resolveRevideoPreviewEffects(clip);
+                if (preview.warning) messages.add(preview.warning);
+                for (const kind of getUnsupportedRevideoEffectKinds(
+                    preview.effects, clip.start, clip.duration, currentTime,
+                )) unsupported.add(String(kind).replaceAll('_', ' '));
+            }
+        }
+        if (messages.size) return [...messages][0];
+        if (unsupported.size) {
+            const names = [...unsupported].slice(0, 3).join(', ');
+            return `Preview simplified — ${names} ${unsupported.size === 1 ? 'renders' : 'render'} accurately on export.`;
+        }
+        return null;
+    }, [tracks, currentTime]);
+
+    if (!notice) return null;
+    return (
+        <div
+            role="status"
+            className="pointer-events-none absolute left-3 right-3 top-3 z-[70] rounded-md border border-amber-300/30 bg-black/75 px-3 py-2 text-center text-[11px] text-amber-100 shadow-lg backdrop-blur-sm"
+        >
+            {notice}
+        </div>
+    );
 };
 
 const IDELayout = ({ mode = 'editor' }) => {
@@ -2665,7 +2719,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                         {isMobile && (
                             <div className="relative border-b" style={{ borderColor: "var(--line-soft)" }}>
                                 <div ref={tabBarRef} className="p-2 flex gap-1 overflow-x-auto no-scrollbar">
-                                    {['media', 'captions', 'transcript', 'color', 'motion', 'shorts', 'iterations', 'assets', 'audio', 'interview', 'transform', 'settings'].map(tab => (
+                                    {['media', 'captions', 'transcript', 'color', 'motion', 'effects', 'shorts', 'iterations', 'assets', 'audio', 'interview', 'transform', 'settings'].map(tab => (
                                         <button
                                             key={tab}
                                             // R105 anchors: the tour points at `tab-shorts`, hints at
@@ -2702,6 +2756,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                                             {tab === 'iterations' && <span style={{ fontSize: 14 }}>🔁</span>}
                                             {tab === 'assets'     && <Sparkles className="w-4 h-4" />}
                                             {tab === 'audio'      && <span style={{ fontSize: 14 }}>🎤</span>}
+                                            {tab === 'effects'    && <Wand2    className="w-4 h-4" />}
                                             {tab === 'interview'  && <Users    className="w-4 h-4" />}
                                             {tab === 'transform'  && <Move     className="w-4 h-4" />}
                                             {tab === 'settings'   && <Settings className="w-4 h-4" />}
@@ -2897,6 +2952,8 @@ const IDELayout = ({ mode = 'editor' }) => {
                             {activeTab === 'captions' && <section className="p-4 border-b border-border/50"><TextPanel /></section>}
                             {activeTab === 'audio' && <section className="p-4 border-b border-border/50"><MixerPanel /></section>}
 
+                            {activeTab === 'effects' && <EffectsPanelHost />}
+
                             {activeTab === 'transform' && <TransformPanel />}
 
                             {activeTab === 'settings' && <section className="p-4"><SettingsPanel onReplayWalkthrough={replayOnboardingWalkthrough} showReplayWalkthrough={!isMobile} /></section>}
@@ -3010,6 +3067,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                                 <GraphicOverlay placementFilter="front" />
                                 {/* R92 round C: alignment guides while dragging */}
                                 <SnapGuidesLayer />
+                                <RevideoPreviewEffectNotice tracks={tracks} />
                             </div>
 
                             {/* Floating Playback Controls (desktop; mobile uses MobileTransportBar) */}

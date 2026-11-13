@@ -120,7 +120,8 @@
       "interview": "interview",
       "motion": "motion",
       "shorts": "shorts",
-      "iterations": "iterations"
+      "iterations": "iterations",
+      "effects": "effects"
     },
     "colorGrading": {
       "title": "Color Grading",
@@ -378,7 +379,11 @@
     "easingExpoOut": "Expo out",
     "easingBackOut": "Overshoot",
     "parameters": "Parameters",
-    "reset": "Reset"
+    "reset": "Reset",
+    "animatedParams": "{{count}} animated",
+    "effectsCount": "{{count}} effects",
+    "keyframeCount": "{{count}} keyframes",
+    "reorderEffect": "Reorder {{name}}"
   },
   "player": {
     "pacingAlert": "Pacing Alert",
@@ -1269,6 +1274,16 @@
       "turbulenceFrequency": "Turbulence frequency",
       "particleFadeIn": "Fade in (seconds)",
       "particleFadeOut": "Fade out (seconds)",
+      "particleSizeOverLife": "Size and opacity over life",
+      "particleSizeAtBirth": "Size at birth",
+      "particleSizeAtEnd": "Size at end",
+      "particleOpacityAtBirth": "Opacity at birth",
+      "particleOpacityAtEnd": "Opacity at end",
+      "particleSizeEasing": "Size curve easing",
+      "particleOpacityEasing": "Opacity curve easing",
+      "particleColorAtBirth": "Color at birth",
+      "particleColorAtEnd": "Color at end",
+      "particleColorEasing": "Color curve easing",
       "loopParticles": "Repeat particle cycles",
       "particleVelocity": "Velocity per second",
       "particleGravity": "Acceleration per second squared",
@@ -1286,9 +1301,14 @@
       "keyframedRotation": "Animate rotation with keyframes",
       "timeRemapping": "Time remapping",
       "timeRemapCurve": "Source time curve",
+      "timeRemapExpression": "Source time expression",
+      "timeRemapExpressionPlaceholder": "t * 1.5",
+      "timeRemapExpressionHelp": "Return source seconds using t, time, duration, progress (0–1), and value. Expressions override keyframes.",
+      "timeRemapExpressionInvalid": "This expression is invalid. Preview and export fall back to keyframes or speed and offset.",
+      "clearExpression": "Clear expression",
       "sourceTime": "Source time (seconds)",
       "sourceSpan": "Source span (seconds)",
-      "curveOverridesSpeedOffset": "The curve controls source time while keyframes exist.",
+      "curveOverridesSpeedOffset": "Curves and expressions control source time. Expressions take precedence.",
       "clearCurve": "Clear curve",
       "timeSpeed": "Speed",
       "timeOffset": "Offset (s)",
@@ -1320,7 +1340,7 @@
       },
       "audioAmount": "Amount",
       "proceduralMotion": "Procedural motion expression",
-      "expressionHelp": "Use t, time, duration, or progress (0–1), pi or e, arithmetic, sin, cos, tan, abs, ceil, floor, round, min, max, sqrt, clamp, smoothstep, noise, or wiggle."
+      "expressionHelp": "Use t, time, duration, progress (0–1), value, pi or e, arithmetic, trigonometry, pow, hypot, angle conversion, mod, fract, clamp, smoothstep, noise, or wiggle."
     }
   },
   "vector": {
@@ -1563,7 +1583,30 @@
     "phase_enter": "Enter",
     "phase_hold": "Hold",
     "phase_exit": "Exit",
-    "reviewPhaseAlt": "{{phase}} phase for beat {{beat}}"
+    "reviewPhaseAlt": "{{phase}} phase for beat {{beat}}",
+    "parent": "Parent Layer",
+    "parentNone": "None",
+    "constraints": "Constraints",
+    "trackTarget": "Track Target",
+    "lookAtTarget": "Look-At Target",
+    "targetNone": "None",
+    "trackMatte": "Track Matte",
+    "matteMode": "Matte Mode",
+    "matteSource": "Matte Source",
+    "matteNone": "None",
+    "matteAlpha": "Alpha",
+    "matteAlphaInverted": "Alpha Inverted",
+    "matteLuma": "Luma",
+    "matteLumaInverted": "Luma Inverted",
+    "trimPaths": "Vector Trim Paths",
+    "trimStart": "Trim Start %",
+    "trimEnd": "Trim End %",
+    "trimOffset": "Trim Offset",
+    "expressions": "Motion Expressions",
+    "selectProperty": "Property",
+    "expressionPreset": "Preset",
+    "expressionCode": "Expression Code",
+    "particleBudget": "Particle Budget (max 1500)"
   },
   "hints": {
     "dismiss": "Dismiss",

@@ -28,6 +28,7 @@ import { TEMPLATE_KINDS, SHAPE_KINDS } from './TemplateGraphics.js';
 import { auditScene as auditTextCraft, ruleById as craftRuleById } from './TextCraft.js';
 import { getScene3DRenderLimitWarnings, getScene3DCompatibilityWarnings, SCENE3D_TEXTURE_MASK_SHAPES } from './Scene3D.js';
 import { GRAPHIC_EFFECT_KINDS } from './LayerEffects.js';
+import { validateMotionExpression } from './MotionExpression.js';
 import {
     NODE_TYPES,
     CONTAINER_TYPES,
@@ -72,6 +73,16 @@ export const ISSUE_CODES = {
     READ_HOLD:            'read_hold',
     SWAP_DWELL:           'swap_dwell',
     SWAP_SLOT_UNRESERVED: 'swap_slot_unreserved',
+    // After Effects Engine Diagnostics & Auto-Fix
+    PARENT_CYCLE:         'parent_cycle',
+    ORPHAN_PARENT_REF:    'orphan_parent_ref',
+    CONSTRAINT_INVALID_TRACK_TARGET: 'constraint_invalid_track_target',
+    CONSTRAINT_INVALID_LOOKAT_TARGET: 'constraint_invalid_lookat_target',
+    TRACK_MATTE_MISSING_SOURCE: 'track_matte_missing_source',
+    TRACK_MATTE_SELF_REF: 'track_matte_self_ref',
+    VECTOR_TRIM_INVERTED: 'vector_trim_inverted',
+    PARTICLE_COUNT_OVER_BUDGET: 'particle_count_over_budget',
+    EXPRESSION_SYNTAX_ERROR: 'expression_syntax_error',
 };
 /** Codes `autoFixScene` can resolve on its own. */
 export const AUTO_FIXABLE = Object.freeze([
@@ -86,6 +97,14 @@ export const AUTO_FIXABLE = Object.freeze([
     // belongs here. Dropping a word that has no time to be read, or retiming
     // a reveal, are design choices and stay in the report.
     ISSUE_CODES.SWAP_SLOT_UNRESERVED,
+    ISSUE_CODES.PARENT_CYCLE,
+    ISSUE_CODES.ORPHAN_PARENT_REF,
+    ISSUE_CODES.CONSTRAINT_INVALID_TRACK_TARGET,
+    ISSUE_CODES.CONSTRAINT_INVALID_LOOKAT_TARGET,
+    ISSUE_CODES.TRACK_MATTE_MISSING_SOURCE,
+    ISSUE_CODES.TRACK_MATTE_SELF_REF,
+    ISSUE_CODES.VECTOR_TRIM_INVERTED,
+    ISSUE_CODES.PARTICLE_COUNT_OVER_BUDGET,
 ]);
 
 // These are deliberately separate: media overlays use FFmpeg/CSS while
@@ -96,7 +115,7 @@ const MEDIA_EFFECT_KINDS = new Set([
     // (including the video glow pass), so validation must preserve them.
     'shadow', 'drop-shadow', 'glow', 'gradient-fill', 'blur', 'blur_gaussian', 'blur_radial', 'blur_motion', 'shake', 'fade_in', 'fade_out',
     'stroke',
-    'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate', 'grayscale', 'sepia',
+    'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate', 'grayscale', 'sepia', 'invert',
     'color_grade', 'grain', 'film_grain', 'film-grain', 'chromatic-aberration', 'rgb_split',
     'motion-blur', 'distortion', 'vignette', 'glitch', 'inner-shadow',
 ]);
@@ -615,6 +634,150 @@ function checkTextCraft(entry, issues) {
     }
 }
 
+/** Recursively gather every node (leaves, groups, containers) in the scene tree. */
+export function collectAllNodes(scene) {
+    const list = [];
+    const visit = (nodes) => {
+        for (const n of (nodes || [])) {
+            if (!n) continue;
+            list.push(n);
+            if (Array.isArray(n.children)) visit(n.children);
+        }
+    };
+    if (Array.isArray(scene?.nodes)) visit(scene.nodes);
+    if (Array.isArray(scene?.layers)) visit(scene.layers);
+    return list;
+}
+
+export function detectParentCycle(nodeId, byId) {
+    const seen = new Set();
+    let curr = nodeId;
+    while (curr) {
+        if (seen.has(curr)) return true;
+        seen.add(curr);
+        const node = byId.get(curr);
+        curr = node?.parentId ?? null;
+    }
+    return false;
+}
+
+/**
+ * Validate scene graph topology, parent cycles, track mattes, constraints,
+ * vector trim bounds, particle limits, and authored expressions.
+ */
+function checkGraphIntegrity(scene, issues) {
+    const allNodes = collectAllNodes(scene);
+    const byId = new Map(allNodes.map(n => [n.id, n]));
+
+    for (const node of allNodes) {
+        // 1. Parent cycle & orphan checks
+        if (node.parentId) {
+            if (!byId.has(node.parentId)) {
+                issues.push(issue(
+                    ISSUE_CODES.ORPHAN_PARENT_REF,
+                    SEVERITY.ERROR,
+                    node,
+                    `Node "${node.name || node.id}" references missing parent "${node.parentId}".`,
+                    { parentId: node.parentId }
+                ));
+            } else if (detectParentCycle(node.id, byId)) {
+                issues.push(issue(
+                    ISSUE_CODES.PARENT_CYCLE,
+                    SEVERITY.ERROR,
+                    node,
+                    `Node "${node.name || node.id}" participates in a cyclic parent chain.`,
+                    { parentId: node.parentId }
+                ));
+            }
+        }
+
+        // 2. Constraints (trackTargetId / lookAtTargetId)
+        if (node.constraints?.trackTargetId) {
+            if (!byId.has(node.constraints.trackTargetId) || node.constraints.trackTargetId === node.id) {
+                issues.push(issue(
+                    ISSUE_CODES.CONSTRAINT_INVALID_TRACK_TARGET,
+                    SEVERITY.ERROR,
+                    node,
+                    `Node "${node.name || node.id}" has an invalid position-track constraint target.`,
+                    { targetId: node.constraints.trackTargetId }
+                ));
+            }
+        }
+        if (node.constraints?.lookAtTargetId) {
+            if (!byId.has(node.constraints.lookAtTargetId) || node.constraints.lookAtTargetId === node.id) {
+                issues.push(issue(
+                    ISSUE_CODES.CONSTRAINT_INVALID_LOOKAT_TARGET,
+                    SEVERITY.ERROR,
+                    node,
+                    `Node "${node.name || node.id}" has an invalid look-at constraint target.`,
+                    { targetId: node.constraints.lookAtTargetId }
+                ));
+            }
+        }
+
+        // 3. Track matte source validation
+        if (node.trackMatte && node.trackMatte.mode && node.trackMatte.mode !== 'none') {
+            if (!node.trackMatte.sourceLayerId || !byId.has(node.trackMatte.sourceLayerId)) {
+                issues.push(issue(
+                    ISSUE_CODES.TRACK_MATTE_MISSING_SOURCE,
+                    SEVERITY.ERROR,
+                    node,
+                    `Node "${node.name || node.id}" uses ${node.trackMatte.mode} matte without a valid source layer.`,
+                    { sourceLayerId: node.trackMatte.sourceLayerId }
+                ));
+            } else if (node.trackMatte.sourceLayerId === node.id) {
+                issues.push(issue(
+                    ISSUE_CODES.TRACK_MATTE_SELF_REF,
+                    SEVERITY.ERROR,
+                    node,
+                    `Node "${node.name || node.id}" cannot use itself as a track matte.`,
+                    { sourceLayerId: node.trackMatte.sourceLayerId }
+                ));
+            }
+        }
+
+        // 4. Vector trim paths
+        if (node.vector && Number.isFinite(node.vector.trimStart) && Number.isFinite(node.vector.trimEnd) && node.vector.trimStart > node.vector.trimEnd) {
+            issues.push(issue(
+                ISSUE_CODES.VECTOR_TRIM_INVERTED,
+                SEVERITY.WARN,
+                node,
+                `Vector "${node.name || node.id}" has trimStart (${node.vector.trimStart}%) > trimEnd (${node.vector.trimEnd}%).`,
+                { trimStart: node.vector.trimStart, trimEnd: node.vector.trimEnd }
+            ));
+        }
+
+        // 5. Particle count budget
+        if (node.particles && Number.isFinite(node.particles.count) && node.particles.count > 1500) {
+            issues.push(issue(
+                ISSUE_CODES.PARTICLE_COUNT_OVER_BUDGET,
+                SEVERITY.WARN,
+                node,
+                `Particle layer "${node.name || node.id}" requests ${node.particles.count} particles (max 1500).`,
+                { count: node.particles.count }
+            ));
+        }
+
+        // 6. Expression syntax errors
+        if (node.expressions && typeof node.expressions === 'object') {
+            for (const [prop, expr] of Object.entries(node.expressions)) {
+                if (typeof expr === 'string' && expr.trim()) {
+                    const res = validateMotionExpression(expr);
+                    if (!res.valid) {
+                        issues.push(issue(
+                            ISSUE_CODES.EXPRESSION_SYNTAX_ERROR,
+                            SEVERITY.ERROR,
+                            node,
+                            `Expression on "${node.name || node.id}.${prop}" failed: ${res.reason}`,
+                            { prop, expr, reason: res.reason }
+                        ));
+                    }
+                }
+            }
+        }
+    }
+}
+
 export function validateScene(scene, opts = {}) {
     const issues = [];
     const shape = validateSceneShape(scene);
@@ -623,6 +786,8 @@ export function validateScene(scene, opts = {}) {
         // A malformed scene cannot be measured; report the structure and stop.
         return { ok: false, issues, counts: { error: issues.length, warn: 0, info: 0 }, shapeErrors: shape.errors };
     }
+
+    checkGraphIntegrity(scene, issues);
 
     const leaves = visibleLeaves(scene, opts);
     for (const entry of leaves) {
@@ -772,19 +937,21 @@ export function autoFixScene(scene, opts = {}) {
         let appliedThisPass = 0;
         for (const item of report.issues) {
             if (item.fix !== 'auto' || !item.nodeId) continue;
+            const allNodes = collectAllNodes(current);
+            const node = allNodes.find(n => n.id === item.nodeId);
+            if (!node) continue;
             const entry = visibleLeaves(current, opts).find(e => e.node.id === item.nodeId);
-            if (!entry) continue;
-            const { node, box } = entry;
+            const box = entry?.box || null;
             let applied = null;
 
             if (item.code === ISSUE_CODES.TEXT_OVERFLOW) {
-                applied = fixTextOverflow(current, node, item.detail, opts);
+                applied = entry ? fixTextOverflow(current, node, item.detail, opts) : null;
             } else if (item.code === ISSUE_CODES.OUTSIDE_FRAME || item.code === ISSUE_CODES.SAFE_AREA) {
                 const target = item.code === ISSUE_CODES.SAFE_AREA
                     ? contentRect(current, opts)
                     : { x: 0, y: 0, w: current.frame.w, h: current.frame.h };
                 // Too big is a different fault from in the wrong place: size first.
-                applied = fixOverlayFit(node, box, target) || fixPlacement(current, node, box, target);
+                applied = (entry && box) ? (fixOverlayFit(node, box, target) || fixPlacement(current, node, box, target)) : null;
             } else if (item.code === ISSUE_CODES.SWAP_SLOT_UNRESERVED) {
                 applied = fixSwapSlot(node);
             } else if (item.code === ISSUE_CODES.TIMING_OUT_OF_RANGE) {
@@ -802,8 +969,23 @@ export function autoFixScene(scene, opts = {}) {
             } else if (item.code === ISSUE_CODES.UNSUPPORTED_BLEND_MODE) {
                 applied = { patch: { vector: { ...node.vector, blendMode: 'source-over' } }, message: `Unsupported vector blending on "${node.name}" was reset to source-over.` };
             } else if (item.code === ISSUE_CODES.ZERO_DURATION) {
-                const left = Math.max(0, num(current.duration, 0) - entry.start);
+                const left = Math.max(0, num(current.duration, 0) - (entry ? entry.start : 0));
                 if (left > 0.05) applied = { patch: { duration: round(left, 3) }, message: `"${node.name}" was given ${round(left)} s on screen.` };
+            } else if (item.code === ISSUE_CODES.PARENT_CYCLE || item.code === ISSUE_CODES.ORPHAN_PARENT_REF) {
+                applied = { patch: { parentId: null }, message: `Parent reference on "${node.name || node.id}" was cleared.` };
+            } else if (item.code === ISSUE_CODES.CONSTRAINT_INVALID_TRACK_TARGET) {
+                applied = { patch: { constraints: { ...(node.constraints || {}), trackTargetId: null } }, message: `Invalid track constraint target on "${node.name || node.id}" was cleared.` };
+            } else if (item.code === ISSUE_CODES.CONSTRAINT_INVALID_LOOKAT_TARGET) {
+                applied = { patch: { constraints: { ...(node.constraints || {}), lookAtTargetId: null } }, message: `Invalid look-at constraint target on "${node.name || node.id}" was cleared.` };
+            } else if (item.code === ISSUE_CODES.TRACK_MATTE_MISSING_SOURCE || item.code === ISSUE_CODES.TRACK_MATTE_SELF_REF) {
+                applied = { patch: { trackMatte: { ...(node.trackMatte || {}), mode: 'none', sourceLayerId: null } }, message: `Invalid track matte on "${node.name || node.id}" was reset to none.` };
+            } else if (item.code === ISSUE_CODES.VECTOR_TRIM_INVERTED) {
+                applied = {
+                    patch: { vector: { ...(node.vector || {}), trimStart: node.vector.trimEnd, trimEnd: node.vector.trimStart } },
+                    message: `Inverted vector trim on "${node.name || node.id}" was corrected.`,
+                };
+            } else if (item.code === ISSUE_CODES.PARTICLE_COUNT_OVER_BUDGET) {
+                applied = { patch: { particles: { ...(node.particles || {}), count: 1500 } }, message: `Particle count on "${node.name || node.id}" was clamped to 1500.` };
             }
 
             if (!applied) continue;

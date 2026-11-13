@@ -9,6 +9,7 @@ import { evaluateMotionCompatibility } from '../agent/AnimationCompatibilityEval
 import { sampleAnimation } from '../motion/MotionResolver.js';
 import { remapSceneObjectTime } from '../motion/TimeRemap.js';
 import { SCENE3D_BLEND_MODES, SCENE3D_CAMERA_DEFAULTS, SCENE3D_TEXTURE_MASK_SHAPES } from '../motion/Scene3D.js';
+import { setParticleColorCurveEasing, setParticleLifeCurveEndpoint, setParticleLifeCurveEasing } from '../motion/ProceduralParticles.js';
 import { validateMotionExpression } from '../motion/MotionExpression.js';
 
 /**
@@ -187,6 +188,36 @@ const TemplateEditor = ({ trackId, clip }) => {
     const update3DScene = (scenePatch) => commit({ scene: { ...scene3d, ...scenePatch } });
     const update3DParticles = (particlePatch) => update3DScene({ particles: { ...particles3d, ...particlePatch } });
     const update3DEmitter = (emitterPatch) => update3DParticles({ emitter: { ...emitter3d, ...emitterPatch } });
+    const updateParticleCurveEndpoint = (fieldName, endpoint, value) => {
+        update3DParticles({ [fieldName]: setParticleLifeCurveEndpoint(particles3d[fieldName], endpoint, value) });
+    };
+    const particleCurveEndpoint = (fieldName, endpoint, fallback) => {
+        const points = Array.isArray(particles3d[fieldName]) ? particles3d[fieldName] : [];
+        const point = points.find(stop => Number(stop?.time ?? stop?.progress) === endpoint);
+        return Number.isFinite(Number(point?.value)) ? Number(point.value) : fallback;
+    };
+    const updateParticleColorEndpoint = (endpoint, color) => {
+        const points = Array.isArray(particles3d.colorOverLife) ? particles3d.colorOverLife : [];
+        const next = points.filter(stop => Number(stop?.time ?? stop?.progress) !== endpoint).slice(0, 30);
+        next.push({ time: endpoint, color, easing: 'linear' });
+        update3DParticles({ colorOverLife: next.sort((a, b) => Number(a.time) - Number(b.time)) });
+    };
+    const particleColorEndpoint = (endpoint, fallback) => {
+        const stop = (Array.isArray(particles3d.colorOverLife) ? particles3d.colorOverLife : [])
+            .find(point => Number(point?.time ?? point?.progress) === endpoint);
+        return /^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(String(stop?.color || '')) ? stop.color : fallback;
+    };
+    const particleColorEasing = () => (particles3d.colorOverLife || []).find(stop => Number(stop?.time ?? stop?.progress) === 0)?.easing || 'linear';
+    const particleCurveEasing = fieldName => {
+        const start = (Array.isArray(particles3d[fieldName]) ? particles3d[fieldName] : [])
+            .find(stop => Number(stop?.time ?? stop?.progress) === 0);
+        return typeof start?.easing === 'string' ? start.easing : 'linear';
+    };
+    const updateParticleCurveEasing = (fieldName, easing, fallbackStart, fallbackEnd) => {
+        let track = setParticleLifeCurveEndpoint(particles3d[fieldName], 0, particleCurveEndpoint(fieldName, 0, fallbackStart));
+        track = setParticleLifeCurveEndpoint(track, 1, particleCurveEndpoint(fieldName, 1, fallbackEnd));
+        update3DParticles({ [fieldName]: setParticleLifeCurveEasing(track, 0, easing) });
+    };
     const update3DObject = (objectPatch) => update3DScene({ objects: objects3d.map((object, index) => index === selected3DObject ? { ...object, ...objectPatch } : object) });
     const update3DShadowReceiver = enabled => update3DObject({ receivesShadow: enabled });
     const keyframeProperties3D = {
@@ -323,6 +354,11 @@ const TemplateEditor = ({ trackId, clip }) => {
     const timeRemap3D = object3d.timeRemap || {};
     const timeRemapKeyframes3D = Array.isArray(timeRemap3D.keyframes) ? timeRemap3D.keyframes : [];
     const hasTimeRemapCurve3D = timeRemapKeyframes3D.some(keyframe => Number.isFinite(Number(keyframe?.time)) && Number.isFinite(Number(keyframe?.value)));
+    const timeRemapExpression3D = typeof timeRemap3D.expression === 'string' ? timeRemap3D.expression : '';
+    const hasTimeRemapExpression3D = !!timeRemapExpression3D.trim();
+    const timeRemapExpressionValidation3D = hasTimeRemapExpression3D
+        ? validateMotionExpression(timeRemapExpression3D)
+        : { valid: true };
     const timeRemapValue3D = remapSceneObjectTime(timeRemap3D, localPlayhead, Number(clip.duration) || 1);
     const currentTimeRemapKeyframe3D = timeRemapKeyframes3D.find(keyframe => Math.abs(Number(keyframe.time) - localPlayhead) < 0.001);
     const setTimeRemapKeyframe3D = (value = timeRemapValue3D) => {
@@ -729,6 +765,12 @@ const TemplateEditor = ({ trackId, clip }) => {
                 <label className="flex items-center justify-between gap-2"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.particleColor')}</span>
                     <input type="color" value={scene3d.particles?.color || '#A78BFA'} onChange={e => update3DScene({ particles: { ...(scene3d.particles || {}), color: e.target.value } })} className="w-7 h-7 rounded border border-border bg-transparent p-0.5 cursor-pointer" />
                 </label>
+                <div className="grid grid-cols-2 gap-2">
+                    {[0, 1].map(endpoint => <label key={endpoint} className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{endpoint === 0 ? t('templates.scene3d.particleColorAtBirth') : t('templates.scene3d.particleColorAtEnd')}</span>
+                        <input type="color" value={particleColorEndpoint(endpoint, particles3d.color || '#A78BFA')} onChange={event => updateParticleColorEndpoint(endpoint, event.target.value)} className="w-7 h-7 rounded border border-border bg-transparent p-0.5 cursor-pointer" />
+                    </label>)}
+                </div>
                 <details className="rounded border border-border/70 p-2 space-y-2">
                     <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.particleSimulation')}</summary>
                     <div className="space-y-2 pt-2">
@@ -756,6 +798,35 @@ const TemplateEditor = ({ trackId, clip }) => {
                             {number3D(t('templates.scene3d.particleFadeIn'), particles3d.fadeIn ?? 0.15, value => update3DParticles({ fadeIn: Math.max(0, Math.min(Number(particles3d.lifetime) || 4, value)) }))}
                             {number3D(t('templates.scene3d.particleFadeOut'), particles3d.fadeOut ?? 0.35, value => update3DParticles({ fadeOut: Math.max(0, Math.min(Number(particles3d.lifetime) || 4, value)) }))}
                         </div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.particleSizeOverLife')}</div>
+                        <div className="grid grid-cols-2 gap-2">
+                            {number3D(t('templates.scene3d.particleSizeAtBirth'), particleCurveEndpoint('sizeOverLife', 0, particles3d.size ?? 5), value => updateParticleCurveEndpoint('sizeOverLife', 0, Math.max(0, Math.min(30, value))), { id: 'particle-size-life-start' })}
+                            {number3D(t('templates.scene3d.particleSizeAtEnd'), particleCurveEndpoint('sizeOverLife', 1, particles3d.size ?? 5), value => updateParticleCurveEndpoint('sizeOverLife', 1, Math.max(0, Math.min(30, value))), { id: 'particle-size-life-end' })}
+                            {number3D(t('templates.scene3d.particleOpacityAtBirth'), particleCurveEndpoint('opacityOverLife', 0, 1), value => updateParticleCurveEndpoint('opacityOverLife', 0, Math.max(0, Math.min(1, value))), { id: 'particle-opacity-life-start' })}
+                            {number3D(t('templates.scene3d.particleOpacityAtEnd'), particleCurveEndpoint('opacityOverLife', 1, 1), value => updateParticleCurveEndpoint('opacityOverLife', 1, Math.max(0, Math.min(1, value))), { id: 'particle-opacity-life-end' })}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            {[
+                                ['sizeOverLife', 'particleSizeEasing', particles3d.size ?? 5, particles3d.size ?? 5],
+                                ['opacityOverLife', 'particleOpacityEasing', 1, 1],
+                            ].map(([fieldName, label, fallbackStart, fallbackEnd]) => <label key={fieldName} className="block space-y-1">
+                                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label === 'particleSizeEasing' ? t('templates.scene3d.particleSizeEasing') : t('templates.scene3d.particleOpacityEasing')}</span>
+                                <select className={field} value={particleCurveEasing(fieldName)} onChange={event => updateParticleCurveEasing(fieldName, event.target.value, fallbackStart, fallbackEnd)}>
+                                    {['linear', 'easeIn', 'easeOut', 'easeInOut', 'easeInOutCubic', 'bounce'].map(easing => <option key={easing} value={easing}>{easing}</option>)}
+                                </select>
+                            </label>)}
+                        </div>
+                        <label className="block space-y-1">
+                            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.particleColorEasing')}</span>
+                            <select className={field} value={particleColorEasing()} onChange={event => {
+                                const track = Array.isArray(particles3d.colorOverLife) ? particles3d.colorOverLife : [];
+                                const completeTrack = [0, 1].reduce((stops, endpoint) => stops.some(stop => Number(stop?.time ?? stop?.progress) === endpoint)
+                                    ? stops : [...stops, { time: endpoint, color: particleColorEndpoint(endpoint, particles3d.color || '#A78BFA') }], track);
+                                update3DParticles({ colorOverLife: setParticleColorCurveEasing(completeTrack, 0, event.target.value) });
+                            }}>
+                                {['linear', 'easeIn', 'easeOut', 'easeInOut', 'easeInOutCubic', 'bounce'].map(easing => <option key={easing} value={easing}>{easing}</option>)}
+                            </select>
+                        </label>
                         <label className="flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={particles3d.loop !== false} onChange={e => update3DParticles({ loop: e.target.checked })} />{t('templates.scene3d.loopParticles')}</label>
                         <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.particleVelocity')}</div>
                         <div className="grid grid-cols-3 gap-2">{['x', 'y', 'z'].map(axis => number3D(t('templates.scene3d.axis', { axis: axis.toUpperCase() }), particles3d.velocity?.[axis] ?? 0, value => update3DParticles({ velocity: { ...(particles3d.velocity || {}), [axis]: Math.max(-20, Math.min(20, value)) } }), { id: `particles-velocity-${axis}` }))}</div>
@@ -847,8 +918,8 @@ const TemplateEditor = ({ trackId, clip }) => {
                 </label>
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.timeRemapping')}</div>
                 <div className="grid grid-cols-2 gap-2">
-                    {number3D(t('templates.scene3d.timeSpeed'), timeRemap3D.speed ?? 1, value => update3DObject({ timeRemap: { ...timeRemap3D, speed: Math.max(-8, Math.min(8, value)) } }), { disabled: hasTimeRemapCurve3D })}
-                    {number3D(t('templates.scene3d.timeOffset'), timeRemap3D.offset ?? 0, value => update3DObject({ timeRemap: { ...timeRemap3D, offset: value } }), { disabled: hasTimeRemapCurve3D })}
+                    {number3D(t('templates.scene3d.timeSpeed'), timeRemap3D.speed ?? 1, value => update3DObject({ timeRemap: { ...timeRemap3D, speed: Math.max(-8, Math.min(8, value)) } }), { disabled: hasTimeRemapCurve3D || hasTimeRemapExpression3D })}
+                    {number3D(t('templates.scene3d.timeOffset'), timeRemap3D.offset ?? 0, value => update3DObject({ timeRemap: { ...timeRemap3D, offset: value } }), { disabled: hasTimeRemapCurve3D || hasTimeRemapExpression3D })}
                     {number3D(t('templates.scene3d.sourceSpan'), timeRemap3D.duration ?? clip.duration ?? 1, value => update3DObject({ timeRemap: { ...timeRemap3D, duration: Math.max(0.001, value) } }))}
                     <label className="block text-[10px] text-muted-foreground">
                         <span>{t('templates.scene3d.timeMode')}</span>
@@ -859,17 +930,28 @@ const TemplateEditor = ({ trackId, clip }) => {
                 </div>
                 <div className="rounded border border-border p-2 space-y-2">
                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.timeRemapCurve')}</div>
-                    {hasTimeRemapCurve3D && <div className="flex items-center justify-between gap-2">
+                    {(hasTimeRemapCurve3D || hasTimeRemapExpression3D) && <div className="flex items-center justify-between gap-2">
                         <span className="text-[10px] text-muted-foreground">{t('templates.scene3d.curveOverridesSpeedOffset')}</span>
-                        <button type="button" className="px-2 py-1 rounded border border-border text-xs shrink-0" onClick={() => update3DObject({ timeRemap: { ...timeRemap3D, keyframes: [] } })}>{t('templates.scene3d.clearCurve')}</button>
+                        {hasTimeRemapCurve3D && <button type="button" className="px-2 py-1 rounded border border-border text-xs shrink-0" onClick={() => update3DObject({ timeRemap: { ...timeRemap3D, keyframes: [] } })}>{t('templates.scene3d.clearCurve')}</button>}
                     </div>}
-                    {number3D(t('templates.scene3d.sourceTime'), timeRemapValue3D, setTimeRemapKeyframe3D)}
-                    <div className="flex items-center gap-1">
-                        <button type="button" className="px-2 py-1 rounded border border-border text-xs" onClick={() => seek3DTimeRemapKeyframe(-1)}>{t('templates.scene3d.previousKeyframe')}</button>
-                        <button type="button" className="px-2 py-1 rounded border border-border text-xs" onClick={() => setTimeRemapKeyframe3D()}>{currentTimeRemapKeyframe3D ? t('templates.scene3d.updateKeyframe') : t('templates.scene3d.addKeyframe')}</button>
-                        <button type="button" className="px-2 py-1 rounded border border-border text-xs" onClick={() => seek3DTimeRemapKeyframe(1)}>{t('templates.scene3d.nextKeyframe')}</button>
-                    </div>
-                    <div className="text-[10px] text-muted-foreground">{t('templates.scene3d.keyframeCount', { count: timeRemapKeyframes3D.length })}</div>
+                    <label className="block space-y-1">
+                        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.scene3d.timeRemapExpression')}</span>
+                        <input className={field} type="text" value={timeRemapExpression3D}
+                            placeholder={t('templates.scene3d.timeRemapExpressionPlaceholder')}
+                            onChange={event => update3DObject({ timeRemap: { ...timeRemap3D, expression: event.target.value } })} />
+                        <span className="block text-[10px] text-muted-foreground">{t('templates.scene3d.timeRemapExpressionHelp')}</span>
+                        {!timeRemapExpressionValidation3D.valid && <span role="status" className="block text-[10px] text-destructive">{t('templates.scene3d.timeRemapExpressionInvalid')}</span>}
+                    </label>
+                    {hasTimeRemapExpression3D && <button type="button" className="px-2 py-1 rounded border border-border text-xs" onClick={() => update3DObject({ timeRemap: { ...timeRemap3D, expression: '' } })}>{t('templates.scene3d.clearExpression')}</button>}
+                    {!hasTimeRemapExpression3D && <>
+                        {number3D(t('templates.scene3d.sourceTime'), timeRemapValue3D, setTimeRemapKeyframe3D)}
+                        <div className="flex items-center gap-1">
+                            <button type="button" className="px-2 py-1 rounded border border-border text-xs" onClick={() => seek3DTimeRemapKeyframe(-1)}>{t('templates.scene3d.previousKeyframe')}</button>
+                            <button type="button" className="px-2 py-1 rounded border border-border text-xs" onClick={() => setTimeRemapKeyframe3D()}>{currentTimeRemapKeyframe3D ? t('templates.scene3d.updateKeyframe') : t('templates.scene3d.addKeyframe')}</button>
+                            <button type="button" className="px-2 py-1 rounded border border-border text-xs" onClick={() => seek3DTimeRemapKeyframe(1)}>{t('templates.scene3d.nextKeyframe')}</button>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground">{t('templates.scene3d.keyframeCount', { count: timeRemapKeyframes3D.length })}</div>
+                    </>}
                 </div>
             </>)}
             {/* R92: vector shapes */}

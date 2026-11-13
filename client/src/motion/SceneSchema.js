@@ -111,7 +111,7 @@ const BLEND_MODE_SET = new Set(BLEND_MODE_KINDS);
 export const EFFECT_KINDS = [
     'shadow', 'drop-shadow', 'glow', 'blur', 'blur_gaussian', 'blur_radial', 'blur_motion', 'shake', 'fade_in', 'fade_out',
     'grain', 'film_grain', 'film-grain', 'gradient-fill', 'stroke', 'inner-shadow',
-    'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate', 'grayscale', 'sepia',
+    'brightness', 'contrast', 'saturation', 'saturate', 'hue', 'hue-rotate', 'grayscale', 'sepia', 'invert',
     'chromatic-aberration', 'rgb_split', 'motion-blur', 'distortion', 'vignette',
     'glitch', 'color_grade',
 ];
@@ -303,6 +303,9 @@ export function createNode(type, overrides = {}) {
         origin: overrides.origin && typeof overrides.origin === 'object' ? { ...overrides.origin } : null,
 
         meta: overrides.meta && typeof overrides.meta === 'object' ? { ...overrides.meta } : {},
+        parentId: overrides.parentId || null,
+        trackMatte: overrides.trackMatte && typeof overrides.trackMatte === 'object' ? { ...overrides.trackMatte } : null,
+        particles: overrides.particles && typeof overrides.particles === 'object' ? { ...overrides.particles } : null,
     };
 }
 
@@ -364,6 +367,9 @@ export function createScene(overrides = {}) {
         nodes,
         /** `{ componentId, presetId, brief, palette, styleKey, ... }` — the art direction that produced it. */
         meta: overrides.meta && typeof overrides.meta === 'object' ? { ...overrides.meta } : {},
+        parentId: overrides.parentId || null,
+        trackMatte: overrides.trackMatte && typeof overrides.trackMatte === 'object' ? { ...overrides.trackMatte } : null,
+        particles: overrides.particles && typeof overrides.particles === 'object' ? { ...overrides.particles } : null,
     };
 }
 
@@ -961,7 +967,7 @@ export function flattenScene(scene, opts = {}) {
                 const requiresGraphicRender = requiresCompositionIsolation || !!node.motionBlur?.enabled;
                 const canUseRichGraphic = node.type === NODE_TYPES.TEXT
                     || (node.type === NODE_TYPES.CAPTION && requiresGraphicRender);
-                if ((node.runs?.length || node.charAnim?.preset || node.textPath?.data || requiresGraphicRender) && canUseRichGraphic) {
+                if ((node.runs?.length || node.charAnim || node.textPath?.data || requiresGraphicRender) && canUseRichGraphic) {
                     const size = node.size || { w: Math.round(scene.frame.w * 0.8), h: Math.round(scene.frame.h * 0.38) };
                     placements.push({
                         trackType: 'overlay',

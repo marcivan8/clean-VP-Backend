@@ -18,6 +18,7 @@ const GPU_CLIP_EFFECT_TYPES = Object.freeze({
     grain: 'film_grain',
     glitch: 'glitch',
     color_grade: 'color_grade',
+    invert: 'invert',
     lut_apply: 'lut_apply',
     fade_in: 'fade_in',
     fade_out: 'fade_out',
@@ -124,6 +125,88 @@ export function createGpuClipEffectConfigs(clipId, effects = [], placement = {})
             keyframes,
         }];
     });
+}
+
+/**
+ * Adapt an authored effect DAG to the playback GPU graph without flattening
+ * its branches. `createGpuClipEffectConfigs` remains the compatibility path
+ * for an ordinary ordered footage stack; this helper is intentionally more
+ * conservative. It keeps unsupported nodes in the graph so EffectPipeline
+ * can report a truthful preview limitation rather than silently rewiring a
+ * composite to a different result.
+ */
+export function createGpuClipEffectGraph(clipId, effectGraph, directEffects = [], placement = {}) {
+    if (!clipId || !effectGraph || !Array.isArray(effectGraph.nodes) || !effectGraph.nodes.length) return null;
+
+    const authoredIds = new Set();
+    const nodeIdByAuthoredId = new Map();
+    effectGraph.nodes.filter(Boolean).forEach((node, index) => {
+        const authoredId = String(node.id || `graph-node-${index}`);
+        // EffectPipeline keeps a global node index. Namespace preview-only DAG
+        // IDs by clip so two clips can safely reuse a template graph whose
+        // authored node IDs happen to be identical.
+        nodeIdByAuthoredId.set(authoredId, `clip-preview:${clipId}:graph:${authoredId}`);
+    });
+    const nodes = effectGraph.nodes.filter(Boolean).map((node, index) => {
+        const originalId = String(node.id || `graph-node-${index}`);
+        const authoredId = nodeIdByAuthoredId.get(originalId);
+        authoredIds.add(authoredId);
+        const metadata = { ...(node.metadata || {}), authoredGraphNodeId: originalId };
+        if ((node.kind || node.type) === 'composite') {
+            return {
+                ...node,
+                id: authoredId,
+                type: 'composite',
+                engine: 'gpu',
+                targetId: clipId,
+                targetType: 'placement',
+                enabled: node.enabled !== false,
+                metadata,
+            };
+        }
+        const adapted = createGpuClipEffectConfigs(clipId, [node], placement)[0];
+        // Keep an unsupported node as an explicit GPU node. The pipeline will
+        // skip it with a warning, which is safer than making a DAG look like
+        // it was successfully reproduced when one branch was dropped.
+        return adapted
+            ? { ...adapted, id: authoredId, order: node.order ?? adapted.order, enabled: node.enabled !== false, metadata }
+            : {
+                ...node,
+                id: authoredId,
+                targetId: clipId,
+                targetType: 'placement',
+                engine: node.engine || 'gpu',
+                enabled: node.enabled !== false,
+                metadata,
+            };
+    });
+
+    const graphConnections = (Array.isArray(effectGraph.connections) ? effectGraph.connections : [])
+        .filter(edge => edge && nodeIdByAuthoredId.has(String(edge.from)) && nodeIdByAuthoredId.has(String(edge.to)))
+        .map(edge => ({ ...edge, from: nodeIdByAuthoredId.get(String(edge.from)), to: nodeIdByAuthoredId.get(String(edge.to)) }));
+
+    // Direct clip effects are authored after the graph. Append them to every
+    // graph sink (normally exactly one), preserving the graph's branch/join
+    // topology and the same ordering used by the export compositor.
+    const sinks = nodes.filter(node => !graphConnections.some(edge => edge.from === node.id));
+    let previousIds = sinks.map(node => node.id);
+    createGpuClipEffectConfigs(clipId, directEffects, placement).forEach((effect, index) => {
+        let id = `clip-preview:${clipId}:direct:${effect.id || index}`;
+        while (authoredIds.has(id)) id = `${id}:${index}`;
+        authoredIds.add(id);
+        const next = { ...effect, id, order: Number(effect.order) || nodes.length + index };
+        nodes.push(next);
+        previousIds.forEach(from => graphConnections.push({ from, to: id }));
+        previousIds = [id];
+    });
+
+    return {
+        nodes,
+        connections: graphConnections,
+        inputNodeId: nodeIdByAuthoredId.get(String(effectGraph.inputNodeId || '')) || null,
+        outputNodeId: previousIds.length === 1 ? previousIds[0]
+            : (nodeIdByAuthoredId.get(String(effectGraph.outputNodeId || '')) || null),
+    };
 }
 
 export function isGpuClipEffect(kind) {

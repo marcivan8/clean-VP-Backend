@@ -124,6 +124,7 @@ const BaseClipOverlay = () => {
                 const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || dims.height;
                 const box = baseClipScreenBox({
                     clipX: clip.x, clipY: clip.y, scale: clip.scale,
+                    scaleX: clip.scaleX, scaleY: clip.scaleY,
                     srcW, srcH, canvasWidth: dims.width, canvasHeight: dims.height,
                 });
                 const rotation = Number(clip.rotation) || 0;
@@ -143,12 +144,12 @@ const BaseClipOverlay = () => {
                             left: `${box.leftPct}%`,
                             top: `${box.topPct}%`,
                             width: `${box.widthPct}%`,
-                            // Height follows the media's own intrinsic aspect ratio
-                            // (same technique GraphicOverlay.jsx uses) — there is
-                            // nothing drawn here, this is purely a transparent
-                            // drag/resize surface over the video the Player already
-                            // renders underneath.
-                            aspectRatio: srcW && srcH ? `${srcW} / ${srcH}` : undefined,
+                            // Explicit axis dimensions keep the interaction
+                            // surface aligned with a non-uniformly scaled or
+                            // mirrored base clip. There is nothing drawn here:
+                            // this is purely the transparent surface over the
+                            // Revideo media node underneath.
+                            height: `${box.heightPct}%`,
                             transform,
                             pointerEvents: 'auto',
                             touchAction: 'none',

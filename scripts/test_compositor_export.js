@@ -54,7 +54,7 @@ const { compileTimelineVisualEffects } = require(path.join(ROOT, 'jobs/exportPro
 // Build plans with the REAL client Compositor, so this exercises the true
 // client→worker path rather than a hand-written plan that could drift from it.
 function loadCompositor() {
-    const order = ['MotionLimits', 'Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionExpression', 'SpatialMotion', 'AudioReactive', 'MotionResolver', 'TimeRemap', 'MotionPresets', 'EffectTiming', 'CaptionModel', 'ClipAdapter', 'Compositor'];
+    const order = ['MotionLimits', 'Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionExpression', 'SpatialMotion', 'AudioReactive', 'MotionResolver', 'TimeRemap', 'MotionPresets', 'EffectTiming', 'TimelineVisualEffects', 'CaptionModel', 'ClipAdapter', 'Compositor'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);
@@ -113,6 +113,48 @@ section('1 · The client and worker agree on the plan version');
     const stack = [{ id: 'outer-comp', type: 'composition', opacity: 0.5, blendMode: 'screen', effects: [] }];
     check('composition boundaries survive flatten-plan serialization for isolated preview/export rendering',
         JSON.stringify(planFor([vclip({ id: 'nested-child', start: 0, duration: 1, extra: { compositionStack: stack } })]).overlays[0].compositionStack) === JSON.stringify(stack));
+    const graphBackedGraphic = planFor([vclip({ id: 'graphic-effect-graph', type: 'template', start: 0, duration: 1, extra: {
+        template: { kind: 'price-pop', params: {} },
+        effectGraph: {
+            nodes: [
+                { id: 'graph-brightness', type: 'brightness', enabled: true, params: { amount: 1.1 } },
+                { id: 'graph-contrast', type: 'contrast', enabled: true, params: { amount: 1.2 } },
+            ],
+            connections: [{ from: 'graph-brightness', to: 'graph-contrast' }],
+        },
+    } })]).overlays[0];
+    check('a linear effect graph on a graphic layer reaches the composition plan in authored order',
+        JSON.stringify(graphBackedGraphic.effects?.map(effect => effect.id)) === JSON.stringify(['graph-brightness', 'graph-contrast']),
+        JSON.stringify(graphBackedGraphic.effects));
+    const branchedGraphicPlan = planFor([vclip({ id: 'graphic-branched-effect-graph', type: 'template', start: 0, duration: 1, extra: {
+        template: { kind: 'price-pop', params: {} },
+        effectGraph: {
+            nodes: [
+                { id: 'base', type: 'brightness', enabled: true, params: { amount: 1.1 } },
+                { id: 'branch', type: 'contrast', enabled: true, params: { amount: 1.2 } },
+                { id: 'join', type: 'composite', enabled: true, params: { mode: 'screen' } },
+            ],
+            connections: [
+                { from: 'base', to: 'branch' },
+                { from: 'base', to: 'join', port: 'base' },
+                { from: 'branch', to: 'join', port: 'overlay' },
+            ],
+        },
+    } })]);
+    check('a branched graphic effect graph is retained for its dedicated RGBA export pass, never flattened into a different stack',
+        !(branchedGraphicPlan.overlays[0].effects || []).length
+            && branchedGraphicPlan.overlays[0].effectGraph?.nodes?.length === 3
+            && branchedGraphicPlan.overlays[0].timelineStart === 0
+            && !branchedGraphicPlan.warnings?.length,
+        JSON.stringify({ effects: branchedGraphicPlan.overlays[0].effects, effectGraph: branchedGraphicPlan.overlays[0].effectGraph, warnings: branchedGraphicPlan.warnings }));
+    const uploadedMediaGraph = planFor([vclip({ id: 'image-branched-effect-graph', type: 'image', start: 0, duration: 1, extra: {
+        effectGraph: branchedGraphicPlan.overlays[0].effectGraph,
+    } })]);
+    check('a complex graph on a fetched image reaches the executable plan for the same RGBA raster pass',
+        uploadedMediaGraph.overlays[0].effectGraph?.nodes?.length === 3
+            && uploadedMediaGraph.overlays[0].timelineStart === 0
+            && !uploadedMediaGraph.warnings?.length,
+        JSON.stringify(uploadedMediaGraph));
     const procedural = planFor([vclip({ id: 'procedural-child', start: 0, duration: 1, extra: {
         x: 50, y: 50,
         compositionStack: [{ id: 'procedural-group', type: 'group', start: 0, duration: 1, opacity: 1,
@@ -157,6 +199,20 @@ section('2 · The worker refuses plans it must not execute');
         goodGraph.filterComplex);
     check('a well-formed plan is accepted', validateCompositionPlanShape(good, W, H).length === 0,
         validateCompositionPlanShape(good, W, H).join('; '));
+    check('recoverable composition warnings travel with an otherwise executable plan',
+        C.validateCompositionPlan({ ...good, warnings: ['A graphic effect graph was not applied to this export.'] }).valid
+            && validateCompositionPlanShape({ ...good, warnings: ['A graphic effect graph was not applied to this export.'] }, W, H).length === 0);
+    check('malformed composition warnings are refused by both validators',
+        !C.validateCompositionPlan({ ...good, warnings: [''] }).valid
+            && validateCompositionPlanShape({ ...good, warnings: [''] }, W, H).length > 0);
+    const imageGraph = {
+        ...good,
+        overlays: [{ ...good.overlays[0], effectGraph: { nodes: [], connections: [] }, timelineStart: 0 }],
+    };
+    check('both validators accept a fetched-overlay graph for the worker raster pass',
+        C.validateCompositionPlan(imageGraph).valid
+            && validateCompositionPlanShape(imageGraph, W, H).length === 0,
+        JSON.stringify({ client: C.validateCompositionPlan(imageGraph), worker: validateCompositionPlanShape(imageGraph, W, H) }));
 
     check('a future plan version is refused',
         validateCompositionPlanShape({ ...good, version: 999 }, W, H).length > 0,
@@ -268,6 +324,20 @@ section('3 · Compilation produces a sane filter graph');
         /trim=duration=/.test(retimedGraph.filterComplex)
             && /setpts=\(if\(lt\(/.test(retimedGraph.filterComplex),
         retimedGraph.filterComplex);
+    const expressionRetimedPlan = planFor([vclip({ id: 'expression-retimed-video', start: 0, duration: 2, extra: {
+        timeRemap: { duration: 2, expression: 't / 2' },
+    } })]);
+    const expressionRetimedOverlay = expressionRetimedPlan.overlays[0];
+    const expressionRetimedGraph = compileCompositionPlan(expressionRetimedPlan, [{ overlayId: expressionRetimedOverlay.id, inputIndex: 1 }]);
+    check('the client plan samples procedural time-remap expressions for export',
+        expressionRetimedOverlay.sourceTimeMap?.length > 1
+            && expressionRetimedOverlay.sourceTimeMap[0].source === 0
+            && expressionRetimedOverlay.sourceTimeMap.at(-1).source === 1,
+        JSON.stringify(expressionRetimedOverlay.sourceTimeMap?.slice(0, 3)));
+    check('the export graph executes the sampled procedural source-time expression',
+        /trim=duration=/.test(expressionRetimedGraph.filterComplex)
+            && /setpts=\(if\(lt\(/.test(expressionRetimedGraph.filterComplex),
+        expressionRetimedGraph.filterComplex);
     const reversePlan = planFor([vclip({ id: 'reverse-retimed-video', start: 0, duration: 2, extra: {
         timeRemap: { duration: 2, keyframes: [
             { time: 0, value: 1, easing: 'linear' },
@@ -892,6 +962,23 @@ if (!FFMPEG) {
     check('exported pixels follow forward, reverse, and forward source-time motion',
         directionSamples.every((sample, index) => colorDist(sample, expectedDirectionColors[index]) < 45),
         `times=${JSON.stringify(directionSampleTimes)} actual=${JSON.stringify(directionSamples)} expected=${JSON.stringify(expectedDirectionColors)}`);
+    const expressionRuntimePlan = planFor([vclip({ id: 'expression-retime-runtime', start: 0, duration: 2, extra: {
+        timeRemap: { duration: 2, expression: 't * t / 2' },
+    } })]);
+    const expressionRuntimeOverlays = expressionRuntimePlan.overlays;
+    const expressionRuntimeGraph = compileCompositionPlan(expressionRuntimePlan,
+        expressionRuntimeOverlays.map((overlay, index) => ({ overlayId: overlay.id, inputIndex: index + 1 })));
+    const expressionRuntimeRender = runGraph(dir, expressionRuntimeGraph, 'expression-retime.mp4', [
+        path.join(dir, 'base.mp4'), { file: directionSource, seek: 0 },
+    ]);
+    const expressionRuntimeColors = [0.25, 1.25, 1.6].map(time =>
+        regionColor(expressionRuntimeRender.out, time, { x: 314, y: 174, w: 12, h: 12 }));
+    check('FFmpeg renders procedural time-remap expressions through the sampled source-time map',
+        expressionRuntimeRender.r.status === 0 && fs.existsSync(expressionRuntimeRender.out),
+        String(expressionRuntimeRender.r.stderr || '').slice(-1200));
+    check('exported pixels follow nonlinear procedural source-time motion',
+        expressionRuntimeColors.every((sample, index) => colorDist(sample, ['ff0000', '018001', '0000ff'][index]) < 45),
+        `actual=${JSON.stringify(expressionRuntimeColors)} expected=red,green,blue`);
 
     const pattern = path.join(dir, 'mirror-pattern.mp4');
     const patternResult = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i',
@@ -1182,7 +1269,7 @@ if (!FFMPEG) {
         !!darkGrade && !!brightGrade && colorDist(darkGrade, brightGrade) > 35,
         `expected a visible grade change, got ${darkGrade} then ${brightGrade}`);
 
-    for (const kind of ['grayscale', 'sepia']) {
+    for (const kind of ['grayscale', 'sepia', 'invert']) {
         const groupStack = [{ id: `${kind}-group`, type: 'composition', opacity: 1, blendMode: 'source-over', start: 0, duration: 3,
             effects: [{ kind, params: { amount: 1 } }] }];
         const groupPlan = planFor([vclip({ id: `${kind}-child`, start: 0, duration: 3,
@@ -1205,9 +1292,112 @@ if (!FFMPEG) {
         const [red, green, blue] = sampled ? sampled.match(/../g).map(value => parseInt(value, 16)) : [];
         check(`isolated composition ${kind} visibly transforms its child`, kind === 'grayscale'
             ? Number.isFinite(red) && Math.max(red, green, blue) - Math.min(red, green, blue) <= 5
-            : Number.isFinite(red) && red > green && green > blue,
+            : kind === 'sepia'
+                ? Number.isFinite(red) && red > green && green > blue
+                : Number.isFinite(red) && green > red + 100 && blue > red + 100,
         `sampled ${sampled}`);
     }
+
+    const splitStack = [{ id: 'rgb-split-group', type: 'composition', opacity: 1, blendMode: 'source-over', start: 0, duration: 3,
+        effects: [{ kind: 'rgb_split', params: { amount: 50, angle: 0, centerX: 0.5, centerY: 0.5 } }] }];
+    const splitPlan = planFor([vclip({ id: 'rgb-split-child', start: 0, duration: 3,
+        extra: { x: 50, y: 50, compositionStack: splitStack } })]);
+    check('RGB split is accepted on isolated composition layers', validateCompositionPlanShape(splitPlan, W, H).length === 0,
+        validateCompositionPlanShape(splitPlan, W, H).join('; '));
+    const splitGraph = compileCompositionPlan(splitPlan, [{ overlayId: splitPlan.overlays[0].id, inputIndex: 1 }]);
+    check('RGB split compiles within the isolated composition effect stack',
+        splitGraph.filterComplex.includes('geq=r=') && splitGraph.filterComplex.includes('cos(')
+            && splitGraph.filterComplex.includes("a='alpha(X,Y)'"));
+    const splitOutput = path.join(dir, 'isolated-rgb-split.mp4');
+    const splitRender = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+        '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
+        '-filter_complex', splitGraph.filterComplex, '-map', `[${splitGraph.outputLabel}]`,
+        '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', splitOutput,
+    ], { encoding: 'utf8', timeout: 120_000 });
+    check('FFmpeg renders RGB split on an isolated composition', splitRender.status === 0,
+        (splitRender.stderr || '').split('\n').slice(-5).join(' | '));
+    const splitBoundary = regionColor(splitOutput, 1, { x: 407, y: 170, w: 12, h: 20 });
+    check('isolated RGB split changes the rendered edge pixels', !!splitBoundary && colorDist(splitBoundary, 'ff0000') > 12,
+        `expected a displaced red edge, got ${splitBoundary}`);
+
+    const patternInput = path.join(dir, 'isolated-distortion-pattern.mp4');
+    const patternSource = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi',
+        '-i', 'testsrc2=size=200x200:duration=3:rate=15', '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', patternInput,
+    ], { encoding: 'utf8', timeout: 60_000 });
+    check('distortion source pattern is generated', patternSource.status === 0 && fs.existsSync(patternInput));
+    const distortionStack = [{ id: 'distortion-group', type: 'composition', opacity: 1, blendMode: 'source-over', start: 0, duration: 3,
+        effects: [{ kind: 'distortion', params: { amount: 0.08, phase: 35 } }] }];
+    const distortionPlan = planFor([vclip({ id: 'distortion-child', start: 0, duration: 3,
+        extra: { x: 50, y: 50, compositionStack: distortionStack } })]);
+    check('distortion is accepted on isolated composition layers', validateCompositionPlanShape(distortionPlan, W, H).length === 0,
+        validateCompositionPlanShape(distortionPlan, W, H).join('; '));
+    const distortionGraph = compileCompositionPlan(distortionPlan, [{ overlayId: distortionPlan.overlays[0].id, inputIndex: 1 }]);
+    check('distortion compiles into the isolated composition RGBA pass',
+        distortionGraph.filterComplex.includes('sin(Y*0.045+') && distortionGraph.filterComplex.includes("a='alpha(clip("));
+    const plainDistortionPlan = planFor([vclip({ id: 'plain-pattern-child', start: 0, duration: 3,
+        extra: { x: 50, y: 50, compositionStack: [{ id: 'plain-pattern-group', type: 'composition', opacity: 1, blendMode: 'source-over', start: 0, duration: 3, effects: [] }] } })]);
+    const plainDistortionGraph = compileCompositionPlan(plainDistortionPlan, [{ overlayId: plainDistortionPlan.overlays[0].id, inputIndex: 1 }]);
+    const distortionFiles = [path.join(dir, 'base.mp4'), patternInput];
+    const plainDistortionRender = runGraph(dir, plainDistortionGraph, 'isolated-distortion-plain.mp4', distortionFiles);
+    const distortionRender = runGraph(dir, distortionGraph, 'isolated-distortion.mp4', distortionFiles);
+    check('FFmpeg renders both plain and distorted isolated composition graphs',
+        plainDistortionRender.r.status === 0 && distortionRender.r.status === 0,
+        `${plainDistortionRender.r.stderr || ''} ${distortionRender.r.stderr || ''}`.trim());
+    const plainPatternPixels = regionColor(plainDistortionRender.out, 1, { x: 300, y: 160, w: 40, h: 40 });
+    const distortedPatternPixels = regionColor(distortionRender.out, 1, { x: 300, y: 160, w: 40, h: 40 });
+    check('isolated distortion displaces visible pattern pixels',
+        !!plainPatternPixels && !!distortedPatternPixels && colorDist(plainPatternPixels, distortedPatternPixels) > 8,
+        `plain=${plainPatternPixels} distorted=${distortedPatternPixels}`);
+
+    const glitchStack = [{ id: 'glitch-group', type: 'composition', opacity: 1, blendMode: 'source-over', start: 0, duration: 3,
+        effects: [{ kind: 'glitch', params: { amount: 32, blockSize: 8, seed: 21, colorShift: true, scanlines: true } }] }];
+    const glitchPlan = planFor([vclip({ id: 'glitch-child', start: 0, duration: 3,
+        extra: { x: 50, y: 50, compositionStack: glitchStack } })]);
+    check('glitch is accepted on isolated composition layers', validateCompositionPlanShape(glitchPlan, W, H).length === 0,
+        validateCompositionPlanShape(glitchPlan, W, H).join('; '));
+    const glitchGraph = compileCompositionPlan(glitchPlan, [{ overlayId: glitchPlan.overlays[0].id, inputIndex: 1 }]);
+    check('glitch compiles into the isolated composition RGBA pass with alpha preserved',
+        glitchGraph.filterComplex.includes('floor(T*12)') && glitchGraph.filterComplex.includes('blockX') === false
+            && glitchGraph.filterComplex.includes("a='alpha(X,Y)'"));
+    const plainGlitchPlan = planFor([vclip({ id: 'plain-glitch-child', start: 0, duration: 3,
+        extra: { x: 50, y: 50, compositionStack: [{ id: 'plain-glitch-group', type: 'composition', opacity: 1, blendMode: 'source-over', start: 0, duration: 3, effects: [] }] } })]);
+    const plainGlitchGraph = compileCompositionPlan(plainGlitchPlan, [{ overlayId: plainGlitchPlan.overlays[0].id, inputIndex: 1 }]);
+    const plainGlitchRender = runGraph(dir, plainGlitchGraph, 'isolated-glitch-plain.mp4', distortionFiles);
+    const glitchRender = runGraph(dir, glitchGraph, 'isolated-glitch.mp4', distortionFiles);
+    check('FFmpeg renders plain and glitched isolated composition graphs',
+        plainGlitchRender.r.status === 0 && glitchRender.r.status === 0,
+        `${plainGlitchRender.r.stderr || ''} ${glitchRender.r.stderr || ''}`.trim());
+    const plainGlitchPixels = regionColor(plainGlitchRender.out, 1, { x: 300, y: 160, w: 40, h: 40 });
+    const glitchedPixels = regionColor(glitchRender.out, 1, { x: 300, y: 160, w: 40, h: 40 });
+    check('isolated glitch visibly changes its child content',
+        !!plainGlitchPixels && !!glitchedPixels && colorDist(plainGlitchPixels, glitchedPixels) > 3,
+        `plain=${plainGlitchPixels} glitched=${glitchedPixels}`);
+
+    const animatedInvertStack = [{ id: 'animated-invert-group', type: 'composition', opacity: 1, blendMode: 'source-over', start: 0, duration: 3,
+        effects: [{ kind: 'invert', params: { amount: 0 }, samples: {
+            amount: [{ t: 0, value: 0 }, { t: 3, value: 1 }],
+        }, outputWindows: [{ start: 0, end: 3 }] }] }];
+    const animatedInvertPlan = planFor([vclip({ id: 'animated-invert-child', start: 0, duration: 3,
+        extra: { x: 50, y: 50, compositionStack: animatedInvertStack } })]);
+    check('animated invert samples pass isolated composition validation',
+        validateCompositionPlanShape(animatedInvertPlan, W, H).length === 0,
+        validateCompositionPlanShape(animatedInvertPlan, W, H).join('; '));
+    const animatedInvertGraph = compileCompositionPlan(animatedInvertPlan, [{ overlayId: animatedInvertPlan.overlays[0].id, inputIndex: 1 }]);
+    check('animated invert is sampled into the isolated composition filter graph',
+        /geq=r='clip\(r\(X,Y\)\*\(1-2\*\(.*T/.test(animatedInvertGraph.filterComplex));
+    const animatedInvertOutput = path.join(dir, 'isolated-invert-animated.mp4');
+    const animatedInvertRender = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+        '-i', path.join(dir, 'base.mp4'), '-i', path.join(dir, 'ov.mp4'),
+        '-filter_complex', animatedInvertGraph.filterComplex, '-map', `[${animatedInvertGraph.outputLabel}]`,
+        '-frames:v', '45', '-pix_fmt', 'yuv420p', '-y', animatedInvertOutput,
+    ], { encoding: 'utf8', timeout: 120_000 });
+    check('FFmpeg renders animated invert on an isolated composition', animatedInvertRender.status === 0,
+        (animatedInvertRender.stderr || '').split('\n').slice(-5).join(' | '));
+    const earlyInvert = regionColor(animatedInvertOutput, 0.2, { x: 315, y: 175, w: 12, h: 12 });
+    const lateInvert = regionColor(animatedInvertOutput, 2.5, { x: 315, y: 175, w: 12, h: 12 });
+    check('animated composition invert changes exported pixels over time',
+        !!earlyInvert && !!lateInvert && colorDist(earlyInvert, lateInvert) > 90,
+        `expected red-to-cyan transition, got ${earlyInvert} then ${lateInvert}`);
 
     const vignetteStack = [{ id: 'vignette-group', type: 'composition', opacity: 1, blendMode: 'source-over', start: 0, duration: 3,
         effects: [{ kind: 'vignette', params: { intensity: 1, radius: 0.1, softness: 0.2, color: [0, 0, 0] } }] }];
@@ -1706,6 +1896,30 @@ if (!FFMPEG) {
     fs.rmSync(dir, { recursive: true, force: true });
 }
 
+section('6b.0 · Invert reaches media-overlay export');
+if (!FFMPEG) {
+    skip('media overlay invert pixels', 'no ffmpeg binary available');
+} else {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'comp-invert-'));
+    makeSources(dir);
+    const plan = planFor([vclip({ id: 'invert-overlay', start: 0.5, duration: 2, extra: {
+        x: 50, y: 50, effects: [{ kind: 'invert', params: { amount: 1 } }],
+    } })]);
+    check('worker accepts invert on a media overlay', validateCompositionPlanShape(plan, W, H).length === 0,
+        validateCompositionPlanShape(plan, W, H).join('; '));
+    const compiled = compileCompositionPlan(plan, [{ overlayId: plan.overlays[0].id, inputIndex: 1 }]);
+    check('invert compiles through the overlay color effect stack', /geq=r='clip\(r\(X,Y\)\*\(1-2\*/.test(compiled.filterComplex));
+    const { r, out } = runGraph(dir, compiled, 'invert-overlay.mp4');
+    check('FFmpeg renders invert on a media overlay', r.status === 0,
+        (r.stderr || '').split('\n').slice(-4).join(' | '));
+    const cyan = regionColor(out, 1, { x: 275, y: 155, w: 90, h: 50 });
+    check('invert changes a red overlay to cyan visible in the exported pixels',
+        Number.isFinite(parseInt(cyan?.slice(0, 2), 16))
+            && parseInt(cyan.slice(2, 4), 16) > 180 && parseInt(cyan.slice(4, 6), 16) > 180,
+        `sampled ${cyan}`);
+    fs.rmSync(dir, { recursive: true, force: true });
+}
+
 section('6b.1 · Gradient fill renders over video overlays');
 if (!FFMPEG) {
     skip('video gradient fill pixels', 'no ffmpeg binary available');
@@ -2176,9 +2390,9 @@ if (!FFMPEG) {
         keyframes: { intensity: [{ time: 0, value: 0.2, easing: 'linear' }, { time: 3, value: 0.9, easing: 'linear' }] } });
     check('glitch export uses authored block size, color separation and scanlines',
         /floor\(X\/8\.0000\)/.test(stylized.filter)
-            && /sin\(Y\*PI\)/.test(stylized.filter)
+            && /sin\(\(Y\+0\.5\)\*PI\)/.test(stylized.filter)
             && /floor\(X\/128\.0000\)/.test(restrained.filter)
-            && !/sin\(Y\*PI\)/.test(restrained.filter)
+            && !/sin\(\(Y\+0\.5\)\*PI\)/.test(restrained.filter)
             && stylized.filter !== restrained.filter);
     const animatedRgb = compileTimelineVisualEffects([{ kind: 'rgb_split', enabled: true,
         params: { amount: 8, angle: 0, centerX: 0.5, centerY: 0.5 },
@@ -2247,6 +2461,8 @@ section('7 · The export job wires it in and reports missing overlays');
         /COMPOSITOR_DISABLED/.test(src));
     check('the plan is validated before execution',
         /validateCompositionPlanShape\(rawPlan, targetWidth, targetHeight\)/.test(src));
+    check('recoverable composition-plan limitations are surfaced in the export result',
+        /compositionPlanWarnings/.test(src) && /rawPlan\?\.warnings/.test(src));
     check('the render resolution is injected for the pixel conversion',
         /rawPlan\.renderWidth\s*=\s*targetWidth/.test(src));
     check('inline vector overlays are rendered to frame sequences before compositor input',

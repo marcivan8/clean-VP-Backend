@@ -25,6 +25,7 @@ import {
 import useTimelineStore from '../store/useTimelineStore';
 import { listNodes, NODE_TYPES, CONTAINER_TYPES } from '../motion/SceneSchema.js';
 import { validateScene, safeZoneForAspect, describeIssues } from '../motion/SceneValidator.js';
+import { validateMotionExpression } from '../motion/MotionExpression.js';
 import { authFetch } from '../utils/authFetch.js';
 import { captureReviewFrame } from '../motion/captureReviewFrame.js';
 
@@ -161,7 +162,7 @@ function LayerRow({ entry, sceneId, selectedId, onSelect, collapsed, onToggle, t
 }
 
 /** The properties of the selected layer. Text commits on blur, not per keystroke. */
-function NodeEditor({ sceneId, node, t }) {
+function NodeEditor({ sceneId, node, allNodes = [], t }) {
     // Keyed on the node by the parent, so an edit made elsewhere (the player,
     // the assistant, undo) remounts this with fresh values.
     const [draft, setDraft] = useState({
@@ -174,13 +175,27 @@ function NodeEditor({ sceneId, node, t }) {
         color: node.style?.color ?? '#ffffff',
         x: node.transform?.x ?? 50,
         y: node.transform?.y ?? 50,
+        scale: node.transform?.scale ?? 1,
+        rotation: node.transform?.rotation ?? 0,
         duration: node.duration ?? 0,
+        parentId: node.parentId || '',
+        matteMode: node.trackMatte?.mode || 'none',
+        matteSourceId: node.trackMatte?.sourceLayerId || '',
+        trackTargetId: node.constraints?.trackTargetId || '',
+        lookAtTargetId: node.constraints?.lookAtTargetId || '',
+        trimStart: node.vector?.trimStart ?? 0,
+        trimEnd: node.vector?.trimEnd ?? 100,
+        trimOffset: node.vector?.trimOffset ?? 0,
+        particleCount: node.particles?.count ?? 200,
         maskShape: node.mask?.kind === 'shape' ? node.mask.shape : 'none',
         maskFeather: node.mask?.kind === 'shape' ? node.mask.feather ?? 0 : 0,
         maskInvert: node.mask?.kind === 'shape' ? !!node.mask.invert : false,
         blurShutterAngle: node.motionBlur?.shutterAngle ?? 180,
         blurSamples: node.motionBlur?.samples ?? 5,
     });
+    const [selectedExprProp, setSelectedExprProp] = useState('x');
+    const [exprCode, setExprCode] = useState(node.expressions?.[selectedExprProp] || '');
+    const [exprValidation, setExprValidation] = useState(null);
     const [note, setNote] = useState('');
 
     const commit = useCallback((patch) => {
@@ -197,10 +212,51 @@ function NodeEditor({ sceneId, node, t }) {
 
     const isText = node.type === NODE_TYPES.TEXT || node.type === NODE_TYPES.CAPTION;
     const supportsTextPath = node.type === NODE_TYPES.TEXT;
+    const supportsTrimPaths = node.type === NODE_TYPES.SHAPE || !!node.vector;
+    const supportsParticles = !!node.particles || node.type === NODE_TYPES.SHAPE;
     const supportsMask = [NODE_TYPES.SHAPE, NODE_TYPES.IMAGE, NODE_TYPES.VIDEO, NODE_TYPES.STICKER].includes(node.type);
     const supportsTemporalBlur = isText || (node.type === NODE_TYPES.SHAPE && !!(node.vector
         || (node.template && node.template.kind !== '3d-scene')));
     const motionBlur = node.motionBlur || { enabled: false, samples: 5, shutterAngle: 180 };
+
+    // Prevent cyclic parentage in UI picker
+    const safeParentCandidates = useMemo(() => {
+        const byId = new Map(allNodes.map(n => [n.id, n]));
+        return allNodes.filter(c => {
+            if (c.id === node.id) return false;
+            let curr = c.id;
+            const seen = new Set();
+            while (curr) {
+                if (curr === node.id) return false;
+                if (seen.has(curr)) break;
+                seen.add(curr);
+                const parent = byId.get(curr);
+                curr = parent ? parent.parentId : null;
+            }
+            return true;
+        });
+    }, [allNodes, node.id]);
+
+    const otherLayerCandidates = useMemo(() => {
+        return allNodes.filter(c => c.id !== node.id);
+    }, [allNodes, node.id]);
+
+    const commitExpression = useCallback((prop, code) => {
+        const trimmed = (code || '').trim();
+        const expressions = { ...(node.expressions || {}) };
+        if (!trimmed) {
+            delete expressions[prop];
+            setExprValidation(null);
+            commit({ expressions });
+            return;
+        }
+        const v = validateMotionExpression(trimmed);
+        setExprValidation(v);
+        if (!v.valid) return;
+        expressions[prop] = trimmed;
+        commit({ expressions });
+    }, [node.expressions, commit]);
+
     /**
      * Commit a number only if one was actually typed. `Number('')` is 0, so an
      * emptied box would otherwise commit zero: a font size of 0 (an invisible
@@ -317,6 +373,138 @@ function NodeEditor({ sceneId, node, t }) {
                         onBlur={e => commitNumber(e.target.value, v => ({ duration: Math.max(0.1, v) }))} />
                 </label>
             </div>
+
+            {/* Parenting & Constraints */}
+            <div className="space-y-2 border-t border-border/60 pt-2">
+                <div className="grid grid-cols-2 gap-2">
+                    <label className="block space-y-1">
+                        <span className={label}>{t('scenePanel.parent') || 'Parent Layer'}</span>
+                        <select className={field} value={draft.parentId}
+                            onChange={e => {
+                                const parentId = e.target.value || null;
+                                setDraft(d => ({ ...d, parentId: parentId || '' }));
+                                commit({ parentId });
+                            }}>
+                            <option value="">{t('scenePanel.parentNone') || 'None'}</option>
+                            {safeParentCandidates.map(c => (
+                                <option key={c.id} value={c.id}>
+                                    {c.content ? String(c.content).slice(0, 24) : c.name}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <label className="block space-y-1">
+                        <span className={label}>{t('scenePanel.trackTarget') || 'Track Target'}</span>
+                        <select className={field} value={draft.trackTargetId}
+                            onChange={e => {
+                                const targetId = e.target.value || null;
+                                setDraft(d => ({ ...d, trackTargetId: targetId || '' }));
+                                commit({ constraints: { ...(node.constraints || {}), trackTargetId: targetId } });
+                            }}>
+                            <option value="">{t('scenePanel.targetNone') || 'None'}</option>
+                            {otherLayerCandidates.map(c => (
+                                <option key={c.id} value={c.id}>
+                                    {c.content ? String(c.content).slice(0, 24) : c.name}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                </div>
+            </div>
+
+            {/* Track Matte */}
+            <div className="space-y-2 border-t border-border/60 pt-2">
+                <span className={label}>{t('scenePanel.trackMatte') || 'Track Matte'}</span>
+                <div className="grid grid-cols-2 gap-2">
+                    <label className="block space-y-1">
+                        <span className={label}>{t('scenePanel.matteMode') || 'Matte Mode'}</span>
+                        <select className={field} value={draft.matteMode}
+                            onChange={e => {
+                                const mode = e.target.value;
+                                setDraft(d => ({ ...d, matteMode: mode }));
+                                if (mode === 'none') {
+                                    commit({ trackMatte: null });
+                                } else {
+                                    const sourceLayerId = draft.matteSourceId || (otherLayerCandidates[0]?.id || null);
+                                    setDraft(d => ({ ...d, matteSourceId: sourceLayerId || '' }));
+                                    commit({ trackMatte: { mode, sourceLayerId } });
+                                }
+                            }}>
+                            <option value="none">{t('scenePanel.matteNone') || 'None'}</option>
+                            <option value="alpha">{t('scenePanel.matteAlpha') || 'Alpha'}</option>
+                            <option value="alpha-inverted">{t('scenePanel.matteAlphaInverted') || 'Alpha Inverted'}</option>
+                            <option value="luma">{t('scenePanel.matteLuma') || 'Luma'}</option>
+                            <option value="luma-inverted">{t('scenePanel.matteLumaInverted') || 'Luma Inverted'}</option>
+                        </select>
+                    </label>
+                    {draft.matteMode !== 'none' && (
+                        <label className="block space-y-1">
+                            <span className={label}>{t('scenePanel.matteSource') || 'Matte Source'}</span>
+                            <select className={field} value={draft.matteSourceId}
+                                onChange={e => {
+                                    const sourceId = e.target.value || null;
+                                    setDraft(d => ({ ...d, matteSourceId: sourceId || '' }));
+                                    commit({ trackMatte: { mode: draft.matteMode, sourceLayerId: sourceId } });
+                                }}>
+                                <option value="">{t('scenePanel.targetNone') || 'Pick layer'}</option>
+                                {otherLayerCandidates.map(c => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.content ? String(c.content).slice(0, 24) : c.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                    )}
+                </div>
+            </div>
+
+            {/* Vector Trim Paths */}
+            {supportsTrimPaths && (
+                <div className="space-y-2 border-t border-border/60 pt-2">
+                    <span className={label}>{t('scenePanel.trimPaths') || 'Vector Trim Paths'}</span>
+                    <div className="grid grid-cols-3 gap-2">
+                        <label className="block space-y-1">
+                            <span className={label}>{t('scenePanel.trimStart') || 'Start %'}</span>
+                            <input className={field} type="number" min="0" max="100" step="1" value={draft.trimStart}
+                                onChange={e => setDraft({ ...draft, trimStart: e.target.value })}
+                                onBlur={e => commitNumber(e.target.value, val => ({
+                                    vector: { ...(node.vector || { kind: 'rect' }), trimStart: Math.max(0, Math.min(100, val)) }
+                                }))} />
+                        </label>
+                        <label className="block space-y-1">
+                            <span className={label}>{t('scenePanel.trimEnd') || 'End %'}</span>
+                            <input className={field} type="number" min="0" max="100" step="1" value={draft.trimEnd}
+                                onChange={e => setDraft({ ...draft, trimEnd: e.target.value })}
+                                onBlur={e => commitNumber(e.target.value, val => ({
+                                    vector: { ...(node.vector || { kind: 'rect' }), trimEnd: Math.max(0, Math.min(100, val)) }
+                                }))} />
+                        </label>
+                        <label className="block space-y-1">
+                            <span className={label}>{t('scenePanel.trimOffset') || 'Offset'}</span>
+                            <input className={field} type="number" step="1" value={draft.trimOffset}
+                                onChange={e => setDraft({ ...draft, trimOffset: e.target.value })}
+                                onBlur={e => commitNumber(e.target.value, val => ({
+                                    vector: { ...(node.vector || { kind: 'rect' }), trimOffset: val }
+                                }))} />
+                        </label>
+                    </div>
+                </div>
+            )}
+
+            {/* Particle Budget */}
+            {node.particles && (
+                <div className="space-y-1 border-t border-border/60 pt-2">
+                    <label className="block space-y-1">
+                        <span className={label}>{t('scenePanel.particleBudget') || 'Particle Budget (max 1500)'}</span>
+                        <input className={field} type="number" min="10" max="1500" value={draft.particleCount}
+                            onChange={e => setDraft({ ...draft, particleCount: e.target.value })}
+                            onBlur={e => commitNumber(e.target.value, val => ({
+                                particles: { ...(node.particles || {}), count: Math.max(10, Math.min(1500, val)) }
+                            }))} />
+                    </label>
+                </div>
+            )}
+
             {supportsTemporalBlur && (
                 <div className="space-y-2 border-t border-border/60 pt-2">
                     <label className="flex items-center gap-2 text-[10px] text-muted-foreground">
@@ -394,6 +582,61 @@ function NodeEditor({ sceneId, node, t }) {
                     )}
                 </div>
             )}
+
+            {/* Motion Expressions with live validation and presets */}
+            <div className="space-y-2 border-t border-border/60 pt-2">
+                <span className={label}>{t('scenePanel.expressions') || 'Motion Expressions'}</span>
+                <div className="grid grid-cols-2 gap-2">
+                    <label className="block space-y-1">
+                        <span className={label}>{t('scenePanel.selectProperty') || 'Property'}</span>
+                        <select className={field} value={selectedExprProp}
+                            onChange={e => {
+                                const prop = e.target.value;
+                                setSelectedExprProp(prop);
+                                setExprCode(node.expressions?.[prop] || '');
+                                setExprValidation(null);
+                            }}>
+                            <option value="x">Transform: X</option>
+                            <option value="y">Transform: Y</option>
+                            <option value="rotation">Transform: Rotation</option>
+                            <option value="scale">Transform: Scale</option>
+                            <option value="opacity">Transform: Opacity</option>
+                        </select>
+                    </label>
+                    <label className="block space-y-1">
+                        <span className={label}>{t('scenePanel.expressionPreset') || 'Preset'}</span>
+                        <select className={field} defaultValue=""
+                            onChange={e => {
+                                const presetCode = e.target.value;
+                                if (!presetCode) return;
+                                setExprCode(presetCode);
+                                commitExpression(selectedExprProp, presetCode);
+                                e.target.value = '';
+                            }}>
+                            <option value="">{t('scenePanel.pick') || 'Insert preset...'}</option>
+                            <option value="wiggle(5, 20)">Wiggle: 5Hz, 20px</option>
+                            <option value="loopOut('cycle')">Loop: Cycle</option>
+                            <option value="loopOut('pingpong')">Loop: PingPong</option>
+                            <option value="audioAmp('bass') * 50">Audio: Bass Amp</option>
+                            <option value="audioAmp('all') * 30">Audio: Master Amp</option>
+                            <option value="time * 90">Spin: 90 deg/s</option>
+                            <option value="Math.sin(time * 3) * 20">Sine Wave: 3Hz</option>
+                            <option value="spring(time, 180, 12, 1)">Spring: Snappy</option>
+                        </select>
+                    </label>
+                </div>
+                <div className="space-y-1">
+                    <textarea rows={2} className={`${field} font-mono text-[11px]`}
+                        placeholder="e.g. wiggle(5, 20) or loopOut('cycle')"
+                        value={exprCode}
+                        onChange={e => setExprCode(e.target.value)}
+                        onBlur={e => commitExpression(selectedExprProp, e.target.value)} />
+                    {exprValidation && !exprValidation.valid && (
+                        <p className="text-[10px] text-rose-400">{exprValidation.reason || 'Invalid expression syntax'}</p>
+                    )}
+                </div>
+            </div>
+
             {note && <p className="text-[10px] text-amber-400">{note}</p>}
         </div>
     );
@@ -428,6 +671,8 @@ export default function ScenePanel() {
     }, [tracks, activeClipId, scenes, pickedSceneId, sceneIds]);
 
     const scene = sceneId ? scenes[sceneId] : null;
+
+    const allNodes = useMemo(() => (scene ? listNodes(scene).map(e => e.node) : []), [scene]);
 
     const rows = useMemo(() => {
         if (!scene) return [];
@@ -647,8 +892,8 @@ export default function ScenePanel() {
                     </div>
 
                     {selected && !CONTAINER_TYPES.includes(selected.type) && (
-                        <NodeEditor key={`${sceneId}:${selected.id}:${selected.content}:${selected.style?.fontSize}:${selected.transform?.x}:${selected.transform?.y}:${selected.duration}:${selected.motionBlur?.enabled}:${selected.motionBlur?.samples}:${selected.motionBlur?.shutterAngle}:${selected.textPath?.data}:${selected.textPath?.align}:${selected.textPath?.side}:${selected.textPath?.offset}`}
-                            sceneId={sceneId} node={selected} t={t} />
+                        <NodeEditor key={`${sceneId}:${selected.id}:${selected.content}:${selected.style?.fontSize}:${selected.transform?.x}:${selected.transform?.y}:${selected.duration}:${selected.parentId}:${selected.trackMatte?.mode}:${selected.trackMatte?.sourceLayerId}:${selected.vector?.trimStart}:${selected.vector?.trimEnd}:${selected.vector?.trimOffset}:${selected.motionBlur?.enabled}:${selected.motionBlur?.samples}:${selected.motionBlur?.shutterAngle}:${selected.textPath?.data}:${selected.textPath?.align}:${selected.textPath?.side}:${selected.textPath?.offset}`}
+                            sceneId={sceneId} node={selected} allNodes={allNodes} t={t} />
                     )}
 
                     {warnings.length > 0 && (

@@ -119,6 +119,91 @@ const duringEmphasis = sampleTypographyMotion(lifecycleLayout, lifecycle, 0.625,
 assert.ok(duringExit.opacity < beforeExit.opacity, 'exit motion animates glyphs out before the clip ends');
 assert.ok(duringEmphasis.scale > 1, 'emphasis beats layer a pulse on top of the settled entrance');
 
+const authoredLayout = layoutRichText('MOVE', { fontSize: 84, fontFamily: 'Inter', maxWidth: 600, maxHeight: 160 });
+const authoredMotion = {
+    preset: 'fade', unit: 'char', stagger: 0.1, duration: 0.5, easing: 'linear',
+    order: 'reverse', startDelay: 0.1,
+    from: { opacity: 0, rotation: -90, translateY: 24, scale: 0.5 },
+    to: { opacity: 1, rotation: 0, translateY: 0, scale: 1 },
+};
+const reverseFirst = sampleTypographyMotion(authoredLayout, authoredMotion, 0.1).get(3);
+const reverseMid = sampleTypographyMotion(authoredLayout, authoredMotion, 0.35).get(3);
+assert.equal(reverseFirst.rotation, -90, 'reverse range starts on the last glyph with authored rotation');
+assert.equal(reverseFirst.opacity, 0, 'authored opacity overrides the named fade preset');
+assert.ok(Math.abs(reverseMid.rotation + 45) < 1e-9, 'rotation endpoints interpolate over eased progress');
+assert.ok(Math.abs(reverseMid.translateY - 12) < 1e-9, 'translation endpoints interpolate per glyph');
+assert.ok(Math.abs(reverseMid.scale - 0.75) < 1e-9, 'scale endpoints interpolate per glyph');
+const presetIndependent = sampleTypographyMotion(authoredLayout, {
+    unit: 'word', duration: 1, easing: 'linear',
+    from: { rotation: -20 }, to: { rotation: 20 },
+}, 0.5).get(0);
+assert.equal(presetIndependent.rotation, 0, 'authored transform endpoints work without a named entrance preset');
+const customOnlyScene = createScene({ frame: { aspectRatio: '16:9', w: 1920, h: 1080 }, duration: 2, nodes: [
+    createNode(NODE_TYPES.TEXT, { id: 'custom-only-title', content: 'MOVE', start: 0, duration: 2,
+        size: { w: 600, h: 160 }, transform: { x: 50, y: 50 }, style: { fontSize: 84 },
+        charAnim: { unit: 'char', duration: 1, from: { rotation: -20 }, to: { rotation: 20 } } }),
+] });
+assert.equal(flattenScene(customOnlyScene).placements[0].clip.template.kind, 'rich-text',
+    'custom-only text animators route through the shared renderer without a named preset');
+const customOnlyGraphic = {
+    text: 'MOVE', w: 600, h: 160, duration: 1,
+    style: { fontSize: 84, fontFamily: 'Inter', color: '#FFFFFF' },
+    charAnim: { unit: 'char', duration: 1, easing: 'linear', from: { rotation: -20 }, to: { rotation: 20 } },
+};
+const customOnlyFrame = time => {
+    const canvas = Canvas.createCanvas(customOnlyGraphic.w, customOnlyGraphic.h);
+    drawRichTextFrame(canvas.getContext('2d'), customOnlyGraphic, time, { width: customOnlyGraphic.w, height: customOnlyGraphic.h });
+    return canvas.toBuffer('image/png');
+};
+assert.notDeepEqual(customOnlyFrame(0), customOnlyFrame(1),
+    'custom-only rich-text endpoints animate in the shared preview renderer without a named preset');
+const selectedRange = sampleTypographyMotion(authoredLayout, {
+    preset: 'fade', unit: 'char', stagger: 0, duration: 1, easing: 'linear',
+    from: { translateY: 0 }, to: { translateY: 20 },
+    rangeSelector: { start: 0, end: 50, shape: 'square' },
+}, 1);
+assert.equal(selectedRange.get(0).translateY, 20, 'square text range selects glyphs inside the authored interval');
+assert.equal(selectedRange.get(3).translateY, 0, 'square text range leaves glyphs outside the interval untouched');
+const triangleRange = sampleTypographyMotion(authoredLayout, {
+    preset: 'fade', unit: 'char', stagger: 0, duration: 1, easing: 'linear',
+    from: { translateY: 0 }, to: { translateY: 20 },
+    rangeSelector: { start: 0, end: 100, shape: 'triangle' },
+}, 1);
+assert.ok(Math.abs(triangleRange.get(0).translateY - 5) < 1e-9, 'triangle range gives a soft partial weight at the selection edge');
+assert.ok(Math.abs(triangleRange.get(1).translateY - 15) < 1e-9, 'triangle range peaks toward the selection center');
+const advancedTextScene = createScene({ frame: { aspectRatio: '16:9', w: 1920, h: 1080 }, duration: 2, nodes: [
+    createNode(NODE_TYPES.TEXT, { id: 'range-title', content: 'MOVE', start: 0, duration: 2,
+        size: { w: 600, h: 160 }, transform: { x: 50, y: 50 }, style: { fontSize: 84 }, charAnim: authoredMotion }),
+] });
+const [advancedTextPlacement] = flattenScene(advancedTextScene).placements;
+assert.deepEqual(advancedTextPlacement.clip.template.params.charAnim, authoredMotion,
+    'authored unit transforms and order survive scene flattening into the compositor');
+const [roundTrippedText] = sceneFromPlacements([advancedTextPlacement], { aspectRatio: '16:9' }).nodes[0].children;
+assert.deepEqual(roundTrippedText.charAnim, authoredMotion, 'authored unit transforms survive timeline lift and scene relifting');
+const overshootingAlpha = sampleTypographyMotion(authoredLayout, {
+    preset: 'fade', unit: 'word', duration: 1, easing: 'easeOutBack',
+    from: { opacity: 0 }, to: { opacity: 1 },
+}, 0.7).get(0).opacity;
+assert.ok(overshootingAlpha >= 0 && overshootingAlpha <= 1,
+    'overshooting easing cannot feed invalid alpha to the canvas renderer');
+const authoredGraphic = { ...graphic, text: 'MOVE', charAnim: authoredMotion };
+const authoredFrame = time => {
+    const canvas = Canvas.createCanvas(authoredGraphic.w, authoredGraphic.h);
+    drawRichTextFrame(canvas.getContext('2d'), authoredGraphic, time, { width: authoredGraphic.w, height: authoredGraphic.h });
+    return canvas.toBuffer('image/png');
+};
+assert.notDeepEqual(authoredFrame(0.1), authoredFrame(0.35), 'authored per-character rotation and transforms render in preview frames');
+const authoredPathGraphic = { ...authoredGraphic, textPath: pathGraphic.textPath };
+const authoredPathCanvas = Canvas.createCanvas(authoredGraphic.w, authoredGraphic.h);
+const unrotatedPathCanvas = Canvas.createCanvas(authoredGraphic.w, authoredGraphic.h);
+drawRichTextFrame(authoredPathCanvas.getContext('2d'), authoredPathGraphic, 0.35,
+    { width: authoredGraphic.w, height: authoredGraphic.h });
+drawRichTextFrame(unrotatedPathCanvas.getContext('2d'), { ...authoredPathGraphic,
+    charAnim: { ...authoredMotion, from: { ...authoredMotion.from, rotation: 0 }, to: { ...authoredMotion.to, rotation: 0 } } },
+    0.35, { width: authoredGraphic.w, height: authoredGraphic.h });
+assert.notDeepEqual(authoredPathCanvas.toBuffer('image/png'), unrotatedPathCanvas.toBuffer('image/png'),
+    'authored rotation composes with tangent rotation on text paths');
+
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibed-rich-text-'));
 try {
     const sequence = await renderTemplateFrames({ kind: 'rich-text', params: graphic }, {
@@ -143,6 +228,28 @@ try {
     });
     assert.notDeepEqual(fs.readFileSync(pathSequence.files[0]), fs.readFileSync(pathSequence.files[3]),
         'exported frames preserve animated text along the SVG path');
+
+    const authoredSequence = await renderTemplateFrames({ kind: 'rich-text', params: authoredGraphic }, {
+        durationSec: 1,
+        fps: 4,
+        widthPx: authoredGraphic.w,
+        tmpDir,
+        name: 'authored-unit-transforms',
+        canvasModule: Canvas,
+    });
+    assert.notDeepEqual(fs.readFileSync(authoredSequence.files[0]), fs.readFileSync(authoredSequence.files[1]),
+        'export frames preserve authored per-character transform endpoints and rotation');
+
+    const customOnlySequence = await renderTemplateFrames({ kind: 'rich-text', params: customOnlyGraphic }, {
+        durationSec: 1,
+        fps: 2,
+        widthPx: customOnlyGraphic.w,
+        tmpDir,
+        name: 'custom-only-unit-transforms',
+        canvasModule: Canvas,
+    });
+    assert.notDeepEqual(fs.readFileSync(customOnlySequence.files[0]), fs.readFileSync(customOnlySequence.files[1]),
+        'custom-only text animators remain animated in export frames without a named preset');
 
     const captionParams = captionPlacement.clip.template.params;
     const captionSequence = await renderTemplateFrames({ kind: 'rich-text', params: captionParams }, {

@@ -38,6 +38,9 @@ assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type
   effects: [{ kind: 'blur_gaussian', params: { radius: 4 } }] }] }), true,
   'the Revideo path accepts the blur effect it actually renders');
 assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type: 'text', content: 'Hello', start: 0, duration: 2,
+  effects: [{ kind: 'invert', params: { amount: 0.65 } }] }] }), true,
+  'the Revideo path accepts the partial invert filter it actually renders');
+assert.equal(isRevideoTrackSupported({ type: 'text', clips: [{ id: 'title', type: 'text', content: 'Hello', start: 0, duration: 2,
   effects: [{ kind: 'hue', keyframes: { degrees: [{ time: 0, value: 0 }, { time: 2, value: 90 }] } }] }] }), true,
   'supported keyframed effects can use Revideo’s animated filter adapter');
 assert.equal(isRevideoTrackSupported({ type: 'overlay', clips: [{ id: 'shadow-opacity', type: 'image', url: '/logo.png', start: 0, duration: 2,

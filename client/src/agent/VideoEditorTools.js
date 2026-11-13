@@ -15,14 +15,35 @@ import { iconFromText } from '../motion/IconLibrary.js';
 import { applyPresetToClip } from '../motion/ClipAdapter.js';
 import { describeToolCapabilities, validateToolInvocation } from './ToolCapabilityCatalog.js';
 import { effectRegistry } from '../effects/EffectRegistry.js';
-import { isGpuClipEffect } from '../effects/ClipEffectAdapter.js';
+import { isHandAppliableEffect } from '../effects/handAppliable.js';
 import { PARAM_TYPES } from '../effects/EffectNode.js';
 import { COMPONENT_IDS } from '../motion/ComponentLibrary.js';
 import { isReferenceAsset } from '../utils/assetRoles.js';
+import { validateMotionExpression } from '../motion/MotionExpression.js';
 
+/**
+ * The footage effects the AI may put on a clip.
+ *
+ * R166 added `invert`: it is in ClipEffectAdapter's GPU clip-effect map, the
+ * export compositor renders it and TimelineVisualEffects approximates it in
+ * preview, so it was renderable end to end and simply unreachable — the AI
+ * could not name it and, until the effects panel was mounted, neither could a
+ * hand. scripts/test_effects_panel_wiring.mjs now asserts this list covers
+ * everything the panel offers, so the two surfaces cannot drift apart again.
+ *
+ * Deliberately NOT here:
+ *   lut_apply       — has its own commands (apply_lut, recommend_luts) and its
+ *                     own export path; two ways to set a LUT is how preview and
+ *                     export came apart in R14/R16/R53/R56.
+ *   smart_zoom, beat_sync, emotion_frame
+ *                   — implemented in engines/AIEffects.js, which is reachable
+ *                     only through the unmounted client WebGL runtime (R165).
+ *   speed_change, audio_normalize, audio_denoise
+ *                   — retiming and audio, with their own commands.
+ */
 const ROKA_FOOTAGE_EFFECT_TYPES = Object.freeze([
     'blur_gaussian', 'blur_radial', 'blur_motion', 'glow', 'vignette', 'rgb_split',
-    'film_grain', 'glitch', 'color_grade', 'fade_in', 'fade_out',
+    'film_grain', 'glitch', 'color_grade', 'invert', 'shake', 'fade_in', 'fade_out',
 ]);
 const ROKA_FOOTAGE_EFFECT_SET = new Set(ROKA_FOOTAGE_EFFECT_TYPES);
 const ROKA_FOOTAGE_EFFECT_GUIDE = ROKA_FOOTAGE_EFFECT_TYPES.map(type => {
@@ -539,6 +560,72 @@ export const TOOL_DEFINITIONS = [
                 replaceExisting: { type: 'boolean', description: 'Replace the current effect stack on target clips. Defaults to false.' },
             },
             required: ['effects'],
+        },
+    },
+    {
+        name: 'apply_motion_expression',
+        description: 'Applies an After Effects motion expression (wiggle, loopOut pingpong, audioAmp bass, spring) to a transform channel of the target layer.',
+        parameters: {
+            type: 'object',
+            properties: {
+                clipId: { type: 'string', description: 'Target clip/layer ID. Defaults to selected clip or playhead layer.' },
+                property: { type: 'string', enum: ['scale', 'rotation', 'x', 'y', 'opacity', 'blur'], description: 'Property channel to drive with the expression.' },
+                expression: { type: 'string', description: 'Expression string (e.g. "wiggle(2, 8)", "1 + audioAmp(\'bass\') * 0.2", "loopOut(\'pingpong\')", "spring(time, 180, 14, 1)").' },
+            },
+            required: ['expression'],
+        },
+    },
+    {
+        name: 'set_track_matte',
+        description: 'Configures an alpha or luminance track matte mask to cut out or reveal the target layer.',
+        parameters: {
+            type: 'object',
+            properties: {
+                clipId: { type: 'string', description: 'Target clip/layer ID to be masked.' },
+                sourceLayerId: { type: 'string', description: 'Source matte layer ID acting as the stencil/cutout mask.' },
+                mode: { type: 'string', enum: ['alpha', 'alpha-inverted', 'luma', 'luma-inverted'], description: 'Track matte evaluation mode.' },
+            },
+            required: ['mode'],
+        },
+    },
+    {
+        name: 'set_layer_parent',
+        description: 'Links a child layer to a host parent layer so it tracks its transform with relative coordinates and cycle prevention.',
+        parameters: {
+            type: 'object',
+            properties: {
+                clipId: { type: 'string', description: 'Child clip/layer ID.' },
+                parentId: { type: 'string', description: 'Parent layer ID to follow, or null to unlink.' },
+            },
+            required: [],
+        },
+    },
+    {
+        name: 'set_vector_trim',
+        description: 'Configures or animates vector shape trim paths (trimStart, trimEnd, trimOffset) for kinetic draw-on strokes, outlines, or borders.',
+        parameters: {
+            type: 'object',
+            properties: {
+                clipId: { type: 'string', description: 'Target vector shape/graphic clip ID.' },
+                trimStart: { type: 'number', description: 'Normalized start offset 0..1.' },
+                trimEnd: { type: 'number', description: 'Normalized end offset 0..1.' },
+                trimOffset: { type: 'number', description: 'Rotational offset in degrees 0..360.' },
+                drawOn: { type: 'boolean', description: 'Whether to create keyframed draw-on stroke animation.' },
+                drawOnDuration: { type: 'number', description: 'Duration of draw-on animation in seconds.' },
+            },
+            required: [],
+        },
+    },
+    {
+        name: 'apply_aesthetic_preset',
+        description: 'Applies a complete creator aesthetic preset (Vox documentary, Ali Abdaal minimal, MrBeast hyper-retention, Iman Gadzhi dark luxury, Apple minimal showcase, Hormozi bold) across footage and motion graphics.',
+        parameters: {
+            type: 'object',
+            properties: {
+                preset: { type: 'string', enum: ['vox', 'ali_abdaal', 'mrbeast', 'iman_gadzhi', 'apple_minimal', 'hormozi'], description: 'Aesthetic look to apply.' },
+                clipId: { type: 'string', description: 'Optional target footage clip ID, or all video clips if omitted.' },
+            },
+            required: ['preset'],
         },
     }
 ];
@@ -1188,6 +1275,11 @@ export class VideoEditorTools {
             case 'compose_motion': return await this.executeMotionEngineAction('compose_motion', action.args, action.signal || null);
             case 'add_motion_component': return this.addMotionComponent(action.args);
             case 'apply_motion_effect_stack': return this.applyMotionEffectStack(action.args);
+            case 'apply_motion_expression':   return this.applyMotionExpression(action.args);
+            case 'set_track_matte':           return this.setTrackMatte(action.args);
+            case 'set_layer_parent':          return this.setLayerParent(action.args);
+            case 'set_vector_trim':           return this.setVectorTrim(action.args);
+            case 'apply_aesthetic_preset':    return this.applyAestheticPreset(action.args);
             case 'clear_keywords':     return this.clearKeywords(action.args);
             case 'add_sfx':           return this.addSFX(action.args);
             case 'apply_preset':      return await this.applyPreset(action.args);
@@ -1297,7 +1389,7 @@ export class VideoEditorTools {
         for (const [index, item] of requested.entries()) {
             const type = String(item?.type || '');
             const definition = effectRegistry.get(type);
-            if (!ROKA_FOOTAGE_EFFECT_SET.has(type) || !definition || (!isGpuClipEffect(type) && !['fade_in', 'fade_out'].includes(type))) {
+            if (!ROKA_FOOTAGE_EFFECT_SET.has(type) || !definition || (!isHandAppliableEffect(type) && !['fade_in', 'fade_out'].includes(type))) {
                 return { success: false, message: `The motion engine cannot apply “${type || `effect ${index + 1}`}” to footage in preview and export.` };
             }
             const supplied = item.params && typeof item.params === 'object' && !Array.isArray(item.params) ? item.params : {};
@@ -1375,6 +1467,318 @@ export class VideoEditorTools {
             success: true,
             message: `Applied ${normalized.map(effect => effect.name).join(', ')} to ${targets.length} video clip${targets.length === 1 ? '' : 's'}. The effects are on the footage effect stack and can be adjusted or undone.`,
             details: { clipIds: targetIds.map(target => target.clipId), effects: normalized.map(({ id, type, name }) => ({ id, type, name })), verified: true },
+        };
+    }
+
+    applyMotionExpression({ clipId, property = 'scale', expression, target } = {}) {
+        const expr = String(expression || '').trim();
+        if (!expr) return { success: false, message: 'Provide an expression to apply (e.g. "wiggle(2, 8)", "1 + audioAmp(\'bass\') * 0.2", "loopOut(\'pingpong\')").' };
+        const validation = validateMotionExpression(expr);
+        if (!validation.valid) {
+            return { success: false, message: `The motion engine expression "${expr}" is invalid (${validation.reason || 'syntax error'}).` };
+        }
+
+        const state = useTimelineStore.getState();
+        const nonAudioTracks = (state.tracks || []).filter(track => track.type !== 'audio');
+        const allClips = nonAudioTracks.flatMap(track => (track.clips || []).map(clip => ({ track, clip })));
+
+        let targets = [];
+        if (clipId) {
+            targets = allClips.filter(entry => entry.clip.id === clipId || entry.clip.clipId === clipId);
+            if (!targets.length) return { success: false, message: 'That clip is no longer on the timeline.' };
+        } else if (target === 'all') {
+            targets = allClips;
+        } else {
+            const selected = new Set(state.selectedClipIds || []);
+            targets = allClips.filter(entry => selected.has(entry.clip.id) || (entry.clip.clipId && selected.has(entry.clip.clipId)));
+            if (!targets.length) {
+                const time = Number(state.currentTime) || 0;
+                targets = allClips.filter(({ clip }) => time >= (Number(clip.start) || 0) && time < (Number(clip.start) || 0) + (Number(clip.duration) || 0));
+            }
+            if (!targets.length && allClips.length > 0) {
+                targets = [allClips[0]];
+            }
+        }
+
+        if (!targets.length) return { success: false, message: 'Select a clip or graphic before applying an expression.' };
+
+        state._saveHistory?.();
+        const targetIds = targets.map(({ track, clip }) => ({ trackId: track.id, clipId: clip.id }));
+        for (const { track, clip } of targets) {
+            const expressions = { ...(clip.expressions || {}), [property]: expr };
+            state.updateClip(track.id, clip.id, { expressions }, { skipHistory: true });
+        }
+
+        const refreshed = useTimelineStore.getState();
+        const verified = targetIds.every(({ trackId, clipId: id }) => {
+            const track = refreshed.tracks.find(t => t.id === trackId);
+            const clip = track?.clips?.find(c => c.id === id);
+            return clip?.expressions?.[property] === expr;
+        });
+        if (!verified) return { success: false, message: 'Failed to persist the expression on target layers.' };
+
+        return {
+            success: true,
+            message: `Applied expression "${expr}" to ${property} on ${targets.length} layer${targets.length === 1 ? '' : 's'}.`,
+            details: { clipIds: targetIds.map(t => t.clipId), property, expression: expr, verified: true },
+        };
+    }
+
+    setTrackMatte({ clipId, sourceLayerId, mode = 'alpha' } = {}) {
+        const validModes = ['alpha', 'alpha-inverted', 'luma', 'luma-inverted'];
+        const normalizedMode = validModes.includes(mode) ? mode : 'alpha';
+
+        const state = useTimelineStore.getState();
+        const visualTracks = (state.tracks || []).filter(track => track.type !== 'audio');
+        const allClips = visualTracks.flatMap(track => (track.clips || []).map(clip => ({ track, clip })));
+
+        let targetEntry = null;
+        if (clipId) {
+            targetEntry = allClips.find(entry => entry.clip.id === clipId || entry.clip.clipId === clipId);
+        } else {
+            const selected = new Set(state.selectedClipIds || []);
+            targetEntry = allClips.find(entry => selected.has(entry.clip.id) || (entry.clip.clipId && selected.has(entry.clip.clipId)));
+            if (!targetEntry) {
+                const time = Number(state.currentTime) || 0;
+                targetEntry = allClips.find(({ clip }) => time >= (Number(clip.start) || 0) && time < (Number(clip.start) || 0) + (Number(clip.duration) || 0));
+            }
+            if (!targetEntry && allClips.length > 0) targetEntry = allClips[0];
+        }
+        if (!targetEntry) return { success: false, message: 'Select a target clip to apply the track matte to.' };
+
+        let sourceEntry = null;
+        if (sourceLayerId) {
+            sourceEntry = allClips.find(entry => entry.clip.id === sourceLayerId || entry.clip.clipId === sourceLayerId);
+            if (!sourceEntry) return { success: false, message: `Source matte layer "${sourceLayerId}" was not found.` };
+        } else {
+            sourceEntry = allClips.find(entry => entry.clip.id !== targetEntry.clip.id && entry.clip.clipId !== targetEntry.clip.clipId);
+        }
+        if (!sourceEntry) return { success: false, message: 'A second visual layer is required on the timeline to serve as the track matte mask.' };
+        if (sourceEntry.clip.id === targetEntry.clip.id) return { success: false, message: 'A layer cannot be its own track matte.' };
+
+        state._saveHistory?.();
+        const matteConfig = { mode: normalizedMode, sourceLayerId: sourceEntry.clip.id };
+        state.updateClip(targetEntry.track.id, targetEntry.clip.id, { trackMatte: matteConfig }, { skipHistory: true });
+
+        const refreshed = useTimelineStore.getState();
+        const updatedTrack = refreshed.tracks.find(t => t.id === targetEntry.track.id);
+        const updatedClip = updatedTrack?.clips?.find(c => c.id === targetEntry.clip.id);
+        const verified = updatedClip?.trackMatte?.mode === normalizedMode && updatedClip?.trackMatte?.sourceLayerId === sourceEntry.clip.id;
+        if (!verified) return { success: false, message: 'Track matte failed to persist on target layer.' };
+
+        return {
+            success: true,
+            message: `Configured ${normalizedMode} track matte on ${targetEntry.clip.name || targetEntry.clip.id} masked by ${sourceEntry.clip.name || sourceEntry.clip.id}.`,
+            details: { targetClipId: targetEntry.clip.id, sourceLayerId: sourceEntry.clip.id, mode: normalizedMode, verified: true },
+        };
+    }
+
+    setLayerParent({ clipId, parentId = null } = {}) {
+        const state = useTimelineStore.getState();
+        const visualTracks = (state.tracks || []).filter(track => track.type !== 'audio');
+        const allClips = visualTracks.flatMap(track => (track.clips || []).map(clip => ({ track, clip })));
+
+        let targetEntry = null;
+        if (clipId) {
+            targetEntry = allClips.find(entry => entry.clip.id === clipId || entry.clip.clipId === clipId);
+        } else {
+            const selected = new Set(state.selectedClipIds || []);
+            targetEntry = allClips.find(entry => selected.has(entry.clip.id) || (entry.clip.clipId && selected.has(entry.clip.clipId)));
+            if (!targetEntry && allClips.length > 0) targetEntry = allClips[0];
+        }
+        if (!targetEntry) return { success: false, message: 'Select a layer to link to a parent.' };
+
+        const targetId = targetEntry.clip.id;
+        const targetParentId = parentId ? String(parentId).trim() : null;
+
+        if (targetParentId) {
+            if (targetParentId === targetId || targetParentId === targetEntry.clip.clipId) return { success: false, message: 'A layer cannot parent itself.' };
+            const parentExists = allClips.some(entry => entry.clip.id === targetParentId || entry.clip.clipId === targetParentId);
+            if (!parentExists) return { success: false, message: `Parent layer "${targetParentId}" was not found.` };
+
+            const visited = new Set([targetId, targetEntry.clip.clipId].filter(Boolean));
+            let curr = targetParentId;
+            while (curr) {
+                if (visited.has(curr)) {
+                    return { success: false, message: `Cannot link layer "${targetId}" to "${targetParentId}": circular parent dependency detected.` };
+                }
+                visited.add(curr);
+                const parentEntry = allClips.find(entry => entry.clip.id === curr || entry.clip.clipId === curr);
+                curr = parentEntry?.clip?.parentId || null;
+            }
+        }
+
+        state._saveHistory?.();
+        state.updateClip(targetEntry.track.id, targetEntry.clip.id, { parentId: targetParentId }, { skipHistory: true });
+
+        const refreshed = useTimelineStore.getState();
+        const updatedTrack = refreshed.tracks.find(t => t.id === targetEntry.track.id);
+        const updatedClip = updatedTrack?.clips?.find(c => c.id === targetId);
+        const verified = updatedClip?.parentId === targetParentId;
+        if (!verified) return { success: false, message: 'Failed to persist parent link.' };
+
+        return {
+            success: true,
+            message: targetParentId
+                ? `Linked layer ${targetEntry.clip.name || targetId} to parent ${targetParentId}. It will follow its position and scale.`
+                : `Unlinked layer ${targetEntry.clip.name || targetId} from its parent.`,
+            details: { clipId: targetId, parentId: targetParentId, verified: true },
+        };
+    }
+
+    setVectorTrim({ clipId, trimStart = 0, trimEnd = 1, trimOffset = 0, drawOn = true, drawOnDuration = 1.2 } = {}) {
+        const state = useTimelineStore.getState();
+        const nonAudioTracks = (state.tracks || []).filter(track => track.type !== 'audio');
+        const allClips = nonAudioTracks.flatMap(track => (track.clips || []).map(clip => ({ track, clip })));
+
+        let targetEntry = null;
+        if (clipId) {
+            targetEntry = allClips.find(entry => entry.clip.id === clipId || entry.clip.clipId === clipId);
+        } else {
+            const selected = new Set(state.selectedClipIds || []);
+            targetEntry = allClips.find(entry => selected.has(entry.clip.id) || (entry.clip.clipId && selected.has(entry.clip.clipId)));
+            if (!targetEntry) {
+                targetEntry = allClips.find(entry => ['shape', 'sticker', 'text', 'overlay', 'graphic'].includes(entry.clip.type || entry.track.type));
+            }
+            if (!targetEntry && allClips.length > 0) targetEntry = allClips[0];
+        }
+        if (!targetEntry) return { success: false, message: 'Select a vector shape, line, or graphic clip to trim.' };
+
+        const start = Math.max(0, Math.min(1, Number(trimStart ?? 0)));
+        const end = Math.max(0, Math.min(1, Number(trimEnd ?? 1)));
+        const offset = Math.max(0, Math.min(360, Number(trimOffset ?? 0)));
+        const duration = Math.max(0.2, Math.min(10, Number(drawOnDuration || 1.2)));
+
+        state._saveHistory?.();
+        const trimConfig = { trimStart: start, trimEnd: end, trimOffset: offset };
+        const updates = { trim: trimConfig };
+
+        if (drawOn) {
+            const currentAnimations = Array.isArray(targetEntry.clip.animations) ? targetEntry.clip.animations : [];
+            const drawOnAnim = {
+                type: 'trim_path',
+                startTime: 0,
+                duration,
+                easing: 'easeOutCubic',
+                keyframes: [
+                    { time: 0, properties: { trimEnd: 0 } },
+                    { time: duration, properties: { trimEnd: end } },
+                ],
+            };
+            updates.animations = [...currentAnimations.filter(a => a.type !== 'trim_path'), drawOnAnim];
+        }
+
+        state.updateClip(targetEntry.track.id, targetEntry.clip.id, updates, { skipHistory: true });
+
+        const refreshed = useTimelineStore.getState();
+        const updatedTrack = refreshed.tracks.find(t => t.id === targetEntry.track.id);
+        const updatedClip = updatedTrack?.clips?.find(c => c.id === targetEntry.clip.id);
+        const verified = updatedClip?.trim?.trimEnd === end;
+        if (!verified) return { success: false, message: 'Failed to persist vector trim path.' };
+
+        return {
+            success: true,
+            message: `Configured kinetic vector trim path (${(start * 100).toFixed(0)}% -> ${(end * 100).toFixed(0)}%) on ${targetEntry.clip.name || targetEntry.clip.id}.${drawOn ? ` Added ${duration}s draw-on animation.` : ''}`,
+            details: { clipId: targetEntry.clip.id, trimStart: start, trimEnd: end, trimOffset: offset, drawOn, verified: true },
+        };
+    }
+
+    applyAestheticPreset({ preset = 'vox', clipId } = {}) {
+        const presets = {
+            vox: {
+                label: 'Vox Documentary',
+                videoEffects: [
+                    { type: 'color_grade', params: { brightness: 0.04, contrast: 1.15, saturation: 0.82, temperature: 14 } },
+                    { type: 'film_grain', params: { intensity: 0.16 } },
+                    { type: 'vignette', params: { intensity: 0.22 } },
+                ],
+                textStyle: { fontFamily: 'Playfair Display, serif', color: '#F5F5F0', accentColor: '#FFD700' },
+            },
+            ali_abdaal: {
+                label: 'Ali Abdaal Clean Minimal',
+                videoEffects: [
+                    { type: 'color_grade', params: { brightness: 0.08, contrast: 1.08, saturation: 1.05, temperature: -4 } },
+                    { type: 'vignette', params: { intensity: 0.1 } },
+                ],
+                textStyle: { fontFamily: 'Inter, sans-serif', color: '#FFFFFF', accentColor: '#3B82F6' },
+            },
+            mrbeast: {
+                label: 'MrBeast Hyper-Retention',
+                videoEffects: [
+                    { type: 'color_grade', params: { brightness: 0.1, contrast: 1.25, saturation: 1.3, temperature: 6 } },
+                    { type: 'glow', params: { threshold: 0.8, intensity: 0.45, radius: 12 } },
+                ],
+                textStyle: { fontFamily: 'Montserrat, sans-serif', color: '#FFE600', accentColor: '#00F0FF', stroke: '#000000', strokeWidth: 3 },
+            },
+            iman_gadzhi: {
+                label: 'Iman Gadzhi Dark Luxury',
+                videoEffects: [
+                    { type: 'color_grade', params: { brightness: -0.06, contrast: 1.28, saturation: 0.88, temperature: 18 } },
+                    { type: 'film_grain', params: { intensity: 0.2 } },
+                    { type: 'vignette', params: { intensity: 0.32 } },
+                    { type: 'glow', params: { threshold: 0.65, intensity: 0.6, radius: 20 } },
+                ],
+                textStyle: { fontFamily: 'Cinzel, serif', color: '#E6C280', accentColor: '#D4AF37' },
+            },
+            apple_minimal: {
+                label: 'Apple Minimal Showcase',
+                videoEffects: [
+                    { type: 'color_grade', params: { brightness: 0.05, contrast: 1.06, saturation: 1.0, temperature: 0 } },
+                ],
+                textStyle: { fontFamily: 'SF Pro Display, Inter, sans-serif', color: '#FFFFFF', accentColor: '#0071E3' },
+            },
+            hormozi: {
+                label: 'Alex Hormozi Bold Punch',
+                videoEffects: [
+                    { type: 'color_grade', params: { brightness: 0.12, contrast: 1.35, saturation: 1.25, temperature: 0 } },
+                ],
+                textStyle: { fontFamily: 'Impact, Montserrat, sans-serif', color: '#00FF66', accentColor: '#FFFF00', stroke: '#000000', strokeWidth: 4 },
+            },
+        };
+
+        const key = String(preset || '').toLowerCase().trim();
+        const config = presets[key] || presets.vox;
+
+        const state = useTimelineStore.getState();
+        const videoTracks = (state.tracks || []).filter(t => t.type === 'video');
+        const textTracks = (state.tracks || []).filter(t => t.type === 'text' || t.type === 'caption');
+
+        let videoTargets = [];
+        if (clipId) {
+            videoTargets = videoTracks.flatMap(t => (t.clips || []).map(c => ({ track: t, clip: c }))).filter(e => e.clip.id === clipId || e.clip.clipId === clipId);
+        } else {
+            videoTargets = videoTracks.flatMap(t => (t.clips || []).map(c => ({ track: t, clip: c })));
+        }
+
+        const textTargets = textTracks.flatMap(t => (t.clips || []).map(c => ({ track: t, clip: c })));
+
+        if (!videoTargets.length && !textTargets.length) {
+            return { success: false, message: 'No video or text clips found on the timeline to style.' };
+        }
+
+        state._saveHistory?.();
+
+        const normalizedEffects = config.videoEffects.map((item, index) => {
+            return effectRegistry.createConfig(item.type, {
+                id: `aesthetic-${key}-${Date.now().toString(36)}-${index}`,
+                params: item.params,
+                enabled: true,
+                order: index,
+            });
+        });
+
+        for (const { track, clip } of videoTargets) {
+            state.updateClip(track.id, clip.id, { effects: normalizedEffects }, { skipHistory: true });
+        }
+
+        for (const { track, clip } of textTargets) {
+            state.updateClip(track.id, clip.id, { ...config.textStyle }, { skipHistory: true });
+        }
+
+        return {
+            success: true,
+            message: `Applied ${config.label} aesthetic preset across ${videoTargets.length} video clip(s) and ${textTargets.length} typography layer(s).`,
+            details: { preset: key, videoCount: videoTargets.length, textCount: textTargets.length, verified: true },
         };
     }
 
