@@ -120,23 +120,33 @@ function compileTransitions(windows, opts) {
         if (any('blurX', v => v > 1e-6) || any('blurY', v => v > 1e-6)) {
             const name = `tb${i}`;
             chain.push(`gblur@${name}=sigma=0.01:sigmaV=0.01:steps=2:enable='${enable}'`);
+            const targets = [name, `gblur@${name}`, 'gblur'];
             for (const s of samples) {
                 const sx = Math.max(0.01, s.fx.blurX * W);
                 const sy = Math.max(0.01, s.fx.blurY * W);
-                cmds.push(`${n4(s.t)} ${name} sigma ${n4(sx)}, ${name} sigmaV ${n4(sy)};`);
+                for (const tgt of targets) {
+                    cmds.push(`${n4(s.t)} ${tgt} sigma ${n4(sx)}, ${tgt} sigmaV ${n4(sy)};`);
+                }
             }
-            cmds.push(`${n4(w.to)} ${name} sigma 0.01, ${name} sigmaV 0.01;`);
+            for (const tgt of targets) {
+                cmds.push(`${n4(w.to)} ${tgt} sigma 0.01, ${tgt} sigmaV 0.01;`);
+            }
         }
 
         // 3. Red/blue split.
         if (any('chroma', v => Math.abs(v) > 1e-6)) {
             const name = `tc${i}`;
             chain.push(`rgbashift@${name}=rh=0:bh=0:edge=smear:enable='${enable}'`);
+            const targets = [name, `rgbashift@${name}`, 'rgbashift'];
             for (const s of samples) {
                 const px = Math.round(s.fx.chroma * W);
-                cmds.push(`${n4(s.t)} ${name} rh ${px}, ${name} bh ${-px};`);
+                for (const tgt of targets) {
+                    cmds.push(`${n4(s.t)} ${tgt} rh ${px}, ${tgt} bh ${-px};`);
+                }
             }
-            cmds.push(`${n4(w.to)} ${name} rh 0, ${name} bh 0;`);
+            for (const tgt of targets) {
+                cmds.push(`${n4(w.to)} ${tgt} rh 0, ${tgt} bh 0;`);
+            }
         }
 
         // 4. Flash / dip, the CSS overlay blend expressed through eq:
