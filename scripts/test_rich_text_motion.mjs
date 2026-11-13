@@ -2,10 +2,35 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Canvas from '@napi-rs/canvas';
 import { createNode, createScene, flattenScene, nodeFromClip, sceneFromPlacements, NODE_TYPES } from '../client/src/motion/SceneSchema.js';
 import { drawRichTextFrame, layoutRichText, sampleTypographyMotion } from '../client/src/motion/RichTextEngine.js';
-import { renderTemplateFrames } from '../server/compositor/TemplateRenderer.js';
+import { renderTemplateFrames, registerFonts } from '../server/compositor/TemplateRenderer.js';
+
+// Ensure fonts are registered in @napi-rs/canvas for headless environments (e.g. CI Linux)
+registerFonts(Canvas);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(__dirname, '..');
+const FONT_DIR = path.join(ROOT, 'client', 'public', 'fonts');
+if (Canvas?.GlobalFonts?.registerFromPath && fs.existsSync(FONT_DIR)) {
+    const FONT_MAP = {
+        'Inter': 'Inter-Regular.ttf',
+        'Anton': 'Anton-Regular.ttf',
+        'Bebas Neue': 'BebasNeue-Regular.ttf',
+        'Montserrat': 'Montserrat-Bold.ttf',
+        'Oswald': 'Oswald-Regular.ttf',
+        'Poppins': 'Poppins-Regular.ttf',
+        'Roboto': 'Roboto-Regular.ttf',
+        'JetBrains Mono': 'JetBrainsMono-Regular.ttf',
+    };
+    for (const [family, file] of Object.entries(FONT_MAP)) {
+        const p = path.join(FONT_DIR, file);
+        if (fs.existsSync(p)) {
+            try { Canvas.GlobalFonts.registerFromPath(p, family); } catch { }
+        }
+    }
+}
 
 const graphic = {
     w: 800,

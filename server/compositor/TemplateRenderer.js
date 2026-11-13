@@ -31,6 +31,19 @@ const FONT_FILES = {
     'JetBrains Mono': '2fc98a00-b314-4999-a8a1-f9fa9f814297.woff2', // latin subset
 };
 
+// Extended fonts available in client/public/fonts/ for rich text and typography
+const EXTENDED_FONT_FILES = {
+    'Bebas Neue': 'BebasNeue-Regular.ttf',
+    'Oswald': 'Oswald-Regular.ttf',
+    'Poppins': 'Poppins-Regular.ttf',
+    'Roboto': 'Roboto-Regular.ttf',
+    'Playfair Display': 'PlayfairDisplay-Regular.ttf',
+    'Nunito': 'Nunito-Regular.ttf',
+    'Caveat': 'Caveat-Regular.ttf',
+    'DM Sans': 'DMSans-Regular.ttf',
+    'JetBrainsMono': 'JetBrainsMono-Regular.ttf',
+};
+
 let graphicsPromise = null;
 let richTextPromise = null;
 let layerEffectsPromise = null;
@@ -64,12 +77,20 @@ function loadTemporalMotionBlur() {
     return temporalBlurPromise;
 }
 
-function registerFonts(Canvas) {
+function registerFonts(CanvasModule) {
+    const C = CanvasModule || (typeof require !== 'undefined' ? require('@napi-rs/canvas') : null);
+    if (!C?.GlobalFonts?.registerFromPath) return;
     if (fontsRegistered) return;
     for (const [family, file] of Object.entries(FONT_FILES)) {
         const p = path.join(FONT_DIR, file);
         if (!fs.existsSync(p)) { console.warn(`[TemplateRenderer] font file missing: ${file}`); continue; }
-        Canvas.GlobalFonts.registerFromPath(p, family);
+        try { C.GlobalFonts.registerFromPath(p, family); } catch { }
+    }
+    for (const [family, file] of Object.entries(EXTENDED_FONT_FILES)) {
+        const p = path.join(FONT_DIR, file);
+        if (fs.existsSync(p)) {
+            try { C.GlobalFonts.registerFromPath(p, family); } catch { }
+        }
     }
     fontsRegistered = true;
 }
@@ -223,6 +244,7 @@ async function renderVectorFrames(vector, opts) {
     const FX = await loadLayerEffects();
     const MB = await loadTemporalMotionBlur();
     const Canvas = opts.canvasModule || require('@napi-rs/canvas');
+    registerFonts(Canvas);
     const w = Number(vector?.w) || 400;
     const h = Number(vector?.h) || 400;
     const fps = Number(opts.fps) > 0 ? Number(opts.fps) : 30;
@@ -255,4 +277,15 @@ async function renderVectorFrames(vector, opts) {
     return { pattern: path.join(dir, 'f%05d.png'), frames, width: W, height: H, files };
 }
 
-module.exports = { renderTemplateFrames, renderVectorFrames, loadTemplateGraphics, loadVectorGraphics, loadRichTextEngine, loadLayerEffects, loadScene3D, FONT_FILES };
+module.exports = {
+    renderTemplateFrames,
+    renderVectorFrames,
+    loadTemplateGraphics,
+    loadVectorGraphics,
+    loadRichTextEngine,
+    loadLayerEffects,
+    loadScene3D,
+    FONT_FILES,
+    FONT_DIR,
+    registerFonts,
+};
