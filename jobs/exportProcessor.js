@@ -2953,7 +2953,7 @@ module.exports = async function processExportJob(job) {
     const revideoTextTracks = allTextTracks.filter(track => isRevideoTrackSupported(track, timeline.audioWaveformsByAsset));
     // Revideo stays opt-in. Without it, STEP 4 draws text using the built-in
     // renderer; STEP 2.5 always composites visual layers either way.
-    const alphaGraphicsExportRequested = ['transparent-png-sequence', 'transparent-mov']
+    const alphaGraphicsExportRequested = ['transparent-png-sequence', 'transparent-mov', 'transparent-webm']
         .includes(String(settings.format || '').toLowerCase());
     // Transparent graphics exports need the local caption layer descriptions
     // so they can be composited over an alpha-preserving base. Keep captions
@@ -4179,7 +4179,7 @@ module.exports = async function processExportJob(job) {
             // Optional alpha deliverable: render only the planned overlay
             // layers over a transparent RGBA base. The ordinary PNG sequence
             // below remains the flattened finished video.
-            if (['transparent-png-sequence', 'transparent-mov'].includes(String(settings.format || '').toLowerCase())) {
+            if (['transparent-png-sequence', 'transparent-mov', 'transparent-webm'].includes(String(settings.format || '').toLowerCase())) {
                 const alphaGraph = compileCompositionPlan(compositionPlan, inputs, { preserveAlpha: true });
                 if (!alphaGraph) throw new Error('no drawable graphic layers are available for a transparent sequence');
                 const duration = Math.max(0.1, Number(rawPlan.base?.totalDuration) || 0, cumulativeOut);
@@ -4948,8 +4948,8 @@ module.exports = async function processExportJob(job) {
     let deliveredPath = outputPath;
     let deliveredCodec = codec;
     const formatChoice = String(settings.format || 'mp4').toLowerCase();
-    const requestedFormat = ['mp4', 'webm', 'png-sequence', 'transparent-png-sequence', 'transparent-mov'].includes(formatChoice) ? formatChoice : 'mp4';
-    if (['transparent-png-sequence', 'transparent-mov'].includes(requestedFormat)) {
+    const requestedFormat = ['mp4', 'webm', 'png-sequence', 'transparent-png-sequence', 'transparent-mov', 'transparent-webm'].includes(formatChoice) ? formatChoice : 'mp4';
+    if (['transparent-png-sequence', 'transparent-mov', 'transparent-webm'].includes(requestedFormat)) {
         const alphaDuration = Math.max(0.1, cumulativeOut,
             Number(rawPlan?.base?.totalDuration) || 0);
         const frameCount = Math.max(1, Math.ceil(alphaDuration * targetFps));
@@ -5059,6 +5059,22 @@ module.exports = async function processExportJob(job) {
             '-vendor', 'apl0', '-f', 'mov', '-y', deliveredPath,
         ]);
         deliveredCodec = 'prores-4444';
+    } else if (requestedFormat === 'transparent-webm') {
+        if (!transparentGraphicsPath || !fs.existsSync(transparentGraphicsPath)) {
+            throw new Error(compositorWarning || 'Transparent graphics export needs at least one supported overlay layer. Choose PNG sequence for a flattened video export.');
+        }
+        deliveredPath = path.join(exportsDir, `${jobId}-graphics.webm`);
+        const alphaFrames = path.join(transparentGraphicsPath, 'frame-%06d.png');
+        await runFfmpegArgs(ffmpegPath, [
+            '-hide_banner', '-loglevel', 'error',
+            '-framerate', String(targetFps), '-start_number', '1', '-i', alphaFrames,
+            '-frames:v', String(Math.max(1, transparentGraphicsFrameCount)),
+            '-an', '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p',
+            '-crf', '30', '-b:v', '0', '-auto-alt-ref', '0',
+            '-deadline', 'good', '-cpu-used', '4', '-row-mt', '1',
+            '-f', 'webm', '-y', deliveredPath,
+        ]);
+        deliveredCodec = 'libvpx-vp9-alpha';
     }
 
     // Report what was actually rendered, not what was asked for. The old
@@ -5086,7 +5102,7 @@ module.exports = async function processExportJob(job) {
         try {
             await gcsBucket.upload(deliveredPath, {
                 destination: gcsDestPath,
-                metadata: { contentType: requestedFormat === 'webm' ? 'video/webm' : requestedFormat === 'transparent-mov' ? 'video/quicktime' : ['png-sequence', 'transparent-png-sequence'].includes(requestedFormat) ? 'application/zip' : 'video/mp4' },
+                metadata: { contentType: ['webm', 'transparent-webm'].includes(requestedFormat) ? 'video/webm' : requestedFormat === 'transparent-mov' ? 'video/quicktime' : ['png-sequence', 'transparent-png-sequence'].includes(requestedFormat) ? 'application/zip' : 'video/mp4' },
             });
             // Remove local file after successful GCS upload
             fs.unlinkSync(deliveredPath);

@@ -687,6 +687,18 @@ const IDELayout = ({ mode = 'editor' }) => {
     const [showMobileExport, setShowMobileExport] = React.useState(false);
     const [exportError, setExportError] = React.useState(null);
     const [showExportModal, setShowExportModal] = React.useState(false);
+    const [exportFormatOverride, setExportFormatOverride] = React.useState(null);
+
+    useEffect(() => {
+        const handleOpenExport = (e) => {
+            if (e.detail?.format) {
+                setExportFormatOverride(e.detail.format);
+            }
+            setShowExportModal(true);
+        };
+        window.addEventListener('vp:open-export-modal', handleOpenExport);
+        return () => window.removeEventListener('vp:open-export-modal', handleOpenExport);
+    }, []);
 
     // ── Progressive auth ──────────────────────────────────────────────────
     const { isAnonymous, hoursLeft, getOrCreate, sessionId } = useSessionStore();
@@ -2421,12 +2433,13 @@ const IDELayout = ({ mode = 'editor' }) => {
 
             <ExportModal
                 isOpen={showExportModal}
-                onClose={() => setShowExportModal(false)}
+                onClose={() => { setShowExportModal(false); setExportFormatOverride(null); }}
                 onExport={handleExportConfirm}
                 isExporting={isExporting}
                 exportResult={exportResult}
                 exportError={exportError}
                 onSaveEditingHabits={handleSaveEditingHabits}
+                initialFormat={exportFormatOverride}
             />
             <ClarificationDialog />
             <ApprovalDialog />

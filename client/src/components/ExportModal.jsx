@@ -69,13 +69,19 @@ const Sep = () => (
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exportError, onSaveEditingHabits }) => {
+const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exportError, onSaveEditingHabits, initialFormat }) => {
     const { t } = useTranslation('editor');
     const [activeTab, setActiveTab] = useState('video');
-    const [settings, setSettings]   = useState({ platform: null, resolution: '1080p', fps: 30, format: 'mp4', quality: 'high', engine: 'ffmpeg' });
+    const [settings, setSettings]   = useState({ platform: null, resolution: '1080p', fps: 30, format: initialFormat || 'mp4', quality: 'high', engine: 'ffmpeg' });
     const [step, setStep]           = useState('configure');
     const [progress, setProgress]   = useState(0);
     const [habitSaveState, setHabitSaveState] = useState('idle'); // idle | saving | saved | error
+
+    useEffect(() => {
+        if (initialFormat) {
+            setSettings(s => ({ ...s, format: initialFormat }));
+        }
+    }, [initialFormat]);
 
     // Audio export tab state
     const { exportAudio } = useAudioEngine();
@@ -410,16 +416,18 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                             borderRadius: 'var(--r-sm)',
                                             padding: 3,
                                         }}>
-                                            {[['mp4', 'MP4'], ['webm', 'WEBM'], ['png-sequence', 'PNG sequence'], ['transparent-png-sequence', 'Alpha PNG'], ['transparent-mov', 'Alpha MOV']].map(([fmt, label]) => (
+                                            {[['mp4', 'MP4'], ['webm', 'WEBM'], ['png-sequence', 'PNG sequence'], ['transparent-png-sequence', 'Alpha PNG'], ['transparent-mov', 'Alpha MOV'], ['transparent-webm', 'Alpha WebM']].map(([fmt, label]) => (
                                                 <button key={fmt} onClick={() => setSettings(s => ({ ...s, format: fmt }))} style={pill(settings.format === fmt)}>
                                                     {label}
                                                 </button>
                                             ))}
                                         </div>
-                                        {['transparent-png-sequence', 'transparent-mov'].includes(settings.format) && (
+                                        {['transparent-png-sequence', 'transparent-mov', 'transparent-webm'].includes(settings.format) && (
                                             <p style={{ margin: 0, fontSize: 10, lineHeight: 1.4, color: 'var(--fg-3)' }}>
                                                 {settings.format === 'transparent-mov'
                                                     ? 'Exports overlay layers and captions as transparent ProRes 4444 video. The footage base and audio are excluded.'
+                                                    : settings.format === 'transparent-webm'
+                                                    ? 'Exports overlay layers and captions as transparent VP9 WebM video. The footage base and audio are excluded.'
                                                     : 'Exports overlay layers and captions as transparent PNG frames. The footage base and audio are excluded.'}
                                             </p>
                                         )}
@@ -439,7 +447,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                     }}
                                 >
                                     <Download size={14} />
-                                    {['transparent-png-sequence', 'transparent-mov'].includes(settings.format) ? 'Export graphics' : selectedPlatform ? t('exportModal.exportFor', { platform: selectedPlatform.label }) : t('exportModal.exportVideo')}
+                                    {['transparent-png-sequence', 'transparent-mov', 'transparent-webm'].includes(settings.format) ? 'Export graphics' : selectedPlatform ? t('exportModal.exportFor', { platform: selectedPlatform.label }) : t('exportModal.exportVideo')}
                                     <ArrowRight size={13} style={{ opacity: 0.6 }} />
                                 </button>
                             </div>

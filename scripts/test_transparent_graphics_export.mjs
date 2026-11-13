@@ -14,16 +14,20 @@ const { compileRasterOverlays } = require('../server/compositor/RasterCaptionCom
 const exportProcessorSource = fs.readFileSync(new URL('../jobs/exportProcessor.js', import.meta.url), 'utf8');
 const exportModalSource = fs.readFileSync(new URL('../client/src/components/ExportModal.jsx', import.meta.url), 'utf8');
 const exportRequestSource = fs.readFileSync(new URL('../client/src/layouts/IDELayout.jsx', import.meta.url), 'utf8');
-assert.match(exportProcessorSource, /'transparent-png-sequence',\s*'transparent-mov'/,
-  'the export processor accepts the new transparent video format');
-assert.match(exportProcessorSource, /\['transparent-png-sequence',\s*'transparent-mov'\]\.includes\(String\(settings\.format/,
-  'transparent MOV exports render the same transparent overlay graph as PNG sequences');
+assert.match(exportProcessorSource, /'transparent-png-sequence',\s*'transparent-mov',\s*'transparent-webm'/,
+  'the export processor accepts the transparent video formats');
+assert.match(exportProcessorSource, /\['transparent-png-sequence',\s*'transparent-mov',\s*'transparent-webm'\]\.includes\(String\(settings\.format/,
+  'transparent MOV and WebM exports render the same transparent overlay graph as PNG sequences');
 assert.match(exportProcessorSource, /requestedFormat === 'transparent-mov'[\s\S]*?'-c:v',\s*'prores_ks'[\s\S]*?'-profile:v',\s*'4'[\s\S]*?'-pix_fmt',\s*'yuva444p10le'/,
   'transparent MOV delivery encodes ProRes 4444 with an alpha-capable pixel format');
-assert.match(exportProcessorSource, /requestedFormat === 'transparent-mov' \? 'video\/quicktime'/,
-  'transparent MOV uploads use the QuickTime media type');
+assert.match(exportProcessorSource, /requestedFormat === 'transparent-webm'[\s\S]*?'-c:v',\s*'libvpx-vp9'[\s\S]*?'-pix_fmt',\s*'yuva420p'[\s\S]*?'-auto-alt-ref',\s*'0'/,
+  'transparent WebM delivery encodes VP9 with an alpha-capable pixel format');
+assert.match(exportProcessorSource, /\['webm',\s*'transparent-webm'\]\.includes\(requestedFormat\)\s*\?\s*'video\/webm'/,
+  'transparent WebM uploads use the WebM media type');
 assert.match(exportModalSource, /\['transparent-mov',\s*'Alpha MOV'\]/,
   'the export dialog exposes the transparent MOV format');
+assert.match(exportModalSource, /\['transparent-webm',\s*'Alpha WebM'\]/,
+  'the export dialog exposes the transparent WebM format');
 assert.match(exportRequestSource, /format:\s*settings\.format\s*\|\|\s*'mp4'/,
   'the chosen export format reaches the render job without being normalized away by the editor');
 const sceneEffects = [{ kind: 'brightness', params: { amount: 0.7 } }, { kind: 'grain', params: { amount: 5 } }, { kind: 'vignette', params: { intensity: 0.5 } }, { kind: 'glitch', params: { intensity: 0.3 } }, { kind: 'blur_motion', params: { intensity: { value: 0.5 }, samples: { value: 16 } } }, { kind: 'distortion', params: { amount: { value: 0.03 } } }, { type: 'glow', params: { radius: 8, intensity: 1, color: [0, 1, 0] } }];
@@ -163,6 +167,29 @@ try {
   alphaDecodedCtx.drawImage(alphaDecodedImage, 0, 0);
   assert.equal(alphaDecodedCtx.getImageData(120, 120, 1, 1).data[3], 0, 'empty transparent pixels survive the ProRes 4444 round trip');
   assert.ok(alphaDecodedCtx.getImageData(64, 64, 1, 1).data[3] >= 250, 'opaque graphic pixels survive the ProRes 4444 round trip');
+
+  const alphaWebm = path.join(tmp, 'graphics-alpha.webm');
+  const alphaWebmEncode = spawnSync(ffmpeg, [
+    '-hide_banner', '-loglevel', 'error', '-framerate', '1', '-start_number', '1',
+    '-i', path.join(alphaSequenceDir, 'frame-%06d.png'), '-frames:v', '2', '-an',
+    '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-auto-alt-ref', '0',
+    '-f', 'webm', '-y', alphaWebm,
+  ], { encoding: 'utf8' });
+  assert.equal(alphaWebmEncode.status, 0, `FFmpeg encodes transparent VP9 WebM: ${alphaWebmEncode.stderr}`);
+  const alphaWebmProbe = spawnSync(ffmpeg, ['-hide_banner', '-i', alphaWebm], { encoding: 'utf8' });
+  assert.match(alphaWebmProbe.stderr, /vp9/, 'the alpha WebM uses the VP9 codec');
+  assert.match(alphaWebmProbe.stderr, /alpha_mode\s*:\s*1|yuva420p/, 'the WebM video stream retains an alpha channel');
+  const alphaWebmDecoded = path.join(tmp, 'alpha-webm-decoded.png');
+  const alphaWebmDecode = spawnSync(ffmpeg, [
+    '-hide_banner', '-loglevel', 'error', '-vcodec', 'libvpx-vp9', '-i', alphaWebm, '-frames:v', '1', '-pix_fmt', 'rgba', '-y', alphaWebmDecoded,
+  ], { encoding: 'utf8' });
+  assert.equal(alphaWebmDecode.status, 0, `FFmpeg decodes transparent VP9 WebM: ${alphaWebmDecode.stderr}`);
+  const alphaWebmDecodedImage = await Canvas.loadImage(alphaWebmDecoded);
+  const alphaWebmDecodedCanvas = Canvas.createCanvas(128, 128);
+  const alphaWebmDecodedCtx = alphaWebmDecodedCanvas.getContext('2d');
+  alphaWebmDecodedCtx.drawImage(alphaWebmDecodedImage, 0, 0);
+  assert.equal(alphaWebmDecodedCtx.getImageData(120, 120, 1, 1).data[3], 0, 'empty transparent pixels survive the VP9 WebM round trip');
+  assert.ok(alphaWebmDecodedCtx.getImageData(64, 64, 1, 1).data[3] >= 250, 'opaque graphic pixels survive the VP9 WebM round trip');
 
   const maskedPlan = {
     ...plan,

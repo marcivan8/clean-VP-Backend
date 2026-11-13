@@ -20,14 +20,46 @@ import { useTranslation } from 'react-i18next';
 import {
     Layers, ChevronRight, ChevronDown, Eye, EyeOff, Trash2, ScanEye, LoaderCircle,
     Type, Square, Image as ImageIcon, Film, AlertTriangle, Wand2,
+    AlignLeft, AlignCenterHorizontal, AlignRight, AlignStartVertical, AlignCenterVertical, AlignEndVertical,
+    Download, FileJson, Video, Sparkles, X,
 } from 'lucide-react';
 
 import useTimelineStore from '../store/useTimelineStore';
-import { listNodes, NODE_TYPES, CONTAINER_TYPES } from '../motion/SceneSchema.js';
+import { listNodes, NODE_TYPES, CONTAINER_TYPES, SCENE_SCHEMA_VERSION } from '../motion/SceneSchema.js';
 import { validateScene, safeZoneForAspect, describeIssues } from '../motion/SceneValidator.js';
 import { validateMotionExpression } from '../motion/MotionExpression.js';
 import { authFetch } from '../utils/authFetch.js';
 import { captureReviewFrame } from '../motion/captureReviewFrame.js';
+
+export function exportSceneAsJson(scene) {
+    if (!scene) return null;
+    return {
+        schemaVersion: SCENE_SCHEMA_VERSION,
+        exportedAt: new Date().toISOString(),
+        scene,
+    };
+}
+
+export function triggerSceneJsonDownload(scene) {
+    const payload = exportSceneAsJson(scene);
+    if (!payload || typeof document === 'undefined') return;
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(scene.name || 'design').toLowerCase().replace(/[^a-z0-9_-]/g, '_')}.vibed-scene.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+const TEXT_PATH_PRESETS = [
+    { key: 'straight', labelKey: 'scenePanel.pathPresetStraight', fallback: 'Straight', path: 'M 50 150 L 950 150' },
+    { key: 'arch', labelKey: 'scenePanel.pathPresetArch', fallback: 'Arch', path: 'M 80 240 C 280 60 800 60 1000 240' },
+    { key: 'wave', labelKey: 'scenePanel.pathPresetWave', fallback: 'Wave', path: 'M 80 200 C 300 80 400 320 600 200 C 800 80 900 320 1020 200' },
+    { key: 'circle', labelKey: 'scenePanel.pathPresetCircle', fallback: 'Circle', path: 'M 150 300 A 350 350 0 1 1 850 300' },
+];
 
 const field = 'w-full bg-white/5 border border-border rounded px-2 py-1 text-xs text-foreground outline-none';
 const label = 'text-[10px] uppercase tracking-wider text-muted-foreground';
@@ -304,6 +336,22 @@ function NodeEditor({ sceneId, node, allNodes = [], t }) {
                                 onChange={event => setDraft(current => ({ ...current, textPathData: event.target.value }))}
                                 onBlur={event => commit({ textPath: { ...node.textPath, data: event.target.value } })} />
                         </label>
+                        <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                            <span className="text-[9px] text-muted-foreground">{t('scenePanel.pathPresets')}:</span>
+                            {TEXT_PATH_PRESETS.map(preset => (
+                                <button
+                                    key={preset.key}
+                                    type="button"
+                                    onClick={() => {
+                                        setDraft(current => ({ ...current, textPathData: preset.path }));
+                                        commit({ textPath: { ...node.textPath, data: preset.path } });
+                                    }}
+                                    className={`px-2 py-0.5 text-[9px] rounded border transition-colors ${draft.textPathData === preset.path ? 'border-primary bg-primary/20 text-primary' : 'border-border/60 bg-secondary/30 text-muted-foreground hover:bg-secondary/60'}`}
+                                >
+                                    {t(preset.labelKey)}
+                                </button>
+                            ))}
+                        </div>
                         <div className="grid grid-cols-3 gap-2">
                             <label className="block space-y-1">
                                 <span className={label}>{t('scenePanel.pathAlign')}</span>
@@ -337,6 +385,86 @@ function NodeEditor({ sceneId, node, allNodes = [], t }) {
                     </>}
                 </div>
             )}
+
+            {/* Figma-style Alignment Toolbar */}
+            <div className="space-y-1 border-t border-border/60 pt-2">
+                <span className={label}>{t('scenePanel.align')}</span>
+                <div className="grid grid-cols-6 gap-1 bg-secondary/40 p-1 rounded border border-border/40">
+                    <button
+                        type="button"
+                        title={t('scenePanel.alignLeft')}
+                        onClick={() => {
+                            const target = 15;
+                            setDraft(d => ({ ...d, x: target }));
+                            commit({ transform: { x: target } });
+                        }}
+                        className={`p-1.5 flex items-center justify-center rounded hover:bg-secondary/80 transition-colors ${Math.abs(Number(draft.x) - 15) < 0.5 ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}
+                    >
+                        <AlignLeft className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                        type="button"
+                        title={t('scenePanel.alignCenterH')}
+                        onClick={() => {
+                            const target = 50;
+                            setDraft(d => ({ ...d, x: target }));
+                            commit({ transform: { x: target } });
+                        }}
+                        className={`p-1.5 flex items-center justify-center rounded hover:bg-secondary/80 transition-colors ${Math.abs(Number(draft.x) - 50) < 0.5 ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}
+                    >
+                        <AlignCenterHorizontal className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                        type="button"
+                        title={t('scenePanel.alignRight')}
+                        onClick={() => {
+                            const target = 85;
+                            setDraft(d => ({ ...d, x: target }));
+                            commit({ transform: { x: target } });
+                        }}
+                        className={`p-1.5 flex items-center justify-center rounded hover:bg-secondary/80 transition-colors ${Math.abs(Number(draft.x) - 85) < 0.5 ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}
+                    >
+                        <AlignRight className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                        type="button"
+                        title={t('scenePanel.alignTop')}
+                        onClick={() => {
+                            const target = 15;
+                            setDraft(d => ({ ...d, y: target }));
+                            commit({ transform: { y: target } });
+                        }}
+                        className={`p-1.5 flex items-center justify-center rounded hover:bg-secondary/80 transition-colors ${Math.abs(Number(draft.y) - 15) < 0.5 ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}
+                    >
+                        <AlignStartVertical className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                        type="button"
+                        title={t('scenePanel.alignCenterV')}
+                        onClick={() => {
+                            const target = 50;
+                            setDraft(d => ({ ...d, y: target }));
+                            commit({ transform: { y: target } });
+                        }}
+                        className={`p-1.5 flex items-center justify-center rounded hover:bg-secondary/80 transition-colors ${Math.abs(Number(draft.y) - 50) < 0.5 ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}
+                    >
+                        <AlignCenterVertical className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                        type="button"
+                        title={t('scenePanel.alignBottom')}
+                        onClick={() => {
+                            const target = 85;
+                            setDraft(d => ({ ...d, y: target }));
+                            commit({ transform: { y: target } });
+                        }}
+                        className={`p-1.5 flex items-center justify-center rounded hover:bg-secondary/80 transition-colors ${Math.abs(Number(draft.y) - 85) < 0.5 ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}
+                    >
+                        <AlignEndVertical className="w-3.5 h-3.5" />
+                    </button>
+                </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-2">
                 {isText && (
                     <label className="block space-y-1">
@@ -365,6 +493,18 @@ function NodeEditor({ sceneId, node, allNodes = [], t }) {
                     <input className={field} type="number" step="1" value={draft.y}
                         onChange={e => setDraft({ ...draft, y: e.target.value })}
                         onBlur={e => commitNumber(e.target.value, v => ({ transform: { y: v } }))} />
+                </label>
+                <label className="block space-y-1">
+                    <span className={label}>{t('scenePanel.scale')}</span>
+                    <input className={field} type="number" step="0.05" min="0.01" max="10" value={draft.scale}
+                        onChange={e => setDraft({ ...draft, scale: e.target.value })}
+                        onBlur={e => commitNumber(e.target.value, v => ({ transform: { scale: Math.max(0.01, v) } }))} />
+                </label>
+                <label className="block space-y-1">
+                    <span className={label}>{t('scenePanel.rotation')}</span>
+                    <input className={field} type="number" step="1" min="-360" max="360" value={draft.rotation}
+                        onChange={e => setDraft({ ...draft, rotation: e.target.value })}
+                        onBlur={e => commitNumber(e.target.value, v => ({ transform: { rotation: v } }))} />
                 </label>
                 <label className="block space-y-1">
                     <span className={label}>{t('scenePanel.seconds')}</span>
@@ -654,6 +794,7 @@ export default function ScenePanel() {
     const [selectedId, setSelectedId] = useState(null);
     const [collapsed, setCollapsed] = useState({});
     const [pickedSceneId, setPickedSceneId] = useState(null);
+    const [showExportModal, setShowExportModal] = useState(false);
     const [reviewing, setReviewing] = useState(false);
     const [review, setReview] = useState(null);
     const [reviewSamples, setReviewSamples] = useState([]);
@@ -814,15 +955,146 @@ export default function ScenePanel() {
                 <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold flex items-center gap-1.5">
                     <Layers className="w-3 h-3" /> {t('scenePanel.title')}
                 </div>
-                {sceneIds.length > 1 && (
-                    <select value={sceneId || ''} onChange={e => { setPickedSceneId(e.target.value); setSelectedId(null); }}
-                        aria-label={t('scenePanel.whichDesign')}
-                        className="bg-background border border-border rounded px-1.5 py-0.5 text-[11px] max-w-[55%] truncate">
-                        <option value="">{t('scenePanel.pick')}</option>
-                        {sceneIds.map(id => <option key={id} value={id}>{scenes[id]?.name || id}</option>)}
-                    </select>
-                )}
+                <div className="flex items-center gap-1.5 max-w-[65%]">
+                    {sceneIds.length > 1 && (
+                        <select value={sceneId || ''} onChange={e => { setPickedSceneId(e.target.value); setSelectedId(null); }}
+                            aria-label={t('scenePanel.whichDesign')}
+                            className="bg-background border border-border rounded px-1.5 py-0.5 text-[11px] truncate">
+                            <option value="">{t('scenePanel.pick')}</option>
+                            {sceneIds.map(id => <option key={id} value={id}>{scenes[id]?.name || id}</option>)}
+                        </select>
+                    )}
+                    {scene && (
+                        <button
+                            type="button"
+                            onClick={() => setShowExportModal(true)}
+                            className="flex items-center gap-1 rounded border border-primary/30 bg-primary/10 hover:bg-primary/20 text-primary px-2 py-0.5 text-[11px] font-medium transition-colors shrink-0"
+                            title={t('scenePanel.exportDesignSub')}
+                        >
+                            <Download className="w-3 h-3" />
+                            <span>{t('scenePanel.exportDesign')}</span>
+                        </button>
+                    )}
+                </div>
             </div>
+
+            {showExportModal && scene && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                    <div className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-2xl space-y-4">
+                        <div className="flex items-start justify-between">
+                            <div>
+                                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                                    <Sparkles className="w-4 h-4 text-primary" />
+                                    {t('scenePanel.exportDesignTitle')}
+                                </h3>
+                                <p className="text-[11px] text-muted-foreground mt-0.5">
+                                    {t('scenePanel.exportDesignSub')}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setShowExportModal(false)}
+                                className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-2">
+                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                                Independent Offline Spec
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    triggerSceneJsonDownload(scene);
+                                    setShowExportModal(false);
+                                }}
+                                className="w-full flex items-center gap-2.5 p-2.5 rounded-lg border border-border/80 bg-secondary/30 hover:bg-secondary/60 text-left transition-colors"
+                            >
+                                <FileJson className="w-4 h-4 text-primary shrink-0" />
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-xs font-medium text-foreground">{t('scenePanel.downloadJsonSpec')}</p>
+                                    <p className="text-[10px] text-muted-foreground">JSON scene graph, keyframes, expressions, and vectors</p>
+                                </div>
+                            </button>
+                        </div>
+
+                        <div className="space-y-2">
+                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                                Transparent Video & Graphics Render
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowExportModal(false);
+                                    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+                                        window.dispatchEvent(new CustomEvent('vp:open-export-modal', { detail: { format: 'transparent-mov' } }));
+                                    }
+                                }}
+                                className="w-full flex items-center gap-2.5 p-2 rounded-lg border border-border/60 bg-secondary/20 hover:bg-secondary/50 text-left transition-colors"
+                            >
+                                <Video className="w-4 h-4 text-emerald-400 shrink-0" />
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-xs font-medium text-foreground">{t('scenePanel.exportTransparentMov')}</p>
+                                    <p className="text-[10px] text-muted-foreground">ProRes 4444 with alpha channel for Premiere / FCP / DaVinci</p>
+                                </div>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowExportModal(false);
+                                    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+                                        window.dispatchEvent(new CustomEvent('vp:open-export-modal', { detail: { format: 'transparent-webm' } }));
+                                    }
+                                }}
+                                className="w-full flex items-center gap-2.5 p-2 rounded-lg border border-border/60 bg-secondary/20 hover:bg-secondary/50 text-left transition-colors"
+                            >
+                                <Video className="w-4 h-4 text-cyan-400 shrink-0" />
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-xs font-medium text-foreground">{t('scenePanel.exportTransparentWebm')}</p>
+                                    <p className="text-[10px] text-muted-foreground">VP9 with alpha channel for Web / OBS Studio overlays</p>
+                                </div>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowExportModal(false);
+                                    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+                                        window.dispatchEvent(new CustomEvent('vp:open-export-modal', { detail: { format: 'transparent-png-sequence' } }));
+                                    }
+                                }}
+                                className="w-full flex items-center gap-2.5 p-2 rounded-lg border border-border/60 bg-secondary/20 hover:bg-secondary/50 text-left transition-colors"
+                            >
+                                <Layers className="w-4 h-4 text-amber-400 shrink-0" />
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-xs font-medium text-foreground">{t('scenePanel.exportTransparentPng')}</p>
+                                    <p className="text-[10px] text-muted-foreground">Numbered transparent PNG frames zipped</p>
+                                </div>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowExportModal(false);
+                                    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+                                        window.dispatchEvent(new CustomEvent('vp:open-export-modal', { detail: { format: 'mp4' } }));
+                                    }
+                                }}
+                                className="w-full flex items-center gap-2.5 p-2 rounded-lg border border-border/60 bg-secondary/20 hover:bg-secondary/50 text-left transition-colors"
+                            >
+                                <Film className="w-4 h-4 text-indigo-400 shrink-0" />
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-xs font-medium text-foreground">{t('scenePanel.exportStandaloneVideo')}</p>
+                                    <p className="text-[10px] text-muted-foreground">Flattened MP4 standalone render</p>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {!scene && <p className="text-[11px] text-muted-foreground">{t('scenePanel.pickHint')}</p>}
 
@@ -892,7 +1164,7 @@ export default function ScenePanel() {
                     </div>
 
                     {selected && !CONTAINER_TYPES.includes(selected.type) && (
-                        <NodeEditor key={`${sceneId}:${selected.id}:${selected.content}:${selected.style?.fontSize}:${selected.transform?.x}:${selected.transform?.y}:${selected.duration}:${selected.parentId}:${selected.trackMatte?.mode}:${selected.trackMatte?.sourceLayerId}:${selected.vector?.trimStart}:${selected.vector?.trimEnd}:${selected.vector?.trimOffset}:${selected.motionBlur?.enabled}:${selected.motionBlur?.samples}:${selected.motionBlur?.shutterAngle}:${selected.textPath?.data}:${selected.textPath?.align}:${selected.textPath?.side}:${selected.textPath?.offset}`}
+                        <NodeEditor key={`${sceneId}:${selected.id}:${selected.content}:${selected.style?.fontSize}:${selected.transform?.x}:${selected.transform?.y}:${selected.transform?.scale}:${selected.transform?.rotation}:${selected.duration}:${selected.parentId}:${selected.trackMatte?.mode}:${selected.trackMatte?.sourceLayerId}:${selected.vector?.trimStart}:${selected.vector?.trimEnd}:${selected.vector?.trimOffset}:${selected.motionBlur?.enabled}:${selected.motionBlur?.samples}:${selected.motionBlur?.shutterAngle}:${selected.textPath?.data}:${selected.textPath?.align}:${selected.textPath?.side}:${selected.textPath?.offset}`}
                             sceneId={sceneId} node={selected} allNodes={allNodes} t={t} />
                     )}
 
