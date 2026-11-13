@@ -108,8 +108,13 @@ const INTENT_PATTERNS = [
         weight: 1.1,
     },
     {
+        domain: SKILL_DOMAINS.SPRING_PHYSICS,
+        regex: /\b(spring|physics|bounce|damping|stiffness|snappy|elastic|overshoot|recoil|harmonic|oscillation)\b/i,
+        weight: 1.2,
+    },
+    {
         domain: SKILL_DOMAINS.EXPRESSIONS_ENGINE,
-        regex: /\b(expression|expressions|wiggle|loopout|pingpong|audioamp|bass pump|audio reactive|sound reactive|time \*|harmonic|oscillation)\b/i,
+        regex: /\b(expression|expressions|wiggle|loopout|pingpong|audioamp|bass pump|audio reactive|sound reactive|time \*|harmonic|oscillation|inertial bounce|overshoot|squash and stretch|loop wiggle|seamless wiggle)\b/i,
         weight: 1.3,
     },
     {
@@ -905,6 +910,105 @@ const INTENT_TECHNIQUE_RECIPES = Object.freeze({
             'Individual keyword punch pops on spoken downbeats with zero hesitation.',
         ],
     },
+
+    // ── Category I: Classical Animation Physics & Modern Agent Craft ──
+    INERTIAL_BOUNCE_SNAP: {
+        id: 'inertial_bounce_snap',
+        intentCategory: 'emphasis_accent',
+        intent: 'natural bounce or overshoot on entrance or impact',
+        displayName: 'Inertial Bounce & Overshoot Snap',
+        feel: 'Dan Ebberts velocity-based decaying oscillation settling naturally',
+        timing: { attackFrames: 4, decayFrames: 14 },
+        verbs: { enter: 'pop-in', emphasis: 'pulse', exit: 'shrink-out' },
+        craftPrinciples: [
+            'Expression formula: 1 + bounce(time, 0.12, 3.5, 6).',
+            'Calculates keyframe arrival velocity and decays via damped sine wave.',
+            'Never exceeds 3 cycles of oscillation; decay >= 5.0 prevents sluggishness.',
+        ],
+    },
+    SQUASH_AND_STRETCH_IMPACT: {
+        id: 'squash_and_stretch_impact',
+        intentCategory: 'emphasis_accent',
+        intent: 'organic impact landing with volume conservation',
+        displayName: 'Volume-Preserving Squash and Stretch',
+        feel: 'Physical elasticity where vertical compression triggers proportional horizontal expansion',
+        timing: { impactFrames: 3, recoveryFrames: 8 },
+        verbs: { enter: 'pop-in', emphasis: 'punch', exit: 'sink-out' },
+        craftPrinciples: [
+            'Disney Principle 1: Volume Conservation (ScaleX * ScaleY ≈ 1.0).',
+            'On ground impact: ScaleY drops to 0.82 while ScaleX expands to 1.22 via squash(scaleY).',
+            'Snappy elastic recovery to (1.0, 1.0) over 8 frames.',
+        ],
+    },
+    ANTICIPATION_WINDUP_LAUNCH: {
+        id: 'anticipation_windup_launch',
+        intentCategory: 'kinetic_typography',
+        intent: 'anticipatory windup recoil before explosive launch',
+        displayName: 'Anticipation Windup & Launch',
+        feel: 'Brief negative recoil that primes the viewer eye before explosive entrance',
+        timing: { windupFrames: 5, launchFrames: 10 },
+        verbs: { enter: 'zoom-in', emphasis: 'nod', exit: 'whip-out' },
+        craftPrinciples: [
+            'Disney Principle 2: Anticipation.',
+            'Draw back opposite to movement trajectory (-6% scale or -15px translation) for 4 frames.',
+            'Explodes forward using easeOutQuart or backOut.',
+        ],
+    },
+    FOLLOW_THROUGH_STAGGER_CASCADE: {
+        id: 'follow_through_stagger_cascade',
+        intentCategory: 'feature_card',
+        intent: 'secondary motion and cascading drag behind leader',
+        displayName: 'Follow-Through & Cascading Drag',
+        feel: 'Subordinate badges and cards lag organically behind parent leader',
+        timing: { leaderDurationSec: 0.45, lagPerChildSec: 0.08 },
+        verbs: { enter: 'rise-in', emphasis: null, exit: 'sink-out' },
+        craftPrinciples: [
+            'Disney Principle 3: Follow-through and overlapping action.',
+            'Parent arrives at frame N; children follow staggered by 2-4 frames each.',
+            'Parenting with relative offset prevents mechanical stiffness.',
+        ],
+    },
+    SEAMLESS_LOOP_WIGGLE: {
+        id: 'seamless_loop_wiggle',
+        intentCategory: 'camera_move',
+        intent: 'seamless looping ambient motion for background or badge',
+        displayName: 'Seamless Boundary-Blended Loop Wiggle',
+        feel: 'Organic continuous floating that loops seamlessly without keyframe pop',
+        timing: { loopDurationSec: 4.0, freq: 1.5, amp: 10 },
+        verbs: { enter: 'fade-in', emphasis: null, exit: 'fade-out' },
+        craftPrinciples: [
+            'Expression formula: loopWiggle(1.5, 10, 4.0).',
+            'Blends dual noise channels at boundary for 100% seamless periodic looping.',
+            'Perfect for background cards, floating badges, and continuous ambient cameras.',
+        ],
+    },
+    KINETIC_GLITCH_SWEEP: {
+        id: 'kinetic_glitch_sweep',
+        intentCategory: 'scene_transition',
+        intent: 'high-energy RGB split displacement or glitch burst',
+        displayName: 'Kinetic RGB Glitch Sweep',
+        feel: 'Chromatic aberration spike and horizontal shear on cut or beat hit',
+        timing: { burstFrames: 4 },
+        verbs: { enter: 'whip-in', emphasis: 'punch', exit: 'whip-out' },
+        craftPrinciples: [
+            'Ultra-fast 3-4 frame chromatic aberration burst (+10px Red, -10px Blue).',
+            'Coupled with micro-zoom (1.04x) and film grain spike for raw cyber energy.',
+        ],
+    },
+    COUNTER_DATAVIZ_REVEAL: {
+        id: 'counter_dataviz_reveal',
+        intentCategory: 'dataviz_annotation',
+        intent: 'numeric stat ticker with spring overshoot and settle',
+        displayName: 'Spring-Driven Numeric Data Reveal',
+        feel: 'Rapid odometer count-up with physics spring settle at target metric',
+        timing: { countFrames: 24, settleFrames: 12 },
+        verbs: { enter: 'pop-in', emphasis: 'pulse', exit: 'shrink-out' },
+        craftPrinciples: [
+            'Spring formula: spring(progress, 240, 20) smoothly rolls digits from 0 to value.',
+            'Enforces tabular-nums font formatting to eliminate horizontal text jitter.',
+            'Punches scale to 1.08 on final number hit and drops down to 1.0.',
+        ],
+    },
 });
 
 /**
@@ -1152,11 +1256,18 @@ function getKnowledgeForBrief(prompt = '', context = {}) {
         '   - Vector trim paths: animate strokeDashoffset `PATH_LEN * (1 - progress)` for underlines and curves.',
         '',
         '6. **After Effects Engine Mastery (Expressions, Mattes, Parenting, Trim)**:',
-        '   - Expressions: animate channels organically via `wiggle(freq, amp)`, `loopOut("pingpong")`, `audioAmp("bass") * scale`, `spring(time, stiffness, damping, mass)`.',
+        '   - Expressions: animate channels organically via `wiggle(freq, amp)`, `loopWiggle(freq, amp, dur)`, `bounce(t, amp, freq, decay)`, `overshoot(t, s)`, `squash(scale)`, `loopOut("pingpong")`, `audioAmp("bass") * scale`, `spring(time, stiffness, damping, mass)`.',
         '   - Track Mattes: stencil layers using `trackMatte`: `{"mode": "alpha"|"alpha-inverted"|"luma"|"luma-inverted", "sourceLayerId": "..."}`.',
         '   - Hierarchical Parenting: link satellite elements or badges to host layers via `parentId`.',
         '   - Vector Trim: kinetic draw-on lines and animated borders with `trim`: `{"trimStart": 0, "trimEnd": 1, "trimOffset": 0}`.',
         '   - Blend Modes & Effect Racks: use `screen`, `multiply`, `overlay`, `glow`, `film_grain`, `vignette`, and `color_grade`.',
+        '',
+        '7. **Universal Motion Design Laws (Lottie & Disney Principles for Code)**:',
+        '   - Forbid Linear Spatial Movement: always use velocity curves, easeOutCubic, backOut, or spring physics for position/scale.',
+        '   - Volume Conservation on Squash & Stretch: ScaleX * ScaleY ≈ 1.0 (never squash both axes simultaneously).',
+        '   - Anticipation Windup: negative recoil (-5% to -8%) for 3-5 frames before high-energy launches.',
+        '   - Hierarchical Stagger & Follow-Through: leader arrives first, child badges/accents follow 2-4 frames later.',
+        '   - Snappy Exits: exits must be 20-30% shorter than entrances and never linger on screen.',
     ];
 
     if (matched.length > 0) {

@@ -240,6 +240,21 @@ const FUNCTIONS = Object.freeze({
         const p = inMax === inMin ? (value < inMin ? 0 : 1) : Math.max(0, Math.min(1, (value - inMin) / (inMax - inMin)));
         return outMin + (outMax - outMin) * (1 - (1 - p) * (1 - p));
     },
+    bounce: (t, amp = 0.08, freq = 3, decay = 5) => {
+        const time = Math.max(0, t);
+        return amp * Math.sin(freq * time * 2 * Math.PI) * Math.exp(-decay * time);
+    },
+    overshoot: (t, s = 1.70158) => {
+        const p = Math.max(0, Math.min(1, t)) - 1;
+        return (p * p * ((s + 1) * p + s) + 1);
+    },
+    spring: (t, stiffness = 220, damping = 18, mass = 1) => {
+        return solveSpring(t, stiffness, damping, mass);
+    },
+    squash: (stretch) => {
+        const s = Math.abs(stretch);
+        return s > 1e-4 ? 1 / s : 1;
+    },
 });
 
 const FUNCTION_ARITY = Object.freeze({
@@ -250,7 +265,9 @@ const FUNCTION_ARITY = Object.freeze({
     mod: [2, 2], fract: [1, 1],
     min: [1, 48], max: [1, 48], clamp: [3, 3], smoothstep: [3, 3],
     linear: [5, 5], ease: [5, 5], easeIn: [5, 5], easeOut: [5, 5],
+    bounce: [1, 4], overshoot: [1, 2], spring: [1, 4], squash: [1, 1],
     noise: [1, 2], wiggle: [2, 3],
+    loopWiggle: [2, 4], loopwiggle: [2, 4],
     loopOut: [0, 2], loopout: [0, 2],
     loopIn: [0, 2], loopin: [0, 2],
     audioAmp: [0, 1], audioamp: [0, 1],
@@ -259,6 +276,7 @@ const FUNCTION_ARITY = Object.freeze({
 const EXPRESSION_FUNCTIONS = new Set([
     ...Object.keys(FUNCTIONS),
     'noise', 'wiggle',
+    'loopWiggle', 'loopwiggle',
     'loopOut', 'loopout',
     'loopIn', 'loopin',
     'audioAmp', 'audioamp',
@@ -452,6 +470,20 @@ export function evaluateMotionExpression(expression, variables = {}) {
             const amplitude = Math.max(0, Math.min(1e6, Math.abs(toNum(args[1]))));
             const seed = args[2] !== undefined ? toNum(args[2]) : (Number(variables.seed ?? variables.index ?? 0) * 17.3);
             return noise1D(time * frequency, seed) * amplitude;
+        }
+        if (lower === 'loopwiggle') {
+            if (args.length < 2 || args.length > 4) throw new Error('loopWiggle expects frequency, amplitude, and optional loopDuration, seed');
+            const time = Number(variables.t ?? variables.time ?? 0);
+            if (!Number.isFinite(time)) throw new Error('loopWiggle requires finite time');
+            const frequency = Math.max(0.01, Math.min(120, Math.abs(toNum(args[0]))));
+            const amplitude = Math.max(0, Math.min(1e6, Math.abs(toNum(args[1]))));
+            const loopDuration = args[2] !== undefined ? Math.max(0.1, toNum(args[2])) : 5;
+            const seed = args[3] !== undefined ? toNum(args[3]) : (Number(variables.seed ?? variables.index ?? 0) * 17.3);
+            const cycleT = ((time % loopDuration) + loopDuration) % loopDuration;
+            const progress = cycleT / loopDuration;
+            const w1 = noise1D(progress * loopDuration * frequency, seed) * amplitude;
+            const w2 = noise1D((progress - 1) * loopDuration * frequency, seed) * amplitude;
+            return w1 * (1 - progress) + w2 * progress;
         }
         if (lower === 'loopout') {
             const loopType = typeof args[0] === 'string' ? args[0] : 'cycle';
@@ -666,6 +698,7 @@ export function validateMotionExpression(expression, { variables = ['t', 'time',
         'audio', 'audio.bass', 'audio.mid', 'audio.treble', 'audio.all',
         'keyframes', 'seed', 'index', 'fps', 'width', 'height', 'w', 'h',
         'layerStart', 'layerEnd',
+        'scale', 'rotation', 'opacity', 'x', 'y',
         ...variables,
         ...variables.map(v => typeof v === 'string' ? v.toLowerCase() : v),
     ]);
@@ -697,6 +730,11 @@ export function validateMotionExpression(expression, { variables = ['t', 'time',
     ].map((context, index) => {
         context.audio = { bass: 0.5, mid: 0.5, treble: 0.5, all: 0.5 };
         context.keyframes = [{ time: 0, value: 0 }, { time: 2, value: 10 }];
+        context.scale = probeValues[index];
+        context.rotation = 0;
+        context.opacity = 1;
+        context.x = 0;
+        context.y = 0;
         for (const variable of variables) {
             if (!Object.prototype.hasOwnProperty.call(context, variable) && variable !== 'pi' && variable !== 'e') {
                 context[variable] = probeValues[index];

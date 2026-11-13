@@ -140,6 +140,20 @@ await test('searchMotionKnowledge finds creator aesthetic techniques', () => {
     assert.ok(gadzhi.length > 0 && gadzhi[0].technique.id === 'iman_gadzhi_dark_luxury');
 });
 
+await test('searchMotionKnowledge finds classical animation and physics techniques', () => {
+    const bounceRes = searchMotionKnowledge('inertial bounce overshoot natural settle');
+    assert.ok(bounceRes.length > 0, 'Should find bounce match');
+    assert.equal(bounceRes[0].technique.id, 'inertial_bounce_snap');
+
+    const squashRes = searchMotionKnowledge('organic impact volume squash and stretch');
+    assert.ok(squashRes.length > 0, 'Should find squash match');
+    assert.equal(squashRes[0].technique.id, 'squash_and_stretch_impact');
+
+    const loopRes = searchMotionKnowledge('seamless loop wiggle ambient background');
+    assert.ok(loopRes.length > 0, 'Should find loop wiggle match');
+    assert.equal(loopRes[0].technique.id, 'seamless_loop_wiggle');
+});
+
 await test('getKnowledgeForBrief injects After Effects Engine mastery guidelines', () => {
     const knowledge = getKnowledgeForBrief('make the title pulse with bass and link to parent badge');
     assert.ok(knowledge.promptBlock.includes('After Effects Engine Mastery'), 'Should include AE guidelines');
@@ -249,10 +263,46 @@ const { resolveCommand, extractParams, COMMAND_BY_ID } = await import('../client
 const { IntentParser } = await import('../client/src/agent/IntentParser.js');
 const { EditPlanner } = await import('../client/src/agent/EditPlanner.js');
 const { default: CommandCompiler } = await import('../client/src/agent/CommandCompiler.js');
+const { evaluateMotionExpression, validateMotionExpression } = await import('../client/src/motion/MotionExpression.js');
+
+await test('MotionExpression evaluates bounce, overshoot, spring, squash, and loopWiggle correctly', () => {
+    // 1. bounce(t, amp, freq, decay)
+    const bVal = evaluateMotionExpression("1 + bounce(t, 0.1, 3, 5)", { t: 0.1 });
+    assert.ok(typeof bVal === 'number' && Number.isFinite(bVal), 'bounce must return finite number');
+
+    // 2. overshoot(t, s)
+    const oVal = evaluateMotionExpression("overshoot(progress, 1.7)", { progress: 0.8 });
+    assert.ok(typeof oVal === 'number' && Number.isFinite(oVal), 'overshoot must return finite number');
+
+    // 3. spring(t, stiffness, damping, mass)
+    const sVal = evaluateMotionExpression("spring(t, 220, 18, 1)", { t: 0.5 });
+    assert.ok(typeof sVal === 'number' && sVal > 0.5 && sVal < 1.5, 'spring must evaluate smoothly');
+
+    // 4. squash(stretch)
+    const sqVal = evaluateMotionExpression("squash(0.8)", {});
+    assert.ok(Math.abs(sqVal - 1.25) < 1e-4, 'squash(0.8) must be 1.25 for volume conservation');
+
+    // 5. loopWiggle(freq, amp, loopDuration)
+    const lwVal1 = evaluateMotionExpression("loopWiggle(2, 10, 4)", { t: 0 });
+    const lwVal2 = evaluateMotionExpression("loopWiggle(2, 10, 4)", { t: 4 });
+    assert.ok(typeof lwVal1 === 'number' && typeof lwVal2 === 'number');
+    assert.ok(Math.abs(lwVal1 - lwVal2) < 1e-3, 'loopWiggle must match exactly at loop boundaries (0s and 4s)');
+
+    // 6. validation
+    assert.equal(validateMotionExpression("1 + bounce(time, 0.12, 3.5, 6)").valid, true);
+    assert.equal(validateMotionExpression("loopWiggle(2, 10, 4)").valid, true);
+    assert.equal(validateMotionExpression("squash(scale)").valid, true);
+});
 
 await test('CommandRegistry resolves expression, matte, parent, trim, and aesthetic prompts', () => {
     const exprMatch = resolveCommand('add a wiggle expression to rotation').match;
     assert.ok(exprMatch && exprMatch.id === 'apply_motion_expression', `Expected apply_motion_expression, got ${exprMatch?.id}`);
+
+    const bounceMatch = resolveCommand('add inertial bounce expression').match;
+    assert.ok(bounceMatch && bounceMatch.id === 'apply_motion_expression', `Expected apply_motion_expression, got ${bounceMatch?.id}`);
+
+    const loopWiggleMatch = resolveCommand('seamless loop wiggle').match;
+    assert.ok(loopWiggleMatch && loopWiggleMatch.id === 'apply_motion_expression', `Expected apply_motion_expression, got ${loopWiggleMatch?.id}`);
 
     const bassMatch = resolveCommand('pulse with bass').match;
     assert.ok(bassMatch && bassMatch.id === 'apply_motion_expression', `Expected apply_motion_expression, got ${bassMatch?.id}`);

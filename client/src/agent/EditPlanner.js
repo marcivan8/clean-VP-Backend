@@ -460,6 +460,12 @@ export class EditPlanner {
                     expression = "1 + audioAmp('bass') * 0.22";
                 } else if (/\b(pingpong|ping-pong|ping pong|loop( out)? pingpong)\b/i.test(prompt)) {
                     expression = "loopOut('pingpong')";
+                } else if (/\b(bounce|inertial bounce|overshoot|rebond)\b/i.test(prompt)) {
+                    expression = "1 + bounce(time, 0.12, 3.5, 6)";
+                } else if (/\b(loop\s*wiggle|seamless wiggle|seamless loop)\b/i.test(prompt)) {
+                    expression = "loopWiggle(2, 10, 4)";
+                } else if (/\b(squash|squash and stretch|ecrasement)\b/i.test(prompt)) {
+                    expression = "squash(scale)";
                 } else if (/\b(wiggle)\b/i.test(prompt)) {
                     const match = prompt.match(/wiggle\((\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?)\)/i);
                     expression = match ? `wiggle(${match[1]}, ${match[2]})` : "wiggle(2, 8)";
