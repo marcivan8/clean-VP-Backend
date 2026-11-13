@@ -4,8 +4,22 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { renderTemplateFrames } from '../server/compositor/TemplateRenderer.js';
+import { renderTemplateFrames, registerFonts } from '../server/compositor/TemplateRenderer.js';
 import { drawScene3D, remapSceneObjectTime, resolveSceneVideoSourceTime, maxSceneObjectSourceTime, getSceneShutterSampleTimes, sampleAudioEnvelope, composeSceneRotation, composeSceneTransform, normalizeScene3D, normalizeSceneMesh, MAX_MESH_TRIANGLES, MAX_SCENE_TRIANGLES, MAX_SCENE_PARTICLES, getScene3DRenderLimitWarnings, getScene3DCompatibilityWarnings, resolveParticleSeed, SCENE3D_CAMERA_DEFAULTS, SCENE3D_PRIMITIVES, SCENE3D_BLEND_MODES } from '../client/src/motion/Scene3D.js';
+
+// Ensure fonts are registered in @napi-rs/canvas for headless environments (e.g. CI Linux)
+registerFonts(Canvas);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(__dirname, '..');
+const FONT_DIR = path.join(ROOT, 'client', 'public', 'fonts');
+if (Canvas?.GlobalFonts?.registerFromPath && fs.existsSync(FONT_DIR)) {
+  for (const name of ['Arial', 'sans-serif', 'Helvetica', 'Inter']) {
+    const p = path.join(FONT_DIR, 'Inter-Regular.ttf');
+    if (fs.existsSync(p)) {
+      try { Canvas.GlobalFonts.registerFromPath(p, name); } catch { }
+    }
+  }
+}
 import { evaluateMotionExpression } from '../client/src/motion/MotionExpression.js';
 import { normalizeParticleColorCurve, normalizeParticleLifeCurve, sampleParticleColorOverLife, setParticleColorCurveEasing, setParticleLifeCurveEndpoint, setParticleLifeCurveEasing, sampleProceduralParticle, sampleProceduralParticles } from '../client/src/motion/ProceduralParticles.js';
 import { canRenderScene3DGpu } from '../client/src/motion/Scene3DGPU.js';

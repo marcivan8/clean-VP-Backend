@@ -44,6 +44,14 @@ const EXTENDED_FONT_FILES = {
     'JetBrainsMono': 'JetBrainsMono-Regular.ttf',
 };
 
+// Common system aliases mapped to bundled TTFs for environments without system fonts (e.g. Linux CI)
+const SYSTEM_FONT_ALIASES = {
+    'Arial': 'Inter-Regular.ttf',
+    'sans-serif': 'Inter-Regular.ttf',
+    'Helvetica': 'Inter-Regular.ttf',
+    'default': 'Inter-Regular.ttf',
+};
+
 let graphicsPromise = null;
 let richTextPromise = null;
 let layerEffectsPromise = null;
@@ -87,6 +95,12 @@ function registerFonts(CanvasModule) {
         try { C.GlobalFonts.registerFromPath(p, family); } catch { }
     }
     for (const [family, file] of Object.entries(EXTENDED_FONT_FILES)) {
+        const p = path.join(FONT_DIR, file);
+        if (fs.existsSync(p)) {
+            try { C.GlobalFonts.registerFromPath(p, family); } catch { }
+        }
+    }
+    for (const [family, file] of Object.entries(SYSTEM_FONT_ALIASES)) {
         const p = path.join(FONT_DIR, file);
         if (fs.existsSync(p)) {
             try { C.GlobalFonts.registerFromPath(p, family); } catch { }

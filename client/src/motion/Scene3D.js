@@ -2146,7 +2146,8 @@ function drawScene3DSample(ctx, scene = {}, time = 0, duration = 1, width = 1080
                 context.textAlign = ['left', 'right'].includes(object.textAlign) ? object.textAlign : 'center';
                 context.textBaseline = 'middle';
                 const fontWeight = Math.max(100, Math.min(900, Math.round(n(object.fontWeight, 800) / 100) * 100));
-                context.font = `${fontWeight} ${fontSize}px ${object.fontFamily || 'Arial'}, sans-serif`;
+                const family = object.fontFamily ? `"${object.fontFamily}", ` : '';
+                context.font = `${fontWeight} ${fontSize}px ${family}"Inter", Arial, sans-serif`;
                 context.lineJoin = 'round';
                 for (const plane of textPlanes) {
                     context.save();
