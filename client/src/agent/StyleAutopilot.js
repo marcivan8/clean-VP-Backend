@@ -355,6 +355,12 @@ export async function runAutopilot(request, opts = {}) {
     const alreadyDone = policySkipped.map(sk => `${sk.id} (${sk.reason})`);
     const skippedAll = [...skipped, ...alreadyDone];
     const skippedText = skippedAll.length ? ` Skipped: ${skippedAll.join('; ')}.` : '';
+
+    // Seamless playback: auto-preview the finished edit from the beginning
+    const freshStore = useTimelineStore.getState();
+    freshStore.seek(0);
+    freshStore.setIsPlaying(true);
+
     return {
         success: true,
         operation: 'auto_edit',

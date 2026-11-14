@@ -956,23 +956,39 @@ const IDELayout = ({ mode = 'editor' }) => {
         console.log("[IDELayout] Revideo Player Ready", revideoPlayer);
         previewReloadRef.current?.attachPlayer(revideoPlayer);
 
-        // Safety net: if a variables change slips through and triggers a Revideo reload
-        // while playing, the loop-guard in Player.prepare() overrides the saved seek
-        // position to frame 0. Subscribe to onRecalculated and, if we were playing at
-        // a non-zero position, request a seek back to the correct frame AFTER the
-        // loop-guard has run (setTimeout(0) defers past the current prepare() call).
+        // Seamless playback recovery: if playback was active when mounting or remounting
+        // (e.g. after aspect ratio change during Auto edit), restore seek position and play state.
+        const initialPlayState = useTimelineStore.getState();
+        if (initialPlayState.isPlaying) {
+            const fps = revideoPlayer.playback?.fps ?? 30;
+            setTimeout(() => {
+                if (playerRef.current === revideoPlayer) {
+                    if (Number.isFinite(initialPlayState.currentTime) && initialPlayState.currentTime >= 0) {
+                        revideoPlayer.requestSeek(Math.round(initialPlayState.currentTime * fps));
+                    }
+                    revideoPlayer.togglePlayback(true);
+                }
+            }, 0);
+        }
+
+        // Safety net: if a variables change triggers a Revideo reload while playing,
+        // Player.prepare() loop-guard resets seek to frame 0 and pauses playback.
+        // Subscribe to onRecalculated and restore position and playback state AFTER prepare() runs.
         if (revideoPlayer.onRecalculated?.subscribe) {
             revideoPlayer.onRecalculated.subscribe(() => {
                 const { isPlaying, currentTime } = useTimelineStore.getState();
-                if (isPlaying && currentTime > 0.1) {
-                    const fps = revideoPlayer.playback?.fps ?? 30;
-                    setTimeout(() => {
-                        // Guard: don't seek if the player has been replaced by a remount
-                        if (playerRef.current === revideoPlayer) {
+                const fps = revideoPlayer.playback?.fps ?? 30;
+                setTimeout(() => {
+                    // Guard: don't seek/unpause if the player has been replaced by a remount
+                    if (playerRef.current === revideoPlayer) {
+                        if (Number.isFinite(currentTime) && currentTime >= 0) {
                             revideoPlayer.requestSeek(Math.round(currentTime * fps));
                         }
-                    }, 0);
-                }
+                        if (isPlaying) {
+                            revideoPlayer.togglePlayback(true);
+                        }
+                    }
+                }, 0);
             });
         }
     };

@@ -159,6 +159,7 @@ const workflowMachine = createMachine({
                         context.userPrompt = event.prompt;
                         context.initialHistoryLen = useTimelineStore.getState().past.length;
                         context.preJobFacts = timelineFacts(useTimelineStore.getState());
+                        context.wasPlaying = useTimelineStore.getState().isPlaying;
                     }
                 }
             }
@@ -332,7 +333,8 @@ const workflowMachine = createMachine({
                                     // P5: After the edit, ensure the canvas shows a valid frame.
                                     // If the current time now falls in a gap (e.g. after silence
                                     // removal), quietly seek to the nearest clip start.
-                                    // We never auto-play — the user controls playback.
+                                    // If playback was active when the edit started or if in auto mode,
+                                    // keep playing seamlessly.
                                     setTimeout(() => {
                                         const ts = useTimelineStore.getState();
                                         const allMediaClips = ts.tracks
@@ -350,6 +352,11 @@ const workflowMachine = createMachine({
                                             // Still in a valid clip; just re-render the current frame
                                             ts.playbackEngine?.renderOnce?.();
                                             ts.playbackEngine?.seek?.(t);
+                                        }
+
+                                        const shouldResume = context.wasPlaying || result.operation === 'auto_edit';
+                                        if (shouldResume && !ts.isPlaying) {
+                                            ts.setIsPlaying(true);
                                         }
                                     }, 300);
                                 }
