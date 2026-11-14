@@ -7,8 +7,8 @@ import useDeviceType from '../../hooks/useDeviceType';
 import { addAssetAtTimelinePosition, getAssetDropTime } from '../../timeline/assetDropPosition.js';
 import { triggerHint } from '../FirstRunHint.jsx';
 import { TRANSITION_TYPES, TRANSITION_DEFAULT_DURATION } from '../../motion/TransitionFX.js';
-import TimelineVisualShelf from './TimelineVisualShelf.jsx';
-import { Scissors, ZoomIn, ZoomOut, Copy, Type, Palette, Undo2, Redo2, ChevronsRight, Magnet, ChevronLeft, ChevronRight } from 'lucide-react';
+import TransitionBox from './TransitionBox.jsx';
+import { Scissors, ZoomIn, ZoomOut, Copy, Type, Palette, Undo2, Redo2, ChevronsRight, Magnet, ChevronLeft, ChevronRight, Wind } from 'lucide-react';
 
 const RULER_H    = 24;   // h-6 = 24px (ruler height)
 const LABEL_W         = 128; // w-32 = 128px (track label column) — desktop
@@ -62,6 +62,7 @@ const Timeline = () => {
 
     // Scroll hint: show briefly when horizontal content overflows
     const [showScrollHint, setShowScrollHint] = React.useState(false);
+    const [showTransitionsBox, setShowTransitionsBox] = React.useState(false);
     React.useEffect(() => {
         const el = tracksAreaRef.current;
         if (!el) return;
@@ -637,24 +638,28 @@ const Timeline = () => {
                         <Type className="w-3 h-3 text-muted-foreground group-hover:text-primary" />
                     </button>
 
-                    <select
-                        className="text-[10px] text-muted-foreground rounded px-1 py-0.5 border-none outline-none cursor-pointer hover:bg-white/10"
-                        style={{ background: "var(--glass-2)", fontFamily: "var(--f-mono)" }}
-                        title={t('timeline.addTransition')}
-                        value=""
-                        onChange={(e) => {
-                            const type = e.target.value;
-                            if (!type) return;
-                            const { activeClipId, addTransition } = useTimelineStore.getState();
-                            if (activeClipId) addTransition(activeClipId, type, TRANSITION_DEFAULT_DURATION[type] || 0.4);
-                            e.target.value = "";
-                        }}
-                    >
-                        <option value="">+ {t('timeline.transition')}</option>
-                        {TRANSITION_TYPES.map(type => (
-                            <option key={type} value={type}>{t(`transitions.${type}`)}</option>
-                        ))}
-                    </select>
+                    <div className="relative">
+                        <button
+                            type="button"
+                            data-transition-toggle="true"
+                            onClick={() => setShowTransitionsBox(prev => !prev)}
+                            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] cursor-pointer transition-colors ${
+                                showTransitionsBox
+                                    ? 'bg-primary/25 text-primary border border-primary/50'
+                                    : 'text-muted-foreground hover:text-foreground hover:bg-white/10'
+                            }`}
+                            style={{ background: showTransitionsBox ? undefined : "var(--glass-2)", fontFamily: "var(--f-mono)" }}
+                            title={t('timeline.transitionBox', 'Toggle Transitions & Effects Box')}
+                        >
+                            <Wind size={11} className={showTransitionsBox ? 'text-primary' : 'text-muted-foreground'} />
+                            <span>{t('timeline.transitions', 'Transitions')}</span>
+                        </button>
+
+                        <TransitionBox
+                            isOpen={showTransitionsBox}
+                            onClose={() => setShowTransitionsBox(false)}
+                        />
+                    </div>
 
                     <button
                         className="p-1 rounded relative group transition-colors hover:bg-white/5"
@@ -724,7 +729,6 @@ const Timeline = () => {
 
             )}
 
-            <TimelineVisualShelf />
 
             {/* Tracks Area */}
             <div

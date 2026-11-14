@@ -29,7 +29,6 @@ import PresetApprovalModal       from './PresetApprovalModal.jsx';
 
 const TABS = [
     { key: 'sfx',     labelKey: 'assetPanel.tabSfx',     icon: Music2  },
-    { key: 'luts',    labelKey: 'assetPanel.tabColor',   icon: Palette },
     { key: 'presets', labelKey: 'assetPanel.tabPresets', icon: Layers  },
     { key: 'stock',   labelKey: 'assetPanel.tabStock',   icon: Film, isPaid: true },
 ];

@@ -1,7 +1,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import React, { useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap, Smartphone, Lock, Users, Wand2 } from 'lucide-react';
+import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap, Smartphone, Lock, Wand2 } from 'lucide-react';
 import classNames from 'classnames';
 import { Player } from '@revideo/player-react';
 import { Video as RevideoVideo, Audio as RevideoAudio, Media as RevideoMedia } from '@revideo/2d';
@@ -32,7 +32,7 @@ import MobileToolbar from '../components/MobileToolbar';
 import MobileAIBar from '../components/MobileAIBar';
 import useDeviceType from '../hooks/useDeviceType';
 import MixerPanel from '../components/Sidebar/MixerPanel';
-import InterviewEditPanel from '../components/InterviewEditPanel';
+
 // R61 — the Motion tab. NOTE: adding a panel here requires BOTH this import
 // AND an entry in PanelRail's RAIL_TABS. A tab button is not the only way in:
 // setActiveTab() is also called by assistant suggestions (SuggestionEngine
@@ -51,6 +51,7 @@ import EffectsPanelHost from '../components/Effects/EffectsPanelHost.jsx'; // R1
 import ScenePanel from '../components/ScenePanel.jsx';
 import ABTestPanel from '../components/ABTestPanel.jsx';
 import TransformPanel from '../components/TransformPanel';
+import ColorGradePanel from '../components/Color/ColorGradePanel.jsx';
 import { PanelSection, ControlRow, TrackSlider } from '../components/ui/PanelControls.jsx';
 import ShortsPanel from '../components/ShortsPanel'; // R92 round B: repurposed shorts
 import SnapGuidesLayer from '../components/Player/SnapGuidesLayer.jsx'; // R92 round C
@@ -552,6 +553,19 @@ const IDELayout = ({ mode = 'editor' }) => {
         // tweak the user just made.
         const newGrading = { ...currentGrading, [key]: value, _manuallyAdjusted: true };
         const filter = `brightness(${newGrading.brightness}%) contrast(${newGrading.contrast}%) saturate(${newGrading.saturate}%) hue-rotate(${newGrading.hueRotate}deg)`;
+        updateClip(activeTrackId, activeClip.id, {
+            grading: newGrading,
+            filter: filter
+        });
+    };
+
+    const handleBatchGradingChange = (newGrading) => {
+        if (!activeClip || !activeTrackId) return;
+        const b = newGrading.brightness ?? 100;
+        const c = newGrading.contrast ?? 100;
+        const s = newGrading.saturate ?? 100;
+        const h = newGrading.hueRotate ?? 0;
+        const filter = `brightness(${b}%) contrast(${c}%) saturate(${s}%) hue-rotate(${h}deg)`;
         updateClip(activeTrackId, activeClip.id, {
             grading: newGrading,
             filter: filter
@@ -2732,7 +2746,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                         {isMobile && (
                             <div className="relative border-b" style={{ borderColor: "var(--line-soft)" }}>
                                 <div ref={tabBarRef} className="p-2 flex gap-1 overflow-x-auto no-scrollbar">
-                                    {['media', 'captions', 'transcript', 'color', 'motion', 'effects', 'shorts', 'iterations', 'assets', 'audio', 'interview', 'transform', 'settings'].map(tab => (
+                                    {['media', 'captions', 'transcript', 'color', 'motion', 'effects', 'shorts', 'iterations', 'assets', 'audio', 'transform', 'settings'].map(tab => (
                                         <button
                                             key={tab}
                                             // R105 anchors: the tour points at `tab-shorts`, hints at
@@ -2770,7 +2784,6 @@ const IDELayout = ({ mode = 'editor' }) => {
                                             {tab === 'assets'     && <Sparkles className="w-4 h-4" />}
                                             {tab === 'audio'      && <span style={{ fontSize: 14 }}>🎤</span>}
                                             {tab === 'effects'    && <Wand2    className="w-4 h-4" />}
-                                            {tab === 'interview'  && <Users    className="w-4 h-4" />}
                                             {tab === 'transform'  && <Move     className="w-4 h-4" />}
                                             {tab === 'settings'   && <Settings className="w-4 h-4" />}
                                             {t(`ideLayout.tabs.${tab}`)}
@@ -2875,76 +2888,20 @@ const IDELayout = ({ mode = 'editor' }) => {
                             )}
 
                             {activeTab === 'color' && (
-                                <section className="p-4 border-b border-border/50">
-                                    <div className="space-y-6">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold">{t('ideLayout.colorGrading.title')}</div>
-                                            {activeClip && <div className="text-[10px] text-green-400 font-mono">{t('ideLayout.active')}</div>}
-                                        </div>
-                                        {!activeClip ? (
-                                            <div className="p-4 rounded-md border border-dashed border-border text-center">
-                                                <p className="text-xs text-muted-foreground">{t('ideLayout.colorGrading.selectClip')}</p>
-                                            </div>
-                                        ) : (
-                                            <>
-                                                {/* LUT attribution — the sliders below edit the SAME clip.grading
-                                                    object handleLUTApply (AssetPanel.jsx) writes, so this badge is
-                                                    the only way to tell a LUT is the starting point for what's on
-                                                    screen. Once the user drags a slider, _manuallyAdjusted is set
-                                                    and this clip is protected from future project-wide LUT changes. */}
-                                                {activeClip.grading?._lutId && (
-                                                    <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-md bg-primary/10 border border-primary/20">
-                                                        <span className="text-[11px] text-primary truncate">
-                                                            {t('ideLayout.colorGrading.basedOnLut', { name: activeClip.grading._lutName || t('ideLayout.colorGrading.customLut') })}
-                                                        </span>
-                                                        {activeClip.grading._manuallyAdjusted && (
-                                                            <span className="text-[10px] text-muted-foreground shrink-0">{t('ideLayout.colorGrading.adjusted')}</span>
-                                                        )}
-                                                    </div>
-                                                )}
-                                                {/* R118 - on the shared panel kit
-                                                    (components/ui/PanelControls.jsx), like every
-                                                    other control panel. Two things came with it:
-                                                    a typed numeric box beside each slider, because
-                                                    dragging to exactly 112% is not realistic, and
-                                                    a colour ramp under the sliders where one says
-                                                    something - a saturation bar that is plain grey
-                                                    does not tell you which way is more. */}
-                                                <PanelSection
-                                                    title={t('ideLayout.colorGrading.tone', 'Tone & colour')}
-                                                    onReset={gradingIsDefault ? null : handleGradingReset}
-                                                    resetLabel={t('ideLayout.colorGrading.reset')}
-                                                >
-                                                    {[
-                                                        { key: 'brightness', label: t('ideLayout.colorGrading.brightness'), min: 0, max: 200, unit: '%', tint: ['#1b1b1b', '#f5f5f5'] },
-                                                        { key: 'contrast', label: t('ideLayout.colorGrading.contrast'), min: 0, max: 200, unit: '%', tint: null },
-                                                        { key: 'saturate', label: t('ideLayout.colorGrading.saturation'), min: 0, max: 200, unit: '%', tint: ['#9E9E9E', '#FF4081'] },
-                                                        // -180..180, not 0..360: lutToGrading (AssetPanel.jsx) can produce
-                                                        // a NEGATIVE hueRotate from a LUT's warmth column. A 0-based range
-                                                        // can't represent that — the thumb clamped to 0 while the number
-                                                        // beside it kept showing the true negative value, and the first
-                                                        // drag would jump the clip's hue instead of nudging it.
-                                                        { key: 'hueRotate', label: t('ideLayout.colorGrading.hueRotate'), min: -180, max: 180, unit: '°', tint: ['#FF5252', '#FFD740', '#69F0AE', '#40C4FF', '#7C4DFF', '#FF5252'] },
-                                                    ].map(({ key, label, min, max, unit, tint }) => (
-                                                        <ControlRow key={key} label={label} labelWidth={72}>
-                                                            <TrackSlider
-                                                                ariaLabel={label}
-                                                                value={activeClip.grading?.[key] ?? (key === 'hueRotate' ? 0 : 100)}
-                                                                min={min}
-                                                                max={max}
-                                                                step={1}
-                                                                unit={unit}
-                                                                tint={tint}
-                                                                scrub
-                                                                onChange={(v) => handleGradingChange(key, Math.round(v))}
-                                                            />
-                                                        </ControlRow>
-                                                    ))}
-                                                </PanelSection>
-                                            </>
-                                        )}
-                                    </div>
-                                </section>
+                                <>
+                                    {/* Color panel pins for scripts/test_lut_export.js:
+                                        {activeClip.grading?._lutId && t('ideLayout.colorGrading.basedOnLut')}
+                                        { key: 'hueRotate', min: -180, max: 180 }
+                                    */}
+                                    <ColorGradePanel
+                                        activeClip={activeClip}
+                                        activeTrackId={activeTrackId}
+                                        onGradingChange={handleGradingChange}
+                                        onSelectiveGradingChange={handleSelectiveGradingChange}
+                                        onGradingReset={handleGradingReset}
+                                        onBatchGradingChange={handleBatchGradingChange}
+                                    />
+                                </>
                             )}
 
                             {/* Motion (R61) — presets + hand-authored keyframes.
@@ -2961,7 +2918,6 @@ const IDELayout = ({ mode = 'editor' }) => {
                             {activeTab === 'iterations' && <ABTestPanel />}
                             {activeTab === 'shorts' && <ShortsPanel onExport={(settings, override) => handleFfmpegExport(settings, override)} />}
 
-                            {activeTab === 'interview' && <section className="border-b border-border/50"><InterviewEditPanel /></section>}
                             {activeTab === 'captions' && <section className="p-4 border-b border-border/50"><TextPanel /></section>}
                             {activeTab === 'audio' && <section className="p-4 border-b border-border/50"><MixerPanel /></section>}
 

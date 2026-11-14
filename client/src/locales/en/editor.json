@@ -921,7 +921,15 @@
     "whip-right": "Whip right",
     "zoom-punch": "Zoom punch",
     "glitch": "Glitch",
-    "speed-lines": "Speed lines"
+    "speed-lines": "Speed lines",
+    "circle-wipe": "Circle wipe",
+    "bar-wipe": "Bar wipe",
+    "blinds": "Blinds",
+    "diagonal-wipe": "Diagonal wipe",
+    "soft-blur": "Soft blur",
+    "push-left": "Push left",
+    "push-right": "Push right",
+    "color-flash": "Color flash"
   },
   "templates": {
     "title": "Templates",

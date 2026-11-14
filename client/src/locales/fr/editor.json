@@ -921,7 +921,15 @@
     "whip-right": "Filé droite",
     "zoom-punch": "Zoom choc",
     "glitch": "Glitch",
-    "speed-lines": "Lignes de vitesse"
+    "speed-lines": "Lignes de vitesse",
+    "circle-wipe": "Balayage circulaire",
+    "bar-wipe": "Balayage vertical",
+    "blinds": "Stores",
+    "diagonal-wipe": "Balayage diagonal",
+    "soft-blur": "Flou doux",
+    "push-left": "Glissement gauche",
+    "push-right": "Glissement droite",
+    "color-flash": "Flash couleur"
   },
   "templates": {
     "title": "Modèles",

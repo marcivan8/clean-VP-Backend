@@ -581,7 +581,15 @@ const VideoPlayer = () => {
                     contrast: activeClip.grading.contrast,
                     saturate: activeClip.grading.saturate,
                     hueRotate: activeClip.grading.hueRotate,
-                    selective: activeClip.grading.selective
+                    selective: activeClip.grading.selective,
+                    temperature: activeClip.grading.temperature,
+                    tint: activeClip.grading.tint,
+                    exposure: activeClip.grading.exposure,
+                    highlights: activeClip.grading.highlights,
+                    shadows: activeClip.grading.shadows,
+                    vibrance: activeClip.grading.vibrance,
+                    wheels: activeClip.grading.wheels,
+                    curves: activeClip.grading.curves,
                 });
             } else {
                 engineRef.current.setGrading({ brightness: 100, contrast: 100, saturate: 100, hueRotate: 0 });

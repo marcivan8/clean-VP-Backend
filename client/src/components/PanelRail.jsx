@@ -31,7 +31,7 @@
 import React from 'react';
 import {
     Layers, Type, FileText, Palette, Zap, Smartphone,
-    Repeat, Sparkles, Mic, Move, Settings, Lock, Users, Wand2,
+    Repeat, Sparkles, Mic, Move, Settings, Lock, Wand2,
 } from 'lucide-react';
 import classNames from 'classnames';
 
@@ -54,13 +54,6 @@ export const RAIL_TABS = [
     { id: 'effects',    Icon: Wand2 },
     { id: 'assets',     Icon: Sparkles },
     { id: 'audio',      Icon: Mic },
-    // R163 — InterviewEditPanel (394 lines, against the live
-    // POST /api/interview/rhythm-zoom) had a render branch in IDELayout and no
-    // way to reach it: no rail button, and nothing calls
-    // setActiveTab('interview'). Its own pre-flight checks handle a project
-    // with fewer than two clips or no captions, so it is safe to offer
-    // unconditionally rather than guessing when a cut is an interview.
-    { id: 'interview',  Icon: Users },
     { id: 'transform',  Icon: Move },
     { id: 'shorts',     Icon: Smartphone, paid: true },
     { id: 'iterations', Icon: Repeat },

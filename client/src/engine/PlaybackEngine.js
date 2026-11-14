@@ -158,6 +158,16 @@ class PlaybackEngine {
             contrast: 1.0,
             saturation: 1.0,
             hueRotate: 0.0,
+            temperature: 0.0,
+            tint: 0.0,
+            exposure: 0.0,
+            highlights: 0.0,
+            shadows: 0.0,
+            vibrance: 0.0,
+            wheelLift: [0, 0, 0, 0],
+            wheelGamma: [0, 0, 0, 0],
+            wheelGain: [0, 0, 0, 0],
+            wheelOffset: [0, 0, 0, 0],
             // Selective (R, Y, G, C, B, M)
             selectiveRes: [0, 0, 0, 0, 0, 0], // H, S, L deltas for each? 
             // Simplified: We pass arrays. 
@@ -321,6 +331,20 @@ class PlaybackEngine {
         uniform float u_saturation;
         uniform float u_hueRotate; // Degrees
 
+        // Extended Tone & Balance
+        uniform float u_temperature;
+        uniform float u_tint;
+        uniform float u_exposure;
+        uniform float u_highlights;
+        uniform float u_shadows;
+        uniform float u_vibrance;
+
+        // Color Wheels (Lift, Gamma, Gain, Offset)
+        uniform vec4 u_wheelLift;
+        uniform vec4 u_wheelGamma;
+        uniform vec4 u_wheelGain;
+        uniform vec4 u_wheelOffset;
+
         // Selective Grading Arrays [R, Y, G, C, B, M]
         uniform float u_selHue[6]; // Hue shift per range
         uniform float u_selSat[6]; // Saturation shift per range
@@ -385,6 +409,43 @@ class PlaybackEngine {
             // Convert back to RGB for Global Ops (could do global in HSL too but contrast/bright typically RGB)
             rgb = hsl2rgb(vec3(h, s, l));
 
+            // Extended Tone & Balance
+            rgb.r += u_temperature * 0.12;
+            rgb.b -= u_temperature * 0.12;
+            rgb.g += u_tint * 0.12;
+            rgb.r -= u_tint * 0.06;
+            rgb.b -= u_tint * 0.06;
+
+            rgb *= exp2(u_exposure * 2.0);
+
+            float lum = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+            float highWeight = smoothstep(0.5, 1.0, lum);
+            float shadowWeight = 1.0 - smoothstep(0.0, 0.5, lum);
+            rgb += rgb * (u_highlights * 0.5) * highWeight;
+            rgb += (1.0 - rgb) * (u_shadows * 0.5) * shadowWeight;
+
+            // 3-Way Color Wheels: Lift, Gamma, Gain, Offset
+            vec3 liftVec = u_wheelLift.rgb + vec3(u_wheelLift.w);
+            rgb = rgb + liftVec * (1.0 - rgb) * 0.5;
+
+            vec3 gainVec = vec3(1.0) + (u_wheelGain.rgb + vec3(u_wheelGain.w)) * 0.5;
+            rgb = rgb * max(vec3(0.0), gainVec);
+
+            vec3 gammaVec = vec3(1.0) - (u_wheelGamma.rgb + vec3(u_wheelGamma.w)) * 0.5;
+            gammaVec = max(vec3(0.1), gammaVec);
+            rgb = pow(clamp(rgb, 0.0, 1.0), gammaVec);
+
+            vec3 offsetVec = u_wheelOffset.rgb + vec3(u_wheelOffset.w);
+            rgb = rgb + offsetVec * 0.5;
+
+            // Vibrance
+            float maxC = max(rgb.r, max(rgb.g, rgb.b));
+            float minC = min(rgb.r, min(rgb.g, rgb.b));
+            float sat = maxC - minC;
+            float vibFactor = u_vibrance * (1.0 - sat);
+            float lumVib = dot(rgb, vec3(0.299, 0.587, 0.114));
+            rgb = mix(vec3(lumVib), rgb, 1.0 + vibFactor);
+
             // 3. Global Adjustments
             
             // Brightness
@@ -399,7 +460,7 @@ class PlaybackEngine {
             float gray = dot(rgb, vec3(0.299, 0.587, 0.114));
             rgb = mix(vec3(gray), rgb, u_saturation);
 
-            outColor = vec4(rgb, color.a);
+            outColor = vec4(clamp(rgb, 0.0, 1.0), color.a);
         }`;
 
         // Compile
@@ -416,6 +477,16 @@ class PlaybackEngine {
             contrast:   gl.getUniformLocation(this.program, "u_contrast"),
             saturation: gl.getUniformLocation(this.program, "u_saturation"),
             hueRotate:  gl.getUniformLocation(this.program, "u_hueRotate"),
+            temperature: gl.getUniformLocation(this.program, "u_temperature"),
+            tint:        gl.getUniformLocation(this.program, "u_tint"),
+            exposure:    gl.getUniformLocation(this.program, "u_exposure"),
+            highlights:  gl.getUniformLocation(this.program, "u_highlights"),
+            shadows:     gl.getUniformLocation(this.program, "u_shadows"),
+            vibrance:    gl.getUniformLocation(this.program, "u_vibrance"),
+            wheelLift:   gl.getUniformLocation(this.program, "u_wheelLift"),
+            wheelGamma:  gl.getUniformLocation(this.program, "u_wheelGamma"),
+            wheelGain:   gl.getUniformLocation(this.program, "u_wheelGain"),
+            wheelOffset: gl.getUniformLocation(this.program, "u_wheelOffset"),
             selHue:     gl.getUniformLocation(this.program, "u_selHue"),
             selSat:     gl.getUniformLocation(this.program, "u_selSat"),
             selLum:     gl.getUniformLocation(this.program, "u_selLum"),
@@ -788,6 +859,55 @@ class PlaybackEngine {
         this.gradingParams.selectiveHue = selHue;
         this.gradingParams.selectiveSat = selSat;
         this.gradingParams.selectiveLum = selLum;
+
+        // Extended Tone & Balance
+        const readClamp = (value, min, max, fallback = 0) => {
+            const v = readValue(value, fallback);
+            return Math.max(min, Math.min(max, v));
+        };
+        this.gradingParams.temperature = readClamp(params.temperature, -100, 100, 0) / 100.0;
+        this.gradingParams.tint = readClamp(params.tint, -100, 100, 0) / 100.0;
+        this.gradingParams.exposure = readClamp(params.exposure, -100, 100, 0) / 100.0;
+        this.gradingParams.highlights = readClamp(params.highlights, -100, 100, 0) / 100.0;
+        this.gradingParams.shadows = readClamp(params.shadows, -100, 100, 0) / 100.0;
+        this.gradingParams.vibrance = readClamp(params.vibrance, -100, 100, 0) / 100.0;
+
+        // Color Wheels conversion (puck coords x,y in range -46..46, level in -100..100)
+        const parseWheel = (wheel) => {
+            if (!wheel) return [0, 0, 0, 0];
+            const x = readValue(wheel.x, 0) / 46.0;
+            const y = readValue(wheel.y, 0) / 46.0;
+            const lvl = readClamp(wheel.level, -100, 100, 0) / 100.0;
+            const dist = Math.hypot(x, y);
+            if (dist < 1e-4) return [0, 0, 0, lvl];
+            const normDist = Math.min(1, dist);
+            const angle = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+            const rad = angle * Math.PI / 180;
+            const r = Math.cos(rad) * normDist;
+            const g = Math.cos(rad - 2 * Math.PI / 3) * normDist;
+            const b = Math.cos(rad - 4 * Math.PI / 3) * normDist;
+            return [r, g, b, lvl];
+        };
+
+        if (params.wheels) {
+            this.gradingParams.wheelLift = parseWheel(params.wheels.lift);
+            this.gradingParams.wheelGamma = parseWheel(params.wheels.gamma);
+            this.gradingParams.wheelGain = parseWheel(params.wheels.gain);
+            this.gradingParams.wheelOffset = parseWheel(params.wheels.offset);
+        } else {
+            this.gradingParams.wheelLift = [0, 0, 0, 0];
+            this.gradingParams.wheelGamma = [0, 0, 0, 0];
+            this.gradingParams.wheelGain = [0, 0, 0, 0];
+            this.gradingParams.wheelOffset = [0, 0, 0, 0];
+        }
+    }
+
+    registerScopeListener(callback) {
+        this.scopeListener = callback;
+    }
+
+    unregisterScopeListener() {
+        this.scopeListener = null;
     }
 
     // Deprecated but compatible
@@ -1620,6 +1740,16 @@ class PlaybackEngine {
         gl.uniform1f(this.loc.contrast, this.gradingParams.contrast);
         gl.uniform1f(this.loc.saturation, this.gradingParams.saturation);
         gl.uniform1f(this.loc.hueRotate, this.gradingParams.hueRotate);
+        gl.uniform1f(this.loc.temperature, this.gradingParams.temperature);
+        gl.uniform1f(this.loc.tint, this.gradingParams.tint);
+        gl.uniform1f(this.loc.exposure, this.gradingParams.exposure);
+        gl.uniform1f(this.loc.highlights, this.gradingParams.highlights);
+        gl.uniform1f(this.loc.shadows, this.gradingParams.shadows);
+        gl.uniform1f(this.loc.vibrance, this.gradingParams.vibrance);
+        gl.uniform4fv(this.loc.wheelLift, this.gradingParams.wheelLift);
+        gl.uniform4fv(this.loc.wheelGamma, this.gradingParams.wheelGamma);
+        gl.uniform4fv(this.loc.wheelGain, this.gradingParams.wheelGain);
+        gl.uniform4fv(this.loc.wheelOffset, this.gradingParams.wheelOffset);
 
         // Selective
         gl.uniform1fv(this.loc.selHue, this.gradingParams.selectiveHue);
@@ -1641,6 +1771,24 @@ class PlaybackEngine {
 
         // DRAW
         gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // Notify scope listener if attached (sampled for video scopes)
+        if (this.scopeListener) {
+            const now = performance.now();
+            if (now - (this._lastScopeSampleTime || 0) >= 66) {
+                this._lastScopeSampleTime = now;
+                try {
+                    const sw = Math.min(160, gl.drawingBufferWidth || 160);
+                    const sh = Math.min(90, gl.drawingBufferHeight || 90);
+                    const bufSize = sw * sh * 4;
+                    if (!this._scopePixelBuf || this._scopePixelBuf.length !== bufSize) {
+                        this._scopePixelBuf = new Uint8Array(bufSize);
+                    }
+                    gl.readPixels(0, 0, sw, sh, gl.RGBA, gl.UNSIGNED_BYTE, this._scopePixelBuf);
+                    this.scopeListener(this._scopePixelBuf, sw, sh);
+                } catch (_) {}
+            }
+        }
 
         this.lastFrameRendered = frameItem.timestamp;
         this._lastRenderedTimestamp = frameItem.timestamp;
