@@ -1126,7 +1126,11 @@ const GraphicOverlay = ({ placementFilter = 'all', onWarning = null }) => {
     const handlePointerDown = (e, clip, trackId) => {
         e.stopPropagation();
         e.currentTarget.setPointerCapture(e.pointerId);
-        setActiveClip(clip.parentCompoundId || clip.id);
+        if (clip.parentCompoundId) {
+            setActiveClip(clip.parentCompoundId);
+        } else {
+            setActiveClip(clip.id);
+        }
 
         const gs = gestureRef.current;
         if (!gs[clip.id]) gs[clip.id] = { pointers: {} };

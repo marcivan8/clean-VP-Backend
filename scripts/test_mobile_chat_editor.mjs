@@ -137,7 +137,7 @@ check('a clip can still be selected without a timeline', () => {
     // The timeline's Clip.jsx was one way in; tapping the thing in the preview
     // is the other, and it is the one that survives on a phone.
     for (const file of ['Player/BaseClipOverlay.jsx', 'Player/TextOverlay.jsx', 'Player/GraphicOverlay.jsx']) {
-        assert.match(read(`../client/src/components/${file}`), /setActiveClip\(clip\.id\)/,
+        assert.match(read(`../client/src/components/${file}`), /setActiveClip\((?:clip\.parentCompoundId\s*\|\|\s*)?clip\.id\)/,
             `${file} is the mobile way into the clip toolbar now`);
     }
     assert.match(ide, /activeTrackType=\{isMobile \? activeTrackType : null\}/,
