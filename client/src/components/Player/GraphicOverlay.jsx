@@ -1083,22 +1083,50 @@ const GraphicOverlay = ({ placementFilter = 'all', onWarning = null }) => {
 
     const activeClips = overlayTracks.flatMap(track =>
         track.clips
-            .filter(clip => {
-                if (!(currentTime >= clip.start && currentTime < clip.start + clip.duration)) return false;
-                if (clip.sceneId && clip.sceneNodeId && matteNodeKeys.has(`${clip.sceneId}:${clip.sceneNodeId}`)) return false;
+            .flatMap(clip => {
+                if (!(currentTime >= clip.start && currentTime < clip.start + clip.duration)) return [];
+                if (clip.isCompound && Array.isArray(clip.compoundLayers)) {
+                    // Compound clip: unpack and position active constituent graphic layers
+                    return clip.compoundLayers
+                        .filter(l => {
+                            const lStart = clip.start + (l.relativeStart ?? (Number(l.start) || 0));
+                            const lDur = Number(l.duration) || clip.duration;
+                            return currentTime >= lStart && currentTime < lStart + lDur;
+                        })
+                        .map(l => {
+                            const lStart = clip.start + (l.relativeStart ?? (Number(l.start) || 0));
+                            const lDur = Number(l.duration) || clip.duration;
+                            return {
+                                clip: {
+                                    ...l,
+                                    id: `${clip.id}-${l.id || l.nodeId || Math.random().toString(36).slice(2, 6)}`,
+                                    parentCompoundId: clip.id,
+                                    start: lStart,
+                                    duration: lDur,
+                                    x: l.x != null ? (Number(clip.x ?? 50) + (Number(l.x) - 50)) : clip.x,
+                                    y: l.y != null ? (Number(clip.y ?? 50) + (Number(l.y) - 50)) : clip.y,
+                                    scale: (Number(clip.scale) || 1) * (Number(l.scale) || 1),
+                                    opacity: (Number(clip.opacity) || 1) * (Number(l.opacity) || 1),
+                                    rotation: (Number(clip.rotation) || 0) + (Number(l.rotation) || 0),
+                                },
+                                trackId: track.id,
+                                trackType: l.trackType || 'overlay',
+                            };
+                        });
+                }
+                if (clip.sceneId && clip.sceneNodeId && matteNodeKeys.has(`${clip.sceneId}:${clip.sceneNodeId}`)) return [];
                 const isSandwich = clip.placement === 'behind_subject' || clip.placement === 'behind_speaker';
-                if (placementFilter === 'behind_subject') return isSandwich;
-                if (placementFilter === 'front') return hasActiveMatte ? !isSandwich : true;
-                return true;
+                if (placementFilter === 'behind_subject') return isSandwich ? [{ clip, trackId: track.id, trackType: track.type }] : [];
+                if (placementFilter === 'front') return (hasActiveMatte ? !isSandwich : true) ? [{ clip, trackId: track.id, trackType: track.type }] : [];
+                return [{ clip, trackId: track.id, trackType: track.type }];
             })
-            .map(clip => ({ clip, trackId: track.id, trackType: track.type }))
     );
     if (activeClips.length === 0) return null;
 
     const handlePointerDown = (e, clip, trackId) => {
         e.stopPropagation();
         e.currentTarget.setPointerCapture(e.pointerId);
-        setActiveClip(clip.id);
+        setActiveClip(clip.parentCompoundId || clip.id);
 
         const gs = gestureRef.current;
         if (!gs[clip.id]) gs[clip.id] = { pointers: {} };

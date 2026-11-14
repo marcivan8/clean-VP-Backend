@@ -174,7 +174,7 @@ export function buildAutopilotSteps(styleId, request, facts = {}) {
         // A standalone animation command already has a stable, explicit scope.
         // Keep its payload exact across styles so Auto runs only that action;
         // style context remains available through the normal execution context.
-        if (/^(?:please\s+)?(?:animate(?:\s+it)?|auto\s+animate(?:\s+it)?|animate\s+automatically)[.!?]*$/i.test(custom)) {
+        if (/^(?:please\s+)?(?:animate(?:\s+(?:it|this|the\s+video|this\s+video|my\s+video))?|auto\s+animate(?:\s+it)?|animate\s+automatically|add\s+(?:animations?|motion\s+graphics?)(?:\s+(?:to|in)\s+(?:this\s+video|it|the\s+video|my\s+video))?|motion\s+graphics?)[.!?]*$/i.test(custom)) {
             return custom ? [{ key: 'request', prompt: custom }] : [];
         }
         return custom ? [{

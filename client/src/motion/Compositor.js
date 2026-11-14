@@ -661,7 +661,24 @@ export function buildCompositionPlan(tracks, opts = {}) {
     let zIndex = 1;
 
     for (const track of overlayTracks) {
-        for (const clip of (track.clips || [])) {
+        const rawClips = track.clips || [];
+        const expandedClips = rawClips.flatMap(c => {
+            if (c?.isCompound && Array.isArray(c.compoundLayers)) {
+                return c.compoundLayers.map(l => ({
+                    ...l,
+                    id: `${c.id}-${l.id || l.nodeId || Math.random().toString(36).slice(2, 6)}`,
+                    start: c.start + (l.relativeStart ?? (Number(l.start) || 0)),
+                    duration: Number(l.duration) || c.duration,
+                    x: l.x != null ? (Number(c.x ?? 50) + (Number(l.x) - 50)) : c.x,
+                    y: l.y != null ? (Number(c.y ?? 50) + (Number(l.y) - 50)) : c.y,
+                    scale: (Number(c.scale) || 1) * (Number(l.scale) || 1),
+                    opacity: (Number(c.opacity) || 1) * (Number(l.opacity) || 1),
+                    rotation: (Number(c.rotation) || 0) + (Number(l.rotation) || 0),
+                }));
+            }
+            return [c];
+        });
+        for (const clip of expandedClips) {
             if (!clip || !(Number(clip.duration) > 0)) continue;
 
             // A linear graph can be projected into the ordinary stack (and is

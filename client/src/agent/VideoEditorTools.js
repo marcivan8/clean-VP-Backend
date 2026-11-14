@@ -528,13 +528,14 @@ export const TOOL_DEFINITIONS = [
     },
     {
         name: 'add_motion_component',
-        description: 'Add an editable After Effects class motion graphics component to the timeline, such as a title sequence, kinetic title, lower third, stat callout, quote card, or CTA. Include the actual copy and timing in params.',
+        description: 'Add an editable After Effects class motion graphics component to the timeline, such as a title sequence, kinetic title, lower third, stat callout, quote card, or CTA. Include the actual copy and timing in params. Supports bundling as a unified compound clip.',
         parameters: {
             type: 'object',
             properties: {
                 component: { type: 'string', enum: COMPONENT_IDS },
                 preset: { type: 'string', description: 'A visual preset supported by the chosen component; omit to use its default.' },
                 params: { type: 'object', description: 'Component content and layout values such as title, subtitle, label, stat, start, duration, x, and y.' },
+                as_compound: { type: 'boolean', description: 'When true, packages the multi-layer motion graphic as a unified compound clip on the overlay track.' },
             },
             required: ['component'],
         },
@@ -1359,13 +1360,14 @@ export class VideoEditorTools {
         return engine.executeStoreAction({ action, args }, signal ? { signal } : null);
     }
 
-    addMotionComponent({ component, preset, params = {} } = {}) {
+    addMotionComponent({ component, preset, params = {}, as_compound, asCompound } = {}) {
         if (!COMPONENT_IDS.includes(component)) {
             return { success: false, message: `Choose a supported motion component: ${COMPONENT_IDS.join(', ')}.` };
         }
         const state = useTimelineStore.getState();
         const previousIds = new Set((state.tracks || []).flatMap(track => (track.clips || []).map(clip => clip.id)));
-        const result = state.addMotionComponent?.(component, preset, params);
+        const shouldCompound = asCompound ?? as_compound ?? params.asCompound ?? params.as_compound ?? false;
+        const result = state.addMotionComponent?.(component, preset, params, { asCompound: shouldCompound });
         if (!result?.success) return { success: false, message: result?.error || 'The motion component could not be created.' };
         const fresh = useTimelineStore.getState();
         const scenePresent = result.sceneId ? !!fresh.scenes?.[result.sceneId] : false;
@@ -1376,8 +1378,8 @@ export class VideoEditorTools {
         }
         return {
             success: true,
-            message: `Added an editable ${component} motion composition${preset ? ` using the ${preset} look` : ''} with ${result.clipCount || 0} layer${result.clipCount === 1 ? '' : 's'}.`,
-            details: { sceneId: result.sceneId || null, groupId: result.groupId || null, clipCount: result.clipCount || 0, clipIds: addedClipIds, verified: true },
+            message: `Added an editable ${component} motion composition${preset ? ` using the ${preset} look` : ''} ${shouldCompound ? 'as a unified compound clip' : `with ${result.clipCount || 0} layer${result.clipCount === 1 ? '' : 's'}`}.`,
+            details: { sceneId: result.sceneId || null, groupId: result.groupId || null, clipCount: result.clipCount || 0, clipIds: addedClipIds, isCompound: shouldCompound, verified: true },
         };
     }
 
@@ -3720,6 +3722,43 @@ export class VideoEditorTools {
                     && boundaries.some(b => Math.abs((Number(c.start) || 0) - b) <= BOUNDARY_MATCH_EPSILON_S));
                 if (targets.length === 0) {
                     return { success: false, message: 'No cuts line up with a chapter boundary closely enough to attach a transition.' };
+                }
+            } else if (applyAt === 'semantic_boundaries') {
+                // 'semantic_boundaries': only apply transitions to genuine scene shifts,
+                // topic changes, or cutaways. Dialogue jump cuts within the same source material
+                // are preserved clean without transitions.
+                const boundaries = extractChapterBoundaries(state.tracks);
+                const BOUNDARY_MATCH_EPSILON_S = 0.3;
+                const overlayClips = (state.tracks || []).filter(t => t.type === 'overlay').flatMap(t => t.clips || []);
+
+                targets = clips.filter((n, i) => {
+                    if (i === 0) return false;
+                    const c = clips[i - 1];
+                    const cutTime = Number(n.start) || 0;
+                    const speed = Number(c.speed) > 0 ? Number(c.speed) : 1;
+                    const cSrcEnd = (Number(c.offset) || 0) + (Number(c.duration) || 0) * speed;
+                    const nOffset = Number(n.offset) || 0;
+
+                    // 1. Different asset/camera take
+                    if ((c.assetId || null) !== (n.assetId || null)) return true;
+                    // 2. Out of order footage
+                    if (nOffset < cSrcEnd - 0.05) return true;
+                    // 3. Jump > 10s in the source (completely different scene/take)
+                    if (nOffset - cSrcEnd > 10) return true;
+                    // 4. Chapter boundary
+                    if (boundaries.some(b => Math.abs(cutTime - b) <= BOUNDARY_MATCH_EPSILON_S)) return true;
+                    // 5. B-roll cutaway entry/exit
+                    if (overlayClips.some(oc => Math.abs((Number(oc.start) || 0) - cutTime) < 0.35 || Math.abs(((Number(oc.start) || 0) + (Number(oc.duration) || 0)) - cutTime) < 0.35)) return true;
+
+                    // Dialogue jump cut within same take: keep clean
+                    return false;
+                });
+
+                if (targets.length === 0) {
+                    return {
+                        success: false,
+                        message: 'No major scene shifts or chapter boundaries found on the timeline — dialogue jump-cuts were kept clean without transitions.',
+                    };
                 }
             } else {
                 targets = clips.slice(1);

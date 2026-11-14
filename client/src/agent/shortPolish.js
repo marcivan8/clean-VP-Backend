@@ -895,6 +895,43 @@ export function polishShort(built, profile, opts = {}) {
         if (moments.some(event => Math.abs(Number(event.timelineTime) - Number(candidate.timelineTime)) < 1.8)) continue;
         moments.push(candidate);
     }
+
+    // Derive cadence punch-in moments from spoken words (sentence boundaries, pauses, emphasis words)
+    // so camera movement is never dead or missing when vision/backend events are absent.
+    if (words.length > 0) {
+        for (let i = 0; i < words.length; i++) {
+            const w = words[i];
+            const text = String(w.word ?? w.text ?? '');
+            const wStart = Number(w.start);
+            if (!Number.isFinite(wStart) || wStart <= 0 || wStart >= duration) continue;
+            const prev = words[i - 1];
+            const isPause = prev && (wStart - Number(prev.end || prev.start)) >= 0.38;
+            const isPunct = /[.!?]$/.test(text) || (prev && /[.!?]$/.test(String(prev.word ?? prev.text ?? '')));
+            const isEmphasisWord = /\b(?:never|always|huge|secret|key|first|stop|real|truth|best|money|million|billion|look|watch|warning|pro|\d+)\b/i.test(text);
+            if (isPause || isPunct || isEmphasisWord) {
+                if (!moments.some(m => Math.abs(Number(m.timelineTime) - wStart) < 2.0)) {
+                    moments.push({
+                        eventType: isEmphasisWord ? 'EMPHASIS_MOMENT' : 'PUNCHLINE_DETECTED',
+                        timelineTime: wStart,
+                        confidence: 0.6,
+                        text,
+                        source: 'transcript-cadence',
+                    });
+                }
+            }
+        }
+    }
+    // Rhythmic fallback beats if moments are still sparse
+    if (moments.length === 0 && duration >= 3.5) {
+        for (let t = 2.0; t < duration - 1.2; t += 5.0) {
+            moments.push({
+                eventType: 'EMPHASIS_MOMENT',
+                timelineTime: t,
+                confidence: 0.5,
+                source: 'rhythm-cadence',
+            });
+        }
+    }
     moments.sort((a, b) => Number(a.timelineTime) - Number(b.timelineTime));
     const applied = [];
     const captionQa = { checked: false, transcriptWords: 0, captionWords: 0, coverage: 0, issues: [] };
@@ -1252,32 +1289,33 @@ export function polishShort(built, profile, opts = {}) {
         if (styled) applied.push(generated ? `captions (${styled}, generated from the transcript)` : `captions (${styled})`);
     }
 
-    // 3. Camera: slow push per shot, punch on each moment
+    // 3. Camera: hybrid slow subtle push per shot + dynamic punch on high-energy & cadence moments
     if (want.camera) {
         let moved = 0;
+        let punchesCount = 0;
         for (const t of tracks) {
             if (t.type !== 'video') continue;
             for (const c of t.clips) {
                 if (c.type && c.type !== 'video') continue;
                 const d = Number(c.duration) || 0;
-                // Was a 0.8s floor: a Reel's own pacing (EditingStyles.js
-                // 'reel': minSilence 0.3, padding 0.05) routinely produces
-                // jump-cut clips well under 0.8s, so most of a tightly-cut
-                // short got NO camera movement at all. 0.3s still reads as
-                // motion on screen; energy is scaled down further for very
-                // short clips so the push doesn't feel like a jolt.
+                // Floor at 0.3s for motion application
                 if (d < 0.3) continue;
                 const shortClipScale = d < 0.8 ? Math.max(0.35, d / 0.8) : 1;
-                const beats = [{ verb: 'push-in', at: 0, duration: d, energy: look.cameraEnergy * 0.5 * shortClipScale }];
+                // Baseline: subtle, smooth Ken Burns push-in across spoken clip (scale 1.0 -> 1.06)
+                const beats = [{ verb: 'push-in', at: 0, duration: d, energy: Math.max(0.3, look.cameraEnergy * 0.55) * shortClipScale }];
+                // Dynamic punch-in zoom on emphasis moments and cadence beats
                 for (const m of moments) {
                     const at = Number(m.timelineTime) - (Number(c.start) || 0);
-                    if (at >= 0.1 && at < d - 0.3) beats.push({ verb: 'punch', at, energy: look.cameraEnergy });
+                    if (at >= 0.1 && at < d - 0.25) {
+                        beats.push({ verb: 'punch', at, duration: 0.38, energy: Math.min(0.85, look.cameraEnergy * 1.15) });
+                        punchesCount += 1;
+                    }
                 }
                 const { animations } = composeMotion({ beats }, { duration: d, kind: 'video' });
                 if (animations.length) { c.animations = [...(c.animations || []).filter(a => a?.source !== COMPOSED), ...animations]; moved += 1; }
             }
         }
-        if (moved) applied.push(`camera moves (${moments.length} punch-in${moments.length === 1 ? '' : 's'})`);
+        if (moved) applied.push(`camera moves (${punchesCount || moments.length} punch-in${(punchesCount || moments.length) === 1 ? '' : 's'})`);
     }
 
     // Feed a full transcript storyboard through the same composed template
@@ -1436,17 +1474,36 @@ export function polishShort(built, profile, opts = {}) {
         }
     }
 
-    // 5. Transitions on real cuts
+    // 5. Transitions on real cuts (major scene/topic shifts and B-roll cutaways only; dialogue jump-cuts stay clean)
     if (want.cuts) {
         const recipe = STYLE_RECIPES[look.recipe];
         const base = tracks.find(t => t.type === 'video' && t.clips.length > 1);
         if (recipe && base) {
             const picked = pickTransitionCuts(base.clips, recipe);
-            const last = base.clips.reduce((m, c) => ((Number(c.start) + Number(c.duration)) > (Number(m.start) + Number(m.duration)) ? c : m), base.clips[0]);
+            const sortedClips = [...base.clips].sort((a, b) => (Number(a.start) || 0) - (Number(b.start) || 0));
+            const last = sortedClips[sortedClips.length - 1];
+            const hasOverlayCutawayAt = (time) => tracks.some(t => t.type === 'overlay' && (t.clips || []).some(oc =>
+                Math.abs((Number(oc.start) || 0) - time) < 0.35 || Math.abs(((Number(oc.start) || 0) + (Number(oc.duration) || 0)) - time) < 0.35
+            ));
             let n = 0;
             picked.forEach((clipId, i) => {
-                const clip = base.clips.find(c => c.id === clipId);
+                const clipIdx = sortedClips.findIndex(c => c.id === clipId);
+                if (clipIdx < 0 || clipIdx >= sortedClips.length - 1) return;
+                const clip = sortedClips[clipIdx];
+                const next = sortedClips[clipIdx + 1];
                 if (!clip || clip === last) return;
+
+                // Restrict transitions to genuine scene boundaries or b-roll cutaways
+                const cutTime = (Number(clip.start) || 0) + (Number(clip.duration) || 0);
+                const speed = Number(clip.speed) > 0 ? Number(clip.speed) : 1;
+                const srcEnd = (Number(clip.offset) || 0) + (Number(clip.duration) || 0) * speed;
+                const nextOffset = Number(next.offset) || 0;
+                const isSceneShift = (clip.assetId || null) !== (next.assetId || null)
+                    || nextOffset < srcEnd - 0.05
+                    || (nextOffset - srcEnd) > 10
+                    || hasOverlayCutawayAt(cutTime);
+                if (!isSceneShift) return; // Keep conversational jump-cuts clean
+
                 const tr = recipeTransitionForCut(recipe, i);
                 const referenceTransition = referenceStyle?.transitionTypes?.[i % Math.max(1, referenceStyle.transitionTypes.length)];
                 if (tr && referenceTransition) tr.type = referenceTransition;

@@ -988,16 +988,30 @@ export class MediaExecutionEngine {
         const old = (useTimelineStore.getState().tracks || []).find(t => t.id === trackId)?.clips || [];
         old.filter(c => c.sfxCue).forEach(c => useTimelineStore.getState().removeClip(trackId, c.id, { skipHistory: true }));
         let placed = 0;
-        // Rotates through each kind's candidate pool independently, so the
-        // Nth "whoosh" doesn't repeat the (N-1)th whoosh's exact sound.
+        let lastPlacedTime = -Infinity;
+        let lastPlacedAssetId = null;
+        // Rotates through each kind's candidate pool intelligently, avoiding identical
+        // back-to-back assets and spacing sound effects so dialogue stays intelligible.
         const kindOccurrence = {};
         for (const cue of cues) {
+            if (cue.t - lastPlacedTime < 1.0) continue;
             const candidates = await this._fetchSfxCandidates(cue.query || SFX_QUERIES[cue.kind] || cue.kind, cache);
-            const occ = kindOccurrence[cue.kind] || 0;
-            kindOccurrence[cue.kind] = occ + 1;
-            const asset = candidates.length ? candidates[occ % candidates.length] : null;
+            if (!candidates.length) { missing.add(cue.kind); continue; }
+
+            let asset = null;
+            if (candidates.length > 1 && lastPlacedAssetId) {
+                const fresh = candidates.filter(a => (a.id || a._id) !== lastPlacedAssetId);
+                const occ = kindOccurrence[cue.kind] || 0;
+                asset = fresh.length ? fresh[occ % fresh.length] : candidates[occ % candidates.length];
+            } else {
+                const occ = kindOccurrence[cue.kind] || 0;
+                asset = candidates[occ % candidates.length];
+            }
+            kindOccurrence[cue.kind] = (kindOccurrence[cue.kind] || 0) + 1;
             const url = sfxPlayableUrl(asset);
             if (!asset || !url) { missing.add(cue.kind); continue; }
+            lastPlacedAssetId = asset.id || asset._id || null;
+            lastPlacedTime = cue.t;
             useTimelineStore.getState().addClip(trackId, {
                 id: `sfx-${cue.kind}-${Math.round(cue.t * 1000)}-${placed}-${Date.now()}`,
                 type: 'audio',

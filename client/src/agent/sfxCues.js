@@ -37,8 +37,8 @@ const CUE_KINDS = new Set(Object.keys(SFX_QUERIES));
 
 /** Seconds a cue starts before its visual event (a whoosh leads the cut). */
 const LEAD = { whoosh: 0.18, pop: 0.02, impact: 0.04 };
-/** Two cues closer than this are one cue. */
-const MIN_GAP_S = 0.45;
+/** Two cues closer than this are one cue (spacing keeps dialogue clear and prevents rapid-fire SFX clutter). */
+const MIN_GAP_S = 0.9;
 const MAX_CUES = 60;
 
 /** 'full' | 'subtle' | 'none' for an editing style (or a recipe when no style). */
@@ -74,8 +74,21 @@ export function collectSfxCues(tracks, { level = 'full', kinds = null } = {}) {
                 const kind = transition.includes('flash') ? 'flash' : transition.includes('glitch') ? 'digital' : 'whoosh';
                 if (want(kind)) raw.push({ t: end - LEAD.whoosh, kind, sourceId: c.id });
             }
-            if (track.type === 'overlay' && (c.type === 'template' || c.type === 'sticker') && want('pop')) {
-                raw.push({ t: start + LEAD.pop, kind: 'pop', sourceId: c.id });
+            if (track.type === 'overlay' && (c.type === 'template' || c.type === 'sticker')) {
+                const tmplKind = String(c.template?.kind || '').toLowerCase();
+                const isDataOrCounter = /counter|meter|kpi|stat|chart|code|graph|price/.test(tmplKind);
+                const isSubtleCard = /quote|editorial|lower-third|banner/.test(tmplKind);
+
+                if (isDataOrCounter) {
+                    const kind = want('digital') ? 'digital' : want('pop') ? 'pop' : null;
+                    if (kind) raw.push({ t: start + LEAD.pop, kind, sourceId: c.id });
+                } else if (isSubtleCard) {
+                    if (level === 'full' && want('whoosh')) {
+                        raw.push({ t: start + LEAD.pop, kind: 'whoosh', sourceId: c.id });
+                    }
+                } else if (want('pop')) {
+                    raw.push({ t: start + LEAD.pop, kind: 'pop', sourceId: c.id });
+                }
             }
             if ((track.type === 'text' || track.type === 'overlay') && Array.isArray(c.animations) && want('impact')) {
                 const slam = c.animations.find(a => a?.presetId === 'composed:slam-in');

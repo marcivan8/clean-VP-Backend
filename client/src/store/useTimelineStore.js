@@ -2512,6 +2512,49 @@ const useTimelineStore = create(
                     return overlayTrackId;
                 };
 
+                // Compound clip placement: bundle multi-layer graphics into a single draggable, unified clip
+                if (opts.asCompound) {
+                    const overlayTrackId = ensureTrack('overlay');
+                    const maxEnd = flat.placements.reduce((max, p) => {
+                        const c = p.clip || {};
+                        return Math.max(max, (Number(c.start) || 0) + (Number(c.duration) || 0));
+                    }, start);
+                    const totalDuration = Math.max(0.5, maxEnd - start);
+
+                    const compoundClip = {
+                        id: `compound-${scene.id || Date.now()}`,
+                        type: 'template',
+                        isCompound: true,
+                        name: opts.label ? `Graphic: ${opts.label}` : (scene.name || 'Motion Graphic'),
+                        start,
+                        duration: totalDuration,
+                        x: 50,
+                        y: 50,
+                        scale: 1,
+                        rotation: 0,
+                        opacity: 1,
+                        sceneId: scene.id,
+                        scene,
+                        compoundLayers: flat.placements.map(p => ({
+                            ...p.clip,
+                            asset: p.asset,
+                            trackType: p.trackType,
+                            relativeStart: Math.max(0, (Number(p.clip?.start) || 0) - start),
+                        })),
+                        template: {
+                            kind: 'rich-text',
+                            params: {
+                                isCompound: true,
+                                name: scene.name || opts.label || 'Motion Graphic',
+                            },
+                        },
+                    };
+                    get().addClip(overlayTrackId, compoundClip, { skipHistory: true });
+                    const stored = { ...scene, meta: { ...scene.meta, placedAt: start, compoundClipId: compoundClip.id } };
+                    set(state => ({ scenes: { ...state.scenes, [stored.id]: stored } }));
+                    return { success: true, clipCount: 1, compoundClipId: compoundClip.id, groupId: flat.placements[0]?.clip?.groupId ?? null, sceneId: stored.id, fixes, issues };
+                }
+
                 let clipCount = 0;
                 for (const placement of flat.placements) {
                     const trackId = ensureTrack(placement.trackType === 'text' ? 'text' : 'overlay');
@@ -2853,7 +2896,12 @@ const useTimelineStore = create(
                 const scene = result.scene || sceneFromPlacements(result.placements, {
                     componentId, presetId, aspectRatio: get().aspectRatio || '16:9', name: params.name || componentId,
                 });
-                return get()._placeScene(scene, { start, label: componentId, skipHistory: !!opts.skipHistory });
+                return get()._placeScene(scene, {
+                    start,
+                    label: componentId,
+                    skipHistory: !!opts.skipHistory,
+                    asCompound: !!(opts.asCompound ?? params?.asCompound ?? params?.as_compound),
+                });
             },
 
             /**

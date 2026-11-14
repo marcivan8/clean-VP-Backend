@@ -508,14 +508,16 @@ export class IntentParser {
             return this.validateAndNormalize(compound, prompt);
         }
 
-        if (!compound?._deferToAI) {
-            const reg = this.tryRegistry(prompt);
-            if (reg) {
-                if (reg.needs_clarification) return reg;
-                console.log('[IntentParser] Registry match:', reg.operation, `(confidence: ${reg._confidence})`);
-                return this.validateAndNormalize(reg, prompt);
-            }
+        // Even if compound splitting yielded _deferToAI (e.g. subordinate clauses),
+        // check whether the prompt as a whole matches an explicit registered command.
+        const reg = this.tryRegistry(prompt);
+        if (reg) {
+            if (reg.needs_clarification) return reg;
+            console.log('[IntentParser] Registry match:', reg.operation, `(confidence: ${reg._confidence})`);
+            return this.validateAndNormalize(reg, prompt);
+        }
 
+        if (!compound?._deferToAI) {
             const localFirst = this.tryLocalFirst(prompt);
             if (localFirst) {
                 console.log('[IntentParser] Local-first match (skipped API):', localFirst.operation);
@@ -674,18 +676,19 @@ export class IntentParser {
 
     /** Resolve explicit conjunction-separated clauses as one atomic plan. */
     static tryCompoundRegistry(prompt) {
-        const lowerPrompt = String(prompt || '').toLowerCase();
+        const cleanPrompt = String(prompt || '').split(/\n\n(?:Editing style|Reference documents|Media attached|Reference media)/i, 1)[0].trim();
+        const lowerPrompt = cleanPrompt.toLowerCase();
         // These creation intents are complete operations. Splitting a prompt
         // such as "create a video from the attached images and video clips"
         // at its final "and" breaks the registered phrase before the normal
         // registry pass can match it, then localParse can misroute it as
         // build_from_rushes.
-        const wholeCommand = resolveCommand(prompt).match;
+        const wholeCommand = resolveCommand(cleanPrompt).match || resolveCommand(prompt).match;
         // These are complete operations that intentionally accept compound
         // details. Splitting a footage effect stack at "and" turns one stack
         // into separate clauses (and "film grain" alone is not a full intent),
         // which previously deferred the command to the legacy filter parser.
-        if (['create_video_from_assets', 'create_video_from_script', 'apply_motion_effect_stack', 'apply_aesthetic_preset', 'apply_motion_expression', 'set_track_matte', 'set_vector_trim', 'set_layer_parent', 'repurpose_shorts'].includes(wholeCommand?.id)) return null;
+        if (['create_video_from_assets', 'create_video_from_script', 'apply_motion_effect_stack', 'apply_aesthetic_preset', 'apply_motion_expression', 'set_track_matte', 'set_vector_trim', 'set_layer_parent', 'repurpose_shorts', 'animate_automatically'].includes(wholeCommand?.id)) return null;
         if ((lowerPrompt.includes('clean') || lowerPrompt.includes('remove silence'))
             && (lowerPrompt.includes('dynamic') || lowerPrompt.includes('zoom rhythm'))
             && !/\b(multicam|multi-cam|multi camera|multi-camera)\b/.test(lowerPrompt)) {
@@ -696,15 +699,15 @@ export class IntentParser {
                 confidence: 'HIGH', originalPrompt: prompt,
             };
         }
-        const firstClause = String(prompt || '').split(/[.!?\n]/, 1)[0].trim();
+        const firstClause = cleanPrompt.split(/[.!?\n]/, 1)[0].trim();
         const leadingCommand = firstClause ? resolveCommand(firstClause).match : null;
         // These commands intentionally bundle several visual/audio actions.
         // Their explanatory follow-up sentences are details for that bundle,
         // not separate tool requests. `sync_cutaways` is also kept intact:
         // splitting "sync the b-roll and number pops" at "and" would leave
         // the first clause as contextual-b-roll-only and discard number pops.
-        if (leadingCommand?.macro || ['polish_short', 'apply_style_recipe', 'storyboard_video', 'sync_cutaways', 'repurpose_shorts'].includes(leadingCommand?.id)) return null;
-        const clauses = String(prompt || '')
+        if (leadingCommand?.macro || ['polish_short', 'apply_style_recipe', 'storyboard_video', 'sync_cutaways', 'repurpose_shorts', 'animate_automatically'].includes(leadingCommand?.id)) return null;
+        const clauses = cleanPrompt
             .split(/\s+(?:and then|then|and also|also|and|plus|et puis|et aussi|et)\s+|\s*;\s*/i)
             .map(part => part.trim().replace(/^[,.;\s]+|[,.;\s]+$/g, ''))
             .filter(Boolean);

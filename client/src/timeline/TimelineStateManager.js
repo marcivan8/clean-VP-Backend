@@ -1041,6 +1041,9 @@ export class TimelineStateManager {
                         parentId: clip.parentId ?? null,
                         trim: clip.trim ?? null,
                         blendMode: clip.blendMode ?? null,
+                        // Compound clip metadata
+                        isCompound: clip.isCompound ?? false,
+                        compoundLayers: clip.compoundLayers ?? null,
                     };
                 })
             };
@@ -1170,6 +1173,9 @@ export class TimelineStateManager {
                                 parentId: legacyClip.parentId ?? null,
                                 trim: legacyClip.trim ?? null,
                                 blendMode: legacyClip.blendMode ?? null,
+                                // Compound clip metadata
+                                isCompound: legacyClip.isCompound ?? false,
+                                compoundLayers: legacyClip.compoundLayers ?? null,
                             }
                         }
                     });
