@@ -777,24 +777,69 @@ function zoomEaseExpr(easing, u) {
 
 /** Piecewise expression of a `[{time,value,easing}]` track over T, or null. */
 function keyframeExpr(pts, T, digits = 4) {
-    if (!pts.length) return null;
+    if (!pts || !pts.length) return null;
     if (pts.length === 1) return pts[0].v.toFixed(digits);
-    let e = pts[pts.length - 1].v.toFixed(digits);
-    for (let i = pts.length - 2; i >= 0; i--) {
-        const a = pts[i], b = pts[i + 1];
-        const span = b.t - a.t;
-        const seg = span > 0.001
-            ? `(${a.v.toFixed(digits)}+(${(b.v - a.v).toFixed(digits)})*${zoomEaseExpr(b.e, `((${T}-${a.t.toFixed(3)})/${span.toFixed(3)})`)})`
-            : b.v.toFixed(digits);
-        e = `if(lt(${T},${b.t.toFixed(3)}),${seg},${e})`;
+
+    // 1. Deduplicate identical/overlapping timestamps
+    const clean = [];
+    for (let i = 0; i < pts.length; i++) {
+        const curr = pts[i];
+        if (clean.length && Math.abs(clean[clean.length - 1].t - curr.t) < 0.001) {
+            clean[clean.length - 1] = curr;
+            continue;
+        }
+        clean.push(curr);
     }
-    return `if(lt(${T},${pts[0].t.toFixed(3)}),${pts[0].v.toFixed(digits)},${e})`;
+
+    // 2. Simplify flat plateau holds (3+ consecutive identical values)
+    const simplified = [];
+    for (let i = 0; i < clean.length; i++) {
+        if (i > 0 && i < clean.length - 1) {
+            const prev = clean[i - 1];
+            const curr = clean[i];
+            const next = clean[i + 1];
+            if (Math.abs(prev.v - curr.v) < 0.0005 && Math.abs(curr.v - next.v) < 0.0005) {
+                continue;
+            }
+        }
+        simplified.push(clean[i]);
+    }
+
+    if (!simplified.length) return null;
+    if (simplified.length === 1) return simplified[0].v.toFixed(digits);
+
+    function buildSegment(a, b) {
+        const span = b.t - a.t;
+        if (span <= 0.001) return b.v.toFixed(digits);
+        const ease = zoomEaseExpr(b.e, `((${T}-${a.t.toFixed(3)})/${span.toFixed(3)})`);
+        return `(${a.v.toFixed(digits)}+(${(b.v - a.v).toFixed(digits)})*${ease})`;
+    }
+
+    // 3. Balanced binary decision tree: keeps expression depth <= 14 even with 100+ keyframes,
+    // preventing FFmpeg expression parser recursion overflow (-22 Invalid Argument).
+    function buildTree(i, j) {
+        if (j === i + 1) {
+            return buildSegment(simplified[i], simplified[j]);
+        }
+        const mid = Math.floor((i + j) / 2);
+        const splitTime = simplified[mid].t.toFixed(3);
+        const left = buildTree(i, mid);
+        const right = buildTree(mid, j);
+        return `if(lt(${T},${splitTime}),${left},${right})`;
+    }
+
+    const first = simplified[0];
+    const last = simplified[simplified.length - 1];
+    const inner = buildTree(0, simplified.length - 1);
+    return `if(lt(${T},${first.t.toFixed(3)}),${first.v.toFixed(digits)},if(gte(${T},${last.t.toFixed(3)}),${last.v.toFixed(digits)},${inner}))`;
 }
 
-function buildSmoothZoomFilter(kfs, { fps = 30, anchor = { mode: 'fixed', x: 0.5, y: 0.28 }, multiplier = 1, minZoom = 1.0, maxZoom = 2.0, panX = null, panY = null, scaleXKfs = null, scaleYKfs = null, positionX = null, positionY = null, width = 1, height = 1 } = {}) {
+function buildSmoothZoomFilter(kfs, { fps = 30, anchor = { mode: 'fixed', x: 0.5, y: 0.28 }, multiplier = 1, minZoom = 1.0, maxZoom = 2.0, panX = null, panY = null, scaleXKfs = null, scaleYKfs = null, positionX = null, positionY = null, width = 1, height = 1, duration = null } = {}) {
+    const maxT = Number.isFinite(Number(duration)) && Number(duration) > 0 ? Number(duration) + 0.05 : Infinity;
     const clean = (arr, map) => (arr || [])
         .filter(k => k && Number.isFinite(Number(k.time)) && Number.isFinite(Number(k.value)))
         .map(k => ({ t: Math.max(0, Number(k.time)), v: map(Number(k.value)), e: k.easing }))
+        .filter(k => k.t <= maxT)
         .sort((a, b) => a.t - b.t);
     const pts = clean(kfs, v => Math.min(maxZoom, Math.max(minZoom, v * multiplier)));
     // Independent axis tracks are relative multipliers. Keep the established
@@ -3517,8 +3562,8 @@ module.exports = async function processExportJob(job) {
                 const cy0 = Math.max(0, Math.min(1, (vc.cropY ?? 0) + (vc.cropH ?? 1) / 2));
                 const baseZoom = vc.scale || (1 / Math.min(vc.cropW, vc.cropH));
                 const anchor = { mode: 'center', x: cx0, y: cy0 };
-                const zoom = buildSmoothZoomFilter(scaleKfs || [{ time: 0, value: 1 }], { fps: targetFps, anchor, multiplier: baseZoom, maxZoom: 8.0, panX, panY, scaleXKfs, scaleYKfs, ...transformMotion })
-                    || buildSmoothZoomFilter([{ time: 0, value: baseZoom }], { fps: targetFps, anchor, maxZoom: 8.0 });
+                const zoom = buildSmoothZoomFilter(scaleKfs || [{ time: 0, value: 1 }], { fps: targetFps, anchor, multiplier: baseZoom, maxZoom: 8.0, panX, panY, scaleXKfs, scaleYKfs, duration: dur, ...transformMotion })
+                    || buildSmoothZoomFilter([{ time: 0, value: baseZoom }], { fps: targetFps, anchor, maxZoom: 8.0, duration: dur });
                 if (zoom) vFilters.push(zoom);
                 vFilters.push(baseTransform ? baseTransform.scaleFilter : scaleFilter);
                 console.log(
@@ -3540,7 +3585,7 @@ module.exports = async function processExportJob(job) {
                 // on top of the scaled output rather than attempting a uniform perspective zoom
                 // on the uncropped wide frame.
                 if (hasCrop && hasZoomKfs && isAspectChangingCrop) {
-                    const zoom = buildSmoothZoomFilter(scaleKfs, { fps: targetFps, anchor: { mode: 'fixed', x: 0.5, y: 0.28 }, panX, panY, scaleXKfs, scaleYKfs, ...transformMotion });
+                    const zoom = buildSmoothZoomFilter(scaleKfs, { fps: targetFps, anchor: { mode: 'fixed', x: 0.5, y: 0.28 }, panX, panY, scaleXKfs, scaleYKfs, duration: dur, ...transformMotion });
                     if (zoom) {
                         vFilters.push(zoom);
                         console.log(`  [camera] clip "${clip.name}": animated zoom on reframed output (${scaleKfs?.length || 0} scale keyframes)`);
@@ -3562,7 +3607,7 @@ module.exports = async function processExportJob(job) {
             // speaker's face). The editor preview uses the same anchor
             // (RHYTHM_ANCHOR_Y in client/src/revideo/project.tsx).
             if (!hasCrop && hasZoomKfs) {
-                const zoom = buildSmoothZoomFilter(scaleKfs, { fps: targetFps, anchor: { mode: 'fixed', x: 0.5, y: 0.28 }, panX, panY, scaleXKfs, scaleYKfs, ...transformMotion });
+                const zoom = buildSmoothZoomFilter(scaleKfs, { fps: targetFps, anchor: { mode: 'fixed', x: 0.5, y: 0.28 }, panX, panY, scaleXKfs, scaleYKfs, duration: dur, ...transformMotion });
                 if (zoom) {
                     vFilters.push(zoom);
                     console.log(`  [camera] clip "${clip.name}": animated zoom/pan (${scaleKfs?.length || 0} scale, ${(panX?.length || 0) + (panY?.length || 0)} pan keyframes)`);

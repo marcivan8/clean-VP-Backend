@@ -56,8 +56,25 @@ export function sliceTimeline(tracks, start, end) {
             }
             // A trimmed head means keyframes/animations authored at clip time 0
             // would now start late; shift what we can, drop what fell off.
-            if (head > EPS && Array.isArray(c.keyframes)) {
-                clip.keyframes = c.keyframes.map(k => ({ ...k, time: (Number(k.time) || 0) - head })).filter(k => k.time >= -EPS);
+            const clipDur = (ne - ns);
+            if (c.keyframes && typeof c.keyframes === 'object') {
+                if (Array.isArray(c.keyframes)) {
+                    clip.keyframes = c.keyframes
+                        .map(k => ({ ...k, time: Math.round(((Number(k.time) || 0) - head) * 1000) / 1000 }))
+                        .filter(k => k.time >= -EPS && k.time <= clipDur + EPS);
+                } else {
+                    const shifted = {};
+                    for (const [prop, kfs] of Object.entries(c.keyframes)) {
+                        if (Array.isArray(kfs)) {
+                            shifted[prop] = kfs
+                                .map(k => ({ ...k, time: Math.round(((Number(k.time) || 0) - head) * 1000) / 1000 }))
+                                .filter(k => k.time >= -EPS && k.time <= clipDur + EPS);
+                        } else {
+                            shifted[prop] = kfs;
+                        }
+                    }
+                    clip.keyframes = shifted;
+                }
             }
             clips.push(clip);
         }

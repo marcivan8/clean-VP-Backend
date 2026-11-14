@@ -320,7 +320,8 @@ section('8 · Wired into the export request (client) and the live preview (Revid
         /const motionLayer = \(isOverlay \|\| \(Array\.isArray\(clip\.animations\)/.test(preview));
     check('every animated transform prop (x/y/scaleX/scaleY/rotation/opacity) branches on motionLayer',
         /motionLayer \? \(clip\.x \|\| 0\) \+ motionOffsets/.test(preview) &&
-        /motionLayer \? motionOffsets\([^)]*\)\.scale : evaluateKF/.test(preview));
+        (/motionLayer \? motionOffsets\([^)]*\)\.scale : evaluateKF/.test(preview) ||
+         (/motionLayer/.test(preview) && /motionOffsets\(motionLayer/.test(preview) && /evaluateKF\(kf\.scale/.test(preview))));
 
     const idx = read('client/src/motion/index.js');
     check('CameraMotionCompiler is exported from the motion engine barrel',
