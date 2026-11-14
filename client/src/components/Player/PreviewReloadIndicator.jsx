@@ -49,12 +49,16 @@ export default class PreviewReloadIndicator extends React.Component {
     reload = null;
     player = null;
     unsubscribeRender = null;
+    unsubscribeRecalc = null;
     showTimer = null;
+    dismissTimer = null;
 
     attachPlayer(player) {
         this.unsubscribeRender?.();
+        this.unsubscribeRecalc?.();
         this.player = player;
         this.unsubscribeRender = player?.onRender?.subscribe?.(this.handleRender) || null;
+        this.unsubscribeRecalc = player?.onRecalculated?.subscribe?.(this.handleRecalculated) || null;
     }
 
     getSnapshotBeforeUpdate(prevProps) {
@@ -72,17 +76,36 @@ export default class PreviewReloadIndicator extends React.Component {
 
     componentWillUnmount() {
         this.unsubscribeRender?.();
+        this.unsubscribeRecalc?.();
         clearTimeout(this.showTimer);
+        clearTimeout(this.dismissTimer);
     }
 
     begin(reason, snapshot) {
         this.reload = { reason, startedAt: performance.now() };
         clearTimeout(this.showTimer);
+        clearTimeout(this.dismissTimer);
         this.setState({ visible: false, snapshot });
         this.showTimer = setTimeout(() => {
             if (this.reload) this.setState({ visible: true });
         }, SHOW_AFTER_MS);
+        // Safety timeout: never leave indicator visible indefinitely if a render is dropped
+        this.dismissTimer = setTimeout(() => {
+            if (this.reload) {
+                this.reload = null;
+                this.setState({ visible: false, snapshot: null });
+            }
+        }, 5000);
     }
+
+    handleRecalculated = () => {
+        if (!this.reload || !this.player) return;
+        try {
+            this.player.requestRender?.();
+        } catch {
+            // ignore
+        }
+    };
 
     // The variables change marks the player for recalculation synchronously,
     // so a render with requestedRecalculation still set belongs to a frame
@@ -92,6 +115,7 @@ export default class PreviewReloadIndicator extends React.Component {
         const { reason, startedAt } = this.reload;
         this.reload = null;
         clearTimeout(this.showTimer);
+        clearTimeout(this.dismissTimer);
         const durationMs = Math.round(performance.now() - startedAt);
         if (durationMs >= SLOW_RELOAD_MS) {
             trackEvent('editor_preview_reload_slow', {

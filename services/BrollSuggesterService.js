@@ -207,10 +207,26 @@ class BrollSuggesterService {
             const moment = moments[idx];
             try {
                 // Query active stock provider (Vecteezy or Pexels) for top 3 video candidates
-                const searchRes = await activeService.searchVideos(moment.query, {
-                    perPage: 3,
-                    orientation: 'landscape',
-                });
+                let searchRes = null;
+                try {
+                    searchRes = await activeService.searchVideos(moment.query, {
+                        perPage: 3,
+                        orientation: 'landscape',
+                    });
+                } catch (serviceErr) {
+                    if (activeService !== pexelsService && pexelsService.isConfigured()) {
+                        try {
+                            searchRes = await pexelsService.searchVideos(moment.query, {
+                                perPage: 3,
+                                orientation: 'landscape',
+                            });
+                        } catch {
+                            throw serviceErr;
+                        }
+                    } else {
+                        throw serviceErr;
+                    }
+                }
 
                 const results = searchRes?.results || [];
                 if (results.length > 0) {

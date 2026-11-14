@@ -29,7 +29,7 @@ const MAX_BATCH_SIZE      = 50;
 let _openai = null;
 function getOpenAI() {
     if (!_openai) {
-        _openai = getAIClient();
+        _openai = getAIClient({ capability: 'embeddings' });
     }
     return _openai;
 }
@@ -106,8 +106,14 @@ class EmbeddingService {
         const cached = await this._fromCache(text);
         if (cached) return cached;
 
+        const client = getOpenAI();
+        if (!client?.embeddings?.create) {
+            console.warn('[EmbeddingService.embed] OpenAI client not available for embeddings');
+            return null;
+        }
+
         try {
-            const response = await getOpenAI().embeddings.create({
+            const response = await client.embeddings.create({
                 model: EMBEDDING_MODEL,
                 input: text.trim(),
             });
@@ -138,6 +144,12 @@ class EmbeddingService {
 
         const results = new Array(texts.length).fill(null);
 
+        const client = getOpenAI();
+        if (!client?.embeddings?.create) {
+            console.warn('[EmbeddingService.embedBatch] OpenAI client not available for embeddings');
+            return results;
+        }
+
         // Split into chunks of MAX_BATCH_SIZE
         for (let i = 0; i < texts.length; i += MAX_BATCH_SIZE) {
             const chunk = texts.slice(i, i + MAX_BATCH_SIZE);
@@ -160,7 +172,7 @@ class EmbeddingService {
             if (uncachedTexts.length === 0) continue;
 
             try {
-                const response = await getOpenAI().embeddings.create({
+                const response = await client.embeddings.create({
                     model: EMBEDDING_MODEL,
                     input: uncachedTexts,
                 });

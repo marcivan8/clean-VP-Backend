@@ -345,10 +345,6 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                         />
                         </Node>
                     );
-                    // Child media nodes load asynchronously. Yield the node so
-                    // Revideo waits for its resources before evaluating async
-                    // media properties in the next scene update.
-                    yield mediaRef();
                 } else if (clip.type === 'audio') {
                     const resolvedUrl = fixUrl(clip.url);
                     if (!resolvedUrl) return;
@@ -370,7 +366,6 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             />
                         </Node>
                     );
-                    yield mediaRef();
                 } else if (clip.type === 'image') {
                     const resolvedUrl = fixUrl(clip.url);
                     if (!resolvedUrl) return;
@@ -465,7 +460,6 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                         />
                         </Node>
                     );
-                    yield mediaRef();
                 } else if (clip.type === 'text') {
                     wrapperRef = createRef<Node>();
                     mediaRef = createRef<Txt>();

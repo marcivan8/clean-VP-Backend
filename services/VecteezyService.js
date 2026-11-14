@@ -17,6 +17,14 @@ const VECTEEZY_API_BASE = 'https://api.vecteezy.com';
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 const MAX_CACHE_ENTRIES = 120;
 
+function normalizeVecteezyOrientation(orientation) {
+    if (!orientation) return undefined;
+    const o = String(orientation).toLowerCase().trim();
+    if (o === 'landscape' || o === 'horizontal') return 'horizontal';
+    if (o === 'portrait' || o === 'vertical') return 'vertical';
+    return undefined;
+}
+
 // Simple in-memory bounded LRU/TTL cache
 class MemoryCache {
     constructor(maxEntries = MAX_CACHE_ENTRIES, ttlMs = CACHE_TTL_MS) {
@@ -273,7 +281,9 @@ class VecteezyService {
                     errorBody = await res.json();
                 } catch (_) {}
 
-                const message = errorBody.message || errorBody.error || `Vecteezy API request failed with status ${res.status}`;
+                const errDetail = errorBody.message || errorBody.error
+                    || (Array.isArray(errorBody.errors) ? errorBody.errors.join('; ') : (typeof errorBody.errors === 'object' ? JSON.stringify(errorBody.errors) : null));
+                const message = errDetail || `Vecteezy API request failed with status ${res.status}`;
                 const err = new Error(message);
                 err.status = res.status;
 
@@ -312,7 +322,7 @@ class VecteezyService {
 
         const page = Math.max(1, parseInt(options.page, 10) || 1);
         const perPage = Math.min(50, Math.max(1, parseInt(options.perPage, 10) || 15));
-        const orientation = options.orientation ? String(options.orientation).toLowerCase() : undefined;
+        const orientation = normalizeVecteezyOrientation(options.orientation);
 
         const cacheKey = `vecteezy:videos:${cleanQuery}:${page}:${perPage}:${orientation || 'any'}`;
         const cached = searchCache.get(cacheKey);
@@ -354,7 +364,7 @@ class VecteezyService {
 
         const page = Math.max(1, parseInt(options.page, 10) || 1);
         const perPage = Math.min(50, Math.max(1, parseInt(options.perPage, 10) || 15));
-        const orientation = options.orientation ? String(options.orientation).toLowerCase() : undefined;
+        const orientation = normalizeVecteezyOrientation(options.orientation);
 
         const cacheKey = `vecteezy:photos:${cleanQuery}:${page}:${perPage}:${orientation || 'any'}`;
         const cached = searchCache.get(cacheKey);
@@ -398,7 +408,7 @@ class VecteezyService {
 
         const page = Math.max(1, parseInt(options.page, 10) || 1);
         const perPage = Math.min(50, Math.max(1, parseInt(options.perPage, 10) || 15));
-        const orientation = options.orientation ? String(options.orientation).toLowerCase() : undefined;
+        const orientation = normalizeVecteezyOrientation(options.orientation);
 
         const cacheKey = `vecteezy:vectors:${cleanQuery}:${page}:${perPage}:${orientation || 'any'}`;
         const cached = searchCache.get(cacheKey);

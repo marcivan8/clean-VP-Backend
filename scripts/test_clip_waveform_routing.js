@@ -111,9 +111,9 @@ check('trimmed waveform maps across the clip duration at timeline zoom',
     /duration=\{waveformDuration\}[\s\S]{0,120}zoomLevel=\{zoomLevel\}/.test(src));
 
 const projectSrc = fs.readFileSync(path.resolve(__dirname, '../client/src/revideo/project.tsx'), 'utf8');
-check('Revideo waits for video, audio and image nodes before async media access',
+check('Revideo mounts video, audio, image and text nodes cleanly',
     (projectSrc.match(/layerRefs\[track\.id\]\(\)\.add\(/g) || []).length === 4
-    && (projectSrc.match(/yield mediaRef\(\);/g) || []).length === 3);
+    && !projectSrc.includes('yield mediaRef();'));
 
 // ── The same "raw file has a late moov atom" pattern, second location ────────
 // captureProjectThumbnail.js seeks a <video> element to grab a frame, which
