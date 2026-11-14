@@ -400,6 +400,21 @@ class EditorialBrain {
                     const match = firstErr.message?.match(/try again in ([\d\.]+)s/i);
                     const waitSec = match ? parseFloat(match[1]) : null;
 
+                    const callGroqFallback = async () => {
+                        const fallbackModel = process.env.GROQ_FALLBACK_MODEL || 'llama-3.3-70b-versatile';
+                        const fallbackPayload = { ...callPayload, model: fallbackModel };
+                        delete fallbackPayload.reasoning_effort;
+                        try {
+                            return await this.openai.chat.completions.create(fallbackPayload);
+                        } catch (fbErr) {
+                            if (/404|not exist|not found|access/i.test(fbErr.message)) {
+                                console.warn('[EditorialBrain] Primary fallback model unavailable; trying llama-3.1-8b-instant');
+                                return await this.openai.chat.completions.create({ ...fallbackPayload, model: 'llama-3.1-8b-instant' });
+                            }
+                            throw fbErr;
+                        }
+                    };
+
                     // If the required wait is short (<= 6 seconds), sleep and retry once
                     if (waitSec !== null && waitSec <= 6) {
                         console.warn(`[EditorialBrain] 429 rate limit hit — backing off for ${waitSec.toFixed(1)}s...`);
@@ -408,19 +423,15 @@ class EditorialBrain {
                             completion = await this.openai.chat.completions.create(callPayload);
                         } catch (retryErr) {
                             if (isGroq && callPayload.model.includes('gpt-oss')) {
-                                console.warn('[EditorialBrain] Still rate limited on gpt-oss; switching to llama-3.3-70b-versatile');
-                                const fallbackPayload = { ...callPayload, model: 'llama-3.3-70b-versatile' };
-                                delete fallbackPayload.reasoning_effort;
-                                completion = await this.openai.chat.completions.create(fallbackPayload);
+                                console.warn('[EditorialBrain] Still rate limited on gpt-oss; switching to fallback');
+                                completion = await callGroqFallback();
                             } else {
                                 throw retryErr;
                             }
                         }
                     } else if (isGroq && callPayload.model.includes('gpt-oss')) {
-                        console.warn('[EditorialBrain] 429 limit on gpt-oss; immediately falling back to llama-3.3-70b-versatile');
-                        const fallbackPayload = { ...callPayload, model: 'llama-3.3-70b-versatile' };
-                        delete fallbackPayload.reasoning_effort;
-                        completion = await this.openai.chat.completions.create(fallbackPayload);
+                        console.warn('[EditorialBrain] 429 limit on gpt-oss; immediately falling back to alternative model');
+                        completion = await callGroqFallback();
                     } else {
                         throw firstErr;
                     }

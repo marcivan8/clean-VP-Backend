@@ -140,15 +140,17 @@ router.post('/analyze', authenticateUser, async (req, res) => {
                 // Query the project's owned rows directly and page through the
                 // result. Avoid a large IN list and ensure client-side bin
                 // truncation cannot silently hide analyzed footage from ROKA.
-                assetIntelligence = await readAllRows(() => supabaseAdmin
+                const rawAssets = await readAllRows(() => supabaseAdmin
                     .from('media_assets')
                     .select('id, name, scene_type, camera_angle, subject_count, has_main_speaker, has_faces, is_broll, is_screen_recording, location_type, lighting_quality, stability, emotional_tone, content_description, suggested_label, transcript_text, audio_type, has_spoken_word, analysis_status')
                     .eq('project_id', projectState.projectId)
-                    .eq('user_id', req.user.id))
-                    // Transcript is useful for finding semantically relevant
-                    // rushes when filenames are opaque. Keep only a planning
-                    // excerpt here; full transcript data remains in its store.
-                    .map(asset => ({ ...asset, transcript_text: String(asset.transcript_text || '').slice(0, 500) }));
+                    .eq('user_id', req.user.id));
+                // Transcript is useful for finding semantically relevant
+                // rushes when filenames are opaque. Keep only a planning
+                // excerpt here; full transcript data remains in its store.
+                assetIntelligence = Array.isArray(rawAssets)
+                    ? rawAssets.map(asset => ({ ...asset, transcript_text: String(asset.transcript_text || '').slice(0, 500) }))
+                    : [];
             }
         } catch (miErr) {
             console.warn('[brainRoutes] /analyze: media intelligence lookup failed (continuing without it):', miErr.message);

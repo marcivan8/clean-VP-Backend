@@ -149,13 +149,19 @@ export class ContextGenerator {
             });
         });
 
-        // --- Find active/selected clip ---
+        // --- Video clips & active/selected clip ---
+        const videoClips = allClips.filter(c => c.trackType === 'video');
         const activeClip = allClips.find(c => c.id === activeClipId) || null;
         const selectedClipDuration = activeClip ? activeClip.duration : 0;
-        const sourceDuration = activeClip ? activeClip.duration * (activeClip.speed || 1) : 0;
+        // If an active clip is selected, use its source duration.
+        // If no clip is specifically selected, fall back to the total duration of primary video footage,
+        // or timeline duration, so the LLM knows the media is not 0 seconds long.
+        const primaryVideoDuration = videoClips.reduce((sum, c) => sum + (Number(c.duration) || 0) * (Number(c.speed) || 1), 0);
+        const sourceDuration = activeClip
+            ? (activeClip.duration * (activeClip.speed || 1))
+            : (primaryVideoDuration > 0 ? primaryVideoDuration : duration);
 
         // --- Editing Mode Detection ---
-        const videoClips = allClips.filter(c => c.trackType === 'video');
         const rangeStart = Number(selectedTimelineRange?.start);
         const rangeEnd = Number(selectedTimelineRange?.end);
         const hasSelectedRange = Number.isFinite(rangeStart) && Number.isFinite(rangeEnd) && rangeEnd > rangeStart;

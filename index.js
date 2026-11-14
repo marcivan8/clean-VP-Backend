@@ -392,6 +392,7 @@ app.get('/api', (req, res) => {
 // index.html is served with no-cache so browsers always fetch a fresh copy after
 // a redeploy — hashed asset filenames (JS/CSS) are safe to cache long-term.
 const clientBuildPath = path.join(__dirname, 'client', 'dist');
+const clientAssetsPath = path.join(clientBuildPath, 'assets');
 app.use(express.static(clientBuildPath, {
   setHeaders(res, filePath) {
     if (filePath.endsWith('index.html')) {
@@ -402,6 +403,45 @@ app.use(express.static(clientBuildPath, {
   },
 }));
 
+// Fallback for hashed assets in /assets/ that were invalidated by a new deployment.
+// When a new build deploys, old chunk hashes are purged. If a client's browser
+// requests an old stylesheet (e.g. index-<oldHash>.css), serve the current version
+// of that stylesheet (e.g. index-<newHash>.css) as text/css so the browser never
+// rejects it with a MIME type mismatch error ('application/json' vs 'text/css').
+app.get('/assets/:filename', (req, res, next) => {
+  const { filename } = req.params;
+
+  if (filename.endsWith('.css')) {
+    // Try to find the current build's CSS file with the same prefix (e.g. index-*, HomePage-*, IDELayout-*)
+    const match = filename.match(/^([a-zA-Z0-9_\-]+?)-[a-zA-Z0-9_\-]+\.css$/);
+    if (match && fs.existsSync(clientAssetsPath)) {
+      const prefix = match[1];
+      try {
+        const files = fs.readdirSync(clientAssetsPath);
+        const currentCss = files.find(f => f.startsWith(`${prefix}-`) && f.endsWith('.css'));
+        if (currentCss) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          return res.type('text/css').sendFile(path.join(clientAssetsPath, currentCss));
+        }
+      } catch (err) {
+        console.warn(`[assets] Failed to resolve stale CSS fallback for ${filename}:`, err.message);
+      }
+    }
+    // If not found, return 404 with text/css so strict MIME checking never fails
+    return res.status(404).type('text/css').send('/* 404: stylesheet not found */');
+  }
+
+  if (filename.endsWith('.js') || filename.endsWith('.mjs')) {
+    return res.status(404).type('application/javascript').send('/* 404: script not found */');
+  }
+
+  if (filename.endsWith('.map')) {
+    return res.status(404).type('application/json').send('{}');
+  }
+
+  return res.status(404).type('text/plain').send('Asset not found');
+});
+
 // Catch-all route for React client-side routing.
 // Must be placed AFTER all API routes but BEFORE the 404 handler.
 app.get('*', (req, res, next) => {
@@ -411,11 +451,15 @@ app.get('*', (req, res, next) => {
   }
 
   // Static asset requests (JS, CSS, images, fonts, source maps…) that weren't
-  // found by express.static() must NOT fall through to index.html — doing so
-  // would serve HTML with content-type text/html, causing browsers to reject the
-  // file with a MIME-type error (e.g. "Refused to apply style … not text/css").
+  // found by express.static() must NOT fall through to index.html or the JSON 404 handler.
   if (/\.(js|css|map|png|jpg|jpeg|gif|ico|svg|woff2?|ttf|eot|webp|webm|mp4)$/.test(req.path)) {
-    return next();
+    if (req.path.endsWith('.css')) {
+      return res.status(404).type('text/css').send('/* 404: stylesheet not found */');
+    }
+    if (req.path.endsWith('.js') || req.path.endsWith('.mjs')) {
+      return res.status(404).type('application/javascript').send('/* 404: script not found */');
+    }
+    return res.status(404).type('text/plain').send('Asset not found');
   }
 
   const indexPath = path.join(clientBuildPath, 'index.html');

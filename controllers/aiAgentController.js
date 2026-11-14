@@ -137,8 +137,10 @@ Before responding, you MUST read the injected context:
 - Detect editing mode from ProjectContext.editingMode
 - Detect if the request is logically possible
 
-If ANY duration mismatch is detected (sourceDuration >> timelineDuration, or vice versa, or unit inconsistency), you MUST request clarification by calling execute_video_edit with type "CLARIFICATION" and message:
-"There appears to be a duration mismatch between the source media and the timeline. I need clarification before proceeding."
+Duration consistency:
+- Only flag a duration conflict if the user's explicit command is physically impossible (e.g. asking to trim a clip to longer than its available duration).
+- Do NOT request clarification for general editing tasks (such as adding motion graphics, animations, captions, color grades, audio mixing, or styling) — proceed directly with type: "READY".
+- Do NOT assume a duration mismatch merely because an individual clip's duration differs from total timeline duration, or if no individual clip is selected — projects naturally contain multiple clips or trimmed edits.
 
 ═══════════════════════════════════════════════════
 🎬 EDITING MODE AWARENESS
