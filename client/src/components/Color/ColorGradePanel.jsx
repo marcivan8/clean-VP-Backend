@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
     Sliders,
@@ -17,7 +17,6 @@ import {
     Search,
     Loader2
 } from 'lucide-react';
-import { PanelSection, ControlRow, TrackSlider } from '../ui/PanelControls.jsx';
 import ColorWheels from './ColorWheels.jsx';
 import CurvesEditor from './CurvesEditor.jsx';
 import VideoScopes from './VideoScopes.jsx';
@@ -33,7 +32,6 @@ const TABS = [
     { key: 'curves',    label: 'Curves',    icon: TrendingUp },
     { key: 'selective', label: 'HSL',       icon: Palette    },
     { key: 'luts',      label: 'LUTs',      icon: Film       },
-    { key: 'scopes',    label: 'Scopes',    icon: Activity   },
 ];
 
 const HSL_RANGES = [
@@ -44,6 +42,173 @@ const HSL_RANGES = [
     { key: 'blues',    label: 'Blues',    color: '#3b82f6' },
     { key: 'magentas', label: 'Magentas', color: '#d946ef' },
 ];
+
+/**
+ * High-end Custom Grade Slider matching professional color grading NLE styling.
+ * Supports click & drag on track, scrubbing, direct numeric editing, and double-click reset.
+ */
+function GradeSlider({
+    label,
+    value = 0,
+    defaultValue = 0,
+    min = 0,
+    max = 200,
+    step = 1,
+    unit = '%',
+    gradient,
+    onChange,
+}) {
+    const trackRef = useRef(null);
+    const inputRef = useRef(null);
+    const [isDragging, setIsDragging] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editVal, setEditVal] = useState(String(value));
+
+    useEffect(() => {
+        if (!isEditing) setEditVal(String(Math.round(value)));
+    }, [value, isEditing]);
+
+    const percentage = useMemo(() => {
+        const clamped = Math.max(min, Math.min(max, value));
+        return ((clamped - min) / (max - min)) * 100;
+    }, [value, min, max]);
+
+    const updateFromPointer = useCallback((clientX) => {
+        if (!trackRef.current) return;
+        const rect = trackRef.current.getBoundingClientRect();
+        if (rect.width <= 0) return;
+        const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        const raw = min + ratio * (max - min);
+        const stepped = Math.round(raw / step) * step;
+        const clamped = Math.max(min, Math.min(max, stepped));
+        onChange?.(clamped);
+    }, [min, max, step, onChange]);
+
+    const handlePointerDown = (e) => {
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        setIsDragging(true);
+        updateFromPointer(e.clientX);
+    };
+
+    const handlePointerMove = (e) => {
+        if (!isDragging) return;
+        updateFromPointer(e.clientX);
+    };
+
+    const handlePointerUp = (e) => {
+        if (!isDragging) return;
+        setIsDragging(false);
+        try {
+            e.currentTarget.releasePointerCapture(e.pointerId);
+        } catch (_) {}
+    };
+
+    const handleKeyDown = (e) => {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            onChange?.(Math.max(min, value - step));
+        } else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            onChange?.(Math.min(max, value + step));
+        }
+    };
+
+    const commitEdit = () => {
+        setIsEditing(false);
+        const parsed = parseFloat(editVal);
+        if (Number.isFinite(parsed)) {
+            const clamped = Math.max(min, Math.min(max, Math.round(parsed)));
+            onChange?.(clamped);
+        } else {
+            setEditVal(String(Math.round(value)));
+        }
+    };
+
+    return (
+        <div className="flex items-center justify-between gap-3 py-1.5 group select-none">
+            {/* Label */}
+            <span
+                className="text-xs text-[#94a3b8] font-medium w-24 shrink-0 truncate cursor-pointer hover:text-white transition-colors"
+                title={`${label} (double-click to reset)`}
+                onDoubleClick={() => onChange?.(defaultValue)}
+            >
+                {label}
+            </span>
+
+            {/* Slider Track with Custom Gradient */}
+            <div
+                ref={trackRef}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerUp}
+                onDoubleClick={() => onChange?.(defaultValue)}
+                className="relative flex-1 h-7 flex items-center cursor-pointer"
+                role="slider"
+                aria-label={label}
+                aria-valuenow={Math.round(value)}
+                aria-valuemin={min}
+                aria-valuemax={max}
+                tabIndex={0}
+                onKeyDown={handleKeyDown}
+            >
+                {/* Background Track Bar */}
+                <div className="w-full h-[5px] rounded-full relative overflow-hidden bg-[#1e232b]">
+                    {/* Visual Gradient Fill */}
+                    <div
+                        className="absolute inset-0 rounded-full opacity-90 group-hover:opacity-100 transition-opacity"
+                        style={{ background: gradient }}
+                    />
+                </div>
+
+                {/* White Circular Thumb */}
+                <div
+                    className="absolute w-3.5 h-3.5 rounded-full bg-white shadow-[0_1px_5px_rgba(0,0,0,0.7)] border border-black/15 -translate-x-1/2 cursor-grab active:cursor-grabbing transition-transform group-hover:scale-110 active:scale-125"
+                    style={{ left: `${percentage}%` }}
+                />
+            </div>
+
+            {/* Value Badge Box */}
+            <div
+                className="h-7 min-w-[62px] px-2 rounded-lg border border-[#2d333b] bg-[#12161c] flex items-center justify-end gap-1 font-mono text-xs text-white shadow-inner focus-within:border-primary/60 focus-within:ring-1 focus-within:ring-primary/40 shrink-0"
+                onDoubleClick={() => onChange?.(defaultValue)}
+            >
+                {isEditing ? (
+                    <input
+                        ref={inputRef}
+                        type="text"
+                        value={editVal}
+                        onChange={(e) => setEditVal(e.target.value)}
+                        onBlur={commitEdit}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitEdit();
+                            if (e.key === 'Escape') {
+                                setEditVal(String(Math.round(value)));
+                                setIsEditing(false);
+                            }
+                        }}
+                        className="w-8 bg-transparent text-right outline-none text-xs font-mono text-white p-0 m-0"
+                        autoFocus
+                    />
+                ) : (
+                    <span
+                        onClick={() => setIsEditing(true)}
+                        className="cursor-text hover:text-primary transition-colors text-right"
+                        title="Click to edit value"
+                    >
+                        {Math.round(value)}
+                    </span>
+                )}
+                {unit && (
+                    <span className="text-[#64748b] text-[11px] select-none font-sans font-normal">
+                        {unit}
+                    </span>
+                )}
+            </div>
+        </div>
+    );
+}
 
 export default function ColorGradePanel({
     activeClip,
@@ -60,6 +225,7 @@ export default function ColorGradePanel({
     const [copiedGrade, setCopiedGrade] = useState(null);
     const [showCopyFeedback, setShowCopyFeedback] = useState(false);
     const [appliedAllFeedback, setAppliedAllFeedback] = useState(false);
+    const [showScopes, setShowScopes] = useState(false);
 
     // Audio Engine for LUTs
     const {
@@ -172,6 +338,43 @@ export default function ColorGradePanel({
         setTimeout(() => setAppliedAllFeedback(false), 2500);
     };
 
+    // Reset Tone section
+    const handleResetTone = () => {
+        if (!activeClip || !activeTrackId) return;
+        onBatchGradingChange?.({
+            ...currentGrading,
+            brightness: 100,
+            contrast: 100,
+            saturate: 100,
+            hueRotate: 0,
+            _manuallyAdjusted: true,
+        });
+    };
+
+    // Reset White Balance section
+    const handleResetWhiteBalance = () => {
+        if (!activeClip || !activeTrackId) return;
+        onBatchGradingChange?.({
+            ...currentGrading,
+            temperature: 0,
+            tint: 0,
+            exposure: 0,
+            _manuallyAdjusted: true,
+        });
+    };
+
+    // Reset Dynamic Range section
+    const handleResetDynamicRange = () => {
+        if (!activeClip || !activeTrackId) return;
+        onBatchGradingChange?.({
+            ...currentGrading,
+            highlights: 0,
+            shadows: 0,
+            vibrance: 0,
+            _manuallyAdjusted: true,
+        });
+    };
+
     // LUT search & apply
     const handleLutSearch = (e) => {
         e.preventDefault();
@@ -232,78 +435,97 @@ export default function ColorGradePanel({
     }, [currentGrading]);
 
     return (
-        <section className="flex flex-col h-full overflow-hidden text-foreground">
-            {/* Header / Active Clip Status */}
-            <div className="p-3 border-b border-border/40 bg-background/50 backdrop-blur-sm">
-                <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                            {t('ideLayout.colorGrading.title', 'Color Grading')}
-                        </span>
+        <section className="flex flex-col h-full overflow-hidden bg-[#0c0f14] text-foreground">
+            {/* Header matching Image 2 */}
+            <div className="px-4 py-3 border-b border-[#1f242d] bg-[#0c0f14]/80 backdrop-blur-md">
+                <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold uppercase tracking-wider text-[#e2e8f0]">
+                        {t('ideLayout.colorGrading.title', 'Color Grading')}
+                    </span>
+
+                    {/* Right side utilities & ACTIVE status */}
+                    <div className="flex items-center gap-1.5">
                         {activeClip && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400 font-mono border border-green-500/20">
-                                {t('ideLayout.active', 'ACTIVE')}
-                            </span>
+                            <>
+                                {/* Video Scope Toggle */}
+                                <button
+                                    type="button"
+                                    onClick={() => setShowScopes(s => !s)}
+                                    className={`p-1.5 rounded-md transition-colors ${
+                                        showScopes
+                                            ? 'bg-primary/20 text-primary border border-primary/30'
+                                            : 'text-[#94a3b8] hover:text-white hover:bg-white/5'
+                                    }`}
+                                    title={showScopes ? "Hide video scopes" : "Show video scopes"}
+                                >
+                                    <Activity size={13} />
+                                </button>
+
+                                {/* A/B Bypass */}
+                                <button
+                                    type="button"
+                                    onClick={handleToggleBypass}
+                                    className={`p-1.5 rounded-md transition-colors ${
+                                        isBypassed
+                                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                            : 'text-[#94a3b8] hover:text-white hover:bg-white/5'
+                                    }`}
+                                    title={isBypassed ? "Unbypass color grade" : "A/B Bypass grade"}
+                                >
+                                    {isBypassed ? <EyeOff size={13} /> : <Eye size={13} />}
+                                </button>
+
+                                {/* Copy Grade */}
+                                <button
+                                    type="button"
+                                    onClick={handleCopyGrade}
+                                    className="p-1.5 rounded-md text-[#94a3b8] hover:text-white hover:bg-white/5 transition-colors relative"
+                                    title="Copy grade"
+                                >
+                                    {showCopyFeedback ? <ClipboardCheck size={13} className="text-primary" /> : <Copy size={13} />}
+                                </button>
+
+                                {/* Paste Grade */}
+                                {copiedGrade && (
+                                    <button
+                                        type="button"
+                                        onClick={handlePasteGrade}
+                                        className="px-2 py-0.5 text-[10px] font-medium rounded-md bg-primary/15 text-primary border border-primary/25 hover:bg-primary/25 transition-colors"
+                                        title="Paste grade to active clip"
+                                    >
+                                        Paste
+                                    </button>
+                                )}
+
+                                {/* Apply to All Clips */}
+                                <button
+                                    type="button"
+                                    onClick={handleApplyToAllClips}
+                                    className="p-1.5 rounded-md text-[#94a3b8] hover:text-white hover:bg-white/5 transition-colors"
+                                    title="Apply grade to all video clips"
+                                >
+                                    <CheckCheck size={13} className={appliedAllFeedback ? "text-primary" : ""} />
+                                </button>
+
+                                {/* Reset All */}
+                                {isNonDefault && (
+                                    <button
+                                        type="button"
+                                        onClick={onGradingReset}
+                                        className="p-1.5 rounded-md text-[#94a3b8] hover:text-white hover:bg-white/5 transition-colors"
+                                        title={t('ideLayout.colorGrading.reset', 'Reset Color')}
+                                    >
+                                        <RotateCcw size={13} />
+                                    </button>
+                                )}
+
+                                {/* Clean ACTIVE indicator text */}
+                                <span className="text-[11px] font-semibold text-emerald-400 font-mono tracking-wider ml-1 select-none">
+                                    {t('ideLayout.active', 'ACTIVE')}
+                                </span>
+                            </>
                         )}
                     </div>
-
-                    {/* Toolbar Actions: Bypass, Copy/Paste, Apply to all, Reset */}
-                    {activeClip && (
-                        <div className="flex items-center gap-1">
-                            <button
-                                type="button"
-                                onClick={handleToggleBypass}
-                                className={`p-1.5 rounded-md transition-colors ${
-                                    isBypassed
-                                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                                        : 'text-muted-foreground hover:text-foreground hover:bg-white/10'
-                                }`}
-                                title={isBypassed ? "Unbypass color grade" : "A/B Bypass grade"}
-                            >
-                                {isBypassed ? <EyeOff size={13} /> : <Eye size={13} />}
-                            </button>
-
-                            <button
-                                type="button"
-                                onClick={handleCopyGrade}
-                                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-white/10 transition-colors relative"
-                                title="Copy grade"
-                            >
-                                {showCopyFeedback ? <ClipboardCheck size={13} className="text-primary" /> : <Copy size={13} />}
-                            </button>
-
-                            {copiedGrade && (
-                                <button
-                                    type="button"
-                                    onClick={handlePasteGrade}
-                                    className="px-2 py-1 text-[10px] font-medium rounded-md bg-primary/15 text-primary border border-primary/25 hover:bg-primary/25 transition-colors"
-                                    title="Paste grade to active clip"
-                                >
-                                    Paste
-                                </button>
-                            )}
-
-                            <button
-                                type="button"
-                                onClick={handleApplyToAllClips}
-                                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-white/10 transition-colors"
-                                title="Apply grade to all video clips"
-                            >
-                                <CheckCheck size={13} className={appliedAllFeedback ? "text-primary" : ""} />
-                            </button>
-
-                            {isNonDefault && (
-                                <button
-                                    type="button"
-                                    onClick={onGradingReset}
-                                    className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-white/10 transition-colors"
-                                    title={t('ideLayout.colorGrading.reset', 'Reset Color')}
-                                >
-                                    <RotateCcw size={13} />
-                                </button>
-                            )}
-                        </div>
-                    )}
                 </div>
 
                 {/* LUT Attribution Badge */}
@@ -322,8 +544,8 @@ export default function ColorGradePanel({
                     </div>
                 )}
 
-                {/* Sub-Tabs Navigation */}
-                <div className="flex items-center gap-1 mt-2.5 bg-black/40 p-0.5 rounded-lg border border-white/5 overflow-x-auto no-scrollbar">
+                {/* Minimalist Sub-Tabs Navigation */}
+                <div className="flex items-center gap-1 mt-2.5 bg-black/40 p-0.5 rounded-lg border border-white/5">
                     {TABS.map(tab => {
                         const Icon = tab.icon;
                         const isActive = subTab === tab.key;
@@ -332,10 +554,10 @@ export default function ColorGradePanel({
                                 key={tab.key}
                                 type="button"
                                 onClick={() => setSubTab(tab.key)}
-                                className={`flex-1 py-1 px-2 text-[11px] font-medium rounded-md transition-all flex items-center justify-center gap-1 shrink-0 ${
+                                className={`flex-1 py-1 px-2 text-[11px] font-medium rounded-md transition-all flex items-center justify-center gap-1.5 shrink-0 ${
                                     isActive
-                                        ? 'bg-white/10 text-white shadow-sm'
-                                        : 'text-muted-foreground hover:text-foreground'
+                                        ? 'bg-[#1e232b] text-white shadow-sm'
+                                        : 'text-[#94a3b8] hover:text-white hover:bg-white/5'
                                 }`}
                             >
                                 <Icon size={12} />
@@ -346,95 +568,197 @@ export default function ColorGradePanel({
                 </div>
             </div>
 
+            {/* Collapsible Video Scopes Drawer */}
+            {activeClip && showScopes && (
+                <div className="p-3 border-b border-[#1f242d] bg-[#080b0f] animate-in fade-in slide-in-from-top-2 duration-150">
+                    <VideoScopes className="!p-1.5" />
+                </div>
+            )}
+
             {/* Main Content Area */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-4">
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
                 {!activeClip ? (
-                    <div className="p-6 rounded-lg border border-dashed border-border/60 text-center my-4">
-                        <Palette size={24} className="mx-auto mb-2 text-muted-foreground/60" />
-                        <p className="text-xs text-muted-foreground">
+                    <div className="p-8 rounded-xl border border-dashed border-[#1f242d] text-center my-6">
+                        <Palette size={26} className="mx-auto mb-2.5 text-[#64748b]" />
+                        <p className="text-xs text-[#94a3b8]">
                             {t('ideLayout.colorGrading.selectClip', 'Select a clip to adjust color.')}
                         </p>
                     </div>
                 ) : (
                     <>
-                        {/* 1. PRIMARY TONE & BALANCE */}
+                        {/* 1. TONE & COLOUR TAB — Continuous Image 2 Styling */}
                         {subTab === 'tone' && (
                             <div className="space-y-4">
-                                <PanelSection
-                                    title="White Balance & Exposure"
-                                    onReset={isNonDefault ? onGradingReset : null}
-                                    resetLabel="Reset"
-                                >
-                                    <ControlRow label="Temp" labelWidth={64}>
-                                        <TrackSlider
-                                            ariaLabel="Temperature"
+                                {/* Section 1: TONE & COLOUR */}
+                                <div>
+                                    <div className="flex items-center justify-between mb-2">
+                                        <h4 className="text-[10px] text-[#94a3b8] uppercase tracking-widest font-semibold select-none">
+                                            {t('ideLayout.colorGrading.tone', 'TONE & COLOUR')}
+                                        </h4>
+                                        <button
+                                            type="button"
+                                            onClick={handleResetTone}
+                                            className="text-[10px] text-[#64748b] hover:text-[#94a3b8] transition-colors"
+                                        >
+                                            Reset
+                                        </button>
+                                    </div>
+
+                                    <div className="space-y-0.5">
+                                        <GradeSlider
+                                            label={t('ideLayout.colorGrading.brightness', 'Brightness')}
+                                            value={currentGrading.brightness ?? 100}
+                                            defaultValue={100}
+                                            min={0}
+                                            max={200}
+                                            step={1}
+                                            unit="%"
+                                            gradient="linear-gradient(to right, #2b3038 0%, #6b7280 50%, #ffffff 100%)"
+                                            onChange={(v) => handleSliderChange('brightness', v)}
+                                        />
+                                        <GradeSlider
+                                            label={t('ideLayout.colorGrading.contrast', 'Contrast')}
+                                            value={currentGrading.contrast ?? 100}
+                                            defaultValue={100}
+                                            min={0}
+                                            max={200}
+                                            step={1}
+                                            unit="%"
+                                            gradient="linear-gradient(to right, #8b5cf6 0%, #a855f7 50%, #2e1065 100%)"
+                                            onChange={(v) => handleSliderChange('contrast', v)}
+                                        />
+                                        <GradeSlider
+                                            label={t('ideLayout.colorGrading.saturation', 'Saturation')}
+                                            value={currentGrading.saturate ?? 100}
+                                            defaultValue={100}
+                                            min={0}
+                                            max={200}
+                                            step={1}
+                                            unit="%"
+                                            gradient="linear-gradient(to right, #fda4af 0%, #f43f5e 50%, #e11d48 100%)"
+                                            onChange={(v) => handleSliderChange('saturate', v)}
+                                        />
+                                        <GradeSlider
+                                            label={t('ideLayout.colorGrading.hueRotate', 'Hue Rotate')}
+                                            value={currentGrading.hueRotate ?? 0}
+                                            defaultValue={0}
+                                            min={-180}
+                                            max={180}
+                                            step={1}
+                                            unit="°"
+                                            gradient="linear-gradient(to right, #ef4444 0%, #eab308 17%, #22c55e 33%, #06b6d4 50%, #3b82f6 67%, #a855f7 83%, #ef4444 100%)"
+                                            onChange={(v) => handleSliderChange('hueRotate', v)}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="h-px bg-[#1f242d] w-full" />
+
+                                {/* Section 2: WHITE BALANCE & EXPOSURE */}
+                                <div>
+                                    <div className="flex items-center justify-between mb-2">
+                                        <h4 className="text-[10px] text-[#94a3b8] uppercase tracking-widest font-semibold select-none">
+                                            WHITE BALANCE & EXPOSURE
+                                        </h4>
+                                        <button
+                                            type="button"
+                                            onClick={handleResetWhiteBalance}
+                                            className="text-[10px] text-[#64748b] hover:text-[#94a3b8] transition-colors"
+                                        >
+                                            Reset
+                                        </button>
+                                    </div>
+
+                                    <div className="space-y-0.5">
+                                        <GradeSlider
+                                            label="Temperature"
                                             value={currentGrading.temperature ?? 0}
+                                            defaultValue={0}
                                             min={-100}
                                             max={100}
                                             step={1}
                                             unit=""
-                                            tint={['#38bdf8', '#fb923c']}
-                                            scrub
+                                            gradient="linear-gradient(to right, #38bdf8 0%, #94a3b8 50%, #f97316 100%)"
                                             onChange={(v) => handleSliderChange('temperature', v)}
                                         />
-                                    </ControlRow>
-                                    <ControlRow label="Tint" labelWidth={64}>
-                                        <TrackSlider
-                                            ariaLabel="Tint"
+                                        <GradeSlider
+                                            label="Tint"
                                             value={currentGrading.tint ?? 0}
+                                            defaultValue={0}
                                             min={-100}
                                             max={100}
                                             step={1}
                                             unit=""
-                                            tint={['#4ade80', '#e879f9']}
-                                            scrub
+                                            gradient="linear-gradient(to right, #4ade80 0%, #94a3b8 50%, #e879f9 100%)"
                                             onChange={(v) => handleSliderChange('tint', v)}
                                         />
-                                    </ControlRow>
-                                    <ControlRow label="Exposure" labelWidth={64}>
-                                        <TrackSlider
-                                            ariaLabel="Exposure"
+                                        <GradeSlider
+                                            label="Exposure"
                                             value={currentGrading.exposure ?? 0}
+                                            defaultValue={0}
                                             min={-100}
                                             max={100}
                                             step={1}
                                             unit=""
-                                            tint={['#0f172a', '#f8fafc']}
-                                            scrub
+                                            gradient="linear-gradient(to right, #090d16 0%, #64748b 50%, #f8fafc 100%)"
                                             onChange={(v) => handleSliderChange('exposure', v)}
                                         />
-                                    </ControlRow>
-                                </PanelSection>
+                                    </div>
+                                </div>
 
-                                <PanelSection
-                                    title={t('ideLayout.colorGrading.tone', 'Tone & colour')}
-                                    onReset={isNonDefault ? onGradingReset : null}
-                                    resetLabel={t('ideLayout.colorGrading.reset', 'Reset')}
-                                >
-                                    {[
-                                        { key: 'contrast',   label: t('ideLayout.colorGrading.contrast', 'Contrast'),     min: 0, max: 200, unit: '%', tint: null },
-                                        { key: 'highlights', label: 'Highlights',                                         min: -100, max: 100, unit: '', tint: ['#64748b', '#f8fafc'] },
-                                        { key: 'shadows',    label: 'Shadows',                                            min: -100, max: 100, unit: '', tint: ['#0f172a', '#94a3b8'] },
-                                        { key: 'brightness', label: t('ideLayout.colorGrading.brightness', 'Brightness'), min: 0, max: 200, unit: '%', tint: ['#1b1b1b', '#f5f5f5'] },
-                                        { key: 'saturate',   label: t('ideLayout.colorGrading.saturation', 'Saturation'), min: 0, max: 200, unit: '%', tint: ['#9E9E9E', '#FF4081'] },
-                                        { key: 'vibrance',   label: 'Vibrance',                                           min: -100, max: 100, unit: '', tint: ['#94a3b8', '#a855f7'] },
-                                        { key: 'hueRotate',  label: t('ideLayout.colorGrading.hueRotate', 'Hue Rotate'),  min: -180, max: 180, unit: '°', tint: ['#FF5252', '#FFD740', '#69F0AE', '#40C4FF', '#7C4DFF', '#FF5252'] },
-                                    ].map(({ key, label, min, max, unit, tint }) => (
-                                        <ControlRow key={key} label={label} labelWidth={64}>
-                                            <TrackSlider
-                                                ariaLabel={label}
-                                                value={currentGrading[key] ?? (key === 'hueRotate' || key === 'highlights' || key === 'shadows' || key === 'vibrance' ? 0 : 100)}
-                                                min={min}
-                                                max={max}
-                                                step={1}
-                                                unit={unit}
-                                                tint={tint}
-                                                scrub
-                                                onChange={(v) => handleSliderChange(key, v)}
-                                            />
-                                        </ControlRow>
-                                    ))}
-                                </PanelSection>
+                                <div className="h-px bg-[#1f242d] w-full" />
+
+                                {/* Section 3: DYNAMIC RANGE */}
+                                <div>
+                                    <div className="flex items-center justify-between mb-2">
+                                        <h4 className="text-[10px] text-[#94a3b8] uppercase tracking-widest font-semibold select-none">
+                                            DYNAMIC RANGE
+                                        </h4>
+                                        <button
+                                            type="button"
+                                            onClick={handleResetDynamicRange}
+                                            className="text-[10px] text-[#64748b] hover:text-[#94a3b8] transition-colors"
+                                        >
+                                            Reset
+                                        </button>
+                                    </div>
+
+                                    <div className="space-y-0.5">
+                                        <GradeSlider
+                                            label="Highlights"
+                                            value={currentGrading.highlights ?? 0}
+                                            defaultValue={0}
+                                            min={-100}
+                                            max={100}
+                                            step={1}
+                                            unit=""
+                                            gradient="linear-gradient(to right, #334155 0%, #94a3b8 50%, #ffffff 100%)"
+                                            onChange={(v) => handleSliderChange('highlights', v)}
+                                        />
+                                        <GradeSlider
+                                            label="Shadows"
+                                            value={currentGrading.shadows ?? 0}
+                                            defaultValue={0}
+                                            min={-100}
+                                            max={100}
+                                            step={1}
+                                            unit=""
+                                            gradient="linear-gradient(to right, #020617 0%, #475569 50%, #cbd5e1 100%)"
+                                            onChange={(v) => handleSliderChange('shadows', v)}
+                                        />
+                                        <GradeSlider
+                                            label="Vibrance"
+                                            value={currentGrading.vibrance ?? 0}
+                                            defaultValue={0}
+                                            min={-100}
+                                            max={100}
+                                            step={1}
+                                            unit=""
+                                            gradient="linear-gradient(to right, #64748b 0%, #a855f7 50%, #c084fc 100%)"
+                                            onChange={(v) => handleSliderChange('vibrance', v)}
+                                        />
+                                    </div>
+                                </div>
                             </div>
                         )}
 
@@ -478,62 +802,67 @@ export default function ColorGradePanel({
                                                 className="w-3.5 h-3.5 rounded-full shadow-sm"
                                                 style={{ backgroundColor: range.color }}
                                             />
-                                            <span className="text-[9px] text-muted-foreground font-medium">
+                                            <span className="text-[9px] text-[#94a3b8] font-medium">
                                                 {range.label.slice(0, 3)}
                                             </span>
                                         </button>
                                     ))}
                                 </div>
 
-                                <PanelSection
-                                    title={`Selective — ${activeHslRange.toUpperCase()}`}
-                                    onReset={() => {
-                                        handleSelectiveChange('hue', 0);
-                                        handleSelectiveChange('sat', 0);
-                                        handleSelectiveChange('lum', 0);
-                                    }}
-                                    resetLabel="Reset"
-                                >
-                                    <ControlRow label="Hue" labelWidth={54}>
-                                        <TrackSlider
-                                            ariaLabel="Hue Shift"
+                                <div>
+                                    <div className="flex items-center justify-between mb-2">
+                                        <h4 className="text-[10px] text-[#94a3b8] uppercase tracking-widest font-semibold select-none">
+                                            SELECTIVE — {activeHslRange.toUpperCase()}
+                                        </h4>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                handleSelectiveChange('hue', 0);
+                                                handleSelectiveChange('sat', 0);
+                                                handleSelectiveChange('lum', 0);
+                                            }}
+                                            className="text-[10px] text-[#64748b] hover:text-[#94a3b8] transition-colors"
+                                        >
+                                            Reset
+                                        </button>
+                                    </div>
+
+                                    <div className="space-y-0.5">
+                                        <GradeSlider
+                                            label="Hue"
                                             value={currentGrading.selective?.[activeHslRange]?.hue ?? 0}
+                                            defaultValue={0}
                                             min={-180}
                                             max={180}
                                             step={1}
                                             unit="°"
-                                            tint={['#FF5252', '#FFD740', '#69F0AE', '#40C4FF', '#7C4DFF', '#FF5252']}
-                                            scrub
+                                            gradient="linear-gradient(to right, #ef4444 0%, #eab308 17%, #22c55e 33%, #06b6d4 50%, #3b82f6 67%, #a855f7 83%, #ef4444 100%)"
                                             onChange={(v) => handleSelectiveChange('hue', v)}
                                         />
-                                    </ControlRow>
-                                    <ControlRow label="Sat" labelWidth={54}>
-                                        <TrackSlider
-                                            ariaLabel="Saturation Shift"
+                                        <GradeSlider
+                                            label="Saturation"
                                             value={currentGrading.selective?.[activeHslRange]?.sat ?? 0}
+                                            defaultValue={0}
                                             min={-100}
                                             max={100}
                                             step={1}
                                             unit=""
-                                            tint={['#94a3b8', '#ec4899']}
-                                            scrub
+                                            gradient="linear-gradient(to right, #64748b, #ec4899)"
                                             onChange={(v) => handleSelectiveChange('sat', v)}
                                         />
-                                    </ControlRow>
-                                    <ControlRow label="Light" labelWidth={54}>
-                                        <TrackSlider
-                                            ariaLabel="Lightness Shift"
+                                        <GradeSlider
+                                            label="Luminance"
                                             value={currentGrading.selective?.[activeHslRange]?.lum ?? 0}
+                                            defaultValue={0}
                                             min={-100}
                                             max={100}
                                             step={1}
                                             unit=""
-                                            tint={['#0f172a', '#f8fafc']}
-                                            scrub
+                                            gradient="linear-gradient(to right, #0f172a, #f8fafc)"
                                             onChange={(v) => handleSelectiveChange('lum', v)}
                                         />
-                                    </ControlRow>
-                                </PanelSection>
+                                    </div>
+                                </div>
                             </div>
                         )}
 
@@ -607,23 +936,9 @@ export default function ColorGradePanel({
                                 )}
                             </div>
                         )}
-
-                        {/* 6. VIDEO SCOPES */}
-                        {subTab === 'scopes' && (
-                            <div className="space-y-3">
-                                <VideoScopes />
-                            </div>
-                        )}
                     </>
                 )}
             </div>
-
-            {/* Persistent Mini Scope preview at bottom when not in scopes tab */}
-            {activeClip && subTab !== 'scopes' && (
-                <div className="p-3 border-t border-border/40 bg-background/50">
-                    <VideoScopes className="!p-2" />
-                </div>
-            )}
         </section>
     );
 }
