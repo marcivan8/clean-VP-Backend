@@ -750,7 +750,7 @@
     {
       "id": "add_motion_component",
       "executes": "add_motion_component",
-      "phrase": "add a title sequence",
+      "phrase": "Add motion title / composition",
       "category": "text",
       "registryDeclared": true,
       "label": "Add motion title / composition",

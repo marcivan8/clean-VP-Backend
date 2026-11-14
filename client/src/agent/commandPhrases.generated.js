@@ -39,7 +39,7 @@ export const COMMAND_PHRASE = Object.freeze({
     "apply_style_recipe": "Apply a style recipe",
     "macro_clean_and_polish": "clean it up and make it dynamic",
     "macro_multicam": "Full multicam pass",
-    "add_motion_component": "add a title sequence",
+    "add_motion_component": "Add motion title / composition",
     "add_template": "add an underline",
     "add_text_overlay": "Add text",
     "auto_captions": "Add captions",
