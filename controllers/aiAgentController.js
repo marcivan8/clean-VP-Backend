@@ -42,6 +42,13 @@ AVAILABLE ACTIONS:
 13. "seek_to" -> Params: time.
 14. "undo_action" -> Undo last.
 15. "add_text_overlay" -> Params: text, start, duration.
+16. "add_motion_component" -> Params: component, preset, params, asCompound.
+17. "design_scene" -> Params: brief.
+18. "apply_motion_expression" -> Params: clipId, property, expression.
+19. "set_track_matte" -> Params: clipId, sourceLayerId, mode.
+20. "set_layer_parent" -> Params: clipId, parentId.
+21. "set_vector_trim" -> Params: clipId, trimStart, trimEnd, trimOffset, drawOn, drawOnDuration.
+22. "apply_aesthetic_preset" -> Params: preset.
 
 OUTPUT FORMAT:
 Return a JSON object with:
@@ -275,10 +282,12 @@ These commands mean the user wants a FULL EDIT of their video. Map them to opera
 🎞 MOTION GRAPHICS / ANIMATION JARGON
 ══════════════════════════════════════════════════
 
+- "add motion graphics / add motion graphics to this video / add motion component / title sequence / kinetic title / quote card / stat callout / lower third / cta card"
+  → add_motion_component (component?: "TitleSequence"|"KineticTitle"|"StatCallout"|"LowerThird"|"QuoteCard"|"CTAWidget", preset?, params?: { asCompound: true })
+
 These commands mean the user wants the brain to find the most interesting/relevant
 moments on its own and bring them to life with motion — NOT a specific manual preset
 pick (that's a different, more specific request). Map them to operation: "animate_automatically":
-- "add animations and motion graphics / add motion graphics / add some motion graphics"
 - "animate the interesting parts / animate the best moments / animate the highlights"
 - "animate this automatically / auto animate / automatically animate this / animate this for me"
 - "add animations automatically / add some animation / add animation"
@@ -377,6 +386,13 @@ OPERATIONS:
 - remove_repetition: Remove repeated segments. Params: {}
 - build_from_rushes: Build video from raw rushes. Params: { platform?, targetDuration? }
 - animate_automatically: Detect the most interesting/relevant moments (reveals, punchlines, emphasis, emotional beats) and automatically apply motion graphics/animations to them to illustrate and bring the video to life — no manual picks. Params: {}
+- add_motion_component: Add an editable After Effects motion graphics component (TitleSequence, KineticTitle, StatCallout, LowerThird, QuoteCard, CTAWidget) onto the timeline as a compound clip. Params: { component?: string, preset?: string, params?: { asCompound: true } }
+- design_scene: Design a full motion sequence from a descriptive brief. Params: { brief: string }
+- apply_motion_expression: Apply an After Effects expression (e.g. wiggle, audioAmp, spring, loopOut). Params: { clipId, property, expression }
+- set_track_matte: Link target layer to a matte source layer (alpha, alpha-inverted, luma, luma-inverted). Params: { clipId, sourceLayerId, mode }
+- set_layer_parent: Link layer transform to a parent layer. Params: { clipId, parentId }
+- set_vector_trim: Animate vector shape trim paths / draw-on animation. Params: { clipId, trimStart, trimEnd, trimOffset, drawOn, drawOnDuration }
+- apply_aesthetic_preset: Apply complete creator aesthetic styling (vox, ali_abdaal, mrbeast, iman_gadzhi, apple, hormozi). Params: { preset: string }
 - compose_motion: Write custom motion for named layers from a description ("make the title slam in then float", "elegant animation on the captions", "typewriter effect"). Use when the user describes HOW something should move. Params: { brief: the user's words }
 - remove_background: Remove, blur, dim or replace the background behind the person in the video ("remove the background", "blur the background", "replace the background with black", "green screen"). Params: { mode?: 'blur'|'color'|'image'|'dim', color?: '#rrggbb' }
 
@@ -534,6 +550,10 @@ USER REQUEST:
                                             "compound_clean_dynamic",
                                             // AI Animation Intelligence (R68)
                                             "animate_automatically",
+                                            // After Effects Motion Engine & Components
+                                            "add_motion_component", "design_scene",
+                                            "apply_motion_expression", "set_track_matte",
+                                            "set_layer_parent", "set_vector_trim", "apply_aesthetic_preset",
                                             // R92: written motion + free background removal
                                             "compose_motion", "remove_background",
                                             // Conversational
@@ -973,7 +993,9 @@ function localParseIntent(prompt, context) {
                 'make it more dynamic', 'more dynamic', 'make it dynamic',
                 'make it more engaging', 'more engaging', 'boost engagement',
                 'keep viewers', 'hold attention', 'dynamic style',
-                'talking head style', 'vlog style', 'add rhythm')) {
+                'talking head style', 'vlog style', 'add rhythm',
+                'camera movement', 'camera movements', 'add camera movement',
+                'camera motion', 'add camera motion', 'camera push', 'camera drift')) {
             return {
                 intent: 'edit',
                 operation: 'rhythm_zoom',
@@ -983,11 +1005,48 @@ function localParseIntent(prompt, context) {
             };
         }
 
+        // ── After Effects Motion Components ───────────────────────────────────
+        // "add motion graphics", "title sequence", "kinetic title", "quote card", etc.
+        if (has('motion graphic', 'motion component', 'title sequence', 'kinetic title',
+                'kinetic text', 'lower third', 'quote card', 'stat callout',
+                'data counter', 'cta card', 'add motion graphics', 'add motion component')) {
+            let component = 'TitleSequence';
+            let preset = 'cinematic';
+            if (has('kinetic')) {
+                component = 'KineticTitle';
+                preset = has('creator') ? 'creator' : 'punchy';
+            } else if (has('stat', 'metric', 'growth')) {
+                component = 'StatCallout';
+                preset = has('growth') ? 'growth' : 'metric-callout';
+            } else if (has('lower third')) {
+                component = 'LowerThird';
+                preset = has('modern') ? 'modern-line' : 'pro-minimal';
+            } else if (has('quote')) {
+                component = 'QuoteCard';
+                preset = 'editorial';
+            } else if (has('cta', 'subscribe', 'follow')) {
+                component = 'CTAWidget';
+                preset = 'subscribe';
+            }
+            return {
+                intent: 'edit',
+                operation: 'add_motion_component',
+                parameters: {
+                    component,
+                    preset,
+                    params: { asCompound: true },
+                    asCompound: true
+                },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+
         // ── AI Animation Intelligence (R68) ───────────────────────────────────
-        // "add animations and motion graphics", "bring it to life", etc. The
+        // "bring it to life", "auto animate", etc. The
         // brain picks the moments (reveal/punchline/emphasis/emotional-beat)
         // itself — this is deliberately broader/less specific than rhythm_zoom.
-        if (has('motion graphic', 'animate automatically', 'auto animate',
+        if (has('animate automatically', 'auto animate',
                 'animate this', 'animate the', 'add animations', 'add animation',
                 'some animation', 'bring it to life', 'bring this to life',
                 'come alive', 'illustrate this', 'illustrate the video',
@@ -1639,6 +1698,111 @@ function generateLocalPlan(intent, context, planId) {
             // (POST /api/audio/animate-automatically) to detect and apply
             // motion; this plan step just has to survive compilation.
             steps = [{ step_id: 'animate', action: 'animate_automatically' }];
+            break;
+
+        case 'add_motion_component': {
+            const raw = String(intent.originalPrompt || intent.prompt || '');
+            const text = raw.toLowerCase();
+            let component = params.component || 'TitleSequence';
+            let preset = params.preset || 'cinematic';
+            const compParams = { ...(params.params || {}) };
+            if (params.asCompound ?? true) compParams.asCompound = true;
+            if (text.includes('kinetic')) {
+                component = 'KineticTitle';
+                preset = text.includes('creator') ? 'creator' : 'punchy';
+            } else if (text.includes('stat') || text.includes('metric') || text.includes('growth')) {
+                component = 'StatCallout';
+                preset = text.includes('growth') ? 'growth' : 'metric-callout';
+            } else if (text.includes('lower third')) {
+                component = 'LowerThird';
+                preset = text.includes('modern') ? 'modern-line' : 'pro-minimal';
+            } else if (text.includes('quote')) {
+                component = 'QuoteCard';
+                preset = 'editorial';
+            } else if (text.includes('cta') || text.includes('subscribe') || text.includes('follow')) {
+                component = 'CTAWidget';
+                preset = 'subscribe';
+            }
+            steps = [{
+                step_id: 'motion_comp',
+                action: 'addMotionComponent',
+                args: { component, preset, params: compParams },
+                reason: `Add a ${component} (${preset}) motion component`
+            }];
+            break;
+        }
+
+        case 'design_scene':
+            steps = [{
+                step_id: 'design_scene_1',
+                action: 'design_scene',
+                args: { brief: params.brief || intent?.originalPrompt || intent?.prompt || '' },
+                reason: 'Design the graphics sequence this brief describes'
+            }];
+            break;
+
+        case 'apply_motion_expression':
+            steps = [{
+                step_id: 'expr_1',
+                action: 'apply_motion_expression',
+                args: {
+                    clipId: clipId || params.clipId,
+                    property: params.property || 'scale',
+                    expression: params.expression,
+                    target: params.target || 'clip'
+                },
+                reason: `Apply ${params.expression} expression to ${params.property || 'scale'}`
+            }];
+            break;
+
+        case 'set_track_matte':
+            steps = [{
+                step_id: 'matte_1',
+                action: 'set_track_matte',
+                args: {
+                    clipId: clipId || params.clipId,
+                    sourceLayerId: params.sourceLayerId || params.source_layer_id,
+                    mode: params.mode || 'alpha'
+                },
+                reason: `Set track matte (${params.mode || 'alpha'})`
+            }];
+            break;
+
+        case 'set_layer_parent':
+            steps = [{
+                step_id: 'parent_1',
+                action: 'set_layer_parent',
+                args: {
+                    clipId: clipId || params.clipId,
+                    parentId: params.parentId || params.parent_id
+                },
+                reason: 'Link layer to parent transform'
+            }];
+            break;
+
+        case 'set_vector_trim':
+            steps = [{
+                step_id: 'trim_1',
+                action: 'set_vector_trim',
+                args: {
+                    clipId: clipId || params.clipId,
+                    trimStart: params.trimStart ?? 0,
+                    trimEnd: params.trimEnd ?? 1,
+                    trimOffset: params.trimOffset ?? 0,
+                    drawOn: params.drawOn ?? true,
+                    drawOnDuration: params.drawOnDuration ?? 1.5
+                },
+                reason: 'Animate vector trim path draw-on'
+            }];
+            break;
+
+        case 'apply_aesthetic_preset':
+            steps = [{
+                step_id: 'aesthetic_1',
+                action: 'apply_aesthetic_preset',
+                args: { preset: params.preset || 'vox' },
+                reason: `Apply ${params.preset || 'vox'} creator aesthetic`
+            }];
             break;
 
         case 'redo_action':

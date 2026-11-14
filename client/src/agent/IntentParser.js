@@ -688,7 +688,7 @@ export class IntentParser {
         // details. Splitting a footage effect stack at "and" turns one stack
         // into separate clauses (and "film grain" alone is not a full intent),
         // which previously deferred the command to the legacy filter parser.
-        if (['create_video_from_assets', 'create_video_from_script', 'apply_motion_effect_stack', 'apply_aesthetic_preset', 'apply_motion_expression', 'set_track_matte', 'set_vector_trim', 'set_layer_parent', 'repurpose_shorts', 'animate_automatically'].includes(wholeCommand?.id)) return null;
+        if (['create_video_from_assets', 'create_video_from_script', 'apply_motion_effect_stack', 'apply_aesthetic_preset', 'apply_motion_expression', 'set_track_matte', 'set_vector_trim', 'set_layer_parent', 'repurpose_shorts', 'animate_automatically', 'add_motion_component'].includes(wholeCommand?.id)) return null;
         if ((lowerPrompt.includes('clean') || lowerPrompt.includes('remove silence'))
             && (lowerPrompt.includes('dynamic') || lowerPrompt.includes('zoom rhythm'))
             && !/\b(multicam|multi-cam|multi camera|multi-camera)\b/.test(lowerPrompt)) {
@@ -706,7 +706,7 @@ export class IntentParser {
         // not separate tool requests. `sync_cutaways` is also kept intact:
         // splitting "sync the b-roll and number pops" at "and" would leave
         // the first clause as contextual-b-roll-only and discard number pops.
-        if (leadingCommand?.macro || ['polish_short', 'apply_style_recipe', 'storyboard_video', 'sync_cutaways', 'repurpose_shorts', 'animate_automatically'].includes(leadingCommand?.id)) return null;
+        if (leadingCommand?.macro || ['polish_short', 'apply_style_recipe', 'storyboard_video', 'sync_cutaways', 'repurpose_shorts', 'animate_automatically', 'add_motion_component'].includes(leadingCommand?.id)) return null;
         const clauses = cleanPrompt
             .split(/\s+(?:and then|then|and also|also|and|plus|et puis|et aussi|et)\s+|\s*;\s*/i)
             .map(part => part.trim().replace(/^[,.;\s]+|[,.;\s]+$/g, ''))

@@ -354,7 +354,8 @@ const workflowMachine = createMachine({
                                             ts.playbackEngine?.seek?.(t);
                                         }
 
-                                        const shouldResume = context.wasPlaying || result.operation === 'auto_edit';
+                                        // Option A: keep playback paused after edit so user can review at their own pace without preview reload freezes
+                                        const shouldResume = false;
                                         if (shouldResume && !ts.isPlaying) {
                                             ts.setIsPlaying(true);
                                         }

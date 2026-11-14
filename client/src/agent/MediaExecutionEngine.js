@@ -1595,6 +1595,7 @@ export class MediaExecutionEngine {
                 };
             }
 
+            case 'add_motion_component':
             case 'addMotionComponent': {
                 const clipsBefore = new Set((store.tracks || []).flatMap(track => (track.clips || []).map(clip => clip.id)));
                 const result = this._callStore(store, 'addMotionComponent', args.component, args.preset, args.params || {});

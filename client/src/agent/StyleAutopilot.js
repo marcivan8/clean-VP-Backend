@@ -356,10 +356,10 @@ export async function runAutopilot(request, opts = {}) {
     const skippedAll = [...skipped, ...alreadyDone];
     const skippedText = skippedAll.length ? ` Skipped: ${skippedAll.join('; ')}.` : '';
 
-    // Seamless playback: auto-preview the finished edit from the beginning
+    // Option A: land paused at the beginning for user review (prevents conflicting with Revideo preview reload)
     const freshStore = useTimelineStore.getState();
     freshStore.seek(0);
-    freshStore.setIsPlaying(true);
+    freshStore.setIsPlaying(false);
 
     return {
         success: true,

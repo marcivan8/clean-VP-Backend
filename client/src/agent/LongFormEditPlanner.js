@@ -401,8 +401,8 @@ export class LongFormEditPlanner {
         steps.push(S('add_transitions_to_sections', {
             type: 'dissolve',
             duration: 0.3,
-            apply_at: 'all_cuts',
-            reason: 'Smooth narrative flow for full build',
+            apply_at: 'semantic_boundaries',
+            reason: 'Smooth narrative flow for section changes',
         }));
 
         steps.push(S('normalize_audio', { reason: 'Master output audio normalization' }));

@@ -603,7 +603,7 @@ export class EditPlanner {
                 const text = raw.toLowerCase();
                 let component = 'TitleSequence';
                 let preset = 'cinematic';
-                const params = {};
+                const params = { asCompound: true };
                 // The words to show: quoted text, or what follows "saying" / "that says" / "with the text".
                 const quoted = raw.match(/["“”«]([^"“”«»]{1,80})["“”»]/);
                 const said = raw.match(/\b(?:saying|that says|which says|with the text|reading|disant)\s*:?\s+(.{1,80})$/i);
@@ -621,12 +621,27 @@ export class EditPlanner {
                 } else if (text.includes('lower third')) {
                     component = 'LowerThird';
                     preset = text.includes('modern') ? 'modern-line' : 'pro-minimal';
+                } else if (text.includes('quote')) {
+                    component = 'QuoteCard';
+                    preset = 'editorial';
+                } else if (text.includes('cta') || text.includes('subscribe') || text.includes('follow')) {
+                    component = 'CTAWidget';
+                    preset = 'subscribe';
                 } else {
                     component = 'TitleSequence';
                     preset = text.includes('bold') ? 'modern-bold' : text.includes('minimal') ? 'minimal' : 'cinematic';
                 }
+                if (!params.title && !params.label && (component === 'TitleSequence' || component === 'KineticTitle')) {
+                    const words = Array.isArray(state?.captions) ? state.captions : [];
+                    if (words.length > 0) {
+                        const snippet = words.slice(0, 5).map(w => w.word || w.text || '').filter(Boolean).join(' ').trim();
+                        if (snippet) params.title = snippet.toUpperCase();
+                    } else if (state?.transcriptSummary) {
+                        params.title = String(state.transcriptSummary).slice(0, 30).trim().toUpperCase();
+                    }
+                }
                 return this.buildPlan(planId, 'add_motion_component', [
-                    { step_id: 'step_1', action: 'addMotionComponent', args: { component, preset, params }, reason: `Add a ${component} (${preset}) motion component` },
+                    { step_id: 'step_1', action: 'addMotionComponent', args: { component, preset, params }, reason: `Add a ${component} (${preset}) motion component as a compound clip` },
                 ]);
             }
             case 'layout_split_screen':       return this.planSingleStep(planId, 'layout_split_screen', 'Split screen: speaker top, b-roll bottom');

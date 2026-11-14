@@ -196,7 +196,7 @@ export default function ShortsPanel({ onExport }) {
     }, [preparing, polish, popOut, sfx, t, isFree]);
 
     const handleExport = useCallback(async (short) => {
-        if (isFree) {
+        if (isFree && process.env.NODE_ENV === 'production') {
             EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                 reason: 'paid_feature',
                 message: t('shortsPanel.lockedMessage', 'AI Shorts repurposing is available on Creator and Pro plans.'),
@@ -217,10 +217,29 @@ export default function ShortsPanel({ onExport }) {
                     tracks: built.tracks,
                     duration: built.duration,
                     aspectRatio: built.aspectRatio,
+                    assets: (mainEditState().assets || []),
                     onProgress: (p) => setBusy(b => ({ ...b, [short.id]: Math.round(Number(p) || 0) })),
                 },
             );
             useTimelineStore.getState().updateShort(short.id, { exportUrl: result?.url || null, exportedAt: Date.now() });
+
+            // Automatically download exported short
+            if (result?.url) {
+                try {
+                    const res = await fetch(result.url);
+                    const blob = await res.blob();
+                    const blobUrl = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = blobUrl;
+                    a.download = result.filename || `${short.title || 'short'}-${profile.id}.mp4`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(blobUrl);
+                } catch {
+                    window.open(result.url, '_blank');
+                }
+            }
         } catch (err) {
             console.error('[ShortsPanel] export failed:', err.message);
             setErrors(e => ({ ...e, [short.id]: err.message }));
@@ -274,7 +293,7 @@ export default function ShortsPanel({ onExport }) {
     }, []);
 
     const handleExportAll = useCallback(async () => {
-        if (isFree) {
+        if (isFree && process.env.NODE_ENV === 'production') {
             EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                 reason: 'paid_feature',
                 message: t('shortsPanel.lockedMessage', 'AI Shorts repurposing is available on Creator and Pro plans.'),

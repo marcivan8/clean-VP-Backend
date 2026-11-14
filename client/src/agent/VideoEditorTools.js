@@ -3756,8 +3756,9 @@ export class VideoEditorTools {
 
                 if (targets.length === 0) {
                     return {
-                        success: false,
-                        message: 'No major scene shifts or chapter boundaries found on the timeline — dialogue jump-cuts were kept clean without transitions.',
+                        success: true,
+                        message: 'Dialogue jump-cuts were kept clean without transitions — no major scene shifts or chapter boundaries required transitions.',
+                        count: 0,
                     };
                 }
             } else {

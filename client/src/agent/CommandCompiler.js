@@ -1172,6 +1172,7 @@ const COMMAND_REGISTRY = new Map([
     ['remove_blur_zone', { compiler: compileAtomicStore('remove_blur_zone', 'Remove the blur zone') }],
     ['add_template',              { compiler: compileAtomicStore('add_template', 'Add an animated template') }],
     ['addMotionComponent',        { compiler: compileAtomicStore('addMotionComponent', 'Add a motion graphics component') }],
+    ['add_motion_component',       { compiler: compileAtomicStore('addMotionComponent', 'Add a motion graphics component') }],
     ['design_scene',              { compiler: compileAtomicStore('design_scene', 'Design a graphics sequence from the brief') }],
     ['apply_motion_effect_stack', { compiler: compileAtomicStore('apply_motion_effect_stack', 'Apply a footage effect stack') }],
     ['set_brand_kit',             { compiler: compileAtomicStore('set_brand_kit', 'Store the brand colours and fonts') }],
