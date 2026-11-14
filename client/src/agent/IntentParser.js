@@ -813,7 +813,7 @@ export class IntentParser {
      */
     static tryCompleteCreativeBrief(prompt) {
         const text = String(prompt || '');
-        if (text.length < 300) return null;
+        if (text.length < 220) return null;
 
         const lower = text.toLowerCase();
         const briefSignals = [
@@ -822,8 +822,30 @@ export class IntentParser {
             'professionally edited', 'production team', 'editing structure',
             'overall visual style', 'full creative edit', 'final objective',
             'complete, polished', 'dynamic creator edit',
+            'visual direction', 'creator content', 'attention-grabbing hook',
+            'high-retention', 'documentary-style', 'sophisticated motion',
         ];
-        if (!briefSignals.some(s => lower.includes(s))) return null;
+
+        // Multi-domain creative prompt detection:
+        // A multi-paragraph or multi-sentence prompt covering multiple editing
+        // dimensions (hook, cuts/dead air, captions/typography, motion/graphics,
+        // camera/zoom, sound design, grading, transitions, social destination)
+        // is a complete creative brief, NOT a request for one isolated single atomic tool.
+        const domainPatterns = [
+            /\b(?:hook|opening hook|first \d+ seconds?)\b/i,
+            /\b(?:tight cuts?|dead air|retention|eliminate dead air|cut out pauses|eliminate pauses)\b/i,
+            /\b(?:captions?|subtitles?|kinetic typography|animated text|typography)\b/i,
+            /\b(?:motion graphics?|callouts?|icons?|animated overlays?|motion design)\b/i,
+            /\b(?:punch-in|zooms?|camera movement|reframing|kinetic camera)\b/i,
+            /\b(?:sound design|whoosh(?:es)?|sfx|sound effects?|background music)\b/i,
+            /\b(?:color grad(?:ing|e)|cinematic color|lut|lighting)\b/i,
+            /\b(?:transitions?|seamless transitions?)\b/i,
+            /\b(?:vertical reel|reel|tiktok|youtube shorts?|shorts?)\b/i,
+        ];
+        const matchedDomains = domainPatterns.filter(re => re.test(lower)).length;
+
+        const isBrief = briefSignals.some(s => lower.includes(s)) || matchedDomains >= 3;
+        if (!isBrief) return null;
 
         return {
             intent: 'long_form_build',

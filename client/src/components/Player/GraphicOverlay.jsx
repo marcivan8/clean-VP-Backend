@@ -1275,6 +1275,7 @@ const GraphicOverlay = ({ placementFilter = 'all', onWarning = null }) => {
                 const motion = { ...resolvedMotion, opacity: groupOpacity > 1e-6 ? resolvedMotion.opacity / groupOpacity : resolvedMotion.opacity };
 
                 const isTemplate = (clip.type === 'template' && !!clip.template) || (clip.type === 'vector' && !!clip.vector);
+                const isText = clip.type === 'text' || Boolean(clip.content);
                 const frameAspect = typeof aspectRatio === 'number' ? aspectRatio
                     : typeof aspectRatio === 'string' && aspectRatio.includes(':')
                         ? Number(aspectRatio.split(':')[0]) / Number(aspectRatio.split(':')[1])
@@ -1284,7 +1285,7 @@ const GraphicOverlay = ({ placementFilter = 'all', onWarning = null }) => {
                     ? { layer, base: resolvedMotion, frameAspect }
                     : null;
                 const src = resolveOverlayMediaUrl(clip, asset);
-                if (!src && !isTemplate) return null;
+                if (!src && !isTemplate && !isText) return null;
 
                 const matteEntry = clip.sceneMask?.kind === 'layer' && clip.sceneId
                     ? sceneNodeClips.get(`${clip.sceneId}:${clip.sceneMask.nodeId}`)
@@ -1410,6 +1411,18 @@ const GraphicOverlay = ({ placementFilter = 'all', onWarning = null }) => {
                                 style={{ opacity: transformBlurContext ? alphaFade : motion.opacity * alphaFade, pointerEvents: 'none', ...(shakeTransform ? { transform: shakeTransform, transformOrigin: 'center' } : {}), ...(overlayFilter ? { filter: overlayFilter } : {}) }} />
                             : isVideo
                             ? <OverlayVideo clip={renderClip} src={src} currentTime={currentTime} isPlaying={isPlaying} style={mediaStyle} motionContext={transformBlurContext} />
+                            : isText
+                            ? <div style={{
+                                fontFamily: clip.fontFamily || 'var(--font-sans)',
+                                fontSize: clip.fontSize ? `${clip.fontSize}px` : '28px',
+                                fontWeight: clip.fontWeight || 700,
+                                color: clip.color || '#fff',
+                                textShadow: clip.textShadow || '0 2px 10px rgba(0,0,0,0.7)',
+                                textAlign: clip.textAlign || 'center',
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-word',
+                                ...mediaStyle,
+                            }}>{clip.content}</div>
                             : <OverlayImage clip={renderClip} src={src} style={mediaStyle} currentTime={currentTime} motionContext={transformBlurContext} />}
                         {isVideo && fadeOverlays.map((fade, index) => <div key={`fade-${index}`} aria-hidden="true" style={{ position: 'absolute', inset: 0, backgroundColor: fade.color, opacity: fade.opacity, pointerEvents: 'none' }} />)}
                         {vignetteStyle && <div aria-hidden="true" style={vignetteStyle} />}

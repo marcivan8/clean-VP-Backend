@@ -603,7 +603,8 @@ export class EditPlanner {
                 const text = raw.toLowerCase();
                 let component = 'TitleSequence';
                 let preset = 'cinematic';
-                const params = { asCompound: true };
+                const wantsCompound = /\b(?:compound|compound clip|nested|bundle)\b/i.test(text);
+                const params = { asCompound: wantsCompound };
                 // The words to show: quoted text, or what follows "saying" / "that says" / "with the text".
                 const quoted = raw.match(/["“”«]([^"“”«»]{1,80})["“”»]/);
                 const said = raw.match(/\b(?:saying|that says|which says|with the text|reading|disant)\s*:?\s+(.{1,80})$/i);
@@ -641,7 +642,7 @@ export class EditPlanner {
                     }
                 }
                 return this.buildPlan(planId, 'add_motion_component', [
-                    { step_id: 'step_1', action: 'addMotionComponent', args: { component, preset, params }, reason: `Add a ${component} (${preset}) motion component as a compound clip` },
+                    { step_id: 'step_1', action: 'addMotionComponent', args: { component, preset, params }, reason: wantsCompound ? `Add a ${component} (${preset}) motion component as a compound clip` : `Add a ${component} (${preset}) motion component` },
                 ]);
             }
             case 'layout_split_screen':       return this.planSingleStep(planId, 'layout_split_screen', 'Split screen: speaker top, b-roll bottom');

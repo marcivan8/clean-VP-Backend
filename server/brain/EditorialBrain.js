@@ -396,7 +396,8 @@ class EditorialBrain {
                 completion = await this.openai.chat.completions.create(callPayload);
             } catch (firstErr) {
                 const isRateLimit = firstErr.status === 429 || /429|rate limit/i.test(firstErr.message);
-                if (isRateLimit) {
+                const isTokenLimit = firstErr.status === 413 || /413|request too large|tokens per minute|tpm/i.test(firstErr.message);
+                if (isRateLimit || isTokenLimit) {
                     const match = firstErr.message?.match(/try again in ([\d\.]+)s/i);
                     const waitSec = match ? parseFloat(match[1]) : null;
 
@@ -415,8 +416,10 @@ class EditorialBrain {
                         }
                     };
 
-                    // If the required wait is short (<= 6 seconds), sleep and retry once
-                    if (waitSec !== null && waitSec <= 6) {
+                    if (isTokenLimit) {
+                        console.warn('[EditorialBrain] Request too large / TPM limit hit on primary model; immediately switching to fallback model');
+                        completion = await callGroqFallback();
+                    } else if (waitSec !== null && waitSec <= 6) {
                         console.warn(`[EditorialBrain] 429 rate limit hit — backing off for ${waitSec.toFixed(1)}s...`);
                         await new Promise(r => setTimeout(r, Math.ceil(waitSec * 1000) + 250));
                         try {
