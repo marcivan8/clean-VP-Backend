@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
+import DecorativeCanvas from './DecorativeCanvas';
 import * as THREE from 'three';
 import { prefersReducedMotion } from './motion';
 
@@ -134,7 +135,7 @@ const HeroObject = ({ className = '', style = null }) => {
 
     return (
         <div className={`vl-canvas-host ${className}`} style={style} aria-hidden="true">
-            <Canvas
+            <DecorativeCanvas
                 dpr={[1, 2]}
                 camera={{ position: [0, 0, 7.8], fov: 40 }}
                 gl={{ antialias: true, alpha: true, powerPreference: 'low-power' }}
@@ -150,7 +151,7 @@ const HeroObject = ({ className = '', style = null }) => {
                 <pointLight color={0x00e5ff} intensity={13} distance={24} position={[-4, 1.6, 3.6]} />
                 <pointLight color={0x8a2be2} intensity={11} distance={24} position={[4, -2, 3]} />
                 <Gyroscope animate={animate} />
-            </Canvas>
+            </DecorativeCanvas>
         </div>
     );
 };

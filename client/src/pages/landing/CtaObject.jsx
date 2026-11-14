@@ -1,5 +1,6 @@
 import React, { useMemo, useRef } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { useFrame } from '@react-three/fiber';
+import DecorativeCanvas from './DecorativeCanvas';
 import * as THREE from 'three';
 import { StudioEnvironment } from './HeroObject';
 import { prefersReducedMotion } from './motion';
@@ -85,7 +86,7 @@ const CtaObject = ({ className = '', style = null }) => {
 
     return (
         <div className={className} style={style} aria-hidden="true">
-            <Canvas
+            <DecorativeCanvas
                 dpr={[1, 2]}
                 camera={{ position: [0, 0, 6.4], fov: 40 }}
                 gl={{ antialias: true, alpha: true, powerPreference: 'low-power' }}
@@ -100,7 +101,7 @@ const CtaObject = ({ className = '', style = null }) => {
                 <pointLight color={0x00e5ff} intensity={11} distance={24} position={[-4, 1.6, 3.6]} />
                 <pointLight color={0x8a2be2} intensity={9} distance={24} position={[4, -2, 3]} />
                 <Cluster animate={animate} />
-            </Canvas>
+            </DecorativeCanvas>
         </div>
     );
 };
