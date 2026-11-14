@@ -96,11 +96,25 @@ function getOperationMeta(operation) {
 // Silence + filler on a 12-min video takes ~5 min combined; 15 min gives ample margin.
 const PROCESSING_TIMEOUT_MS = 15 * 60 * 1000;
 
+const SLOW_AI_COMMAND_MS = 60 * 1000;
+
+function trackAICommandOutcome(attrs, durationMs) {
+    trackEvent('ai_edit_finished', {
+        ...attrs,
+        duration_ms: Math.round(durationMs),
+        slow: durationMs >= SLOW_AI_COMMAND_MS,
+    });
+}
+
 /**
  * Sentry metrics for AI commands: latency from prompt to applied edit and a
  * finished counter, both tagged with the operation (IntentParser's fixed
  * vocabulary, so low-cardinality) and the outcome. Never alters the result
  * or the error — it only observes, then returns/rethrows unchanged.
+ *
+ * The same outcome and duration also go to PostHog as 'ai_edit_finished'.
+ * The 'ai_edit:<operation>' event fires only on success, so without this
+ * event failed and slow edits are not visible next to session replays.
  */
 async function measureAICommand(phase, run) {
     const t0 = nowMs();
@@ -111,11 +125,13 @@ async function measureAICommand(phase, run) {
         const attrs = { phase, operation: result?.operation || 'unknown', outcome };
         distributionMetric('ai.command.duration', nowMs() - t0, 'millisecond', attrs);
         countMetric('ai.command.finished', attrs);
+        trackAICommandOutcome(attrs, nowMs() - t0);
         return result;
     } catch (err) {
         const attrs = { phase, operation: 'unknown', outcome: 'error' };
         distributionMetric('ai.command.duration', nowMs() - t0, 'millisecond', attrs);
         countMetric('ai.command.finished', attrs);
+        trackAICommandOutcome({ ...attrs, error_name: err?.name || null }, nowMs() - t0);
         throw err;
     }
 }
@@ -373,6 +389,7 @@ const workflowMachine = createMachine({
                     actions: () => {
                         countMetric('ai.command.timeout', { phase: 'prompt' });
                         stopAutopilot(); // R91: no further Auto steps after the UI said it stopped.
+                        trackEvent('ai_edit_timeout', { phase: 'prompt', timeout_ms: PROCESSING_TIMEOUT_MS });
                         console.error('[Workflow] Processing timed out after 15 minutes');
                         useAIStore.getState().setIsAnalyzing(false);
                         useAIStore.getState().addLog({

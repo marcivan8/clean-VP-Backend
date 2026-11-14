@@ -81,6 +81,7 @@
   "ideLayout": {
     "clickToRename": "Click to rename",
     "untitledProject": "Untitled Project",
+    "updatingPreview": "Updating preview…",
     "rendering": "Rendering...",
     "export": "Export",
     "mediaAndAssets": "Media & Assets",
