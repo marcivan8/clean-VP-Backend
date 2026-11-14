@@ -1,5 +1,10 @@
 /**
+ * NOT MOUNTED TODAY (R166)
+ *
  * InterviewEditPanel.jsx
+ *
+ * Unmounted per user request to streamline the editor UI and remove the interview tab.
+ * The underlying API routes (/api/interview/*) remain functional if ever revived.
  *
  * "Fake multi-camera" zoom rhythm for single-camera talking-head / interview /
  * podcast videos.

@@ -1,3 +1,12 @@
+/**
+ * NOT MOUNTED TODAY (R166)
+ *
+ * TimelineVisualShelf.jsx
+ *
+ * Superseded by TransitionBox.jsx per user request to put timeline transitions into
+ * a floating/collapsible transition box that can be toggled without cluttering the timeline.
+ */
+
 import React from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { ArrowDownToLine, Sparkles, Wind } from 'lucide-react';
