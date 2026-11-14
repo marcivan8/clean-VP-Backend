@@ -815,6 +815,13 @@ export class IntentParser {
         const text = String(prompt || '');
         if (text.length < 220) return null;
 
+        // Explicit finish or style recipe commands carry their own dedicated
+        // finishing pipelines (polish_short, apply_style_recipe). They must not
+        // be intercepted as a generic long_form_edit build.
+        if (/^(?:pro finish|polish (?:short|the short)|apply (?:the )?[\w\s-]+(?:style )?recipe)\b/i.test(text.trim())) {
+            return null;
+        }
+
         const lower = text.toLowerCase();
         const briefSignals = [
             'act as a senior', 'act as a professional', 'act as an experienced',
