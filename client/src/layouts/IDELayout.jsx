@@ -56,6 +56,7 @@ import { PanelSection, ControlRow, TrackSlider } from '../components/ui/PanelCon
 import ShortsPanel from '../components/ShortsPanel'; // R92 round B: repurposed shorts
 import SnapGuidesLayer from '../components/Player/SnapGuidesLayer.jsx'; // R92 round C
 import ShortPreviewBar from '../components/Player/ShortPreviewBar.jsx'; // R93
+import PreviewReloadIndicator from '../components/Player/PreviewReloadIndicator.jsx';
 import LayoutPresetPicker from '../components/LayoutPresetPicker.jsx';
 import AssetPanel from '../components/AssetPanel';
 // R108 — the desktop panel switcher. Adding a panel still means BOTH an entry
@@ -525,6 +526,13 @@ const IDELayout = ({ mode = 'editor' }) => {
         };
     }, [deferredTracks, duration, aspectRatio, assets, toProxyUrl]);
 
+    // The same string the <Player> puts on its `variables` attribute. The
+    // player reloads only when this string changes, so the reload indicator
+    // compares it rather than the object identity.
+    const playerVariablesJson = React.useMemo(() => JSON.stringify(playerVariables), [playerVariables]);
+    const playerClipCount = playerVariables.tracks.reduce((n, t) => n + t.clips.length, 0);
+    const playerKey = `player-${aspectRatio}-${hasClips ? 'media' : 'empty'}`;
+
     // R118 - the Colour panel's Reset is live only when something differs from
     // the neutral grade, so a header offering to undo nothing is never shown.
     // `_lutId`/`_lutName`/`_manuallyAdjusted` are bookkeeping, not grade, so
@@ -929,6 +937,8 @@ const IDELayout = ({ mode = 'editor' }) => {
 
     const projectLoaderRef = useRef(null);
     const playerRef = useRef(null);
+    const previewSurfaceRef = useRef(null);
+    const previewReloadRef = useRef(null);
 
     // iPhone / iPad Safari: Revideo's media elements need playsinline and a
     // user-gesture unlock, or the preview stays black (utils/iosMediaUnlock.js).
@@ -944,6 +954,7 @@ const IDELayout = ({ mode = 'editor' }) => {
         playerRef.current = revideoPlayer;
         useTimelineStore.getState().setPlayerRef(revideoPlayer);
         console.log("[IDELayout] Revideo Player Ready", revideoPlayer);
+        previewReloadRef.current?.attachPlayer(revideoPlayer);
 
         // Safety net: if a variables change slips through and triggers a Revideo reload
         // while playing, the loop-guard in Player.prepare() overrides the saved seek
@@ -2973,6 +2984,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                             <ShortPreviewBar />
 
                             <div
+                                ref={previewSurfaceRef}
                                 data-scene-review-surface="true"
                                 className="bg-black rounded-lg shadow-2xl relative border border-white/5 group overflow-hidden"
                                 style={{
@@ -3004,7 +3016,7 @@ const IDELayout = ({ mode = 'editor' }) => {
 
                                         return (
                                             <Player
-                                                key={`player-${aspectRatio}-${hasClips ? 'media' : 'empty'}`}
+                                                key={playerKey}
                                                 onPlayerReady={handlePlayerReady}
                                                 playing={isPlaying}
                                                 controls={false}
@@ -3026,6 +3038,14 @@ const IDELayout = ({ mode = 'editor' }) => {
                                         );
                                     })()}
                                 </ErrorBoundary>
+                                <PreviewReloadIndicator
+                                    ref={previewReloadRef}
+                                    playerKey={playerKey}
+                                    variablesJson={playerVariablesJson}
+                                    clipCount={playerClipCount}
+                                    surfaceRef={previewSurfaceRef}
+                                    label={t('ideLayout.updatingPreview')}
+                                />
                                 {/* R99 — freeform zone blur: a backdrop-filter DOM
                                     layer, mounted BELOW the text/graphics overlays
                                     (so captions/stickers drawn in a blurred zone stay
