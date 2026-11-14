@@ -902,18 +902,18 @@ class PlaybackEngine {
         }
     }
 
+    // Deprecated but compatible
+    setFilter(filter) {
+        // ...
+        console.warn("[PlaybackEngine] setFilter is deprecated for WebGL engine. Use setGrading.");
+    }
+
     registerScopeListener(callback) {
         this.scopeListener = callback;
     }
 
     unregisterScopeListener() {
         this.scopeListener = null;
-    }
-
-    // Deprecated but compatible
-    setFilter(filter) {
-        // ...
-        console.warn("[PlaybackEngine] setFilter is deprecated for WebGL engine. Use setGrading.");
     }
 
     setMasterVolume(value) {
