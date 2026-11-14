@@ -154,6 +154,16 @@ const PATTERNS = [
         intent: (m) => ({ type: 'edit', action: 'set_aspect_ratio', constraints: { ratio: m[1] }, confidence: 'high' })
     },
 
+    // ── REPURPOSE SHORTS ───────────────────────────────────────────────────
+    {
+        regex: /(?:repurpose|recycle|cut|make|generate|turn|transform|decoupe|fais)\s+(?:this\s+|the\s+)?(?:video|long\s+video|footage\s+)?(?:in)?to\s+(?:\d+\s+)?(?:shorts?|reels?|social\s+clips?|clips?)/i,
+        intent: () => ({ type: 'edit', action: 'repurpose_shorts', confidence: 'high' })
+    },
+    {
+        regex: /(?:find|get|give\s+me|trouve|fais)\s+(?:some\s+|a\s+few\s+|several\s+|\d+\s+)?(?:shorts?|reels?|clips?\s+for\s+(?:tiktok|socials?|reels|shorts))/i,
+        intent: () => ({ type: 'edit', action: 'repurpose_shorts', confidence: 'high' })
+    },
+
     // ── REMOVE / DELETE ────────────────────────────────────────────────────
     {
         regex: /^(?:delete|remove|erase|trash|ditch|get\s+rid\s+of)\s+(?:the\s+)?(?:current\s+)?(?:clip|selection|this)$/i,

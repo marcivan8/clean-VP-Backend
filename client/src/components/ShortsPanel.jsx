@@ -28,6 +28,7 @@ import { createProject } from '../lib/projectsApi.js';
 import { captureShortThumbnail, getCachedShortThumbnail, thumbnailKey } from '../utils/captureShortThumbnail.js';
 import { useUserPlan } from '../hooks/useUserPlan.js';
 import { EventBus, EVENT_TYPES } from '../agent/EventBus.js';
+import useAIStore from '../store/useAIStore.js';
 
 const fmt = (s) => {
     const n = Math.max(0, Math.round(Number(s) || 0));
@@ -93,7 +94,16 @@ export default function ShortsPanel({ onExport }) {
     const [busy, setBusy] = useState({});         // id -> export progress 0..100
     const [preparing, setPreparing] = useState(null); // id of the short being readied for preview
     const [errors, setErrors] = useState({});
+    const [panelError, setPanelError] = useState(null);
     const [thumbs, setThumbs] = useState({});     // thumbnailKey -> data URL | null
+    const [isFinding, setIsFinding] = useState(false);
+    const isAnalyzing = useAIStore(s => s.isAnalyzing);
+
+    useEffect(() => {
+        if (!isAnalyzing) {
+            setIsFinding(false);
+        }
+    }, [isAnalyzing, shorts]);
 
     // Treatment options
     const [polish, setPolish] = useState(true);
@@ -138,11 +148,22 @@ export default function ShortsPanel({ onExport }) {
             });
             return;
         }
+        setPanelError(null);
+        const total = (useTimelineStore.getState().tracks || []).reduce((m, t) => Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
+        if (total < 10) {
+            setPanelError(total === 0
+                ? t('shortsPanel.noClips', 'Add video footage to the timeline before generating shorts.')
+                : t('shortsPanel.tooShort', `The video on the timeline is ${Math.round(total)} s long, too short to cut shorts out of (at least 10 s required).`));
+            return;
+        }
+        setIsFinding(true);
         try {
             const { workflowController } = await import('../agent/WorkflowController.js');
             workflowController.processUserPrompt(t('shortsPanel.findPrompt'));
         } catch (err) {
             console.error('[ShortsPanel] find failed:', err.message);
+            setIsFinding(false);
+            setPanelError(err.message);
         }
     }, [t, isFree]);
 
@@ -309,10 +330,27 @@ export default function ShortsPanel({ onExport }) {
                 </div>
             )}
 
-            <button type="button" onClick={handleFind}
-                className="w-full mb-3 px-2 py-1.5 rounded text-[11px] bg-primary/15 border border-primary/40 text-primary flex items-center justify-center gap-1.5">
-                <Wand2 className="w-3 h-3" /> {sorted.length ? t('shortsPanel.findAgain') : t('shortsPanel.find')}
-                {isFree && <Lock className="w-2.5 h-2.5 ml-1 text-primary" />}
+            {panelError && (
+                <div className="mb-3 p-2.5 rounded bg-destructive/15 border border-destructive/30 text-destructive text-[11px] flex items-start gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <span className="flex-1">{panelError}</span>
+                </div>
+            )}
+
+            <button type="button" onClick={handleFind} disabled={isFinding}
+                className="w-full mb-3 px-2 py-1.5 rounded text-[11px] bg-primary/15 border border-primary/40 text-primary flex items-center justify-center gap-1.5 disabled:opacity-50 transition-opacity">
+                {isFinding ? (
+                    <>
+                        <Loader2 className="w-3 h-3 animate-spin text-primary" />
+                        <span>{t('shortsPanel.findingMoments', 'Finding shorts across video…')}</span>
+                    </>
+                ) : (
+                    <>
+                        <Wand2 className="w-3 h-3" />
+                        <span>{sorted.length ? t('shortsPanel.findAgain') : t('shortsPanel.find')}</span>
+                        {isFree && <Lock className="w-2.5 h-2.5 ml-1 text-primary" />}
+                    </>
+                )}
             </button>
 
             {/* Finish treatment toggles */}

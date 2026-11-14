@@ -20,7 +20,7 @@
  */
 
 import i18next from 'i18next';
-import { EventBus, EVENT_TYPES } from '../agent/EventBus';
+import { EventBus, EVENT_TYPES } from '../agent/EventBus.js';
 import { quotaReason } from './quotaReason.js';
 
 /**
