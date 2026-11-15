@@ -278,10 +278,19 @@ function commandsPromptSection(ctx) {
         '  pipeline must run the command and verify its postcondition first.',
     );
 
-    const readyIds = ready.map(c => c.id);
-    const editorKnowledgeBlock = buildEditorKnowledgePrompt(readyIds, ctx);
-    if (editorKnowledgeBlock) {
-        parts.push('', editorKnowledgeBlock);
+    const hasActiveMedia = Boolean(
+        (ctx && ctx.clipCount > 0) ||
+        (ctx && ctx.totalAssets > 0) ||
+        (ctx && Array.isArray(ctx.clips) && ctx.clips.length > 0) ||
+        (ctx && Array.isArray(ctx.assets) && ctx.assets.length > 0)
+    );
+
+    if (hasActiveMedia) {
+        const readyIds = ready.map(c => c.id);
+        const editorKnowledgeBlock = buildEditorKnowledgePrompt(readyIds, ctx);
+        if (editorKnowledgeBlock) {
+            parts.push('', editorKnowledgeBlock);
+        }
     }
 
     return parts.join('\n');

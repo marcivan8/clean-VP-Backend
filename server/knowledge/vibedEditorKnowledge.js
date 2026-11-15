@@ -726,7 +726,7 @@ const AUTONOMOUS_RECIPES = Object.freeze({
             { command: 'denoise_audio', why: 'Remove background noise and room acoustic reflections.' },
             { command: 'normalize_audio', why: 'Bring master dialogue to platform loudness target.' },
             { command: 'rhythm_zoom', why: 'Introduce visual dynamics across alternating sentences.' },
-            { command: 'place_contextual_broll', why: 'Cut away to relevant B-roll over spoken concepts.' },
+            { command: 'sync_cutaways', why: 'Cut away to relevant B-roll over spoken concepts.' },
             { command: 'auto_captions', why: 'Generate synchronized per-word subtitles.' },
             { command: 'emphasize_keywords', why: 'Color and scale key emotional words in subtitles.' },
             { command: 'apply_lut', why: 'Harmonize skin tones and apply cinematic color grade.' },
@@ -739,9 +739,9 @@ const AUTONOMOUS_RECIPES = Object.freeze({
         description: 'Repurposes and polishes high-retention vertical short-form content.',
         steps: [
             { command: 'set_aspect_ratio', params: { ratio: '9:16' }, why: 'Reframe canvas for mobile vertical consumption.' },
-            { command: 'find_hook', why: 'Locate highest-curiosity moment and place at 0:00.' },
+            { command: 'extract_short', why: 'Locate highest-curiosity moment and place at 0:00.' },
             { command: 'silence_removal', params: { threshold: '-30dB', minSilenceDuration: 0.28 }, why: 'Tighten pauses aggressively for mobile attention spans.' },
-            { command: 'apply_smart_zoom', why: 'Keep speaker face centered in vertical format.' },
+            { command: 'zoom_speaker', why: 'Keep speaker face centered in vertical format.' },
             { command: 'auto_captions', params: { style: 'karaoke_bold' }, why: 'Deliver bold karaoke subtitles for sound-off viewing.' },
             { command: 'emphasize_keywords', why: 'Highlight punch words in bright neon accents.' },
             { command: 'add_sfx', params: { category: 'whoosh' }, why: 'Add acoustic hit on hook entrance.' },
@@ -868,8 +868,8 @@ RELEVANT TOOL MASTERY (Ready for this project):
 ${domainSections.length ? domainSections.join('\n\n') : 'All standard editor tools available; verify preconditions against active timeline state.'}
 
 STANDARD AUTONOMOUS COMPOSITION RECIPES:
-• Full Polish Pipeline: silence_removal → remove_filler_words → denoise_audio → normalize_audio → rhythm_zoom → place_contextual_broll → auto_captions → emphasize_keywords → apply_lut.
-• Viral Short Pipeline: set_aspect_ratio (9:16) → find_hook → silence_removal (-30dB) → apply_smart_zoom → auto_captions (karaoke) → emphasize_keywords → add_sfx (whoosh).
+• Full Polish Pipeline: silence_removal → remove_filler_words → denoise_audio → normalize_audio → rhythm_zoom → sync_cutaways → auto_captions → emphasize_keywords → apply_lut.
+• Viral Short Pipeline: set_aspect_ratio (9:16) → extract_short → silence_removal (-30dB) → zoom_speaker → auto_captions (karaoke) → emphasize_keywords → add_sfx (whoosh).
 • Interview Pacing: detect_speakers → silence_removal (0.6s) → normalize_audio → denoise_audio → auto_captions (editorial).`;
 }
 
