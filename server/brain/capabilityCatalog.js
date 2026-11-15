@@ -20,6 +20,7 @@
 'use strict';
 
 const catalog = require('./commandCatalog.generated.json');
+const { buildEditorKnowledgePrompt } = require('../knowledge/vibedEditorKnowledge');
 
 /**
  * Resources this module can actually determine from the server's context
@@ -276,6 +277,12 @@ function commandsPromptSection(ctx) {
         '- Never claim an edit succeeded from this advisory response. The execution',
         '  pipeline must run the command and verify its postcondition first.',
     );
+
+    const readyIds = ready.map(c => c.id);
+    const editorKnowledgeBlock = buildEditorKnowledgePrompt(readyIds, ctx);
+    if (editorKnowledgeBlock) {
+        parts.push('', editorKnowledgeBlock);
+    }
 
     return parts.join('\n');
 }

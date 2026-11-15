@@ -429,6 +429,11 @@ export class MediaExecutionEngine {
         job.startTime = Date.now();
         job.setState(EXECUTION_STATES.RUNNING);
 
+        const isMultiStep = Array.isArray(job.commands) && job.commands.length > 1;
+        if (isMultiStep) {
+            try { useTimelineStore.getState().beginHistoryGroup?.(); } catch (_) {}
+        }
+
         job.timeoutHandle = setTimeout(() => {
             console.warn(`[MediaExecutionEngine] Job ${job.id} timed out`);
             job.cancel();
@@ -441,6 +446,9 @@ export class MediaExecutionEngine {
             clearTimeout(job.timeoutHandle);
 
             if (job.state === EXECUTION_STATES.CANCELLED || job.state === EXECUTION_STATES.TIMEOUT) {
+                if (isMultiStep) {
+                    try { useTimelineStore.getState().cancelHistoryGroup?.(); } catch (_) {}
+                }
                 return { success: false, jobId: job.id, state: job.state, error: job.error || 'Job was cancelled' };
             }
 
@@ -448,6 +456,9 @@ export class MediaExecutionEngine {
             const verified = await this.verifyExecution(job);
 
             if (verified) {
+                if (isMultiStep) {
+                    try { useTimelineStore.getState().endHistoryGroup?.(); } catch (_) {}
+                }
                 job.setState(EXECUTION_STATES.DONE);
                 job.endTime = Date.now();
                 job.setProgress(100);
@@ -455,6 +466,9 @@ export class MediaExecutionEngine {
                 job.onComplete(ok);
                 return ok;
             } else {
+                if (isMultiStep) {
+                    try { useTimelineStore.getState().cancelHistoryGroup?.(); } catch (_) {}
+                }
                 job.setState(EXECUTION_STATES.FAILED);
                 const failedResult = job.results.find(r => r.success === false);
                 job.error = failedResult?.error || failedResult?.message || 'Execution verification failed';
@@ -463,6 +477,9 @@ export class MediaExecutionEngine {
             }
         } catch (err) {
             clearTimeout(job.timeoutHandle);
+            if (isMultiStep) {
+                try { useTimelineStore.getState().cancelHistoryGroup?.(); } catch (_) {}
+            }
             if (err.name === 'AbortError' || job.signal.aborted) {
                 return { success: false, jobId: job.id, state: job.state, error: 'Cancelled' };
             }

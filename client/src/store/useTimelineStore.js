@@ -3885,13 +3885,44 @@ const useTimelineStore = create(
                 const changed = !!base && (
                     st.past !== before
                     || timelineManager.getState() !== base._timelineState
-                    || st.captions !== base._extraState.captions
-                    || st.duration !== base._extraState.duration
+                    || st.captions !== base._extraState?.captions
+                    || st.duration !== base._extraState?.duration
                     || st.aspectRatio !== base.aspectRatio
                     || st.scenes !== base.scenes);
                 if (base && changed) {
                     set({ _historyGroupDepth: 0, _historyGroupBase: null, _historyGroupPast: null,
                         past: [...(before || []), base].slice(-50), future: [] });
+                } else {
+                    set({ _historyGroupDepth: 0, _historyGroupBase: null, _historyGroupPast: null });
+                }
+            },
+            cancelHistoryGroup: () => {
+                const st = get();
+                const base = st._historyGroupBase;
+                const before = st._historyGroupPast;
+                if (base) {
+                    if (base._timelineState) {
+                        try {
+                            timelineManager.dispatch(
+                                { type: ACTION_TYPES.LOAD_STATE, payload: { state: base._timelineState } },
+                                { skipHistory: true }
+                            );
+                        } catch (_) {}
+                    }
+                    set({
+                        currentTime: base.currentTime,
+                        activeClipId: base.activeClipId,
+                        selectedClipIds: base.selectedClipIds || [],
+                        tracks: timelineManager.toLegacyTracks(),
+                        aspectRatio: base.aspectRatio || st.aspectRatio,
+                        scenes: base.scenes ?? st.scenes,
+                        past: before || st.past,
+                        future: [],
+                        _historyGroupDepth: 0,
+                        _historyGroupBase: null,
+                        _historyGroupPast: null,
+                        ...(base._extraState || {}),
+                    });
                 } else {
                     set({ _historyGroupDepth: 0, _historyGroupBase: null, _historyGroupPast: null });
                 }
