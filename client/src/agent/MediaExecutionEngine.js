@@ -1551,7 +1551,7 @@ export class MediaExecutionEngine {
                     plan,
                     palette: footagePalette,
                     subject: footageSubject,
-                    asCompound: args.asCompound ?? args.as_compound ?? true,
+                    asCompound: !!(args.asCompound ?? args.as_compound),
                 });
                 if (!result?.success) return { action, success: false, error: result?.error, message: result?.error };
 
