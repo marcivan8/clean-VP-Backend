@@ -223,17 +223,41 @@ async function executeChatCompletionWithFailover({
             }
         }
 
-        // 2. Try secondary AI provider if configured (e.g. Groq, OpenAI)
-        const baseProvider = resolveProvider({ capability: 'chat' });
-        if (!requestSignal.aborted && baseProvider !== provider && isAIConfigured({ capability: 'chat' })) {
+        // 1b. Try Groq model fallbacks
+        if (provider === 'groq') {
+            const groqFallbacks = ['openai/gpt-oss-20b', 'llama-3.3-70b-versatile', 'qwen/qwen3-32b'];
+            const candidateModels = groqFallbacks.filter(m => m !== model);
+            for (const fallbackModel of candidateModels) {
+                if (requestSignal.aborted) break;
+                console.warn(
+                    `[motionProvider] Groq model "${activeModel}" failed (${status || msg}); ` +
+                    `retrying with fallback "${fallbackModel}"...`
+                );
+                try {
+                    const fallbackParams = { ...requestParams, model: fallbackModel };
+                    delete fallbackParams.reasoning_effort;
+                    completion = await ai.chat.completions.create(fallbackParams, { signal: requestSignal });
+                    if (completion?.choices?.[0]?.message?.content) {
+                        return { completion, activeProvider: 'groq', activeModel: fallbackModel };
+                    }
+                } catch (fbErr) {
+                    if (deadlineController.signal.aborted && !signal?.aborted) throw timeoutError();
+                    console.warn(`[motionProvider] Groq fallback model "${fallbackModel}" failed: ${describeAIError(fbErr)}`);
+                }
+            }
+        }
+
+        // 2. Try alternate AI provider if configured (e.g. Groq -> Gemini, or Gemini -> Groq)
+        const alternateProvider = provider === 'gemini' ? 'groq' : 'gemini';
+        if (!requestSignal.aborted && isAIConfigured({ provider: alternateProvider })) {
             console.warn(
                 `[motionProvider] Provider "${provider}" exhausted all models; ` +
-                `failing over to secondary provider "${baseProvider}"...`
+                `failing over to secondary provider "${alternateProvider}"...`
             );
             try {
-                const secondaryAi = getAIClient({ timeout, provider: baseProvider });
+                const secondaryAi = getAIClient({ timeout, provider: alternateProvider });
                 if (secondaryAi) {
-                    const secondaryModel = resolveModel(model || 'gpt-4o', { provider: baseProvider, capability });
+                    const secondaryModel = resolveModel(model || 'gpt-4o', { provider: alternateProvider, capability });
                     const secondaryParams = {
                         ...requestParams,
                         model: secondaryModel,
@@ -241,10 +265,8 @@ async function executeChatCompletionWithFailover({
                             ? Number(process.env.MOTION_AI_MAX_TOKENS)
                             : (/gemini|^o\d|gpt-5/i.test(secondaryModel) ? 2000 : 700),
                     };
-                    // Gemini's reasoning control is provider-specific. If a
-                    // Gemini motion request fails over to another vendor,
-                    // don't send that vendor an unsupported Gemini setting.
-                    if (baseProvider !== 'gemini') delete secondaryParams.reasoning_effort;
+                    if (alternateProvider !== 'gemini') delete secondaryParams.reasoning_effort;
+                    else secondaryParams.reasoning_effort = 'low';
                     if (/gemma/i.test(secondaryModel)) {
                         delete secondaryParams.response_format;
                     } else {
@@ -252,12 +274,12 @@ async function executeChatCompletionWithFailover({
                     }
                     completion = await secondaryAi.chat.completions.create(secondaryParams, { signal: requestSignal });
                     if (completion?.choices?.[0]?.message?.content) {
-                        return { completion, activeProvider: baseProvider, activeModel: secondaryModel };
+                        return { completion, activeProvider: alternateProvider, activeModel: secondaryModel };
                     }
                 }
             } catch (secondaryErr) {
                 if (deadlineController.signal.aborted && !signal?.aborted) throw timeoutError();
-                console.warn(`[motionProvider] Secondary provider "${baseProvider}" failed: ${describeAIError(secondaryErr)}`);
+                console.warn(`[motionProvider] Secondary provider "${alternateProvider}" failed: ${describeAIError(secondaryErr)}`);
             }
         }
 

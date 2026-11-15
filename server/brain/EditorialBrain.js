@@ -402,18 +402,46 @@ class EditorialBrain {
                     const waitSec = match ? parseFloat(match[1]) : null;
 
                     const callGroqFallback = async () => {
-                        const fallbackModel = process.env.GROQ_FALLBACK_MODEL || 'llama-3.3-70b-versatile';
-                        const fallbackPayload = { ...callPayload, model: fallbackModel };
-                        delete fallbackPayload.reasoning_effort;
-                        try {
-                            return await this.openai.chat.completions.create(fallbackPayload);
-                        } catch (fbErr) {
-                            if (/404|not exist|not found|access/i.test(fbErr.message)) {
-                                console.warn('[EditorialBrain] Primary fallback model unavailable; trying llama-3.1-8b-instant');
-                                return await this.openai.chat.completions.create({ ...fallbackPayload, model: 'llama-3.1-8b-instant' });
+                        const groqCandidates = [
+                            process.env.GROQ_FALLBACK_MODEL,
+                            'openai/gpt-oss-20b',
+                            'llama-3.3-70b-versatile',
+                            'qwen/qwen3-32b',
+                        ].filter(Boolean).filter(m => m !== callPayload.model);
+
+                        for (const fallbackModel of groqCandidates) {
+                            const fallbackPayload = { ...callPayload, model: fallbackModel };
+                            delete fallbackPayload.reasoning_effort;
+                            try {
+                                console.warn(`[EditorialBrain] Trying Groq fallback model "${fallbackModel}"...`);
+                                return await this.openai.chat.completions.create(fallbackPayload);
+                            } catch (fbErr) {
+                                console.warn(`[EditorialBrain] Groq fallback model "${fallbackModel}" failed:`, fbErr.message);
                             }
-                            throw fbErr;
                         }
+
+                        // If Groq models are exhausted or hit rate limits, failover to Gemini
+                        if (process.env.GEMINI_API_KEY) {
+                            try {
+                                const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                                if (geminiAi) {
+                                    console.warn('[EditorialBrain] Groq capacity/rate limits reached; failing over to Gemini...');
+                                    const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+                                    const geminiPayload = {
+                                        model: geminiModel,
+                                        temperature,
+                                        max_tokens: 1200,
+                                        response_format: BRAIN_OUTPUT_SCHEMA,
+                                        messages: callPayload.messages,
+                                    };
+                                    return await geminiAi.chat.completions.create(geminiPayload);
+                                }
+                            } catch (geminiErr) {
+                                console.warn('[EditorialBrain] Gemini failover error:', geminiErr.message);
+                            }
+                        }
+
+                        throw new Error('All Groq and failover models exhausted');
                     };
 
                     if (isTokenLimit) {

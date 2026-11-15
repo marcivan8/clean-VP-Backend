@@ -3835,6 +3835,7 @@ const useTimelineStore = create(
                     // back but left the scene holding the undone change, and
                     // the next edit re-applied it from the scene.
                     scenes: state.scenes,
+                    editHistory: [...(state.editHistory || [])],
                 };
                 const newPast = [...state.past, snapshot].slice(-50);
                 set({ past: newPast, future: [] });
@@ -3869,6 +3870,7 @@ const useTimelineStore = create(
                             selectedClipIds: [...(st.selectedClipIds || [])],
                             aspectRatio: st.aspectRatio,
                             scenes: st.scenes,
+                            editHistory: [...(st.editHistory || [])],
                             _extraState: { captions: st.captions, duration: st.duration },
                         },
                         _historyGroupPast: st.past,
@@ -3916,6 +3918,7 @@ const useTimelineStore = create(
                         tracks: timelineManager.toLegacyTracks(),
                         aspectRatio: base.aspectRatio || st.aspectRatio,
                         scenes: base.scenes ?? st.scenes,
+                        editHistory: base.editHistory || [],
                         past: before || st.past,
                         future: [],
                         _historyGroupDepth: 0,
@@ -3942,6 +3945,7 @@ const useTimelineStore = create(
                     selectedClipIds: [...state.selectedClipIds],
                     aspectRatio: state.aspectRatio,
                     scenes: state.scenes,
+                    editHistory: [...(state.editHistory || [])],
                 };
 
                 // Only snapshots that opted in (rippleDeleteClip) carry _extraState.
@@ -3968,6 +3972,7 @@ const useTimelineStore = create(
                     // `??`: an older snapshot has no scenes, and blanking the
                     // designs would be worse than leaving them alone.
                     scenes: previous.scenes ?? state.scenes,
+                    editHistory: previous.editHistory || state.editHistory,
                     past: newPast,
                     future: [currentSnapshot, ...state.future],
                     ...(previous._extraState || {}),
@@ -3987,6 +3992,7 @@ const useTimelineStore = create(
                     selectedClipIds: [...state.selectedClipIds],
                     aspectRatio: state.aspectRatio,
                     scenes: state.scenes,
+                    editHistory: [...(state.editHistory || [])],
                 };
 
                 if (next._extraState) {
@@ -4007,6 +4013,7 @@ const useTimelineStore = create(
                     tracks: timelineManager.toLegacyTracks(),
                     aspectRatio: next.aspectRatio || state.aspectRatio,
                     scenes: next.scenes ?? state.scenes,
+                    editHistory: next.editHistory || state.editHistory,
                     past: [...state.past, currentSnapshot],
                     future: newFuture,
                     ...(next._extraState || {}),

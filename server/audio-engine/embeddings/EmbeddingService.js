@@ -61,63 +61,85 @@ function shouldPreferGemini() {
     return false;
 }
 
+const GEMINI_EMBED_MODELS = [
+    process.env.GEMINI_EMBEDDING_MODEL,
+    'gemini-embedding-001',
+    'embedding-001',
+    'text-embedding-004',
+].filter(Boolean);
+
 async function callGeminiEmbed(text) {
     const key = process.env.GEMINI_API_KEY;
     if (!key) return null;
-    try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${encodeURIComponent(key)}`;
-        const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: 'models/text-embedding-004',
-                content: { parts: [{ text: text.trim() }] },
-            }),
-        });
-        if (!res.ok) {
-            const errText = await res.text().catch(() => '');
-            console.warn(`[EmbeddingService] Gemini embed error (${res.status}):`, errText.slice(0, 160));
-            return null;
+
+    for (const modelName of GEMINI_EMBED_MODELS) {
+        try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:embedContent?key=${encodeURIComponent(key)}`;
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: `models/${modelName}`,
+                    content: { parts: [{ text: text.trim() }] },
+                    outputDimensionality: EMBEDDING_DIM,
+                }),
+            });
+            if (res.status === 404) {
+                // Model deprecated or not found on this API version; try next candidate
+                continue;
+            }
+            if (!res.ok) {
+                const errText = await res.text().catch(() => '');
+                console.warn(`[EmbeddingService] Gemini embed error (${res.status}) on ${modelName}:`, errText.slice(0, 160));
+                continue;
+            }
+            const data = await res.json();
+            const values = data?.embedding?.values;
+            if (!Array.isArray(values) || values.length === 0) continue;
+            return padAndNormalizeEmbedding(values, EMBEDDING_DIM);
+        } catch (err) {
+            console.warn(`[EmbeddingService] Gemini embed fetch error on ${modelName}:`, err.message);
         }
-        const data = await res.json();
-        const values = data?.embedding?.values;
-        if (!Array.isArray(values) || values.length === 0) return null;
-        return padAndNormalizeEmbedding(values, EMBEDDING_DIM);
-    } catch (err) {
-        console.warn('[EmbeddingService] Gemini embed fetch error:', err.message);
-        return null;
     }
+    return null;
 }
 
 async function callGeminiBatchEmbed(texts) {
     const key = process.env.GEMINI_API_KEY;
     if (!key) return texts.map(() => null);
-    try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:batchEmbedContents?key=${encodeURIComponent(key)}`;
-        const requests = texts.map(t => ({
-            model: 'models/text-embedding-004',
-            content: { parts: [{ text: String(t || '').trim() }] },
-        }));
-        const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ requests }),
-        });
-        if (!res.ok) {
-            const errText = await res.text().catch(() => '');
-            console.warn(`[EmbeddingService] Gemini batch embed error (${res.status}):`, errText.slice(0, 160));
-            return texts.map(() => null);
+
+    for (const modelName of GEMINI_EMBED_MODELS) {
+        try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:batchEmbedContents?key=${encodeURIComponent(key)}`;
+            const requests = texts.map(t => ({
+                model: `models/${modelName}`,
+                content: { parts: [{ text: String(t || '').trim() }] },
+                outputDimensionality: EMBEDDING_DIM,
+            }));
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ requests }),
+            });
+            if (res.status === 404) {
+                continue;
+            }
+            if (!res.ok) {
+                const errText = await res.text().catch(() => '');
+                console.warn(`[EmbeddingService] Gemini batch embed error (${res.status}) on ${modelName}:`, errText.slice(0, 160));
+                continue;
+            }
+            const data = await res.json();
+            const embeddings = data?.embeddings || [];
+            return texts.map((_, i) => {
+                const values = embeddings[i]?.values;
+                return Array.isArray(values) && values.length > 0 ? padAndNormalizeEmbedding(values, EMBEDDING_DIM) : null;
+            });
+        } catch (err) {
+            console.warn(`[EmbeddingService] Gemini batch embed fetch error on ${modelName}:`, err.message);
         }
-        const data = await res.json();
-        const embeddings = data?.embeddings || [];
-        return texts.map((_, i) => {
-            const values = embeddings[i]?.values;
-            return Array.isArray(values) && values.length > 0 ? padAndNormalizeEmbedding(values, EMBEDDING_DIM) : null;
-        });
-    } catch (err) {
-        console.warn('[EmbeddingService] Gemini batch embed fetch error:', err.message);
-        return texts.map(() => null);
     }
+    return texts.map(() => null);
 }
 
 // OpenAI client (lazy-init so tests don't fail on missing key)

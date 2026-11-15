@@ -245,6 +245,19 @@ const COVERAGE = Object.freeze({
  */
 export function isSatisfied(commandId, situation) {
     const facts = situation?.facts || {};
+
+    // A single uncut video clip on the timeline has NEVER had silence/filler/repetition cleanup,
+    // regardless of what stale ledger entries might linger.
+    const isCleanupOp = (
+        commandId === 'long_form_edit' ||
+        commandId === 'silence_removal' ||
+        commandId === 'remove_filler_words' ||
+        commandId === 'remove_repetition'
+    );
+    if (isCleanupOp && (facts.clipCount || 0) <= 1) {
+        return false;
+    }
+
     const ops = facts.opsApplied instanceof Set
         ? facts.opsApplied
         : new Set(Array.isArray(facts.opsApplied) ? facts.opsApplied : []);
