@@ -2625,7 +2625,7 @@ const useTimelineStore = create(
                     return { success: false, error: err.message };
                 }
                 if (!composed?.scene) return { success: false, error: 'That brief did not describe anything that could be designed.' };
-                const placed = get()._placeScene(composed.scene, { start: at, label: 'sequence', asCompound: opts.asCompound ?? true });
+                const placed = get()._placeScene(composed.scene, { start: at, label: 'sequence', asCompound: !!opts.asCompound });
                 return {
                     ...placed,
                     plan: { tone: composed.plan.tone.label, pacing: composed.plan.pacing, beats: composed.plan.beats.map(b => b.kind), rationale: composed.scene.meta.rationale },
@@ -2900,7 +2900,7 @@ const useTimelineStore = create(
                     start,
                     label: componentId,
                     skipHistory: !!opts.skipHistory,
-                    asCompound: opts.asCompound ?? params?.asCompound ?? params?.as_compound ?? true,
+                    asCompound: !!(opts.asCompound ?? params?.asCompound ?? params?.as_compound),
                 });
             },
 

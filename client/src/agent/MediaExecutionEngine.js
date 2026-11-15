@@ -1547,7 +1547,12 @@ export class MediaExecutionEngine {
                     }
                 }
 
-                const result = this._callStore(store, 'designScene', brief, { plan, palette: footagePalette, subject: footageSubject });
+                const result = this._callStore(store, 'designScene', brief, {
+                    plan,
+                    palette: footagePalette,
+                    subject: footageSubject,
+                    asCompound: args.asCompound ?? args.as_compound ?? true,
+                });
                 if (!result?.success) return { action, success: false, error: result?.error, message: result?.error };
 
                 // Do not leave obvious template copy or a scene that still
