@@ -309,6 +309,12 @@ export function createNode(type, overrides = {}) {
         placement: overrides.placement || null,
         spatial: overrides.spatial && typeof overrides.spatial === 'object' ? { ...overrides.spatial } : null,
         motionPath: overrides.motionPath && typeof overrides.motionPath === 'object' ? { ...overrides.motionPath } : null,
+        cadence: overrides.cadence || null,
+        camera: overrides.camera && typeof overrides.camera === 'object' ? { ...overrides.camera } : null,
+        leaderLine: overrides.leaderLine && typeof overrides.leaderLine === 'object' ? { ...overrides.leaderLine } : null,
+        mockup: overrides.mockup && typeof overrides.mockup === 'object' ? { ...overrides.mockup } : null,
+        kineticBadge: overrides.kineticBadge && typeof overrides.kineticBadge === 'object' ? { ...overrides.kineticBadge } : null,
+        atmosphere: overrides.atmosphere && typeof overrides.atmosphere === 'object' ? { ...overrides.atmosphere } : null,
     };
 }
 
@@ -376,6 +382,12 @@ export function createScene(overrides = {}) {
         placement: overrides.placement || null,
         spatial: overrides.spatial && typeof overrides.spatial === 'object' ? { ...overrides.spatial } : null,
         motionPath: overrides.motionPath && typeof overrides.motionPath === 'object' ? { ...overrides.motionPath } : null,
+        cadence: overrides.cadence || null,
+        camera: overrides.camera && typeof overrides.camera === 'object' ? { ...overrides.camera } : null,
+        leaderLine: overrides.leaderLine && typeof overrides.leaderLine === 'object' ? { ...overrides.leaderLine } : null,
+        mockup: overrides.mockup && typeof overrides.mockup === 'object' ? { ...overrides.mockup } : null,
+        kineticBadge: overrides.kineticBadge && typeof overrides.kineticBadge === 'object' ? { ...overrides.kineticBadge } : null,
+        atmosphere: overrides.atmosphere && typeof overrides.atmosphere === 'object' ? { ...overrides.atmosphere } : null,
     };
 }
 
@@ -891,6 +903,12 @@ export function flattenScene(scene, opts = {}) {
                 ...(node.placement ? { placement: node.placement } : {}),
                 ...(node.spatial ? { spatial: { ...node.spatial } } : {}),
                 ...(node.particles ? { particles: { ...node.particles } } : {}),
+                ...(node.cadence ? { cadence: node.cadence } : {}),
+                ...(node.camera ? { camera: { ...node.camera } } : {}),
+                ...(node.leaderLine ? { leaderLine: { ...node.leaderLine } } : {}),
+                ...(node.mockup ? { mockup: { ...node.mockup } } : {}),
+                ...(node.kineticBadge ? { kineticBadge: { ...node.kineticBadge } } : {}),
+                ...(node.atmosphere ? { atmosphere: { ...node.atmosphere } } : {}),
             };
             if (num(abs.opacity, 1) < 1) common.opacity = Math.round(num(abs.opacity, 1) * 1000) / 1000;
             // A scene matte uses the same foreground/background removal path
@@ -1181,6 +1199,12 @@ export function nodeFromClip(clip, trackType = 'overlay') {
         placement: clip.placement || null,
         spatial: clip.spatial || null,
         particles: clip.particles || null,
+        cadence: clip.cadence || null,
+        camera: clip.camera || null,
+        leaderLine: clip.leaderLine || null,
+        mockup: clip.mockup || null,
+        kineticBadge: clip.kineticBadge || null,
+        atmosphere: clip.atmosphere || null,
         origin: { clipId: clip.id, trackType, groupId: clip.groupId || null },
     });
 }

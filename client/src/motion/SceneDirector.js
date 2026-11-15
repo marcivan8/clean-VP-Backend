@@ -210,6 +210,29 @@ export function planFromBrief(brief, opts = {}) {
     const planCta = typeof plan?.cta === 'string' && plan.cta.trim() ? plan.cta.trim() : null;
     const items = Array.isArray(opts.items) ? opts.items.filter(i => typeof i === 'string' && i.trim()) : [];
 
+    const wantsTactile = /\b(?:12\s*fps|tactile|stop[- ]motion|paper[- ]?craft|on twos|flipbook|stutter)\b/i.test(s);
+    const wants60fps = /\b(?:60\s*fps|smooth[- ]60|buttery)\b/i.test(s);
+    const inferredCadence = wantsTactile ? '12fps-tactile' : (wants60fps ? 'smooth-60fps' : null);
+
+    const wantsDollyIn = /\b(?:zoom in|dolly in|push in)\b/i.test(s);
+    const wantsWhipPan = /\b(?:whip[- ]pan|whip cut|whip)\b/i.test(s);
+    const wantsDrift = /\b(?:handheld|drift|floating camera)\b/i.test(s);
+    const inferredCamera = wantsDollyIn ? { kind: 'dolly-in', intensity: 0.5 }
+        : (wantsWhipPan ? { kind: 'whip-pan', intensity: 0.8 }
+        : (wantsDrift ? { kind: 'handheld-drift', intensity: 0.3 } : null));
+
+    const wantsLeaderLine = /\b(?:leader line|pointer line|callout line|technical callout|annotat(?:ed|ion))\b/i.test(s);
+    const wantsPhone = /\b(?:iphone|phone mockup|mobile screen|mobile app|smartphone)\b/i.test(s);
+    const wantsBrowser = /\b(?:browser(?: window)?|website mockup|safari frame|chrome frame)\b/i.test(s);
+    const wantsTerminal = /\b(?:terminal|console|code window|cli)\b/i.test(s);
+    const wantsBadge = /\b(?:badge|seal|rotating stamp|sticker|ribbon|certified|official seal)\b/i.test(s);
+    const wantsGrain = /\b(?:film grain|vintage|retro|noise|texture|analog|halide)\b/i.test(s);
+    const wantsLightLeak = /\b(?:light[- ]leak|film burn|halation)\b/i.test(s);
+    const wantsPaper = /\b(?:paper texture|craft paper|tactile paper)\b/i.test(s);
+    const wantsRoute = /\b(?:car driving|driving from|flight path|route line|travel from|point a to (?:point )?b|map route)\b/i.test(s);
+    const wantsCurvedText = /\b(?:curved text|text on path|wave text)\b/i.test(s);
+    const wantsTypewriter = /\b(?:typewriter|per[- ]character|stagger letters|letter by letter)\b/i.test(s);
+
     if (planBeats.length) {
         // The plan already describes the sequence beat by beat.
         for (const b of planBeats.slice(0, 8)) {
@@ -238,6 +261,14 @@ export function planFromBrief(brief, opts = {}) {
                 motionPath: (b?.motionPath && typeof b.motionPath === 'object') ? b.motionPath : ((b?.path && typeof b.path === 'object') ? b.path : null),
                 runs: Array.isArray(b?.runs) ? b.runs : null,
                 palette: (b?.palette && typeof b.palette === 'object') ? b.palette : null,
+                cadence: typeof b?.cadence === 'string' ? b.cadence : null,
+                camera: (b?.camera && typeof b.camera === 'object') ? b.camera : null,
+                leaderLine: (b?.leaderLine && typeof b.leaderLine === 'object') ? b.leaderLine : null,
+                mockup: (b?.mockup && typeof b.mockup === 'object') ? b.mockup : null,
+                kineticBadge: (b?.kineticBadge && typeof b.kineticBadge === 'object') ? b.kineticBadge : null,
+                atmosphere: (b?.atmosphere && typeof b.atmosphere === 'object') ? b.atmosphere : null,
+                textPath: (b?.textPath && typeof b.textPath === 'object') ? b.textPath : null,
+                charAnim: (b?.charAnim && typeof b.charAnim === 'object') ? b.charAnim : null,
                 effects: Array.isArray(b?.effects) ? b.effects : null,
                 nodes: Array.isArray(b?.nodes) ? b.nodes : (Array.isArray(b?.layers) ? b.layers : null),
             });
@@ -249,12 +280,22 @@ export function planFromBrief(brief, opts = {}) {
         const wantsParticles = /\b(?:particles?|sparks?|dust|glow|neon|embers?)\b/i.test(s);
         const wantsVector = /\b(?:chart|graph|meter|progress|arrow|bracket)\b/i.test(s);
         const wantsHold = /\b(?:breathe|float|sway|drift|alive|living)\b/i.test(s);
+
         const inferAttrs = (beatKind) => ({
             ...(wants3D ? { spatial: { rx: 12, ry: -14, depth: 30 } } : {}),
             ...(wantsBehindSpeaker ? { placement: 'behind_speaker' } : {}),
             ...(wantsParticles ? { particles: { kind: 'sparks', count: 80, speed: 1.2 } } : {}),
             ...(wantsVector ? { vector: { kind: beatKind === 'stat' ? 'circular-meter' : 'circle-callout' } } : {}),
             ...(wantsHold ? { motion: { enter: 'pop-in', hold: 'breathe', exit: 'fade-out', energy: 0.7 } } : {}),
+            ...(inferredCadence ? { cadence: inferredCadence } : {}),
+            ...(inferredCamera ? { camera: inferredCamera } : {}),
+            ...(wantsLeaderLine ? { leaderLine: { target: [70, 40], label: [30, 25], pointer: 'dot' } } : {}),
+            ...(wantsPhone ? { mockup: { kind: 'phone-frame' } } : (wantsBrowser ? { mockup: { kind: 'browser-window' } } : (wantsTerminal ? { mockup: { kind: 'code-terminal' } } : {}))),
+            ...(wantsBadge ? { kineticBadge: { kind: 'circular-stamp', rpm: 12, text: 'VERIFIED' } } : {}),
+            ...(wantsGrain || wantsLightLeak || wantsPaper ? { atmosphere: { ...(wantsGrain ? { grain: 0.3 } : {}), ...(wantsLightLeak ? { lightLeak: 0.25 } : {}), ...(wantsPaper ? { paper: 0.35 } : {}) } } : {}),
+            ...(wantsRoute ? { motionPath: { points: [[15, 80], [45, 60], [85, 25]], autoOrient: true, bank: 0.4 } } : {}),
+            ...(wantsCurvedText ? { textPath: { data: 'M 100 500 Q 500 200 900 500', autoOrient: true } } : {}),
+            ...(wantsTypewriter ? { charAnim: { kind: 'typewriter', stagger: 0.05, energy: 0.8 } } : {}),
         });
 
         const pointWords = 'benefit|benefits|reason|reasons|point|points|feature|features|capability|capabilities|callout|callouts|bullet|bullets|step|steps|pillar|pillars|tip|tips|way|ways';
@@ -322,12 +363,23 @@ export function planFromBrief(brief, opts = {}) {
     const durMatch = s.match(/\b(\d+(?:\.\d+)?)\s*(?:-second|seconds|second|s\b)\b/i);
     const askedDuration = durMatch ? Number(durMatch[1]) : 0;
 
+    const planAtmosphere = plan?.atmosphere || (wantsGrain || wantsLightLeak || wantsPaper ? {
+        ...(wantsGrain ? { grain: 0.3 } : {}),
+        ...(wantsLightLeak ? { lightLeak: 0.25 } : {}),
+        ...(wantsPaper ? { paper: 0.35 } : {}),
+    } : null);
+    const planCadence = plan?.cadence || inferredCadence;
+    const planCamera = plan?.camera || inferredCamera;
+
     rationale.unshift(`The tone reads as ${tone.label}, so the look and the pacing follow that.`);
     return {
         tone,
         pacing: tone.pacing,
         beats,
         background: cleanBackground(plan?.background || opts.background || backgroundRequestFromBrief(text), tone.palette),
+        cadence: planCadence,
+        camera: planCamera,
+        atmosphere: planAtmosphere,
         placeholders: beats.filter(b => !b.text && b.kind !== 'stat').length,
         rationale,
         ...(askedDuration > 0 ? { askedDuration } : {}),
@@ -620,6 +672,125 @@ export function composeSceneFromBrief(brief, opts = {}) {
             }
         }
 
+        // 10. Frame cadence (e.g. 12fps tactile on twos vs 60fps buttery smooth)
+        const cadence = beat.cadence || plan.cadence;
+        if (cadence) {
+            for (const child of innerChildren) {
+                child.cadence = cadence;
+                child.meta = { ...(child.meta || {}), cadence };
+            }
+        }
+
+        // 11. Virtual camera choreography (dolly, whip pan, handheld drift)
+        const camera = beat.camera || plan.camera;
+        if (camera && typeof camera === 'object') {
+            for (const child of innerChildren) {
+                child.camera = { ...camera };
+                child.meta = { ...(child.meta || {}), camera: { ...camera } };
+            }
+        }
+
+        // 12. Tactile atmosphere textures (film grain, light leak, paper)
+        const atmosphere = beat.atmosphere || plan.atmosphere;
+        if (atmosphere && typeof atmosphere === 'object') {
+            for (const child of innerChildren) {
+                child.atmosphere = { ...atmosphere };
+                child.meta = { ...(child.meta || {}), atmosphere: { ...atmosphere } };
+            }
+        }
+
+        // 13. Text-on-path & curved typography
+        if (beat.textPath && typeof beat.textPath === 'object') {
+            const textChild = innerChildren.find(c => c.type === NODE_TYPES.TEXT);
+            if (textChild) {
+                textChild.textPath = { ...beat.textPath };
+            }
+        }
+
+        // 14. Per-character cascading animation
+        if (beat.charAnim && typeof beat.charAnim === 'object') {
+            const textChild = innerChildren.find(c => c.type === NODE_TYPES.TEXT);
+            if (textChild) {
+                textChild.charAnim = { ...beat.charAnim };
+            }
+        }
+
+        // 15. Technical leader line annotations
+        if (beat.leaderLine && typeof beat.leaderLine === 'object') {
+            const target = Array.isArray(beat.leaderLine.target) ? beat.leaderLine.target : [70, 40];
+            const labelPos = Array.isArray(beat.leaderLine.label) ? beat.leaderLine.label : [30, 25];
+            const pinsStr = `${target[0] / 100},${target[1] / 100},${beat.text || 'Spec Point'};${labelPos[0] / 100},${labelPos[1] / 100},${beat.kicker || 'Note'}`;
+            const leaderNode = createNode(NODE_TYPES.SHAPE, {
+                name: `${beat.kind} Technical Leader Line`,
+                start: 0.15,
+                duration: Math.max(0.4, duration - 0.2),
+                transform: { x: 50, y: 50, scale: 1 },
+                size: { w: frame.w, h: frame.h },
+                template: {
+                    kind: 'annotated-shot',
+                    params: {
+                        pins: pinsStr,
+                        accent: palette.accent,
+                        pointer: beat.leaderLine.pointer || 'dot',
+                    },
+                },
+                leaderLine: { ...beat.leaderLine },
+                origin: { role: 'leaderLine', beat: beat.kind },
+            });
+            innerChildren.push(leaderNode);
+        }
+
+        // 16. Device mockups & code terminals
+        if (beat.mockup && typeof beat.mockup === 'object') {
+            const mockupKind = beat.mockup.kind === 'browser-window' ? 'code-window' : 'phone-frame';
+            const mockupNode = createNode(NODE_TYPES.SHAPE, {
+                name: `${beat.kind} Device Mockup (${beat.mockup.kind || 'phone'})`,
+                start: 0,
+                duration,
+                transform: { x: placement.x, y: placement.anchor === 'top' ? 32 : 68, scale: 0.85 },
+                size: { w: 520, h: 920 },
+                template: {
+                    kind: mockupKind,
+                    params: {
+                        accent: palette.accent,
+                        theme: 'dark',
+                        title: beat.text || 'App Preview',
+                        code: beat.text || 'Vibed.render()',
+                    },
+                },
+                mockup: { ...beat.mockup },
+                origin: { role: 'mockup', beat: beat.kind },
+            });
+            innerChildren.unshift(mockupNode);
+        }
+
+        // 17. Kinetic rotating badge / official seal
+        if (beat.kineticBadge && typeof beat.kineticBadge === 'object') {
+            const badgeText = beat.kineticBadge.text || beat.text || 'VERIFIED';
+            const rpm = Number(beat.kineticBadge.rpm) || 12;
+            const badgeNode = createNode(NODE_TYPES.SHAPE, {
+                name: `${beat.kind} Kinetic Badge (${beat.kineticBadge.kind || 'seal'})`,
+                start: 0.2,
+                duration: Math.max(0.4, duration - 0.3),
+                transform: { x: placement.x > 50 ? 25 : 75, y: placement.anchor === 'top' ? 22 : 78, scale: 0.9 },
+                size: { w: 200, h: 200 },
+                template: {
+                    kind: 'location-badge',
+                    params: {
+                        location: badgeText,
+                        time: `${rpm > 0 ? '+' : ''}${rpm} RPM`,
+                        color: palette.accent,
+                    },
+                },
+                kineticBadge: { ...beat.kineticBadge },
+                expressions: {
+                    rotation: `time * ${rpm * 6}`,
+                },
+                origin: { role: 'badge', beat: beat.kind },
+            });
+            innerChildren.push(badgeNode);
+        }
+
         groups.push(createGroup({
             name: `${i + 1}. ${beat.kind}`,
             transform: { x: 0, y: 0 },
@@ -644,17 +815,37 @@ export function composeSceneFromBrief(brief, opts = {}) {
         meta: { isBackdrop: true, animatedBackground: true },
         origin: { role: 'background', componentId: 'scene-background-motion' },
     }) : null;
+    const atmosphereNode = plan.atmosphere ? createNode(NODE_TYPES.SHAPE, {
+        name: 'Atmospheric Texture',
+        start: 0,
+        duration: cursor,
+        transform: { x: 50, y: 50, scale: 1 },
+        size: { w: frame.w, h: frame.h },
+        template: {
+            kind: plan.atmosphere.lightLeak ? 'light-leak' : 'film-grain',
+            params: {
+                intensity: plan.atmosphere.grain || 0.2,
+                color: palette.accent,
+            },
+        },
+        meta: { isAtmosphere: true },
+        atmosphere: { ...plan.atmosphere },
+        origin: { role: 'atmosphere', componentId: 'scene-atmosphere' },
+    }) : null;
     const scene = normalizeScene(createScene({
         name: `Sequence (${plan.tone.label})`,
         frame,
         duration: sceneContentDuration(groups),
-        nodes: [...(background ? [background] : []), ...groups],
+        nodes: [...(background ? [background] : []), ...(atmosphereNode ? [atmosphereNode] : []), ...groups],
         meta: {
             director: true,
             brief: String(brief || '').slice(0, 300),
             tone: plan.tone.label,
             pacing: plan.pacing,
             ...(background ? { backgroundMotion: background.template.kind } : {}),
+            ...(plan.cadence ? { cadence: plan.cadence } : {}),
+            ...(plan.camera ? { camera: plan.camera } : {}),
+            ...(plan.atmosphere ? { atmosphere: plan.atmosphere } : {}),
             beats: plan.beats.map(b => b.kind),
             rationale: [...plan.rationale, placement.reason, ...(palette.notes || [])],
             visualDirections: plan.beats.map((beat, index) => ({

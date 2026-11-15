@@ -305,6 +305,79 @@ await test('cleanBeat and cleanScenePlan sanitize and preserve motionPath, runs,
     assert.ok(plan.beats[0].runs, 'Plan beat must carry runs');
 });
 
+await test('cleanBeat and cleanScenePlan sanitize and preserve cadence, camera, leaderLine, mockup, kineticBadge, atmosphere, textPath, and charAnim', () => {
+    const rawBeat = {
+        kind: 'point',
+        text: 'Telemetry & Specification Callout',
+        cadence: '12fps-tactile',
+        camera: { kind: 'dolly-in', intensity: 0.65, duration: 2.5 },
+        leaderLine: { target: [72, 38], label: [25, 20], pointer: 'dot', drawDuration: 0.8 },
+        mockup: { kind: 'phone-frame', scroll: 0.4 },
+        kineticBadge: { kind: 'circular-stamp', rpm: 12, text: 'CERTIFIED' },
+        atmosphere: { grain: 0.35, lightLeak: 0.2, paper: 0.4 },
+        textPath: { data: 'M 50 150 Q 250 50 450 150', autoOrient: true, startOffset: 0.1 },
+        charAnim: { kind: 'stagger', stagger: 0.04, energy: 0.85 },
+    };
+
+    const cleaned = cleanBeat(rawBeat);
+    assert.ok(cleaned, 'Beat must clean successfully');
+    assert.equal(cleaned.cadence, '12fps-tactile');
+    assert.deepEqual(cleaned.camera, { kind: 'dolly-in', intensity: 0.65, duration: 2.5 });
+    assert.deepEqual(cleaned.leaderLine, { target: [72, 38], label: [25, 20], pointer: 'dot', drawDuration: 0.8 });
+    assert.deepEqual(cleaned.mockup, { kind: 'phone-frame', scroll: 0.4 });
+    assert.deepEqual(cleaned.kineticBadge, { kind: 'circular-stamp', rpm: 12, text: 'CERTIFIED' });
+    assert.deepEqual(cleaned.atmosphere, { grain: 0.35, lightLeak: 0.2, paper: 0.4 });
+    assert.deepEqual(cleaned.textPath, { data: 'M 50 150 Q 250 50 450 150', autoOrient: true, startOffset: 0.1 });
+    assert.deepEqual(cleaned.charAnim, { kind: 'stagger', stagger: 0.04, energy: 0.85 });
+
+    const plan = cleanScenePlan({
+        title: 'Tactile Technical Reveal',
+        cadence: '12fps-tactile',
+        camera: { kind: 'handheld-drift', intensity: 0.3 },
+        atmosphere: { grain: 0.4, paper: 0.3 },
+        beats: [rawBeat],
+    });
+    assert.ok(plan, 'Plan must clean successfully');
+    assert.equal(plan.cadence, '12fps-tactile');
+    assert.deepEqual(plan.camera, { kind: 'handheld-drift', intensity: 0.3 });
+    assert.deepEqual(plan.atmosphere, { grain: 0.4, paper: 0.3 });
+    assert.ok(plan.beats[0].leaderLine, 'Plan beat must carry leaderLine');
+    assert.ok(plan.beats[0].mockup, 'Plan beat must carry mockup');
+    assert.ok(plan.beats[0].kineticBadge, 'Plan beat must carry kineticBadge');
+});
+
+await test('SceneDirector and SceneSchema compose, flatten, and preserve all generative motion layers', async () => {
+    const { composeSceneFromBrief } = await import('../client/src/motion/SceneDirector.js');
+    const { flattenScene, nodeFromClip } = await import('../client/src/motion/SceneSchema.js');
+
+    const brief = 'Design a tactile paper stop-motion reveal with a technical leader line pointing to the sensor, an iphone mockup, a verified badge sticker, and vintage film grain';
+    const composed = composeSceneFromBrief(brief, { aspectRatio: '16:9' });
+    assert.ok(composed?.scene, 'Scene must compose successfully');
+    assert.equal(composed.plan.cadence, '12fps-tactile', 'Plan must infer 12fps tactile cadence');
+    assert.equal(composed.scene.meta.cadence, '12fps-tactile', 'Scene meta must carry cadence');
+    assert.ok(composed.scene.meta.atmosphere, 'Scene meta must carry atmosphere');
+
+    // Flatten to clips
+    const flattened = flattenScene(composed.scene);
+    assert.ok(flattened.placements.length > 0, 'Flattening must produce placements');
+
+    // Check leaf clips for preserved attributes
+    const hasLeaderLineClip = flattened.placements.some(p => p.clip.leaderLine);
+    const hasMockupClip = flattened.placements.some(p => p.clip.mockup);
+    const hasBadgeClip = flattened.placements.some(p => p.clip.kineticBadge);
+    const hasAtmosphere = composed.scene.nodes.some(n => n.meta?.isAtmosphere || n.atmosphere);
+
+    assert.ok(hasLeaderLineClip, 'Placements must include leaderLine clip');
+    assert.ok(hasMockupClip, 'Placements must include mockup clip');
+    assert.ok(hasBadgeClip, 'Placements must include kineticBadge clip');
+    assert.ok(hasAtmosphere, 'Scene must include atmospheric texture node');
+
+    // Check nodeFromClip roundtrip
+    const leaderClip = flattened.placements.find(p => p.clip.leaderLine)?.clip;
+    const liftedNode = nodeFromClip(leaderClip, 'overlay');
+    assert.ok(liftedNode.leaderLine, 'nodeFromClip must restore leaderLine attribute');
+});
+
 await test('padAndNormalizeEmbedding converts 768-dim embeddings to 1536-dim preserving cosine similarity', () => {
     const { padAndNormalizeEmbedding } = nodeRequire(path.join(ROOT, 'server/audio-engine/embeddings/EmbeddingService.js'));
     const vec768A = Array.from({ length: 768 }, (_, i) => Math.sin(i * 0.1));

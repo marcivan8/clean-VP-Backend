@@ -343,7 +343,15 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techni
         '  "anticipate": true (optional) - the beat winds up against its own move just before it, which gives a punch or a whip-out weight. Leave it out for calm treatments, where it reads as a stutter.',
         '',
         'A beat MAY also add advanced generative motion design layers and custom styling for ANY subject (travel, automotive, food, sports, branding, tech, etc.):',
+        '  "cadence": "12fps-tactile" | "smooth-60fps" | "posterize-8fps" | "cinematic-24fps" (use "12fps-tactile" for Vox/Johnny Harris paper-craft stop-motion on twos; "smooth-60fps" for sleek tech/commercial)',
+        '  "camera": {"kind": "dolly-in"|"dolly-out"|"whip-pan"|"handheld-drift"|"pan-right"|"pan-left"|"tilt-up"|"altitude-zoom"|"orbital-roll", "intensity": 0.1..1.0, "duration": s} for virtual cinematic camera choreography',
         '  "motionPath": {"points": [[x1, y1], [x2, y2], ...], "bank": 0..1.2, "spin": 0..720, "autoOrient": true, "easing": "easeInOutCubic"} for objects traveling across the frame (e.g. car driving from A to B, flight route, moving pointer)',
+        '  "leaderLine": {"target": [x, y], "label": [x, y], "pointer": "dot"|"arrow"|"crosshair", "drawDuration": 0.8} for technical spec callouts pointing to landmarks, product features, or map points',
+        '  "mockup": {"kind": "phone-frame"|"browser-window"|"code-terminal"|"tablet-frame", "scroll": 0..1} for presenting digital interfaces and software workflows',
+        '  "kineticBadge": {"kind": "circular-stamp"|"rotating-seal"|"wobbly-sticker"|"award-ribbon", "text": "...", "rpm": 12} for rotating seal stamps and organic sticker badges',
+        '  "textPath": {"data": "M...", "startOffset": 0..1, "autoOrient": true} to flow kinetic typography along curved bezier paths and wave trajectories',
+        '  "charAnim": {"kind": "stagger"|"wave"|"typewriter"|"random-in", "stagger": 0.02..0.1, "energy": 0.5..1.0} for per-character cascading motion',
+        '  "atmosphere": {"grain": 0.1..0.8, "halation": 0.1..0.8, "lightLeak": 0.1..0.8, "scanlines": 0.1..0.8, "vignette": 0.1..0.8, "paper": 0.1..0.8} for tactile film and paper textures',
         '  "runs": [{"text": "WORD", "fontFamily": "Anton"|"Montserrat"|"Inter"|"Playfair Display", "fontSize": 32..140, "fontWeight": "400"|"700"|"900", "color": "#RRGGBB"}, ...] for mixed typography and multi-font emphasis in the same sentence',
         '  "palette": {"text": "#RRGGBB", "sub": "#RRGGBB", "accent": "#RRGGBB", "background": "#RRGGBB"} to specify custom branding or scene color palettes',
         '  "spatial": {"rx": -25..25, "ry": -25..25, "depth": 10..80} for 3D card tilt & spatial perspective',
@@ -571,6 +579,120 @@ function cleanEffects(raw) {
     return cleaned.length > 0 ? cleaned : null;
 }
 
+function cleanCadence(raw) {
+    if (typeof raw !== 'string') return undefined;
+    const allowed = ['12fps-tactile', 'smooth-60fps', 'posterize-8fps', 'cinematic-24fps'];
+    const val = raw.trim().toLowerCase();
+    return allowed.includes(val) ? val : undefined;
+}
+
+function cleanCamera(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const allowedKinds = [
+        'dolly-in', 'dolly-out', 'whip-pan', 'handheld-drift', 'pan-right',
+        'pan-left', 'tilt-up', 'tilt-down', 'altitude-zoom', 'orbital-roll',
+    ];
+    const kind = typeof raw.kind === 'string' && allowedKinds.includes(raw.kind.trim().toLowerCase())
+        ? raw.kind.trim().toLowerCase()
+        : null;
+    if (!kind) return null;
+    const intensity = Number.isFinite(Number(raw.intensity))
+        ? Math.max(0.05, Math.min(1.5, Math.round(Number(raw.intensity) * 100) / 100))
+        : 0.5;
+    const duration = Number.isFinite(Number(raw.duration)) && Number(raw.duration) > 0
+        ? Math.max(0.1, Math.min(60, Math.round(Number(raw.duration) * 100) / 100))
+        : undefined;
+    return { kind, intensity, ...(duration ? { duration } : {}) };
+}
+
+function cleanLeaderLine(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const parsePoint = pt => {
+        const x = Number(Array.isArray(pt) ? pt[0] : pt?.x);
+        const y = Number(Array.isArray(pt) ? pt[1] : pt?.y);
+        return Number.isFinite(x) && Number.isFinite(y)
+            ? [Math.max(-100, Math.min(200, Math.round(x * 10) / 10)), Math.max(-100, Math.min(200, Math.round(y * 10) / 10))]
+            : null;
+    };
+    const target = parsePoint(raw.target);
+    const label = parsePoint(raw.label);
+    if (!target || !label) return null;
+    const pointer = ['dot', 'arrow', 'crosshair'].includes(raw.pointer) ? raw.pointer : 'dot';
+    const drawDuration = Number.isFinite(Number(raw.drawDuration))
+        ? Math.max(0.1, Math.min(10, Math.round(Number(raw.drawDuration) * 10) / 10))
+        : 0.8;
+    return { target, label, pointer, drawDuration };
+}
+
+function cleanMockup(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const allowed = ['phone-frame', 'browser-window', 'code-terminal', 'tablet-frame', 'smartwatch'];
+    const kind = typeof raw.kind === 'string' && allowed.includes(raw.kind.trim().toLowerCase())
+        ? raw.kind.trim().toLowerCase()
+        : null;
+    if (!kind) return null;
+    const scroll = Number.isFinite(Number(raw.scroll)) ? Math.max(0, Math.min(1, Math.round(Number(raw.scroll) * 100) / 100)) : 0;
+    return { kind, scroll };
+}
+
+function cleanKineticBadge(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const allowed = ['circular-stamp', 'rotating-seal', 'wobbly-sticker', 'award-ribbon'];
+    const kind = typeof raw.kind === 'string' && allowed.includes(raw.kind.trim().toLowerCase())
+        ? raw.kind.trim().toLowerCase()
+        : 'circular-stamp';
+    const text = cleanLine(raw.text, { maxWords: 6, maxChars: 40 });
+    const rpm = Number.isFinite(Number(raw.rpm)) ? Math.max(-120, Math.min(120, Math.round(Number(raw.rpm)))) : 12;
+    return { kind, ...(text ? { text } : {}), rpm };
+}
+
+function cleanAtmosphere(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const clamp01 = v => Number.isFinite(Number(v)) ? Math.max(0, Math.min(1, Math.round(Number(v) * 100) / 100)) : undefined;
+    const grain = clamp01(raw.grain);
+    const halation = clamp01(raw.halation);
+    const lightLeak = clamp01(raw.lightLeak || raw.light_leak);
+    const scanlines = clamp01(raw.scanlines);
+    const vignette = clamp01(raw.vignette);
+    const paper = clamp01(raw.paper || raw.paperTexture);
+    const res = {};
+    if (grain !== undefined) res.grain = grain;
+    if (halation !== undefined) res.halation = halation;
+    if (lightLeak !== undefined) res.lightLeak = lightLeak;
+    if (scanlines !== undefined) res.scanlines = scanlines;
+    if (vignette !== undefined) res.vignette = vignette;
+    if (paper !== undefined) res.paper = paper;
+    return Object.keys(res).length > 0 ? res : null;
+}
+
+function cleanTextPath(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    if (typeof raw.data !== 'string' || !raw.data.trim() || raw.data.length > 5000) return null;
+    const startOffset = Number.isFinite(Number(raw.startOffset))
+        ? Math.max(0, Math.min(1, Math.round(Number(raw.startOffset) * 100) / 100))
+        : 0;
+    return {
+        data: raw.data.trim(),
+        autoOrient: raw.autoOrient !== false,
+        startOffset,
+    };
+}
+
+function cleanCharAnim(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const allowed = ['stagger', 'wave', 'typewriter', 'random-in'];
+    const kind = typeof raw.kind === 'string' && allowed.includes(raw.kind.trim().toLowerCase())
+        ? raw.kind.trim().toLowerCase()
+        : 'stagger';
+    const stagger = Number.isFinite(Number(raw.stagger))
+        ? Math.max(0.01, Math.min(0.5, Math.round(Number(raw.stagger) * 1000) / 1000))
+        : 0.04;
+    const energy = Number.isFinite(Number(raw.energy))
+        ? Math.max(0.1, Math.min(1, Math.round(Number(raw.energy) * 100) / 100))
+        : 0.7;
+    return { kind, stagger, energy };
+}
+
 function cleanBeat(raw, visualCatalog = {}) {
     if (!raw || typeof raw !== 'object') return null;
     const kind = BEAT_KINDS.includes(raw.kind) ? raw.kind : null;
@@ -603,6 +725,14 @@ function cleanBeat(raw, visualCatalog = {}) {
     const motionPath = cleanMotionPath(raw.motionPath || raw.path);
     const runs = cleanRuns(raw.runs);
     const palette = cleanPalette(raw.palette);
+    const cadence = cleanCadence(raw.cadence);
+    const camera = cleanCamera(raw.camera);
+    const leaderLine = cleanLeaderLine(raw.leaderLine);
+    const mockup = cleanMockup(raw.mockup);
+    const kineticBadge = cleanKineticBadge(raw.kineticBadge);
+    const atmosphere = cleanAtmosphere(raw.atmosphere);
+    const textPath = cleanTextPath(raw.textPath);
+    const charAnim = cleanCharAnim(raw.charAnim);
     const effects = cleanEffects(raw.effects);
     const nodes = Array.isArray(raw.nodes) ? raw.nodes.slice(0, 16) : undefined;
 
@@ -628,6 +758,14 @@ function cleanBeat(raw, visualCatalog = {}) {
         ...(motionPath ? { motionPath } : {}),
         ...(runs ? { runs } : {}),
         ...(palette ? { palette } : {}),
+        ...(cadence ? { cadence } : {}),
+        ...(camera ? { camera } : {}),
+        ...(leaderLine ? { leaderLine } : {}),
+        ...(mockup ? { mockup } : {}),
+        ...(kineticBadge ? { kineticBadge } : {}),
+        ...(atmosphere ? { atmosphere } : {}),
+        ...(textPath ? { textPath } : {}),
+        ...(charAnim ? { charAnim } : {}),
         ...(effects ? { effects } : {}),
         ...(nodes ? { nodes } : {}),
     };
@@ -654,6 +792,9 @@ function cleanScenePlan(raw, visualCatalog = {}) {
     const tone = TONE_KEYS.includes(toneRaw) ? toneRaw : '';
     const background = cleanSceneBackground(raw.background);
     const palette = cleanPalette(raw.palette);
+    const cadence = cleanCadence(raw.cadence);
+    const camera = cleanCamera(raw.camera);
+    const atmosphere = cleanAtmosphere(raw.atmosphere);
 
     // A single word is a label, not a title; two words is the floor.
     const usableTitle = title.split(' ').length >= 2 ? title : '';
@@ -667,6 +808,9 @@ function cleanScenePlan(raw, visualCatalog = {}) {
         ...(tone ? { tone } : {}),
         ...(background ? { background } : {}),
         ...(palette ? { palette } : {}),
+        ...(cadence ? { cadence } : {}),
+        ...(camera ? { camera } : {}),
+        ...(atmosphere ? { atmosphere } : {}),
     };
 }
 
