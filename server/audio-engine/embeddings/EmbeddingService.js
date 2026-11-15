@@ -25,6 +25,101 @@ const CACHE_TTL_SECONDS   = 7 * 24 * 60 * 60; // 7 days
 const CACHE_KEY_PREFIX    = 'embed:v1:';
 const MAX_BATCH_SIZE      = 50;
 
+/**
+ * Normalizes an arbitrary-dimension vector (e.g. 768 from Gemini text-embedding-004)
+ * and zero-pads it to targetDim (1536) so it is 100% compatible with Supabase's
+ * pgvector column `vector(1536)` and search_assets_by_embedding RPC.
+ *
+ * Preserves exact cosine similarity: cos(u', v') == cos(u, v) because:
+ *   sum(u'_i * v'_i) for i in [0..767] == sum(u_i * v_i)
+ *   sum(u'_i * v'_i) for i in [768..1535] == 0
+ *   ||u'|| == 1.0, ||v'|| == 1.0
+ */
+function padAndNormalizeEmbedding(vector, targetDim = EMBEDDING_DIM) {
+    if (!Array.isArray(vector) || vector.length === 0) return null;
+    if (vector.length === targetDim) return vector;
+    if (vector.length > targetDim) return vector.slice(0, targetDim);
+
+    let norm = 0;
+    for (let i = 0; i < vector.length; i++) {
+        norm += vector[i] * vector[i];
+    }
+    norm = Math.sqrt(norm);
+    const scale = norm > 0 ? 1 / norm : 1;
+
+    const padded = new Array(targetDim).fill(0);
+    for (let i = 0; i < vector.length; i++) {
+        padded[i] = vector[i] * scale;
+    }
+    return padded;
+}
+
+function shouldPreferGemini() {
+    const prov = (process.env.AI_EMBEDDING_PROVIDER || process.env.AI_PROVIDER || '').toLowerCase();
+    if (prov === 'gemini') return true;
+    if (process.env.GEMINI_API_KEY && (!process.env.OPENAI_API_KEY || prov === 'groq')) return true;
+    return false;
+}
+
+async function callGeminiEmbed(text) {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) return null;
+    try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${encodeURIComponent(key)}`;
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'models/text-embedding-004',
+                content: { parts: [{ text: text.trim() }] },
+            }),
+        });
+        if (!res.ok) {
+            const errText = await res.text().catch(() => '');
+            console.warn(`[EmbeddingService] Gemini embed error (${res.status}):`, errText.slice(0, 160));
+            return null;
+        }
+        const data = await res.json();
+        const values = data?.embedding?.values;
+        if (!Array.isArray(values) || values.length === 0) return null;
+        return padAndNormalizeEmbedding(values, EMBEDDING_DIM);
+    } catch (err) {
+        console.warn('[EmbeddingService] Gemini embed fetch error:', err.message);
+        return null;
+    }
+}
+
+async function callGeminiBatchEmbed(texts) {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) return texts.map(() => null);
+    try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:batchEmbedContents?key=${encodeURIComponent(key)}`;
+        const requests = texts.map(t => ({
+            model: 'models/text-embedding-004',
+            content: { parts: [{ text: String(t || '').trim() }] },
+        }));
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requests }),
+        });
+        if (!res.ok) {
+            const errText = await res.text().catch(() => '');
+            console.warn(`[EmbeddingService] Gemini batch embed error (${res.status}):`, errText.slice(0, 160));
+            return texts.map(() => null);
+        }
+        const data = await res.json();
+        const embeddings = data?.embeddings || [];
+        return texts.map((_, i) => {
+            const values = embeddings[i]?.values;
+            return Array.isArray(values) && values.length > 0 ? padAndNormalizeEmbedding(values, EMBEDDING_DIM) : null;
+        });
+    } catch (err) {
+        console.warn('[EmbeddingService] Gemini batch embed fetch error:', err.message);
+        return texts.map(() => null);
+    }
+}
+
 // OpenAI client (lazy-init so tests don't fail on missing key)
 let _openai = null;
 function getOpenAI() {
@@ -106,30 +201,54 @@ class EmbeddingService {
         const cached = await this._fromCache(text);
         if (cached) return cached;
 
-        const client = getOpenAI();
-        if (!client?.embeddings?.create) {
-            console.warn('[EmbeddingService.embed] OpenAI client not available for embeddings');
-            return null;
+        // 1. Direct Gemini path when configured or preferred
+        if (shouldPreferGemini() && process.env.GEMINI_API_KEY) {
+            const geminiEmbedding = await callGeminiEmbed(text);
+            if (geminiEmbedding) {
+                this._toCache(text, geminiEmbedding);
+                return geminiEmbedding;
+            }
         }
 
-        try {
-            const response = await client.embeddings.create({
-                model: EMBEDDING_MODEL,
-                input: text.trim(),
-            });
+        // 2. OpenAI path
+        const client = getOpenAI();
+        if (client?.embeddings?.create) {
+            try {
+                const response = await client.embeddings.create({
+                    model: EMBEDDING_MODEL,
+                    input: text.trim(),
+                });
 
-            const embedding = response?.data?.[0]?.embedding;
-            if (!Array.isArray(embedding) || embedding.length !== EMBEDDING_DIM) {
+                const embedding = response?.data?.[0]?.embedding;
+                if (Array.isArray(embedding) && embedding.length === EMBEDDING_DIM) {
+                    this._toCache(text, embedding);
+                    return embedding;
+                }
                 console.error('[EmbeddingService.embed] unexpected shape:', embedding?.length);
+            } catch (err) {
+                console.warn('[EmbeddingService.embed] OpenAI error:', err.message);
+                // Fallback to Gemini on OpenAI failure (e.g. 429 out of credits)
+                if (process.env.GEMINI_API_KEY) {
+                    const fallbackEmbedding = await callGeminiEmbed(text);
+                    if (fallbackEmbedding) {
+                        this._toCache(text, fallbackEmbedding);
+                        return fallbackEmbedding;
+                    }
+                }
                 return null;
             }
-
-            this._toCache(text, embedding);
-            return embedding;
-        } catch (err) {
-            console.error('[EmbeddingService.embed] OpenAI error:', err.message);
-            return null;
         }
+
+        // 3. Last chance Gemini fallback if OpenAI was unavailable
+        if (process.env.GEMINI_API_KEY) {
+            const geminiEmbedding = await callGeminiEmbed(text);
+            if (geminiEmbedding) {
+                this._toCache(text, geminiEmbedding);
+                return geminiEmbedding;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -143,12 +262,6 @@ class EmbeddingService {
         if (!texts?.length) return [];
 
         const results = new Array(texts.length).fill(null);
-
-        const client = getOpenAI();
-        if (!client?.embeddings?.create) {
-            console.warn('[EmbeddingService.embedBatch] OpenAI client not available for embeddings');
-            return results;
-        }
 
         // Split into chunks of MAX_BATCH_SIZE
         for (let i = 0; i < texts.length; i += MAX_BATCH_SIZE) {
@@ -171,23 +284,50 @@ class EmbeddingService {
 
             if (uncachedTexts.length === 0) continue;
 
-            try {
-                const response = await client.embeddings.create({
-                    model: EMBEDDING_MODEL,
-                    input: uncachedTexts,
-                });
-
-                (response?.data || []).forEach((item, j) => {
-                    const globalIdx = uncachedIndices[j];
-                    const embedding = item?.embedding;
-                    if (Array.isArray(embedding) && embedding.length === EMBEDDING_DIM) {
-                        results[globalIdx] = embedding;
-                        this._toCache(uncachedTexts[j], embedding);
+            // Prefer Gemini when configured
+            if (shouldPreferGemini() && process.env.GEMINI_API_KEY) {
+                const geminiResults = await callGeminiBatchEmbed(uncachedTexts);
+                geminiResults.forEach((emb, j) => {
+                    if (emb) {
+                        results[uncachedIndices[j]] = emb;
+                        this._toCache(uncachedTexts[j], emb);
                     }
                 });
-            } catch (err) {
-                console.error('[EmbeddingService.embedBatch] OpenAI error:', err.message);
-                // partial results still returned
+                continue;
+            }
+
+            const client = getOpenAI();
+            let batchSuccess = false;
+            if (client?.embeddings?.create) {
+                try {
+                    const response = await client.embeddings.create({
+                        model: EMBEDDING_MODEL,
+                        input: uncachedTexts,
+                    });
+
+                    (response?.data || []).forEach((item, j) => {
+                        const globalIdx = uncachedIndices[j];
+                        const embedding = item?.embedding;
+                        if (Array.isArray(embedding) && embedding.length === EMBEDDING_DIM) {
+                            results[globalIdx] = embedding;
+                            this._toCache(uncachedTexts[j], embedding);
+                        }
+                    });
+                    batchSuccess = true;
+                } catch (err) {
+                    console.warn('[EmbeddingService.embedBatch] OpenAI error:', err.message);
+                }
+            }
+
+            // Fallback to Gemini if OpenAI failed or unavailable
+            if (!batchSuccess && process.env.GEMINI_API_KEY) {
+                const geminiResults = await callGeminiBatchEmbed(uncachedTexts);
+                geminiResults.forEach((emb, j) => {
+                    if (emb) {
+                        results[uncachedIndices[j]] = emb;
+                        this._toCache(uncachedTexts[j], emb);
+                    }
+                });
             }
         }
 
@@ -293,4 +433,4 @@ class EmbeddingService {
 
 // Singleton
 const embeddingService = new EmbeddingService();
-module.exports = { EmbeddingService, embeddingService };
+module.exports = { EmbeddingService, embeddingService, padAndNormalizeEmbedding };

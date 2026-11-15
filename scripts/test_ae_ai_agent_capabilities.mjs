@@ -253,6 +253,88 @@ await test('cleanBeat drops invalid AE field values gracefully', () => {
     assert.equal(beat.blendMode, undefined);
 });
 
+await test('cleanBeat and cleanScenePlan sanitize and preserve motionPath, runs, palette, and geographic vector shapes', () => {
+    const rawBeat = {
+        kind: 'point',
+        text: 'Driving Across Tokyo',
+        motionPath: {
+            points: [[10, 80], [35, 60], [65, 40], [90, 20]],
+            bank: 0.85,
+            spin: 360,
+            autoOrient: true,
+            duration: 4.2,
+        },
+        runs: [
+            { text: 'DRIVE ACROSS ', fontFamily: 'Montserrat', fontSize: 60, fontWeight: '700', color: '#FFFFFF' },
+            { text: 'TOKYO', fontFamily: 'Anton', fontSize: 100, fontWeight: '900', color: '#FF0055' },
+        ],
+        palette: {
+            text: '#FFFFFF',
+            accent: '#FF0055',
+            background: '#0D0D15',
+        },
+        vector: {
+            kind: 'location-badge',
+            params: { city: 'Tokyo', lat: '35.6762', lon: '139.6503' },
+        },
+        placement: 'behind_speaker',
+        spatial: { rx: 12, ry: -14, depth: 35 },
+    };
+
+    const cleaned = cleanBeat(rawBeat);
+    assert.ok(cleaned, 'Beat must clean successfully');
+    assert.equal(cleaned.motionPath?.points?.length, 4);
+    assert.equal(cleaned.motionPath?.bank, 0.85);
+    assert.equal(cleaned.motionPath?.autoOrient, true);
+    assert.equal(cleaned.runs?.length, 2);
+    assert.equal(cleaned.runs[0].fontFamily, 'Montserrat');
+    assert.equal(cleaned.runs[1].color, '#FF0055');
+    assert.equal(cleaned.palette?.accent, '#FF0055');
+    assert.equal(cleaned.vector?.kind, 'location-badge');
+    assert.equal(cleaned.placement, 'behind_speaker');
+
+    const plan = cleanScenePlan({
+        title: 'Epic Japan Travel Itinerary',
+        palette: { accent: '#FF0055' },
+        beats: [rawBeat],
+    });
+    assert.ok(plan, 'Plan must clean successfully');
+    assert.equal(plan.title, 'Epic Japan Travel Itinerary');
+    assert.equal(plan.palette?.accent, '#FF0055');
+    assert.ok(plan.beats[0].motionPath, 'Plan beat must carry motionPath');
+    assert.ok(plan.beats[0].runs, 'Plan beat must carry runs');
+});
+
+await test('padAndNormalizeEmbedding converts 768-dim embeddings to 1536-dim preserving cosine similarity', () => {
+    const { padAndNormalizeEmbedding } = nodeRequire(path.join(ROOT, 'server/audio-engine/embeddings/EmbeddingService.js'));
+    const vec768A = Array.from({ length: 768 }, (_, i) => Math.sin(i * 0.1));
+    const vec768B = Array.from({ length: 768 }, (_, i) => Math.cos(i * 0.1));
+
+    const paddedA = padAndNormalizeEmbedding(vec768A, 1536);
+    const paddedB = padAndNormalizeEmbedding(vec768B, 1536);
+
+    assert.equal(paddedA.length, 1536);
+    assert.equal(paddedB.length, 1536);
+
+    // Compute raw cosine
+    let dotRaw = 0, normA = 0, normB = 0;
+    for (let i = 0; i < 768; i++) {
+        dotRaw += vec768A[i] * vec768B[i];
+        normA += vec768A[i] * vec768A[i];
+        normB += vec768B[i] * vec768B[i];
+    }
+    const rawCosine = dotRaw / (Math.sqrt(normA) * Math.sqrt(normB));
+
+    // Compute padded cosine
+    let dotPadded = 0;
+    for (let i = 0; i < 1536; i++) {
+        dotPadded += paddedA[i] * paddedB[i];
+    }
+
+    assert.ok(Math.abs(rawCosine - dotPadded) < 1e-7, 'Cosine similarity must be identical within float precision');
+    assert.ok(paddedA.slice(768).every(x => x === 0), 'Dimensions 768-1535 must be zero-padded');
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. Agent Intent Parsing & Command Registry
 // ─────────────────────────────────────────────────────────────────────────────

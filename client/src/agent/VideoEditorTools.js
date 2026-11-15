@@ -1031,6 +1031,14 @@ export function matchTranscriptToBroll(words, candidates, chapterBoundaries = []
     const boundaries = Array.isArray(chapterBoundaries) ? chapterBoundaries : [];
     const isNearChapterBoundary = (t) => boundaries.some(b => Math.abs(t - b) <= BROLL_CHAPTER_PROXIMITY_S);
 
+    const totalDuration = words.length > 0
+        ? Math.max(0, (words[words.length - 1]?.end || words[words.length - 1]?.start || 0) - (words[0]?.start || 0))
+        : 0;
+    const dynamicMaxPlacements = Math.max(BROLL_MAX_PLACEMENTS, Math.min(100, Math.ceil(totalDuration / 12)));
+    const maxPlacements = Number.isFinite(opts.maxPlacements) && opts.maxPlacements > 0
+        ? opts.maxPlacements
+        : dynamicMaxPlacements;
+
     const placements = [];
     const lastPlacedAt = new Map(); // assetId -> last timelineTime it was placed at
     let lastPlacementEnd = -Infinity;
@@ -1100,7 +1108,7 @@ export function matchTranscriptToBroll(words, candidates, chapterBoundaries = []
                     });
                     lastPlacedAt.set(best.assetId, at);
                     lastPlacementEnd = at + duration;
-                    if (placements.length >= BROLL_MAX_PLACEMENTS) break;
+                    if (placements.length >= maxPlacements) break;
                 }
             }
         }

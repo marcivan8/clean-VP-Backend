@@ -306,6 +306,9 @@ export function createNode(type, overrides = {}) {
         parentId: overrides.parentId || null,
         trackMatte: overrides.trackMatte && typeof overrides.trackMatte === 'object' ? { ...overrides.trackMatte } : null,
         particles: overrides.particles && typeof overrides.particles === 'object' ? { ...overrides.particles } : null,
+        placement: overrides.placement || null,
+        spatial: overrides.spatial && typeof overrides.spatial === 'object' ? { ...overrides.spatial } : null,
+        motionPath: overrides.motionPath && typeof overrides.motionPath === 'object' ? { ...overrides.motionPath } : null,
     };
 }
 
@@ -370,6 +373,9 @@ export function createScene(overrides = {}) {
         parentId: overrides.parentId || null,
         trackMatte: overrides.trackMatte && typeof overrides.trackMatte === 'object' ? { ...overrides.trackMatte } : null,
         particles: overrides.particles && typeof overrides.particles === 'object' ? { ...overrides.particles } : null,
+        placement: overrides.placement || null,
+        spatial: overrides.spatial && typeof overrides.spatial === 'object' ? { ...overrides.spatial } : null,
+        motionPath: overrides.motionPath && typeof overrides.motionPath === 'object' ? { ...overrides.motionPath } : null,
     };
 }
 
@@ -881,6 +887,10 @@ export function flattenScene(scene, opts = {}) {
                 ...(resolvedBlendMode !== 'source-over' ? { blendMode: resolvedBlendMode } : {}),
                 ...(node.shadow ? { shadow: { ...node.shadow } } : {}),
                 ...(node.motionBlur?.enabled ? { motionBlur: { ...node.motionBlur } } : {}),
+                ...(node.motionPath ? { motionPath: typeof node.motionPath === 'object' ? { ...node.motionPath } : node.motionPath } : (node.path ? { motionPath: typeof node.path === 'object' ? { ...node.path } : node.path } : {})),
+                ...(node.placement ? { placement: node.placement } : {}),
+                ...(node.spatial ? { spatial: { ...node.spatial } } : {}),
+                ...(node.particles ? { particles: { ...node.particles } } : {}),
             };
             if (num(abs.opacity, 1) < 1) common.opacity = Math.round(num(abs.opacity, 1) * 1000) / 1000;
             // A scene matte uses the same foreground/background removal path
@@ -1167,6 +1177,10 @@ export function nodeFromClip(clip, trackType = 'overlay') {
         mask: clip.sceneMask || (clip.layerMask ? { kind: 'matte', layerMask: clip.layerMask } : null),
         animations: Array.isArray(clip.animations) ? clip.animations : [],
         expressions: clip.expressions && typeof clip.expressions === 'object' ? clip.expressions : {},
+        motionPath: clip.motionPath || null,
+        placement: clip.placement || null,
+        spatial: clip.spatial || null,
+        particles: clip.particles || null,
         origin: { clipId: clip.id, trackType, groupId: clip.groupId || null },
     });
 }

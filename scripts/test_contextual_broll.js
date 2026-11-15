@@ -255,6 +255,15 @@ section('4 · matchTranscriptToBroll — baseline keyword matching (no chapter b
     check('isChapterTransition is false with no boundaries supplied', matches[0].isChapterTransition === false);
     check('chapterBoundaries defaults to [] when omitted (3-arg back-compat)', matchTranscriptToBroll(words, candidates).length === matches.length);
     check('no words / no candidates returns []', matchTranscriptToBroll([], candidates).length === 0 && matchTranscriptToBroll(words, []).length === 0);
+
+    const longWords = [];
+    for (let t = 0; t < 180; t += 3) {
+        longWords.push({ start: t, end: t + 2, word: 'equipment' });
+        longWords.push({ start: t + 2, end: t + 2.8, word: 'camera' });
+    }
+    const longMatches = matchTranscriptToBroll(longWords, candidates);
+    check('long-form video scales b-roll placements past 8 across full duration',
+        longMatches.length > 8 && longMatches[longMatches.length - 1].timelineTime > 120);
 }
 
 section('5 · matchTranscriptToBroll — R78 chapter-boundary transition awareness');

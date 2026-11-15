@@ -95,7 +95,11 @@ function extractVisualMoments(words = [], chapterBoundaries = [], options = {}) 
 
     const windowSeconds = options.windowSeconds || 6.0;
     const minSpacing = options.minSpacing || 8.0;
-    const maxMoments = options.maxMoments || 5;
+    const duration = words.length > 0
+        ? Math.max(0, (words[words.length - 1]?.end || words[words.length - 1]?.start || 0) - (words[0]?.start || 0))
+        : 0;
+    const dynamicMaxMoments = Math.max(5, Math.min(60, Math.ceil(duration / 12)));
+    const maxMoments = options.maxMoments || dynamicMaxMoments;
     const boundaries = Array.isArray(chapterBoundaries) ? chapterBoundaries : [];
 
     const moments = [];
@@ -192,8 +196,12 @@ class BrollSuggesterService {
             return { suggestions: [], message: 'No transcript words provided.' };
         }
 
+        const duration = words.length > 0
+            ? Math.max(0, (words[words.length - 1]?.end || words[words.length - 1]?.start || 0) - (words[0]?.start || 0))
+            : 0;
+        const dynamicCap = Math.max(8, Math.min(60, Math.ceil(duration / 12)));
         const moments = extractVisualMoments(words, chapters, {
-            maxMoments: Math.min(8, Math.max(1, maxSuggestions)),
+            maxMoments: maxSuggestions ? Math.max(1, maxSuggestions) : dynamicCap,
             minSpacing: 6.0,
         });
 

@@ -95,7 +95,7 @@ const CAPABILITY_PROVIDERS = {
     motion:     ['openai', 'ollama', 'groq', 'gemini', 'gemma-local'],
     vision:     ['openai', 'ollama', 'gemini'],
     audio:      ['openai', 'groq'],
-    embeddings: ['openai'],
+    embeddings: ['openai', 'gemini'],
     // 'judge' is text-only arbitration: score a handful of already-generated
     // candidates against a short rubric and return numbers. It gets its own
     // lane rather than riding on 'chat' because it wants the OPPOSITE trade:

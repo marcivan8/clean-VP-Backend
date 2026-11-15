@@ -235,6 +235,9 @@ export function planFromBrief(brief, opts = {}) {
                 expressions: (b?.expressions && typeof b.expressions === 'object') ? b.expressions : null,
                 particles: (b?.particles && typeof b.particles === 'object') ? b.particles : null,
                 vector: (b?.vector && typeof b.vector === 'object') ? b.vector : null,
+                motionPath: (b?.motionPath && typeof b.motionPath === 'object') ? b.motionPath : ((b?.path && typeof b.path === 'object') ? b.path : null),
+                runs: Array.isArray(b?.runs) ? b.runs : null,
+                palette: (b?.palette && typeof b.palette === 'object') ? b.palette : null,
                 effects: Array.isArray(b?.effects) ? b.effects : null,
                 nodes: Array.isArray(b?.nodes) ? b.nodes : (Array.isArray(b?.layers) ? b.layers : null),
             });
@@ -586,6 +589,35 @@ export function composeSceneFromBrief(brief, opts = {}) {
                 origin: { role: 'accent', beat: beat.kind },
             });
             innerChildren.push(vectorNode);
+        }
+
+        // 7. Motion path trajectory (e.g. driving, flight route, moving pointer)
+        const path = beat.motionPath || beat.path;
+        if (path && typeof path === 'object' && Array.isArray(path.points)) {
+            for (const child of innerChildren) {
+                if (!child.path && !child.motionPath) {
+                    child.path = { ...path };
+                    child.motionPath = { ...path };
+                }
+            }
+        }
+
+        // 8. Multi-style typography runs (mixed fonts in same headline)
+        if (Array.isArray(beat.runs) && beat.runs.length > 0) {
+            const textChild = innerChildren.find(c => c.type === NODE_TYPES.TEXT);
+            if (textChild) {
+                textChild.runs = beat.runs.map(r => ({ ...r }));
+            }
+        }
+
+        // 9. Custom palette override
+        if (beat.palette && typeof beat.palette === 'object') {
+            for (const child of innerChildren) {
+                if (child.style) {
+                    if (beat.palette.text && child.style.color) child.style.color = beat.palette.text;
+                    if (beat.palette.accent && child.style.accentColor) child.style.accentColor = beat.palette.accent;
+                }
+            }
         }
 
         groups.push(createGroup({

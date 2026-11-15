@@ -342,11 +342,15 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techni
         '  "energy": 0 (subtle) to 1 (maximal), omit for a moderate default',
         '  "anticipate": true (optional) - the beat winds up against its own move just before it, which gives a punch or a whip-out weight. Leave it out for calm treatments, where it reads as a stutter.',
         '',
-        'A beat MAY also add advanced generative motion design layers:',
-        '  "spatial": {"rx": -15..15, "ry": -15..15, "depth": 10..50} for 3D card tilt & spatial perspective',
+        'A beat MAY also add advanced generative motion design layers and custom styling for ANY subject (travel, automotive, food, sports, branding, tech, etc.):',
+        '  "motionPath": {"points": [[x1, y1], [x2, y2], ...], "bank": 0..1.2, "spin": 0..720, "autoOrient": true, "easing": "easeInOutCubic"} for objects traveling across the frame (e.g. car driving from A to B, flight route, moving pointer)',
+        '  "runs": [{"text": "WORD", "fontFamily": "Anton"|"Montserrat"|"Inter"|"Playfair Display", "fontSize": 32..140, "fontWeight": "400"|"700"|"900", "color": "#RRGGBB"}, ...] for mixed typography and multi-font emphasis in the same sentence',
+        '  "palette": {"text": "#RRGGBB", "sub": "#RRGGBB", "accent": "#RRGGBB", "background": "#RRGGBB"} to specify custom branding or scene color palettes',
+        '  "spatial": {"rx": -25..25, "ry": -25..25, "depth": 10..80} for 3D card tilt & spatial perspective',
         '  "placement": "behind_speaker" | "behind_subject" | "front" (use "behind_speaker" to sandwich kinetic text behind the presenter)',
-        '  "particles": {"kind": "sparks"|"dust"|"bokeh"|"neon-embers", "count": 40..150} for atmospheric particles',
-        '  "vector": {"kind": "circular-meter"|"line-graph"|"progress-bar"|"circle-callout"|"arrow"|"bar-chart"} for animated data callouts and accents',
+        '  "particles": {"kind": "sparks"|"dust"|"bokeh"|"neon-embers"|"confetti", "count": 20..150, "speed": 0.5..2.5, "color": "#RRGGBB"} for atmospheric particles',
+        '  "vector": {"kind": "circular-meter"|"line-graph"|"progress-bar"|"circle-callout"|"arrow"|"bar-chart"|"location-badge"|"timeline-steps"|"process-flow"|"route-line"|"star"|"polygon"} for animated data callouts, geographic routes and accents',
+        '  "trim": {"trimStart": 0..1, "trimEnd": 0..1, "trimOffset": 0..360} for vector and SVG draw-on reveals',
         '  "expressions": {"scale": "audioAmp(\'bass\') * 0.15 + 1.0", "position": "wiggle(2, 8)"} for living physics',
         '  "effects": ["glow", "chromatic-aberration", "motion-blur"] for cinematic polish',
         '',
@@ -499,10 +503,64 @@ function cleanParticles(raw) {
 
 function cleanVector(raw) {
     if (!raw || typeof raw !== 'object') return null;
-    const validKinds = ['arrow', 'circle-callout', 'progress-bar', 'bar-chart', 'line-graph', 'circular-meter', 'burst', 'highlight-box', 'underline'];
+    const validKinds = [
+        'arrow', 'circle-callout', 'progress-bar', 'bar-chart', 'line-graph',
+        'circular-meter', 'burst', 'highlight-box', 'underline', 'location-badge',
+        'timeline-steps', 'process-flow', 'status-label', 'route-line',
+        'rect', 'circle', 'ellipse', 'capsule', 'callout', 'polygon', 'star', 'path',
+    ];
     const kind = validKinds.includes(raw.kind) ? raw.kind : null;
     if (!kind) return null;
     return { kind, params: typeof raw.params === 'object' && raw.params ? { ...raw.params } : {} };
+}
+
+function cleanMotionPath(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const rawPoints = Array.isArray(raw.points) ? raw.points : [];
+    const points = rawPoints.map(p => {
+        const x = Number(Array.isArray(p) ? p[0] : p?.x);
+        const y = Number(Array.isArray(p) ? p[1] : p?.y);
+        return Number.isFinite(x) && Number.isFinite(y) ? [Math.max(-100, Math.min(200, Math.round(x * 100) / 100)), Math.max(-100, Math.min(200, Math.round(y * 100) / 100))] : null;
+    }).filter(Boolean);
+    if (points.length < 2) return null;
+    const res = { points };
+    if (Number.isFinite(Number(raw.startTime)) && Number(raw.startTime) >= 0) res.startTime = Math.max(0, Math.min(600, Number(raw.startTime)));
+    if (Number.isFinite(Number(raw.duration)) && Number(raw.duration) > 0) res.duration = Math.max(0.1, Math.min(600, Number(raw.duration)));
+    if (Number.isFinite(Number(raw.bank))) res.bank = Math.max(-2, Math.min(2, Math.round(Number(raw.bank) * 100) / 100));
+    if (Number.isFinite(Number(raw.spin))) res.spin = Math.max(-1440, Math.min(1440, Math.round(Number(raw.spin))));
+    if (raw.autoOrient === true) res.autoOrient = true;
+    if (typeof raw.easing === 'string' && raw.easing.trim()) res.easing = raw.easing.trim().slice(0, 40);
+    if (raw.mode === 'bezier' || raw.arcLength === true) res.arcLength = true;
+    return res;
+}
+
+function cleanRuns(raw) {
+    if (!Array.isArray(raw) || raw.length === 0) return null;
+    const validRuns = [];
+    for (const item of raw.slice(0, 10)) {
+        if (!item || typeof item !== 'object') continue;
+        const text = cleanLine(item.text, { maxWords: 15, maxChars: 120 });
+        if (!text) continue;
+        const run = { text };
+        if (typeof item.fontFamily === 'string' && item.fontFamily.trim()) run.fontFamily = item.fontFamily.trim().slice(0, 50);
+        if (Number.isFinite(Number(item.fontSize))) run.fontSize = Math.max(12, Math.min(300, Math.round(Number(item.fontSize))));
+        if (item.fontWeight !== undefined) run.fontWeight = String(item.fontWeight).slice(0, 20);
+        if (typeof item.color === 'string' && (/^#[0-9a-fA-F]{3,8}$/.test(item.color) || /^[a-z]+$/i.test(item.color))) run.color = item.color.trim();
+        if (typeof item.fontStyle === 'string') run.fontStyle = item.fontStyle.slice(0, 20);
+        if (Number.isFinite(Number(item.letterSpacing))) run.letterSpacing = Math.max(-20, Math.min(100, Number(item.letterSpacing)));
+        validRuns.push(run);
+    }
+    return validRuns.length > 0 ? validRuns : null;
+}
+
+function cleanPalette(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const isColor = v => typeof v === 'string' && /^#[0-9a-fA-F]{3,8}$/i.test(v.trim());
+    const cleaned = {};
+    for (const k of ['text', 'sub', 'accent', 'background']) {
+        if (isColor(raw[k])) cleaned[k] = raw[k].trim();
+    }
+    return Object.keys(cleaned).length > 0 ? cleaned : null;
 }
 
 function cleanEffects(raw) {
@@ -523,17 +581,6 @@ function cleanBeat(raw, visualCatalog = {}) {
     const label = (kind === 'stat' || kind === 'quote') ? cleanLine(raw.label, { maxWords: 4, maxChars: 32 }) : '';
     const explicitMotion = cleanMotion(raw.motion);
 
-    // R103 — a technique id the model picked from the knowledge-base shortlist.
-    // Validated against the library, never trusted as a string: an unknown id
-    // is dropped entirely rather than passed through, so a hallucinated name
-    // leaves the beat with no motion and the look's own motion stands (the
-    // same outcome as before techniques existed).
-    //
-    // An explicit `motion` object WINS over a technique when both are present.
-    // That ordering is deliberate: the technique is the library's
-    // recommendation, the motion object is the model overriding it for this
-    // specific beat, and the more specific instruction should not be silently
-    // discarded in favour of the generic one.
     const technique = typeof raw.technique === 'string' && techniqueByName(raw.technique)
         ? raw.technique
         : null;
@@ -553,6 +600,9 @@ function cleanBeat(raw, visualCatalog = {}) {
     const spatial = cleanSpatial(raw.spatial || raw.scene3d);
     const particles = cleanParticles(raw.particles);
     const vector = cleanVector(raw.vector);
+    const motionPath = cleanMotionPath(raw.motionPath || raw.path);
+    const runs = cleanRuns(raw.runs);
+    const palette = cleanPalette(raw.palette);
     const effects = cleanEffects(raw.effects);
     const nodes = Array.isArray(raw.nodes) ? raw.nodes.slice(0, 16) : undefined;
 
@@ -575,6 +625,9 @@ function cleanBeat(raw, visualCatalog = {}) {
         ...(spatial ? { spatial } : {}),
         ...(particles ? { particles } : {}),
         ...(vector ? { vector } : {}),
+        ...(motionPath ? { motionPath } : {}),
+        ...(runs ? { runs } : {}),
+        ...(palette ? { palette } : {}),
         ...(effects ? { effects } : {}),
         ...(nodes ? { nodes } : {}),
     };
@@ -600,6 +653,7 @@ function cleanScenePlan(raw, visualCatalog = {}) {
     const toneRaw = typeof raw.tone === 'string' ? raw.tone.trim().toLowerCase() : '';
     const tone = TONE_KEYS.includes(toneRaw) ? toneRaw : '';
     const background = cleanSceneBackground(raw.background);
+    const palette = cleanPalette(raw.palette);
 
     // A single word is a label, not a title; two words is the floor.
     const usableTitle = title.split(' ').length >= 2 ? title : '';
@@ -612,6 +666,7 @@ function cleanScenePlan(raw, visualCatalog = {}) {
         ...(beats.length ? { beats } : {}),
         ...(tone ? { tone } : {}),
         ...(background ? { background } : {}),
+        ...(palette ? { palette } : {}),
     };
 }
 
