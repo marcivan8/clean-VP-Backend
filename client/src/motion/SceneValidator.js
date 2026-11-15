@@ -854,6 +854,20 @@ function fixSwapSlot(node) {
     };
 }
 
+function fixTextFit(node, box, target) {
+    if (node.type !== NODE_TYPES.TEXT || !box) return null;
+    const factor = Math.min(target.w / Math.max(1, box.w), target.h / Math.max(1, box.h), 0.98);
+    if (factor >= 0.999) return null;
+    const style = node.style || {};
+    const curSize = num(style.fontSize, 48);
+    const nextSize = Math.max(14, Math.floor(curSize * factor));
+    if (nextSize >= curSize) return null;
+    return {
+        patch: { style: { ...style, fontSize: nextSize } },
+        message: `"${node.name}" was scaled down from ${Math.round(curSize)} px to ${nextSize} px to fit within the safe area.`,
+    };
+}
+
 function fixPlacement(scene, node, box, target) {
     const { w: fw, h: fh } = scene.frame;
     let cx = box.cx;
@@ -951,7 +965,12 @@ export function autoFixScene(scene, opts = {}) {
                     ? contentRect(current, opts)
                     : { x: 0, y: 0, w: current.frame.w, h: current.frame.h };
                 // Too big is a different fault from in the wrong place: size first.
-                applied = (entry && box) ? (fixOverlayFit(node, box, target) || fixPlacement(current, node, box, target)) : null;
+                if (node.type === NODE_TYPES.TEXT && box && (box.w > target.w || box.h > target.h)) {
+                    applied = fixTextFit(node, box, target);
+                }
+                if (!applied) {
+                    applied = (entry && box) ? (fixOverlayFit(node, box, target) || fixPlacement(current, node, box, target)) : null;
+                }
             } else if (item.code === ISSUE_CODES.SWAP_SLOT_UNRESERVED) {
                 applied = fixSwapSlot(node);
             } else if (item.code === ISSUE_CODES.TIMING_OUT_OF_RANGE) {

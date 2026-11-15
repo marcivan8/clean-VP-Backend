@@ -230,10 +230,30 @@ export function planFromBrief(brief, opts = {}) {
                 // against the look's own motion in SceneComposer.resolveLook,
                 // never used raw.
                 motion: (b?.motion && typeof b.motion === 'object') ? b.motion : null,
+                spatial: (b?.spatial && typeof b.spatial === 'object') ? b.spatial : ((b?.scene3d && typeof b.scene3d === 'object') ? b.scene3d : null),
+                placement: typeof b?.placement === 'string' ? b.placement : null,
+                expressions: (b?.expressions && typeof b.expressions === 'object') ? b.expressions : null,
+                particles: (b?.particles && typeof b.particles === 'object') ? b.particles : null,
+                vector: (b?.vector && typeof b.vector === 'object') ? b.vector : null,
+                effects: Array.isArray(b?.effects) ? b.effects : null,
+                nodes: Array.isArray(b?.nodes) ? b.nodes : (Array.isArray(b?.layers) ? b.layers : null),
             });
         }
         rationale.push(`The sequence follows the ${beats.length} beats in the plan.`);
     } else {
+        const wants3D = /\b(?:3d|spatial|tilt|perspective|isometric)\b/i.test(s);
+        const wantsBehindSpeaker = /\b(?:behind (?:the )?(?:speaker|person|subject|host)|sandwich)\b/i.test(s);
+        const wantsParticles = /\b(?:particles?|sparks?|dust|glow|neon|embers?)\b/i.test(s);
+        const wantsVector = /\b(?:chart|graph|meter|progress|arrow|bracket)\b/i.test(s);
+        const wantsHold = /\b(?:breathe|float|sway|drift|alive|living)\b/i.test(s);
+        const inferAttrs = (beatKind) => ({
+            ...(wants3D ? { spatial: { rx: 12, ry: -14, depth: 30 } } : {}),
+            ...(wantsBehindSpeaker ? { placement: 'behind_speaker' } : {}),
+            ...(wantsParticles ? { particles: { kind: 'sparks', count: 80, speed: 1.2 } } : {}),
+            ...(wantsVector ? { vector: { kind: beatKind === 'stat' ? 'circular-meter' : 'circle-callout' } } : {}),
+            ...(wantsHold ? { motion: { enter: 'pop-in', hold: 'breathe', exit: 'fade-out', energy: 0.7 } } : {}),
+        });
+
         const pointWords = 'benefit|benefits|reason|reasons|point|points|feature|features|capability|capabilities|callout|callouts|bullet|bullets|step|steps|pillar|pillars|tip|tips|way|ways';
         const wantsPoints = new RegExp(`\\b(?:${pointWords})\\b`).test(s);
         const wantsStat = /\bstat|\bnumber|\bmetric|\bresult|%|\bgrowth|\broi\b/.test(s);
@@ -258,28 +278,40 @@ export function planFromBrief(brief, opts = {}) {
                 text: extractedTitle,
                 ...(extractedSub ? { sub: extractedSub } : {}),
                 kicker: null,
+                ...inferAttrs('intro'),
             });
             rationale.push('It opens with a title, because the brief asks for an introduction.');
         }
         if (wantsPoints) {
             const n = countNear(s, pointWords, 3);
             for (let i = 0; i < n; i++) {
-                beats.push({ kind: 'point', text: planPoints[i] || items[i] || null, kicker: String(i + 1).padStart(2, '0') });
+                beats.push({
+                    kind: 'point',
+                    text: planPoints[i] || items[i] || null,
+                    kicker: String(i + 1).padStart(2, '0'),
+                    ...inferAttrs('point'),
+                });
             }
             rationale.push(`${n} points, numbered, so the viewer can count along.`);
         }
         if (wantsStat) {
-            beats.push({ kind: 'stat', text: null, value: null, label: planPoints[0] || null });
+            beats.push({
+                kind: 'stat',
+                text: null,
+                value: null,
+                label: planPoints[0] || null,
+                ...inferAttrs('stat'),
+            });
             rationale.push('One figure gets a callout of its own.');
         }
-        if (wantsQuote) beats.push({ kind: 'quote', text: planPoints[0] || null });
+        if (wantsQuote) beats.push({ kind: 'quote', text: planPoints[0] || null, ...inferAttrs('quote') });
         if (wantsCta) {
             const extractedCta = planCta || opts.cta || (text.match(/(?:call[- ]to[- ]action to|cta to)\s+([^.,\n]+)/i)?.[1]?.trim()?.toUpperCase()) || null;
-            beats.push({ kind: 'cta', text: extractedCta, kicker: null });
+            beats.push({ kind: 'cta', text: extractedCta, kicker: null, ...inferAttrs('cta') });
             rationale.push('It closes on the call to action.');
         }
         if (beats.length === 0) {
-            beats.push({ kind: 'intro', text: extractedTitle });
+            beats.push({ kind: 'intro', text: extractedTitle, ...inferAttrs('intro') });
             rationale.push('Nothing specific was asked for, so it is a single title.');
         }
     }
@@ -464,16 +496,104 @@ export function composeSceneFromBrief(brief, opts = {}) {
             if (beat.sub) params.subtitle = beat.sub;
         }
 
-        const beatScene = composeComponentScene(spec.component, preset, params, { frame, safeZone: opts.safeZone, rect: placement.rect });
-        if (!beatScene) return;
-        // The component's own group becomes this beat's group, placed in time.
-        const inner = beatScene.nodes[0];
+        let innerChildren = [];
+        if (Array.isArray(beat.nodes) && beat.nodes.length > 0) {
+            innerChildren = beat.nodes.map(n => ({ ...n }));
+        } else {
+            const beatScene = composeComponentScene(spec.component, preset, params, { frame, safeZone: opts.safeZone, rect: placement.rect });
+            if (!beatScene) return;
+            const inner = beatScene.nodes[0];
+            innerChildren = [...(inner?.children || [])];
+        }
+
+        // 1. Placement (e.g. behind_speaker / behind_subject depth sandwiching)
+        if (beat.placement) {
+            for (const child of innerChildren) {
+                child.placement = beat.placement;
+                child.meta = { ...(child.meta || {}), placement: beat.placement };
+            }
+        }
+
+        // 2. 3D Spatial transforms & perspective depth
+        const spatial = beat.spatial || beat.scene3d;
+        if (spatial && typeof spatial === 'object') {
+            const rx = Number(spatial.rx || 0);
+            const ry = Number(spatial.ry || 0);
+            const rz = Number(spatial.rz || 0);
+            const z = Number(spatial.depth || spatial.z || 0);
+            for (const child of innerChildren) {
+                child.transform = {
+                    ...(child.transform || {}),
+                    ...(rx ? { rotationX: rx } : {}),
+                    ...(ry ? { rotationY: ry } : {}),
+                    ...(rz ? { rotation: rz } : {}),
+                    ...(z ? { z } : {}),
+                };
+            }
+        }
+
+        // 3. Living physics & audio-reactive expressions
+        if (beat.expressions && typeof beat.expressions === 'object') {
+            for (const child of innerChildren) {
+                child.expressions = { ...(child.expressions || {}), ...beat.expressions };
+            }
+        }
+
+        // 4. Layer effects (glow, chromatic aberration, motion blur)
+        if (Array.isArray(beat.effects) && beat.effects.length > 0) {
+            for (const child of innerChildren) {
+                const effs = beat.effects.map(k => (typeof k === 'string' ? { kind: k, params: {} } : k));
+                child.effects = [...(child.effects || []), ...effs];
+            }
+        }
+
+        // 5. Procedural atmospheric particle layer
+        if (beat.particles && typeof beat.particles === 'object') {
+            const particleNode = createNode(NODE_TYPES.SHAPE, {
+                name: `${beat.kind} Atmospheric Particles`,
+                start: 0,
+                duration,
+                transform: { x: 50, y: 50, scale: 1 },
+                size: { w: frame.w, h: frame.h },
+                particles: {
+                    count: Math.min(250, Number(beat.particles.count || 80)),
+                    kind: String(beat.particles.kind || 'sparks'),
+                    speed: Number(beat.particles.speed || 1.2),
+                    color: beat.particles.color || palette.accent,
+                },
+                meta: { isAtmosphere: true },
+                origin: { role: 'atmosphere', beat: beat.kind },
+            });
+            innerChildren.unshift(particleNode);
+        }
+
+        // 6. Procedural vector accent layer
+        if (beat.vector && typeof beat.vector === 'object') {
+            const vectorNode = createNode(NODE_TYPES.SHAPE, {
+                name: `${beat.kind} Vector Accent`,
+                start: 0.1,
+                duration: Math.max(0.4, duration - 0.2),
+                transform: { x: placement.x, y: placement.anchor === 'top' ? 26 : 74, scale: 1 },
+                template: {
+                    kind: String(beat.vector.kind || 'circle-callout'),
+                    params: {
+                        color: palette.accent,
+                        w: 220,
+                        h: 220,
+                        ...(beat.vector.params || {}),
+                    },
+                },
+                origin: { role: 'accent', beat: beat.kind },
+            });
+            innerChildren.push(vectorNode);
+        }
+
         groups.push(createGroup({
             name: `${i + 1}. ${beat.kind}`,
             transform: { x: 0, y: 0 },
             start: round(cursor),
             duration,
-            children: inner.children,
+            children: innerChildren,
             // A beat arrives as one move: its layers stagger inside it.
             motion: { stagger: plan.pacing === 'rapid' ? 0.08 : 0.12, order: 'forward' },
             origin: { beat: beat.kind, index: i, component: spec.component, preset },

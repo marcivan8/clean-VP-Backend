@@ -323,6 +323,7 @@ export function cleanMotionOverride(raw, fallback) {
     const isVerb = (name, group) => typeof name === 'string' && VERBS[name]?.group === group;
     const enter = isVerb(raw.enter, 'in') ? raw.enter : fallback.enter;
     const emphasis = raw.emphasis === null ? null : (isVerb(raw.emphasis, 'emphasis') ? raw.emphasis : fallback.emphasis);
+    const hold = raw.hold === null ? null : (isVerb(raw.hold, 'hold') ? raw.hold : (fallback.hold || null));
     const exit = raw.exit === null ? null : (isVerb(raw.exit, 'out') ? raw.exit : fallback.exit);
     const energy = Number.isFinite(Number(raw.energy)) ? Math.min(1, Math.max(0, Number(raw.energy))) : fallback.energy;
     // R103 round F — anticipation is part of this contract, not a separate
@@ -330,7 +331,14 @@ export function cleanMotionOverride(raw, fallback) {
     // moves the same way it asks for a verb. Strictly boolean: anything else
     // falls back rather than being coerced, like every other field here.
     const anticipate = typeof raw.anticipate === 'boolean' ? raw.anticipate : (fallback.anticipate === true);
-    return { enter, emphasis, exit, energy, anticipate };
+    return {
+        enter,
+        emphasis,
+        ...(hold ? { hold } : {}),
+        exit,
+        energy,
+        anticipate,
+    };
 }
 
 /** A look, with `params` allowed to override any colour, the display font (a
@@ -381,6 +389,9 @@ function motionFor(look, { duration, index = 0, stagger = STAGGER, emphasis = tr
     const hasRoom = duration >= 2.2 && (at + 0.95 < duration - 0.4);
     if (emphasis && look.motion.emphasis && hasRoom) {
         beats.push({ verb: look.motion.emphasis, at: Math.min(at + duration * 0.45, Math.max(at + 0.2, duration - 0.7)), energy: look.motion.energy * 0.8, anticipate });
+    }
+    if (look.motion.hold && duration >= 1.2) {
+        beats.push({ verb: look.motion.hold, at: Math.min(at + 0.35, duration * 0.25), energy: (Number(look.motion.energy) || 0.6) * 0.7 });
     }
     if (look.motion.exit) beats.push({ verb: look.motion.exit, energy: look.motion.energy, anticipate });
     const { animations } = composeMotion({ beats }, { duration, kind: 'text' });

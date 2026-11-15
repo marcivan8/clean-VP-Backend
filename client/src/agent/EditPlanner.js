@@ -603,8 +603,8 @@ export class EditPlanner {
                 const text = raw.toLowerCase();
                 let component = 'TitleSequence';
                 let preset = 'cinematic';
-                const wantsCompound = /\b(?:compound|compound clip|nested|bundle)\b/i.test(text);
-                const params = { asCompound: wantsCompound };
+                const notCompound = /\b(?:flat|unbundle|separate tracks|flatten)\b/i.test(text);
+                const params = { asCompound: !notCompound };
                 // The words to show: quoted text, or what follows "saying" / "that says" / "with the text".
                 const quoted = raw.match(/["“”«]([^"“”«»]{1,80})["“”»]/);
                 const said = raw.match(/\b(?:saying|that says|which says|with the text|reading|disant)\s*:?\s+(.{1,80})$/i);

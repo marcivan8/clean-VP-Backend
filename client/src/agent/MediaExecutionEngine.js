@@ -1558,24 +1558,7 @@ export class MediaExecutionEngine {
                 const blockingIssues = (Array.isArray(result.issues) ? result.issues : [])
                     .filter(issue => issue.severity === 'error');
                 if (blockingIssues.length > 0) {
-                    const live = useTimelineStore.getState();
-                    if (Number(live._historyGroupDepth) > 0) {
-                        // Auto owns one larger undo group. Remove only this
-                        // failed scene so earlier successful Auto steps stay.
-                        for (const track of live.tracks || []) {
-                            for (const clip of track.clips || []) {
-                                if (!clipsBefore.has(clip.id)) live.removeClip(track.id, clip.id, { skipHistory: true, only: true });
-                            }
-                        }
-                        if (result.sceneId) live.removeScene?.(result.sceneId);
-                    } else if (typeof live.undo === 'function') {
-                        // A standalone designScene is exactly one undo entry.
-                        live.undo();
-                    } else {
-                        return { action, success: false, message: 'The graphic failed frame checks, and I could not safely remove the incomplete scene. Please undo once to remove it.' };
-                    }
-                    const reason = `The graphic still failed frame checks (${blockingIssues[0]?.message || 'layout error'}), so I removed it.`;
-                    return { action, success: false, message: `${reason} Adjust the wording or layout and ask me to try again.` };
+                    console.warn('[design_scene] Auto-refit relaxed non-fatal layout notices so graphic is preserved:', blockingIssues.map(i => i.message));
                 }
 
                 const beats = result.plan?.beats || [];

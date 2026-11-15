@@ -231,6 +231,7 @@ const TONE_KEYS = ['premium', 'technology', 'viral', 'editorial', 'warm'];
  */
 const ENTER_VERBS = ['fade-in', 'rise-in', 'drop-in', 'slide-in', 'slam-in', 'pop-in', 'zoom-in', 'whip-in', 'swing-in', 'spin-in', 'blur-in', 'typewriter', 'word-reveal', 'glitch-in'];
 const EMPHASIS_VERBS = ['punch', 'pulse', 'shake', 'wobble', 'nod', 'flash', 'jiggle', 'bounce'];
+const HOLD_VERBS = ['float', 'breathe', 'sway', 'drift', 'push-in'];
 const EXIT_VERBS = ['fade-out', 'sink-out', 'fly-out', 'shrink-out', 'blur-out', 'whip-out'];
 
 /**
@@ -336,9 +337,18 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techni
         'A beat MAY also suggest its own "motion" when the tone\'s usual treatment would undersell it (a standout number, the final call to action) - most beats should leave "motion" out and let the tone\'s own default carry them:',
         `  "enter" (required if "motion" is given): one of ${ENTER_VERBS.join(', ')}`,
         `  "emphasis" (optional): one of ${EMPHASIS_VERBS.join(', ')}, or omit it`,
+        `  "hold" (optional): one of ${HOLD_VERBS.join(', ')} (float, breathe, sway, drift, push-in) to eliminate dead static holds`,
         `  "exit" (optional): one of ${EXIT_VERBS.join(', ')}, or omit it`,
         '  "energy": 0 (subtle) to 1 (maximal), omit for a moderate default',
         '  "anticipate": true (optional) - the beat winds up against its own move just before it, which gives a punch or a whip-out weight. Leave it out for calm treatments, where it reads as a stutter.',
+        '',
+        'A beat MAY also add advanced generative motion design layers:',
+        '  "spatial": {"rx": -15..15, "ry": -15..15, "depth": 10..50} for 3D card tilt & spatial perspective',
+        '  "placement": "behind_speaker" | "behind_subject" | "front" (use "behind_speaker" to sandwich kinetic text behind the presenter)',
+        '  "particles": {"kind": "sparks"|"dust"|"bokeh"|"neon-embers", "count": 40..150} for atmospheric particles',
+        '  "vector": {"kind": "circular-meter"|"line-graph"|"progress-bar"|"circle-callout"|"arrow"|"bar-chart"} for animated data callouts and accents',
+        '  "expressions": {"scale": "audioAmp(\'bass\') * 0.15 + 1.0", "position": "wiggle(2, 8)"} for living physics',
+        '  "effects": ["glow", "chromatic-aberration", "motion-blur"] for cinematic polish',
         '',
         'Rules:',
         '- At most 8 beats.',
@@ -406,13 +416,21 @@ function cleanMotion(raw) {
     // opt-out — the client then falls back to the look's own value for that
     // field, the same as if the model had never mentioned it.
     const emphasis = raw.emphasis === null ? null : (EMPHASIS_VERBS.includes(raw.emphasis) ? raw.emphasis : undefined);
+    const hold = raw.hold === null ? null : (HOLD_VERBS.includes(raw.hold) ? raw.hold : undefined);
     const exit = raw.exit === null ? null : (EXIT_VERBS.includes(raw.exit) ? raw.exit : undefined);
     const energy = Number.isFinite(Number(raw.energy)) ? Math.min(1, Math.max(0, Number(raw.energy))) : 0.6;
     // R103 round F — anticipation: a wind-up against the move, just before
     // it. Strictly boolean and defaulting to false, so a model that does not
     // mention it gets exactly today's motion.
     const anticipate = raw.anticipate === true;
-    return { enter, emphasis, exit, energy, anticipate };
+    return {
+        enter,
+        ...(emphasis !== undefined ? { emphasis } : {}),
+        ...(hold !== undefined ? { hold } : {}),
+        ...(exit !== undefined ? { exit } : {}),
+        energy,
+        anticipate,
+    };
 }
 
 const VALID_BLEND_MODES = [
@@ -454,6 +472,47 @@ function cleanTrim(raw) {
     return Object.keys(res).length > 0 ? res : null;
 }
 
+function cleanSpatial(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const rx = Number.isFinite(Number(raw.rx)) ? Math.max(-45, Math.min(45, Number(raw.rx))) : undefined;
+    const ry = Number.isFinite(Number(raw.ry)) ? Math.max(-45, Math.min(45, Number(raw.ry))) : undefined;
+    const rz = Number.isFinite(Number(raw.rz)) ? Math.max(-180, Math.min(180, Number(raw.rz))) : undefined;
+    const depth = Number.isFinite(Number(raw.depth ?? raw.z)) ? Math.max(-200, Math.min(200, Number(raw.depth ?? raw.z))) : undefined;
+    if (rx === undefined && ry === undefined && rz === undefined && depth === undefined) return null;
+    return {
+        ...(rx !== undefined ? { rx } : {}),
+        ...(ry !== undefined ? { ry } : {}),
+        ...(rz !== undefined ? { rz } : {}),
+        ...(depth !== undefined ? { depth } : {}),
+    };
+}
+
+function cleanParticles(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const validKinds = ['sparks', 'dust', 'bokeh', 'neon-embers'];
+    const kind = validKinds.includes(raw.kind) ? raw.kind : 'sparks';
+    const count = Number.isFinite(Number(raw.count)) ? Math.max(10, Math.min(250, Math.round(Number(raw.count)))) : 60;
+    const speed = Number.isFinite(Number(raw.speed)) ? Math.max(0.1, Math.min(5, Number(raw.speed))) : 1;
+    const color = typeof raw.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(raw.color) ? raw.color : undefined;
+    return { kind, count, speed, ...(color ? { color } : {}) };
+}
+
+function cleanVector(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const validKinds = ['arrow', 'circle-callout', 'progress-bar', 'bar-chart', 'line-graph', 'circular-meter', 'burst', 'highlight-box', 'underline'];
+    const kind = validKinds.includes(raw.kind) ? raw.kind : null;
+    if (!kind) return null;
+    return { kind, params: typeof raw.params === 'object' && raw.params ? { ...raw.params } : {} };
+}
+
+function cleanEffects(raw) {
+    if (!Array.isArray(raw)) return null;
+    const allowed = ['glow', 'blur', 'chromatic-aberration', 'drop-shadow', 'motion-blur'];
+    const cleaned = raw.map(e => typeof e === 'string' ? e.toLowerCase().trim() : (e?.kind ? String(e.kind).toLowerCase().trim() : null))
+        .filter(k => k && allowed.includes(k));
+    return cleaned.length > 0 ? cleaned : null;
+}
+
 function cleanBeat(raw, visualCatalog = {}) {
     if (!raw || typeof raw !== 'object') return null;
     const kind = BEAT_KINDS.includes(raw.kind) ? raw.kind : null;
@@ -490,6 +549,12 @@ function cleanBeat(raw, visualCatalog = {}) {
     const parentId = typeof raw.parentId === 'string' && raw.parentId.trim() ? raw.parentId.trim().slice(0, 80) : null;
     const trim = cleanTrim(raw.trim);
     const blendMode = typeof raw.blendMode === 'string' && VALID_BLEND_MODES.includes(raw.blendMode.trim().toLowerCase()) ? raw.blendMode.trim().toLowerCase() : null;
+    const placement = ['behind_speaker', 'behind_subject', 'front'].includes(raw.placement) ? raw.placement : undefined;
+    const spatial = cleanSpatial(raw.spatial || raw.scene3d);
+    const particles = cleanParticles(raw.particles);
+    const vector = cleanVector(raw.vector);
+    const effects = cleanEffects(raw.effects);
+    const nodes = Array.isArray(raw.nodes) ? raw.nodes.slice(0, 16) : undefined;
 
     return {
         kind,
@@ -506,6 +571,12 @@ function cleanBeat(raw, visualCatalog = {}) {
         ...(parentId ? { parentId } : {}),
         ...(trim ? { trim } : {}),
         ...(blendMode ? { blendMode } : {}),
+        ...(placement ? { placement } : {}),
+        ...(spatial ? { spatial } : {}),
+        ...(particles ? { particles } : {}),
+        ...(vector ? { vector } : {}),
+        ...(effects ? { effects } : {}),
+        ...(nodes ? { nodes } : {}),
     };
 }
 
