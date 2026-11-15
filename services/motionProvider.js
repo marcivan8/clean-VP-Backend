@@ -247,17 +247,21 @@ async function executeChatCompletionWithFailover({
             }
         }
 
-        // 2. Try alternate AI provider if configured (e.g. Groq -> Gemini, or Gemini -> Groq)
-        const alternateProvider = provider === 'gemini' ? 'groq' : 'gemini';
-        if (!requestSignal.aborted && isAIConfigured({ provider: alternateProvider })) {
+        // 2. Try secondary AI provider if configured (e.g. Groq, OpenAI, or Gemini)
+        const baseProvider = resolveProvider({ capability: 'chat' });
+        const secondaryProvider = (baseProvider && baseProvider !== provider && isAIConfigured({ capability: 'chat' }))
+            ? baseProvider
+            : (provider === 'gemini' ? 'groq' : 'gemini');
+
+        if (!requestSignal.aborted && isAIConfigured({ provider: secondaryProvider })) {
             console.warn(
                 `[motionProvider] Provider "${provider}" exhausted all models; ` +
-                `failing over to secondary provider "${alternateProvider}"...`
+                `failing over to secondary provider "${secondaryProvider}" (base: "${baseProvider}")...`
             );
             try {
-                const secondaryAi = getAIClient({ timeout, provider: alternateProvider });
+                const secondaryAi = getAIClient({ timeout, provider: secondaryProvider });
                 if (secondaryAi) {
-                    const secondaryModel = resolveModel(model || 'gpt-4o', { provider: alternateProvider, capability });
+                    const secondaryModel = resolveModel(model || 'gpt-4o', { provider: secondaryProvider, capability });
                     const secondaryParams = {
                         ...requestParams,
                         model: secondaryModel,
@@ -265,7 +269,7 @@ async function executeChatCompletionWithFailover({
                             ? Number(process.env.MOTION_AI_MAX_TOKENS)
                             : (/gemini|^o\d|gpt-5/i.test(secondaryModel) ? 2000 : 700),
                     };
-                    if (alternateProvider !== 'gemini') delete secondaryParams.reasoning_effort;
+                    if (secondaryProvider !== 'gemini') delete secondaryParams.reasoning_effort;
                     else secondaryParams.reasoning_effort = 'low';
                     if (/gemma/i.test(secondaryModel)) {
                         delete secondaryParams.response_format;
@@ -274,12 +278,12 @@ async function executeChatCompletionWithFailover({
                     }
                     completion = await secondaryAi.chat.completions.create(secondaryParams, { signal: requestSignal });
                     if (completion?.choices?.[0]?.message?.content) {
-                        return { completion, activeProvider: alternateProvider, activeModel: secondaryModel };
+                        return { completion, activeProvider: secondaryProvider, activeModel: secondaryModel };
                     }
                 }
             } catch (secondaryErr) {
                 if (deadlineController.signal.aborted && !signal?.aborted) throw timeoutError();
-                console.warn(`[motionProvider] Secondary provider "${alternateProvider}" failed: ${describeAIError(secondaryErr)}`);
+                console.warn(`[motionProvider] Secondary provider "${secondaryProvider}" failed: ${describeAIError(secondaryErr)}`);
             }
         }
 
