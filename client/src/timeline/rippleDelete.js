@@ -27,26 +27,27 @@ const EPS = 1e-3;
 export function getMainVideoTrackId(tracks) {
     const visual = (Array.isArray(tracks) ? tracks : [])
         .map((t, idx) => ({ t, idx }))
-        .filter(({ t }) => t && (t.type === 'video' || t.type === 'image') && Array.isArray(t.clips));
+        .filter(({ t }) => t && (t.type === 'video' || t.type === 'image' || t.type === 'overlay') && Array.isArray(t.clips));
     if (visual.length === 0) return null;
 
     // Direct hit for standard main track id
-    const defaultTrack = visual.find(({ t }) => t.id === 'track-default-video');
+    const defaultTrack = visual.find(({ t }) => (t.id === 'track-default-video' || t.id === 'track-1') && (t.clips || []).length > 0);
     if (defaultTrack) return defaultTrack.t.id;
 
     // Filter out obvious B-roll / overlay tracks if other visual tracks exist
-    const isBroll = ({ t }) => /b-?roll/i.test(t.name || '') || String(t.id || '').includes('broll');
+    const isBroll = ({ t }) => /b-?roll/i.test(t.name || '') || String(t.id || '').includes('broll') || t.type === 'overlay';
     const nonBroll = visual.filter(entry => !isBroll(entry));
     const candidates = nonBroll.length > 0 ? nonBroll : visual;
 
-    // Pick candidate with largest duration of clips, breaking ties by base track order (higher order = base)
+    // Pick candidate with largest duration of clips, breaking ties by base track order (lower order = base layer)
     candidates.sort((a, b) => {
-        const durA = (a.t.clips || []).reduce((sum, c) => sum + (Number(c.duration) || 0), 0);
-        const durB = (b.t.clips || []).reduce((sum, c) => sum + (Number(c.duration) || 0), 0);
+        const durOf = (clips) => (clips || []).reduce((sum, c) => sum + (Number(c.duration) || Number(c.sourceDuration) || 0), 0);
+        const durA = durOf(a.t.clips);
+        const durB = durOf(b.t.clips);
         if (Math.abs(durB - durA) > 0.01) return durB - durA;
         const orderA = Number.isFinite(Number(a.t.order)) ? Number(a.t.order) : a.idx;
         const orderB = Number.isFinite(Number(b.t.order)) ? Number(b.t.order) : b.idx;
-        return orderB - orderA;
+        return orderA - orderB;
     });
 
     return candidates[0].t.id;

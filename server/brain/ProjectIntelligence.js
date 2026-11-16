@@ -39,7 +39,8 @@
 const crypto = require('crypto');
 const { projectMapStyleNote } = require('./editingStyles');
 
-const { getAIClient, isAIConfigured, resolveModel } = require('../../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel, resolveProvider } = require('../../services/AIProvider');
+const { repairAndParseJSON } = require('../../services/motionProvider');
 const { supabaseAdmin } = require('../../config/database');
 const { ASSET_ANALYSIS_DONE } = require('./media/analysisStatus');
 
@@ -287,15 +288,60 @@ class ProjectIntelligence {
     }
 
     async _requestMapJSON(openai, prompt, maxTokens = 1200) {
-        const completion = await openai.chat.completions.create({
+        const isGroq = resolveProvider({ capability: 'chat' }) === 'groq';
+        const effectiveTokens = isGroq ? Math.min(600, maxTokens) : maxTokens;
+        const callPayload = {
             model: resolveModel('gpt-4o', 'chat'),
             messages: [{ role: 'user', content: prompt }],
             response_format: { type: 'json_object' },
             temperature: 0.15,
-            max_tokens: maxTokens,
-        });
+            max_tokens: effectiveTokens,
+            ...(isGroq ? { reasoning_effort: 'low' } : {}),
+        };
+
+        let completion;
+        try {
+            completion = await openai.chat.completions.create(callPayload);
+        } catch (callErr) {
+            const isRateLimit = callErr.status === 429 || callErr.status === 413 || /rate limit|tpm|tokens per minute|request too large/i.test(callErr.message);
+            if (isRateLimit && isGroq) {
+                const groqFallbacks = ['openai/gpt-oss-20b', 'llama-3.1-8b-instant'].filter(m => m !== callPayload.model);
+                for (const fallbackModel of groqFallbacks) {
+                    try {
+                        console.warn(`[ProjectIntelligence] Primary Groq model rate-limited; trying fallback "${fallbackModel}"...`);
+                        const fallbackPayload = { ...callPayload, model: fallbackModel, max_tokens: 500 };
+                        delete fallbackPayload.reasoning_effort;
+                        completion = await openai.chat.completions.create(fallbackPayload);
+                        break;
+                    } catch (fbErr) {
+                        console.warn(`[ProjectIntelligence] Fallback model "${fallbackModel}" failed:`, fbErr.message);
+                    }
+                }
+            }
+            if (!completion && process.env.GEMINI_API_KEY) {
+                try {
+                    const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                    if (geminiAi) {
+                        console.warn('[ProjectIntelligence] Rate limits reached on primary model; failing over to Gemini...');
+                        completion = await geminiAi.chat.completions.create({
+                            model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+                            messages: [{ role: 'user', content: prompt }],
+                            response_format: { type: 'json_object' },
+                            temperature: 0.15,
+                            max_tokens: 1200,
+                        });
+                    }
+                } catch (geminiErr) {
+                    console.warn('[ProjectIntelligence] Gemini failover failed:', geminiErr.message);
+                }
+            }
+            if (!completion) throw callErr;
+        }
+
         const raw = completion?.choices?.[0]?.message?.content;
         if (!raw) throw new Error('model returned no content');
+        const parsed = repairAndParseJSON(raw);
+        if (parsed?.data) return parsed.data;
         try { return JSON.parse(raw); }
         catch { throw new Error('model returned malformed JSON'); }
     }

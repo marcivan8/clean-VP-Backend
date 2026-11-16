@@ -4,7 +4,8 @@ const path = require('path');
 const fs = require('fs');
 const { detectBeats } = require('../analysis/beatDetector');
 const { OpenAI } = require('openai');
-const { getAIClient, isAIConfigured, resolveModel } = require('../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel, resolveProvider } = require('../services/AIProvider');
+const { repairAndParseJSON } = require('../services/motionProvider');
 const storageConfig = require('../config/storage');
 
 /** R92: voice enhancement chain (also asserted by scripts/test_round_a.mjs). */
@@ -174,16 +175,46 @@ Respond ONLY with valid JSON:
 }`;
 
     try {
-        const completion = await openai.chat.completions.create({
-            model: resolveModel('gpt-4o', 'chat'),
-            messages: [{ role: 'user', content: prompt }],
-            response_format: { type: 'json_object' },
-            temperature: 0.1,
-            max_tokens: 4096,
-        }, { timeout: 45_000 });
+        const isGroq = resolveProvider({ capability: 'chat' }) === 'groq';
+        const maxTokens = isGroq ? 800 : 2048;
 
-        const parsed = JSON.parse(completion.choices[0].message.content);
-        const cuts = (Array.isArray(parsed.cuts) ? parsed.cuts : []).flatMap(c => {
+        let completion = null;
+        try {
+            completion = await openai.chat.completions.create({
+                model: resolveModel('gpt-4o', 'chat'),
+                messages: [{ role: 'user', content: prompt }],
+                response_format: { type: 'json_object' },
+                temperature: 0.1,
+                max_tokens: maxTokens,
+                ...(isGroq ? { reasoning_effort: 'low' } : {}),
+            }, { timeout: 45_000 });
+        } catch (apiErr) {
+            const isRateLimit = apiErr.status === 429 || apiErr.status === 413 || /rate limit|tpm|tokens per minute|request too large/i.test(apiErr.message);
+            if (isRateLimit && process.env.GEMINI_API_KEY) {
+                try {
+                    console.warn('[gptSemanticFiller] Primary chat provider rate-limited, failing over to Gemini...');
+                    const geminiClient = getAIClient({ provider: 'gemini', capability: 'chat' });
+                    if (geminiClient) {
+                        completion = await geminiClient.chat.completions.create({
+                            model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+                            messages: [{ role: 'user', content: prompt }],
+                            response_format: { type: 'json_object' },
+                            temperature: 0.1,
+                            max_tokens: 1500,
+                        }, { timeout: 45_000 });
+                    }
+                } catch (geminiErr) {
+                    console.warn('[gptSemanticFiller] Gemini failover failed:', geminiErr.message);
+                }
+            }
+            if (!completion) throw apiErr;
+        }
+
+        const raw = completion?.choices?.[0]?.message?.content || '';
+        const parsed = repairAndParseJSON(raw);
+        const data = parsed?.data ?? parsed;
+        const cutsArray = Array.isArray(data?.cuts) ? data.cuts : (Array.isArray(data) ? data : []);
+        const cuts = cutsArray.flatMap(c => {
             if (!Number.isFinite(c?.start) || !Number.isFinite(c?.end) || c.end <= c.start || (c.confidence ?? 1) < 0.8) return [];
             const touched = words.filter(w => Number(w.start) < c.end && Number(w.end) > c.start);
             if (!touched.length || c.end - c.start > 6) return [];
@@ -193,7 +224,7 @@ Respond ONLY with valid JSON:
             const end = Math.min(c.end, Number(touched[touched.length - 1].end));
             return end > start ? [{ start, end, reason: String(c.reason || '').slice(0, 100), confidence: c.confidence }] : [];
         });
-        console.log(`[gptSemanticFiller] GPT-4o returned ${parsed.cuts?.length || 0} cuts, ${cuts.length} above confidence threshold`);
+        console.log(`[gptSemanticFiller] Semantic pass returned ${cutsArray.length} raw cuts, ${cuts.length} above confidence threshold`);
         return cuts;
     } catch (err) {
         if (isQuotaExhausted(err)) {
@@ -386,14 +417,18 @@ module.exports = async function processAudioJob(job) {
     // GCS fallback for distributed environments (e.g. separate Railway worker service)
     if (!fs.existsSync(inputPath)) {
         const storageConfig = require('../config/storage');
-        if (storageConfig.bucket && filename && (userId || filename.startsWith('raw/'))) {
-            console.log(`[Job ${job.id}] Local file missing, downloading from GCS...`);
-            const gcsPath = filename.startsWith('raw/') ? filename : `raw/${userId}/${path.basename(filename)}`;
+        const rel = path.relative(uploadsDir, inputPath);
+        const candidateGcs = filename?.startsWith('raw/')
+            ? filename
+            : (rel.startsWith('raw/') ? rel : (userId && filename ? `raw/${userId}/${path.basename(filename)}` : null));
+
+        if (storageConfig.bucket && candidateGcs) {
+            console.log(`[Job ${job.id}] Local file missing, downloading from GCS... (${candidateGcs})`);
             const dir = path.dirname(inputPath);
             if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
             try {
-                await storageConfig.bucket.file(gcsPath).download({ destination: inputPath });
-                console.log(`[Job ${job.id}] Downloaded from GCS: ${gcsPath}`);
+                await storageConfig.bucket.file(candidateGcs).download({ destination: inputPath });
+                console.log(`[Job ${job.id}] Downloaded from GCS: ${candidateGcs}`);
             } catch (err) {
                 throw new Error(`File not found locally and GCS download failed: ${err.message}`);
             }

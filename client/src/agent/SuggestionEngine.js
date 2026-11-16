@@ -111,6 +111,7 @@ export function deriveFacts(state = null) {
     return {
         clipCount,
         primaryClipCount,
+        mainTrackId,
         videoTrackCount: videoTracks.length,
         multicamClips:   withVirtualCam,
         rhythmClips:     withRhythm,

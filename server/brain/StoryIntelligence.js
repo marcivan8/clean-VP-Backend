@@ -41,6 +41,7 @@ const { storyMapStyleNote } = require('./editingStyles');
 
 const { supabaseAdmin } = require('../../config/database');
 const { getAIClient, isAIConfigured, resolveModel, resolveProvider } = require('../../services/AIProvider');
+const { repairAndParseJSON } = require('../../services/motionProvider');
 
 /** Beat vocabulary. Closed, because the Brain switches on these. */
 const BEATS = ['hook', 'setup', 'build', 'turn', 'payoff', 'outro', 'filler'];
@@ -347,7 +348,8 @@ class StoryIntelligence {
     }
 
     async _requestStoryMap(openai, prompt) {
-        const completion = await openai.chat.completions.create({
+        const isGroq = resolveProvider({ capability: 'chat' }) === 'groq';
+        const callPayload = {
             // R84 missed this call site (same bug as ProjectIntelligence.js) —
             // hardcoded 'gpt-4o' 404s under AI_PROVIDER=groq/gemini. Route
             // through resolveModel() like every other real call site does.
@@ -355,34 +357,61 @@ class StoryIntelligence {
             messages:        [{ role: 'user', content: prompt }],
             response_format: STORY_MAP_SCHEMA,
             temperature:     0.2,
-            // FIX: was 1500. Strict JSON Schema Mode has to emit the FULL
-            // object — every required field, including the beats/sagWindows/
-            // issues arrays — before the document is valid; there is no
-            // partial-credit. Production logs showed real projects (7 assets)
-            // hitting "max completion tokens reached... missing properties:
-            // deliversThroughLine, throughLineNote, issues" — exactly the LAST
-            // three properties in this schema, meaning generation ran out of
-            // budget after the earlier arrays and never reached them. Raised
-            // to a ceiling wide enough for a fully-populated map on a
-            // multi-beat cut. Groq's gpt-oss models are reasoning models —
-            // their thinking tokens are drawn from this same budget, which is
-            // why 1500 was tight even for output that isn't itself huge.
-            max_tokens:      3000,
+            max_tokens:      isGroq ? 1200 : 3000,
             // Structured extraction, not open-ended reasoning — cap the
             // model's internal thinking so it spends the token budget on the
             // schema fields, not on deliberating. Groq-only: 'reasoning_effort'
             // is a gpt-oss-specific field other providers' APIs don't expect.
-            ...(resolveProvider({ capability: 'chat' }) === 'groq' ? { reasoning_effort: 'low' } : {}),
-        });
+            ...(isGroq ? { reasoning_effort: 'low' } : {}),
+        };
+
+        let completion;
+        try {
+            completion = await openai.chat.completions.create(callPayload);
+        } catch (callErr) {
+            const isRateLimit = callErr.status === 429 || callErr.status === 413 || /rate limit|tpm|tokens per minute|request too large/i.test(callErr.message);
+            if (isRateLimit && isGroq) {
+                const groqFallbacks = ['openai/gpt-oss-20b', 'llama-3.1-8b-instant'].filter(m => m !== callPayload.model);
+                for (const fallbackModel of groqFallbacks) {
+                    try {
+                        console.warn(`[StoryIntelligence] Primary Groq model rate-limited; trying fallback "${fallbackModel}"...`);
+                        const fallbackPayload = { ...callPayload, model: fallbackModel, max_tokens: 1000 };
+                        delete fallbackPayload.reasoning_effort;
+                        completion = await openai.chat.completions.create(fallbackPayload);
+                        break;
+                    } catch (fbErr) {
+                        console.warn(`[StoryIntelligence] Fallback model "${fallbackModel}" failed:`, fbErr.message);
+                    }
+                }
+            }
+            if (!completion && process.env.GEMINI_API_KEY) {
+                try {
+                    const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                    if (geminiAi) {
+                        console.warn('[StoryIntelligence] Rate limits reached on primary model; failing over to Gemini...');
+                        completion = await geminiAi.chat.completions.create({
+                            model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+                            messages: [{ role: 'user', content: prompt }],
+                            response_format: STORY_MAP_SCHEMA,
+                            temperature: 0.2,
+                            max_tokens: 3000,
+                        });
+                    }
+                } catch (geminiErr) {
+                    console.warn('[StoryIntelligence] Gemini failover failed:', geminiErr.message);
+                }
+            }
+            if (!completion) throw callErr;
+        }
 
         const raw = completion?.choices?.[0]?.message?.content;
         if (!raw) throw new Error('model returned no content');
 
-        let parsed;
-        try { parsed = JSON.parse(raw); }
-        catch { throw new Error('model returned malformed JSON'); }
+        const parsed = repairAndParseJSON(raw);
+        if (parsed?.data) return parsed.data;
 
-        return parsed;
+        try { return JSON.parse(raw); }
+        catch { throw new Error('model returned malformed JSON'); }
     }
 
     /**

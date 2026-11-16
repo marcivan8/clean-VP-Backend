@@ -257,7 +257,7 @@ export function isSatisfied(commandId, situation) {
     const primaryClips = typeof facts.primaryClipCount === 'number'
         ? facts.primaryClipCount
         : (facts.clipCount || 0);
-    if (isCleanupOp && primaryClips <= 1) {
+    if (isCleanupOp && (primaryClips <= 1 || (facts.clipCount || 0) <= 1)) {
         return false;
     }
 

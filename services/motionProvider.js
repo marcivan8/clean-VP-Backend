@@ -69,15 +69,17 @@ function resolveMotionProvider(env = process.env) {
  * @returns {{ data: any|null, error: string|null }}
  */
 function repairAndParseJSON(raw) {
+    const res = (data, error) => ({ ok: !error && data !== null, data, error });
+
     if (typeof raw !== 'string' || !raw.trim()) {
-        return { data: null, error: 'empty_input' };
+        return res(null, 'empty_input');
     }
 
     const trimmed = raw.trim();
 
     // 1. Direct parse attempt
     try {
-        return { data: JSON.parse(trimmed), error: null };
+        return res(JSON.parse(trimmed), null);
     } catch {
         // Continue to repair attempts
     }
@@ -88,7 +90,7 @@ function repairAndParseJSON(raw) {
     if (fenceMatch && fenceMatch[1]) {
         cleaned = fenceMatch[1].trim();
         try {
-            return { data: JSON.parse(cleaned), error: null };
+            return res(JSON.parse(cleaned), null);
         } catch {
             // Continue to boundary extraction
         }
@@ -111,12 +113,12 @@ function repairAndParseJSON(raw) {
 
     if (candidate) {
         try {
-            return { data: JSON.parse(candidate), error: null };
+            return res(JSON.parse(candidate), null);
         } catch {
             // 4. Bounded repair: remove illegal trailing commas before closing braces/brackets
             const trailingCommaCleaned = candidate.replace(/,\s*([}\]])/g, '$1');
             try {
-                return { data: JSON.parse(trailingCommaCleaned), error: null };
+                return res(JSON.parse(trailingCommaCleaned), null);
             } catch {
                 // fall through to structural repair
             }
@@ -181,18 +183,18 @@ function repairAndParseJSON(raw) {
         }
 
         try {
-            return { data: JSON.parse(repaired), error: null };
+            return res(JSON.parse(repaired), null);
         } catch {
             const cleanedRepaired = repaired.replace(/,\s*([}\]])/g, '$1');
             try {
-                return { data: JSON.parse(cleanedRepaired), error: null };
+                return res(JSON.parse(cleanedRepaired), null);
             } catch (err) {
-                return { data: null, error: `syntax_error: ${err.message}` };
+                return res(null, `syntax_error: ${err.message}`);
             }
         }
     }
 
-    return { data: null, error: 'no_json_structure_found' };
+    return res(null, 'no_json_structure_found');
 }
 
 /**

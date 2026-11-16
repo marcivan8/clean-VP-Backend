@@ -2679,14 +2679,16 @@ Pauses: ${JSON.stringify(compact)}`,
         let decisions = [];
         const raw = completion?.choices?.[0]?.message?.content || '';
         const parsed = repairAndParseJSON(raw);
-        if (!parsed.ok || !parsed.data) {
+        const payload = parsed?.data ?? parsed;
+        if (!payload || parsed?.error) {
             console.warn(`[interviewRoutes] classify-pauses: parse failure — falling back to heuristics`);
             decisions = classifyPausesHeuristically(pauses);
             return res.json({ decisions, fallback: true, source: 'heuristics' });
         }
-        decisions = (parsed.data.d || []).map(d => ({
+        const dArray = payload.d || payload.decisions || (Array.isArray(payload) ? payload : []);
+        decisions = dArray.map(d => ({
             i:      d.i,
-            action: ['cut', 'keep', 'shorten'].includes(d.a) ? d.a : 'keep',
+            action: ['cut', 'keep', 'shorten'].includes(d.a || d.action) ? (d.a || d.action) : 'keep',
         }));
 
         const counts = { cut: 0, keep: 0, shorten: 0 };
@@ -2821,12 +2823,17 @@ router.post('/refine-cut-frames', ...authOnly, async (req, res) => {
             // file, which makes an -ss seek over a signed HTTP URL slow or outright
             // unsupported (server-side Range support varies). A single-frame grab
             // (extractVideoFrame) tolerates that; a multi-second window read here
-            // doesn't always. Scaling the timeout proportionally with windowDur (up to 25s)
+            // doesn't always. Scaling the timeout proportionally with windowDur (up to 60s)
             // allows 4K multi-minute files to decode cleanly without premature abort.
-            const killTimeoutMs = Math.min(25_000, Math.max(8_000, Math.ceil(windowDur * 120)));
+            const killTimeoutMs = Math.min(60_000, Math.max(15_000, Math.ceil(windowDur * 350) + 6000));
             const killTimer = setTimeout(() => {
                 proc.kill('SIGKILL');
-                finish(new Error(`refine-cut-frames: ffmpeg decode timed out after ${killTimeoutMs}ms. stderr: ${stderrTail.slice(-400)}`));
+                if (chunks.length > 0) {
+                    console.warn(`[interviewRoutes] refine-cut-frames: decode timed out after ${killTimeoutMs}ms but salvaging ${chunks.length} partial chunks`);
+                    finish(null, Buffer.concat(chunks));
+                } else {
+                    finish(new Error(`refine-cut-frames: ffmpeg decode timed out after ${killTimeoutMs}ms. stderr: ${stderrTail.slice(-400)}`));
+                }
             }, killTimeoutMs);
 
             proc.stdout.on('data', chunk => {
