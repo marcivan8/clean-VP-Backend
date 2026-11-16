@@ -28,6 +28,7 @@ const { brainStyleSection, styleFocusSection, ledgerSection } = require('./editi
 // real capabilities were invisible to the Brain and could never be suggested.
 const { commandsPromptSection } = require('./capabilityCatalog');
 const { getAIClient, isAIConfigured, resolveModel, resolveProvider } = require('../../services/AIProvider');
+const { repairAndParseJSON } = require('../../services/motionProvider');
 const { ContextEngine } = require('./ContextEngine');
 const { UserProfileEngine } = require('./UserProfileEngine');
 const { ASSET_ANALYSIS_DONE } = require('./media/analysisStatus');
@@ -99,7 +100,7 @@ function assetRoleLabel(asset, projectRole) {
 // Combine the client bin, server-side analysis rows, and project-map roles
 // into one compact inventory. Keeping these as separate prompt sections
 // duplicated every asset and made large-bin requests fail on context limits.
-function buildAssetInventoryText(ctx = {}, rawInput = '') {
+function buildAssetInventoryText(ctx = {}, rawInput = '', maxChars = MAX_ASSET_CONTEXT_CHARS) {
     const rows = new Map();
     const roles = new Map((Array.isArray(ctx.projectMap?.asset_roles) ? ctx.projectMap.asset_roles : [])
         .filter(role => role?.assetId)
@@ -188,7 +189,7 @@ function buildAssetInventoryText(ctx = {}, rawInput = '') {
         const row = formattedRows.get(entry.index) || rowFor(entry);
         formattedRows.set(entry.index, row);
         const extra = inventoryRows ? 1 : 0;
-        if (inventoryRows.length + extra + row.length > MAX_ASSET_CONTEXT_CHARS) return false;
+        if (inventoryRows.length + extra + row.length > maxChars) return false;
         inventoryRows += `${extra ? '\n' : ''}${row}`;
         visibleIndexes.add(entry.index);
         return true;
@@ -201,7 +202,7 @@ function buildAssetInventoryText(ctx = {}, rawInput = '') {
         formattedRows.set(entry.index, row);
         return row;
     });
-    const availableChars = Math.max(0, MAX_ASSET_CONTEXT_CHARS - inventoryRows.length);
+    const availableChars = Math.max(0, maxChars - inventoryRows.length);
     const averageRowLength = remainingRows.length
         ? remainingRows.reduce((sum, row) => sum + row.length + 1, 0) / remainingRows.length
         : 1;
@@ -216,7 +217,7 @@ function buildAssetInventoryText(ctx = {}, rawInput = '') {
         append(remainingVisible[position]);
     }
     // Rows vary in size; use any leftover budget after the spread sample.
-    for (let index = 0; index < remainingVisible.length && inventoryRows.length < MAX_ASSET_CONTEXT_CHARS; index += 1) {
+    for (let index = 0; index < remainingVisible.length && inventoryRows.length < maxChars; index += 1) {
         if (!sampled.has(index)) append(remainingVisible[index]);
     }
     const omittedCount = entries.length - visibleIndexes.size;
@@ -364,7 +365,14 @@ class EditorialBrain {
             const profile = input?.context?.profile || await this.profileEngine.getProfile(input?.userId);
             const platform = input?.context?.platform || null;
 
-            const systemPrompt = this.buildSystemPrompt(context, profile, platform, session, input?.rawInput);
+            const primaryModel = resolveModel('gpt-4o', 'chat');
+            const isGroq = resolveProvider({ capability: 'chat' }) === 'groq';
+
+            // Groq free-tier has a strict 8,000 TPM limit where requested = prompt_tokens + max_tokens.
+            // When running under Groq (or when compact mode is requested), compact the prompt
+            // and clamp max_tokens to 700 to ensure total request never exceeds 8,000 TPM.
+            const isCompact = isGroq || Boolean(input?.context?.isCompactPrompt);
+            const systemPrompt = this.buildSystemPrompt(context, profile, platform, session, input?.rawInput, { isCompact });
 
             // Classify intent type for temperature selection
             // We use 0.2 for precise execution tasks, 0.4 for creative/advisory
@@ -377,12 +385,11 @@ class EditorialBrain {
                 ? `User said: "${input.rawInput}"`
                 : `Trigger: ${input?.trigger || 'unknown'}. Analyze the project and provide suggestions.`;
 
-            const primaryModel = resolveModel('gpt-4o', 'chat');
-            const isGroq = resolveProvider({ capability: 'chat' }) === 'groq';
+            const maxTokens = isGroq ? 700 : 1200;
             const callPayload = {
                 model: primaryModel,
                 temperature,
-                max_tokens: 1200,
+                max_tokens: maxTokens,
                 ...(isGroq ? { reasoning_effort: 'low' } : {}),
                 response_format: BRAIN_OUTPUT_SCHEMA,
                 messages: [
@@ -405,8 +412,7 @@ class EditorialBrain {
                         const groqCandidates = [
                             process.env.GROQ_FALLBACK_MODEL,
                             'openai/gpt-oss-20b',
-                            'llama-3.3-70b-versatile',
-                            'qwen/qwen3-32b',
+                            'llama-3.1-8b-instant',
                         ].filter(Boolean).filter(m => m !== callPayload.model);
 
                         for (const fallbackModel of groqCandidates) {
@@ -430,7 +436,7 @@ class EditorialBrain {
                                     const geminiPayload = {
                                         model: geminiModel,
                                         temperature,
-                                        max_tokens: 1200,
+                                        max_tokens: 2500, // Gemini has 1M TPM context and does not suffer 8k TPM limits
                                         response_format: BRAIN_OUTPUT_SCHEMA,
                                         messages: callPayload.messages,
                                     };
@@ -445,7 +451,10 @@ class EditorialBrain {
                     };
 
                     if (isTokenLimit) {
-                        console.warn('[EditorialBrain] Request too large / TPM limit hit on primary model; immediately switching to fallback model');
+                        console.warn('[EditorialBrain] Request too large / TPM limit hit on primary model; rebuilding in ultra-compact mode and failing over');
+                        const ultraCompactPrompt = this.buildSystemPrompt(context, profile, platform, session, input?.rawInput, { isCompact: true, ultraCompact: true });
+                        callPayload.messages[0].content = ultraCompactPrompt;
+                        callPayload.max_tokens = Math.min(callPayload.max_tokens, 500);
                         completion = await callGroqFallback();
                     } else if (waitSec !== null && waitSec <= 6) {
                         console.warn(`[EditorialBrain] 429 rate limit hit — backing off for ${waitSec.toFixed(1)}s...`);
@@ -474,8 +483,12 @@ class EditorialBrain {
             const raw = completion.choices[0]?.message?.content;
             if (!raw) return this.fallbackOutput(input?.rawInput);
 
-            const parsed = JSON.parse(raw);
-            return this._normalizeBrainOutput(parsed, input?.rawInput);
+            const parseResult = repairAndParseJSON(raw);
+            if (!parseResult.data) {
+                console.warn('[EditorialBrain] JSON parsing/repair failed:', parseResult.error, 'Raw preview:', String(raw).slice(0, 200));
+                return this.fallbackOutput(input?.rawInput);
+            }
+            return this._normalizeBrainOutput(parseResult.data, input?.rawInput);
 
         } catch (err) {
             console.error('[EditorialBrain] process error:', err.message);
@@ -490,10 +503,15 @@ class EditorialBrain {
      * @param {Object} profile  - User profile from UserProfileEngine
      * @param {string|null} platformKey
      * @param {import('./Session').EditingSession} session
+     * @param {string} [rawInput='']
+     * @param {Object} [options={}]
      * @returns {string}
      */
-    buildSystemPrompt(context, profile, platformKey, session, rawInput = '') {
+    buildSystemPrompt(context, profile, platformKey, session, rawInput = '', options = {}) {
+        const isCompact = options.isCompact === true;
+        const isUltraCompact = options.ultraCompact === true;
         const ctx      = context  || {};
+        if (isCompact) ctx.isCompactPrompt = true;
         const prof     = profile  || {};
         const summary  = session?.summarize() || { duration: 0, eventsCount: 0, commandsRun: [], recentEvents: [] };
         const platform = platformKey || ctx.platform || 'unknown';
@@ -525,7 +543,8 @@ class EditorialBrain {
             : '(no captions/transcript yet)';
 
         const inferredContentType = ctx.inferredContentType || 'unknown';
-        const { text: assetInventoryText } = buildAssetInventoryText(ctx, rawInput);
+        const maxAssetChars = isUltraCompact ? 2_000 : (isCompact ? 4_000 : MAX_ASSET_CONTEXT_CHARS);
+        const { text: assetInventoryText } = buildAssetInventoryText(ctx, rawInput, maxAssetChars);
 
         const hiddenNote = permanentlyHidden.length > 0
             ? `NEVER suggest these — user permanently dismissed them: ${permanentlyHidden.join(', ')}`
@@ -600,6 +619,35 @@ ${(() => {
     const beats = Array.isArray(s.beats) ? s.beats : [];
     const sags  = Array.isArray(s.sag_windows) ? s.sag_windows : [];
     const iss   = Array.isArray(s.issues) ? s.issues : [];
+
+    const formatBeats = (beatsList) => {
+        if (!beatsList || beatsList.length === 0) return '  (none identified)';
+        if (!isCompact || beatsList.length <= 8) {
+            return beatsList.map(b => `  — ${b.startSec}s–${b.endSec}s ${b.beat}${b.summary ? `: ${b.summary}` : ''}`).join('\n');
+        }
+        const first = beatsList.slice(0, 3).map(b => `  — ${b.startSec}s–${b.endSec}s ${b.beat}${b.summary ? `: ${b.summary}` : ''}`);
+        const last = beatsList.slice(-3).map(b => `  — ${b.startSec}s–${b.endSec}s ${b.beat}${b.summary ? `: ${b.summary}` : ''}`);
+        return [
+            ...first,
+            `  — ... (${beatsList.length - 6} intermediate beats from ${beatsList[3].startSec}s to ${beatsList[beatsList.length - 4].endSec}s) ...`,
+            ...last,
+        ].join('\n');
+    };
+
+    const formatSags = (sagsList) => {
+        if (!sagsList || sagsList.length === 0) return '  (none — the cut holds attention throughout)';
+        const list = isCompact ? sagsList.slice(0, 3) : sagsList;
+        const note = isCompact && sagsList.length > 3 ? `\n  — ... (${sagsList.length - 3} more minor sags)` : '';
+        return list.map(w => `  — [${w.severity}] ${w.startSec}s–${w.endSec}s: ${w.reason}`).join('\n') + note;
+    };
+
+    const formatIssues = (issuesList) => {
+        if (!issuesList || issuesList.length === 0) return '  (none identified — do NOT invent one to fill this space)';
+        const list = isCompact ? issuesList.slice(0, 5) : issuesList;
+        const note = isCompact && issuesList.length > 5 ? `\n  — ... (${issuesList.length - 5} more issues)` : '';
+        return list.map(i => `  — [${i.severity}]${i.atSec !== null && i.atSec !== undefined ? ` at ${i.atSec}s` : ''} ${i.issue}${i.suggestion ? ` → ${i.suggestion}` : ''}`).join('\n') + note;
+    };
+
     return [
         `Length read:  ${s.analysed_sec ?? '?'}s across ${s.clip_count ?? 0} clip(s)`,
         `Hook:         ${s.hook_strength || 'unknown'}` +
@@ -610,19 +658,13 @@ ${(() => {
             `${s.through_line_note ? ` — ${s.through_line_note}` : ''}`,
         '',
         'Beats:',
-        beats.length === 0
-            ? '  (none identified)'
-            : beats.map(b => `  — ${b.startSec}s–${b.endSec}s ${b.beat}${b.summary ? `: ${b.summary}` : ''}`).join('\n'),
+        formatBeats(beats),
         '',
         'Sags:',
-        sags.length === 0
-            ? '  (none — the cut holds attention throughout)'
-            : sags.map(w => `  — [${w.severity}] ${w.startSec}s–${w.endSec}s: ${w.reason}`).join('\n'),
+        formatSags(sags),
         '',
         'Issues with this cut:',
-        iss.length === 0
-            ? '  (none identified — do NOT invent one to fill this space)'
-            : iss.map(i => `  — [${i.severity}]${i.atSec !== null && i.atSec !== undefined ? ` at ${i.atSec}s` : ''} ${i.issue}${i.suggestion ? ` → ${i.suggestion}` : ''}`).join('\n'),
+        formatIssues(iss),
     ].filter(l => l !== '').join('\n');
 })()}
 

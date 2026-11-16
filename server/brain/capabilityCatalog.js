@@ -163,9 +163,12 @@ const trim = (text, max) => {
  * Brain is told what is possible NOW rather than what exists in the abstract.
  *
  * @param {Object} ctx  ContextEngine.build() output
+ * @param {Object} [options]
+ * @param {boolean} [options.compact]
  * @returns {string}
  */
-function commandsPromptSection(ctx) {
+function commandsPromptSection(ctx, options = {}) {
+    const isCompact = options.compact === true || (ctx && ctx.isCompactPrompt === true);
     const { ready, blocked } = partition(ctx);
     const styleId = typeof ctx?.editingStyle === 'string' ? ctx.editingStyle : ctx?.editingStyle?.id;
     const style = catalog.styles?.[styleId] || null;
@@ -173,6 +176,9 @@ function commandsPromptSection(ctx) {
 
     const line = (cmd) => {
         const inputs = (cmd.inputs || []).filter(input => input.name).map(input => input.name);
+        if (isCompact) {
+            return `  "${cmd.phrase}" → ${cmd.id}${cmd.destructive ? ' [cuts]' : ''}${inputs.length ? ` [${inputs.join(', ')}]` : ''}`;
+        }
         return `  "${cmd.phrase}" → ${cmd.id}${cmd.destructive ? ' [cuts footage]' : ''}${inputs.length ? ` [inputs: ${inputs.join(', ')}]` : ''} — ${trim(cmd.summary || cmd.label, 62)}`;
     };
 
@@ -287,7 +293,7 @@ function commandsPromptSection(ctx) {
 
     if (hasActiveMedia) {
         const readyIds = ready.map(c => c.id);
-        const editorKnowledgeBlock = buildEditorKnowledgePrompt(readyIds, ctx);
+        const editorKnowledgeBlock = buildEditorKnowledgePrompt(readyIds, ctx, { compact: isCompact });
         if (editorKnowledgeBlock) {
             parts.push('', editorKnowledgeBlock);
         }

@@ -824,9 +824,11 @@ function getToolsByDomain(domain) {
  *
  * @param {Array<string>} availableCommandIds
  * @param {object} [context]
+ * @param {object} [options]
+ * @param {boolean} [options.compact] - compact mode for rate/token constrained providers (e.g. Groq 8k TPM)
  * @returns {string}
  */
-function buildEditorKnowledgePrompt(availableCommandIds = [], context = {}) {
+function buildEditorKnowledgePrompt(availableCommandIds = [], context = {}, options = {}) {
     const readySet = new Set(availableCommandIds);
     const relevantTools = Object.values(TOOL_REGISTRY).filter(t => readySet.has(t.id));
 
@@ -837,8 +839,14 @@ function buildEditorKnowledgePrompt(availableCommandIds = [], context = {}) {
         grouped.get(tool.domain).push(tool);
     }
 
+    const isCompact = options.compact === true || (context && context.isCompactPrompt === true);
+
     for (const [domain, tools] of grouped.entries()) {
         const toolSummaries = tools.map(t => {
+            if (isCompact) {
+                const modes = (t.usageWays || []).map(u => u.mode).join(', ');
+                return `  ▸ ${t.id} ("${t.label}"): ${t.purpose} | When: ${t.whenToUse}${modes ? ` | Modes: ${modes}` : ''}`;
+            }
             const usageModes = (t.usageWays || []).map(u => `      • ${u.mode}: ${u.description}`).join('\n');
             return `  ▸ ${t.id} ("${t.label}"):
     Purpose: ${t.purpose}
@@ -846,9 +854,25 @@ function buildEditorKnowledgePrompt(availableCommandIds = [], context = {}) {
     Anti-pattern / Avoid When: ${t.whenNotToUse}
     Distinct Usage Modes:
 ${usageModes}`;
-        }).join('\n\n');
+        }).join(isCompact ? '\n' : '\n\n');
 
         domainSections.push(`[${domain.toUpperCase()}]\n${toolSummaries}`);
+    }
+
+    if (isCompact) {
+        return `═══════════════════════════════════════════════
+AUTONOMOUS EDITOR CRAFT & TOOL INTELLIGENCE (ROKA Engine)
+═══════════════════════════════════════════════
+Execute with intention, respect temporal logic, and apply multi-step production pipelines.
+CORE PRINCIPLES: 1. Pacing First (remove silences/filler before cosmetics). 2. Purposeful Framing (punch-ins for rhetorical emphasis). 3. Audio Grounding (normalize -14 LUFS, denoise). 4. Cutaways illustrate spoken thoughts. 5. Atomic transactions (single undo).
+
+TOOL MASTERY (Ready for this project):
+${domainSections.length ? domainSections.join('\n\n') : 'All standard editor tools available.'}
+
+STANDARD AUTONOMOUS COMPOSITION RECIPES:
+• Full Polish Pipeline: silence_removal → remove_filler_words → denoise_audio → normalize_audio → rhythm_zoom → sync_cutaways → auto_captions → emphasize_keywords → apply_lut.
+• Viral Short Pipeline: set_aspect_ratio (9:16) → extract_short → silence_removal (-30dB) → zoom_speaker → auto_captions (karaoke) → emphasize_keywords → add_sfx (whoosh).
+• Interview Pacing: detect_speakers → silence_removal (0.6s) → normalize_audio → denoise_audio → auto_captions (editorial).`;
     }
 
     return `═══════════════════════════════════════════════

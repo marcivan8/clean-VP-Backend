@@ -71,6 +71,10 @@ export function deriveFacts(state = null) {
     const videoClips = videoTracks.flatMap(t => t.clips || []);
     const clipCount  = videoClips.length;
 
+    const primaryVideoTrack = videoTracks[0];
+    const primaryClips = (primaryVideoTrack?.clips || []).filter(c => !c.type || ['video', 'image'].includes(c.type));
+    const primaryClipCount = primaryClips.length;
+
     const withVirtualCam = videoClips.filter(c => c.virtualCam).length;
     const withRhythm     = videoClips.filter(c => c.keyframes?.scale?.length > 0).length;
 
@@ -101,6 +105,7 @@ export function deriveFacts(state = null) {
 
     return {
         clipCount,
+        primaryClipCount,
         videoTrackCount: videoTracks.length,
         multicamClips:   withVirtualCam,
         rhythmClips:     withRhythm,

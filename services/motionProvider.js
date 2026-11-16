@@ -92,6 +92,8 @@ function repairAndParseJSON(raw) {
         } catch {
             // Continue to boundary extraction
         }
+    } else {
+        cleaned = cleaned.replace(/^```(?:json)?\s*/i, '');
     }
 
     // 3. Extract outermost { ... } or [ ... ]
@@ -115,6 +117,75 @@ function repairAndParseJSON(raw) {
             const trailingCommaCleaned = candidate.replace(/,\s*([}\]])/g, '$1');
             try {
                 return { data: JSON.parse(trailingCommaCleaned), error: null };
+            } catch {
+                // fall through to structural repair
+            }
+        }
+    }
+
+    // 5. Deep structural repair for truncated or unterminated JSON:
+    // (e.g. token limit truncation, unclosed string literals at position 648, unclosed braces/brackets)
+    let startIdx = -1;
+    if (firstBrace !== -1 && firstBracket !== -1) {
+        startIdx = Math.min(firstBrace, firstBracket);
+    } else if (firstBrace !== -1) {
+        startIdx = firstBrace;
+    } else if (firstBracket !== -1) {
+        startIdx = firstBracket;
+    }
+
+    if (startIdx !== -1) {
+        let s = cleaned.slice(startIdx);
+        const stack = [];
+        let inString = false;
+        let escaped = false;
+
+        for (let i = 0; i < s.length; i++) {
+            const ch = s[i];
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (ch === '\\') {
+                escaped = true;
+                continue;
+            }
+            if (ch === '"') {
+                inString = !inString;
+                continue;
+            }
+            if (!inString) {
+                if (ch === '{' || ch === '[') {
+                    stack.push(ch);
+                } else if (ch === '}') {
+                    if (stack[stack.length - 1] === '{') stack.pop();
+                } else if (ch === ']') {
+                    if (stack[stack.length - 1] === '[') stack.pop();
+                }
+            }
+        }
+
+        let repaired = s;
+        if (inString) {
+            repaired += '"';
+        }
+
+        repaired = repaired.replace(/:\s*"?$/, ': null');
+        repaired = repaired.replace(/,\s*$/, '');
+        repaired = repaired.replace(/,\s*([}\]])/g, '$1');
+
+        while (stack.length > 0) {
+            const open = stack.pop();
+            if (open === '{') repaired += '}';
+            else if (open === '[') repaired += ']';
+        }
+
+        try {
+            return { data: JSON.parse(repaired), error: null };
+        } catch {
+            const cleanedRepaired = repaired.replace(/,\s*([}\]])/g, '$1');
+            try {
+                return { data: JSON.parse(cleanedRepaired), error: null };
             } catch (err) {
                 return { data: null, error: `syntax_error: ${err.message}` };
             }
