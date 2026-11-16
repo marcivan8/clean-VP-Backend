@@ -2314,6 +2314,7 @@ export class MediaExecutionEngine {
                 const hasStyleReference = (st.assets || []).some(asset => isReferenceAsset(asset) && ['video', 'image'].includes(asset.type));
                 let referenceAnalysisStatus = hasStyleReference ? 'awaiting_analysis' : 'not_attached';
                 const text = words.slice(0, 400).map(w => String(w.word ?? w.text ?? '')).join(' ');
+                const isReel = platform === 'reels' || st.editingStyle === 'reel' || /reel/i.test(String(args.brief || ''));
                 const isMobile = typeof window !== 'undefined' && typeof window.innerWidth === 'number' && window.innerWidth < 768;
                 const isDesktop = !isMobile;
                 if (text) {
@@ -2324,13 +2325,13 @@ export class MediaExecutionEngine {
                         fetchShortVisualContext,
                     } = await import('./shortFinisher.js');
 
-                    // On Desktop, fetch generative AI scene plan in parallel with motion techniques and visual context.
-                    // On Mobile, skip remote generative scene plan to remain fast, lightweight, and zero-latency.
+                    // On Desktop Reels, fetch generative AI scene plan in parallel with motion techniques and visual context.
+                    // On Mobile Reels, skip remote generative scene plan to remain fast, lightweight, and zero-latency.
                     const [p, motionTechniques, visualContext, generativePlan] = await Promise.all([
                         fetchShortPlan(text, platform, total),
                         fetchShortMotionTechniques(text, platform, '', job?.signal),
                         fetchShortVisualContext(st.projectId, job?.signal),
-                        isDesktop
+                        (isDesktop && isReel)
                             ? fetchGenerativeScenePlan({
                                 brief: `Pro finish for ${platform === 'reels' ? 'Instagram Reels' : platform === 'shorts' ? 'YouTube Shorts' : 'TikTok'}: open strong, surface the key point, and close with a punchy call to action.`,
                                 transcript: text,
@@ -2359,7 +2360,7 @@ export class MediaExecutionEngine {
                         editingStyle: st.editingStyle,
                         platform,
                     });
-                    scenePlan = (isDesktop && generativePlan?.beats?.length > 0)
+                    scenePlan = (isDesktop && isReel && generativePlan?.beats?.length > 0)
                         ? { ...localPlan, ...generativePlan, beats: generativePlan.beats, source: 'ai-scene-plan' }
                         : localPlan;
                 } else if (hasStyleReference) {
@@ -2368,11 +2369,15 @@ export class MediaExecutionEngine {
                 // Earlier finish replaced, not stacked.
                 const before = JSON.parse(JSON.stringify(st.tracks || []));
                 const sourceTracks = before.map(t => ({ ...t, clips: t.clips.filter(c => !isFinishLayer(c)) }));
+                // On Reels:
                 // Desktop: full After Effects suite (hook headline, CTA outro, captions, camera moves, stat/quote callouts, story graphics).
                 // Mobile: lightweight restrained fallback (captions + camera moves only, zero remote latency).
-                const layers = isDesktop
-                    ? { title: true, cta: true, captions: true, camera: true, numbers: true, graphics: true, cuts: false }
-                    : { title: false, cta: false, captions: true, camera: true, numbers: false, graphics: false, cuts: false };
+                // On other formats/styles: respect args.layers or default to R158 standard (captions + camera only).
+                const reelDesktopLayers = { title: true, cta: true, captions: true, camera: true, numbers: true, graphics: true, cuts: false };
+                const reelMobileLayers = { title: false, cta: false, captions: true, camera: true, numbers: false, graphics: false, cuts: false };
+                const layers = args.layers !== undefined
+                    ? args.layers
+                    : (isReel ? (isDesktop ? reelDesktopLayers : reelMobileLayers) : undefined);
                 const polished = polishShort({ tracks: sourceTracks, duration: total, aspectRatio: st.aspectRatio },
                     profile, { words, events, plan, scenePlan, referenceStyleProfile, assets: st.assets || [], layers });
                 st._saveHistory?.();
