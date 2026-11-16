@@ -155,6 +155,30 @@ export async function fetchShortPlan(text, platform, duration) {
     });
 }
 
+/** Optional AI-directed generative scene plan from /api/motion/scene-plan (desktop After Effects-grade scene plan). */
+export async function fetchGenerativeScenePlan({ brief, transcript, platform, tone, signal } = {}) {
+    try {
+        const res = await fetchWithTimeout('/api/motion/scene-plan', {
+            method: 'POST',
+            body: JSON.stringify({
+                brief: String(brief || 'Pro finish for Instagram Reels: open strong, surface the key point, and close with a punchy call to action.').slice(0, 600),
+                transcript: String(transcript || '').slice(0, 2000),
+                platform: platform || 'reels',
+                tone: tone || 'punchy',
+                timeoutMs: 15000,
+            }),
+            ...(signal ? { signal } : {}),
+        }, 15000);
+        if (!res.ok) return null;
+        const data = await res.json().catch(() => ({}));
+        return (data && data.plan) ? data.plan : null;
+    } catch (err) {
+        if (signal?.aborted) throw err;
+        console.warn('[shortFinisher] generative scene plan unavailable, falling back to local scene plan:', err.message);
+        return null;
+    }
+}
+
 /** Fast, read-only retrieval over the Motion Knowledge Base; no model generation. */
 export async function fetchShortMotionTechniques(text, platform, tone = '', signal) {
     if (!String(text || '').trim()) return [];
@@ -210,15 +234,28 @@ export async function finishShort(state, short, opts = {}) {
     if (!wantsPolish && !opts.popOut) return { ...built, applied: [], words };
 
     const text = words.map(w => String(w.word ?? w.text ?? '')).join(' ').slice(0, 2000);
-    const [plan, techniques, visualContext] = wantsPolish ? await Promise.all([
+    const isMobile = typeof window !== 'undefined' && typeof window.innerWidth === 'number' && window.innerWidth < 768;
+    const isDesktop = !isMobile;
+
+    const [plan, techniques, visualContext, generativePlan] = wantsPolish ? await Promise.all([
         opts.plan !== undefined ? opts.plan
             : (text ? (opts.fetchPlan || fetchShortPlan)(text, profile.id, built.duration) : null),
         opts.motionTechniques !== undefined ? opts.motionTechniques
             : (text ? (opts.fetchMotionTechniques || fetchShortMotionTechniques)(text, profile.id, '', opts.signal) : []),
         opts.visualContext !== undefined ? opts.visualContext
             : (state.projectId ? fetchShortVisualContext(state.projectId, opts.signal) : []),
-    ]) : [null, [], []];
-    const scenePlan = wantsPolish && (opts.scenePlan || fallbackShortScenePlan(words, {
+        (isDesktop && opts.scenePlan === undefined && text)
+            ? fetchGenerativeScenePlan({
+                brief: `Pro finish for ${profile.id === 'reels' ? 'Instagram Reels' : profile.id === 'shorts' ? 'YouTube Shorts' : 'TikTok'}: open strong, surface the key point, and close with a punchy call to action.`,
+                transcript: text,
+                platform: profile.id,
+                tone: 'punchy',
+                signal: opts.signal,
+            })
+            : Promise.resolve(null),
+    ]) : [null, [], [], null];
+
+    const localPlan = wantsPolish && (opts.scenePlan || fallbackShortScenePlan(words, {
         headline: plan?.headline,
         duration: built.duration,
         techniques,
@@ -227,22 +264,20 @@ export async function finishShort(state, short, opts = {}) {
         platform: profile.id,
         editingStyle: opts.editingStyle || state.editingStyle,
     }));
-    // `undefined` means "use polishShort's own defaults" (R158: captions +
-    // camera, no hook title, no CTA, no number pops, no transitions). The
-    // explicit object is the polish-OFF case and names every layer, including
-    // the two added in R158, so a new layer defaulting to on can never leak
-    // into a short the user asked not to polish.
-    // `opts.layers` is forwarded so the layer choice is reachable from here,
-    // not only from a direct polishShort() call — that is what makes the
-    // hook title and CTA genuinely switchable rather than merely present in
-    // the file. Undefined means "use polishShort's defaults" (R158: captions
-    // + camera).
-    //
-    // polish:false still wins outright and names every layer: "do not polish
-    // this" must not be overridable by a stray layers object, and listing
-    // them all means a layer added later cannot default itself back on into a
-    // short the user asked to leave alone.
-    const layers = wantsPolish ? (opts.layers || undefined) : {
+
+    const scenePlan = (isDesktop && generativePlan?.beats?.length > 0)
+        ? { ...localPlan, ...generativePlan, beats: generativePlan.beats, source: 'ai-scene-plan' }
+        : localPlan;
+
+    // Desktop gets the full After Effects-grade suite by default (headline/title,
+    // CTA outro, captions, camera moves, stat/quote callouts, and storyboard scenes).
+    // Mobile keeps the lightweight, restrained fallback (captions + camera only).
+    const defaultLayers = isDesktop ? {
+        title: true, cta: true, captions: true, camera: true,
+        numbers: true, graphics: true, cuts: false,
+    } : undefined;
+
+    const layers = wantsPolish ? (opts.layers !== undefined ? opts.layers : defaultLayers) : {
         title: false, cta: false, captions: false, camera: false,
         numbers: false, graphics: false, cuts: false,
     };

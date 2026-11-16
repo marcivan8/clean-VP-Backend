@@ -1801,8 +1801,44 @@ export class MediaExecutionEngine {
             // force-trimmed down to target -- that forcing (every Reel coming
             // out at a fixed ~22s no matter the source) was the reported bug.
             case 'extract_short': {
-                const st = useTimelineStore.getState();
-                const words = Array.isArray(st.captions) ? st.captions : [];
+                let st = useTimelineStore.getState();
+                let words = Array.isArray(st.captions) ? [...st.captions] : [];
+
+                // 1. Caption clips carry their words in TIMELINE time already
+                if (words.length === 0) {
+                    for (const tc of (st.tracks || []).flatMap(t => t.clips || [])) {
+                        if (!Array.isArray(tc.words) || tc.words.length === 0) continue;
+                        for (const w of tc.words) {
+                            const s0 = Number(w?.start), e0 = Number(w?.end);
+                            if (Number.isFinite(s0) && Number.isFinite(e0)) words.push({ word: w.word ?? w.text, start: s0, end: e0 });
+                        }
+                    }
+                    words.sort((a, b) => a.start - b.start);
+                }
+
+                // 2. Try transcripts in store if captions array is empty
+                if (words.length === 0 && st.transcripts && Object.keys(st.transcripts).length > 0) {
+                    try {
+                        const mapped = mapTranscriptToTimeline({ tracks: st.tracks, assets: st.assets, transcripts: st.transcripts });
+                        if (Array.isArray(mapped) && mapped.length > 0) {
+                            words = mapped;
+                            st.setCaptions?.(mapped);
+                        }
+                    } catch (err) {
+                        console.warn('[extract_short] transcript map fallback failed:', err);
+                    }
+                }
+
+                // 3. If still empty, auto-transcribe main track sources so the short can be identified
+                if (words.length === 0 && job?.signal) {
+                    const sources = listMainTrackSources(st.tracks, st.assets);
+                    if (sources.length > 0) {
+                        await this._captionMainTrackSources(sources, { language: 'auto', style: 'default' }, job, '/api/captions/generate', { skipHistory: true });
+                        st = useTimelineStore.getState();
+                        words = Array.isArray(st.captions) ? [...st.captions] : [];
+                    }
+                }
+
                 if (words.length === 0) {
                     return { action, success: false, message: 'Picking the best moment needs a transcript. Run "add captions" first.' };
                 }
@@ -2278,16 +2314,31 @@ export class MediaExecutionEngine {
                 const hasStyleReference = (st.assets || []).some(asset => isReferenceAsset(asset) && ['video', 'image'].includes(asset.type));
                 let referenceAnalysisStatus = hasStyleReference ? 'awaiting_analysis' : 'not_attached';
                 const text = words.slice(0, 400).map(w => String(w.word ?? w.text ?? '')).join(' ');
+                const isMobile = typeof window !== 'undefined' && typeof window.innerWidth === 'number' && window.innerWidth < 768;
+                const isDesktop = !isMobile;
                 if (text) {
-                    const { fetchShortPlan, fetchShortMotionTechniques, fetchShortVisualContext } = await import('./shortFinisher.js');
-                    // Scene structure is always authored locally from the
-                    // transcript, semantic events and upload-time visual
-                    // analysis. The only remote lookups are the optional
-                    // headline model and the non-generative motion library.
-                    const [p, motionTechniques, visualContext] = await Promise.all([
+                    const {
+                        fetchShortPlan,
+                        fetchGenerativeScenePlan,
+                        fetchShortMotionTechniques,
+                        fetchShortVisualContext,
+                    } = await import('./shortFinisher.js');
+
+                    // On Desktop, fetch generative AI scene plan in parallel with motion techniques and visual context.
+                    // On Mobile, skip remote generative scene plan to remain fast, lightweight, and zero-latency.
+                    const [p, motionTechniques, visualContext, generativePlan] = await Promise.all([
                         fetchShortPlan(text, platform, total),
                         fetchShortMotionTechniques(text, platform, '', job?.signal),
                         fetchShortVisualContext(st.projectId, job?.signal),
+                        isDesktop
+                            ? fetchGenerativeScenePlan({
+                                brief: `Pro finish for ${platform === 'reels' ? 'Instagram Reels' : platform === 'shorts' ? 'YouTube Shorts' : 'TikTok'}: open strong, surface the key point, and close with a punchy call to action.`,
+                                transcript: text,
+                                platform,
+                                tone: 'punchy',
+                                signal: job?.signal,
+                            })
+                            : Promise.resolve(null),
                     ]);
                     plan = p;
                     // Reference assets guide style only. Their cached visual
@@ -2298,7 +2349,7 @@ export class MediaExecutionEngine {
                     referenceAnalysisStatus = !hasStyleReference ? 'not_attached'
                         : adaptedReference ? 'applied'
                             : referenceStyleProfile ? 'low_confidence' : 'unavailable';
-                    scenePlan = fallbackShortScenePlan(words, {
+                    const localPlan = fallbackShortScenePlan(words, {
                         headline: plan?.headline,
                         duration: total,
                         techniques: motionTechniques,
@@ -2308,14 +2359,22 @@ export class MediaExecutionEngine {
                         editingStyle: st.editingStyle,
                         platform,
                     });
+                    scenePlan = (isDesktop && generativePlan?.beats?.length > 0)
+                        ? { ...localPlan, ...generativePlan, beats: generativePlan.beats, source: 'ai-scene-plan' }
+                        : localPlan;
                 } else if (hasStyleReference) {
                     referenceAnalysisStatus = 'not_applied_no_transcript';
                 }
                 // Earlier finish replaced, not stacked.
                 const before = JSON.parse(JSON.stringify(st.tracks || []));
                 const sourceTracks = before.map(t => ({ ...t, clips: t.clips.filter(c => !isFinishLayer(c)) }));
+                // Desktop: full After Effects suite (hook headline, CTA outro, captions, camera moves, stat/quote callouts, story graphics).
+                // Mobile: lightweight restrained fallback (captions + camera moves only, zero remote latency).
+                const layers = isDesktop
+                    ? { title: true, cta: true, captions: true, camera: true, numbers: true, graphics: true, cuts: false }
+                    : { title: false, cta: false, captions: true, camera: true, numbers: false, graphics: false, cuts: false };
                 const polished = polishShort({ tracks: sourceTracks, duration: total, aspectRatio: st.aspectRatio },
-                    profile, { words, events, plan, scenePlan, referenceStyleProfile, assets: st.assets || [] });
+                    profile, { words, events, plan, scenePlan, referenceStyleProfile, assets: st.assets || [], layers });
                 st._saveHistory?.();
                 // Remove the previous finish layers, then write the changes clip by clip.
                 for (const t of (useTimelineStore.getState().tracks || [])) {
@@ -2352,8 +2411,8 @@ export class MediaExecutionEngine {
                 let brollNote = '';
                 let brollPlaced = 0;
                 let brollFailure = null;
-                const brollRequested = scenePlan?.source === 'local-fallback' ? (scenePlan.brollMoments?.length || 0) : 0;
-                if (scenePlan?.source === 'local-fallback' && scenePlan.brollMoments?.length
+                const brollRequested = (scenePlan?.source === 'local-fallback' || scenePlan?.source === 'ai-scene-plan') ? (scenePlan.brollMoments?.length || 0) : 0;
+                if ((scenePlan?.source === 'local-fallback' || scenePlan?.source === 'ai-scene-plan') && scenePlan.brollMoments?.length
                     && !['interview', 'podcast'].includes(useTimelineStore.getState().editingStyle)) {
                     const live = useTimelineStore.getState();
                     live.beginHistoryGroup?.();

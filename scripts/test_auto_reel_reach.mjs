@@ -69,7 +69,7 @@ await check('a failed KB lookup degrades to built-in motion recipes', async () =
     finally { globalThis.fetch = saved; }
 });
 
-await check('Pro Finish always builds its scene plan locally from words, visuals and events', () => {
+await check('Pro Finish builds its scene plan locally for mobile and offline fallback from words, visuals and events', () => {
     const src = read('client/src/agent/MediaExecutionEngine.js');
     const at = src.indexOf("case 'polish_short'");
     const block = src.slice(at, at + 10000);
@@ -77,9 +77,10 @@ await check('Pro Finish always builds its scene plan locally from words, visuals
     assert.match(block, /fallbackShortScenePlan\(words/);
     assert.match(block, /visualContext/);
     assert.match(block, /events,/);
-    assert.ok(!block.includes('fetchScenePlanResult'), 'Pro Finish still fetches a generated scene plan');
+    assert.match(block, /isDesktop/);
     const finisher = read('client/src/agent/shortFinisher.js');
-    assert.ok(!finisher.includes('/api/motion/scene-plan'), 'short finisher still calls the generative scene-plan route');
+    assert.ok(finisher.includes('fetchGenerativeScenePlan'), 'short finisher exposes generative scene plan for desktop');
+    assert.ok(finisher.includes('fallbackShortScenePlan'), 'short finisher retains local fallback for mobile');
 });
 
 await check('the Motion KB endpoint exposes searchable, executable technique metadata', () => {
