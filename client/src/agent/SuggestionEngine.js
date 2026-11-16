@@ -27,7 +27,8 @@
  * Each stage only becomes available once its prerequisite is genuinely satisfied.
  */
 
-import useTimelineStore from '../store/useTimelineStore';
+import useTimelineStore from '../store/useTimelineStore.js';
+import { getMainVideoTrackId } from '../timeline/rippleDelete.js';
 import { getEditingStyle } from './EditingStyles.js';
 // The pure blend only — importing EditPolicy here would be circular, since it
 // imports deriveFacts from this file.
@@ -71,7 +72,11 @@ export function deriveFacts(state = null) {
     const videoClips = videoTracks.flatMap(t => t.clips || []);
     const clipCount  = videoClips.length;
 
-    const primaryVideoTrack = videoTracks[0];
+    const mainTrackId = getMainVideoTrackId(tracks);
+    const primaryVideoTrack = videoTracks.find(t => t.id === mainTrackId)
+        || videoTracks.find(t => t.id === 'track-default-video')
+        || videoTracks.find(t => !/b-?roll/i.test(t.name || ''))
+        || videoTracks[0];
     const primaryClips = (primaryVideoTrack?.clips || []).filter(c => !c.type || ['video', 'image'].includes(c.type));
     const primaryClipCount = primaryClips.length;
 

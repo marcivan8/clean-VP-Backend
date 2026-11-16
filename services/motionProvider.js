@@ -260,8 +260,8 @@ async function executeChatCompletionWithFailover({
         if (deadlineController.signal.aborted && !signal?.aborted) throw timeoutError();
         const status = err.status ?? err.statusCode ?? err.response?.status;
         const msg = String(err.message || '');
-        const isRetryable = status === 503 || status === 429 || status === 404 ||
-            /503|429|404|demand|capacity|overloaded|rate limit|quota|not found/i.test(msg);
+        const isRetryable = status === 503 || status === 429 || status === 404 || status === 400 ||
+            /503|429|404|400|demand|capacity|overloaded|rate limit|quota|not found|validate json|failed_generation/i.test(msg);
 
         if (!isRetryable) {
             throw err;
@@ -296,7 +296,7 @@ async function executeChatCompletionWithFailover({
 
         // 1b. Try Groq model fallbacks
         if (provider === 'groq') {
-            const groqFallbacks = ['openai/gpt-oss-20b', 'llama-3.3-70b-versatile', 'qwen/qwen3-32b'];
+            const groqFallbacks = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.1-8b-instant'];
             const candidateModels = groqFallbacks.filter(m => m !== model);
             for (const fallbackModel of candidateModels) {
                 if (requestSignal.aborted) break;
@@ -307,6 +307,7 @@ async function executeChatCompletionWithFailover({
                 try {
                     const fallbackParams = { ...requestParams, model: fallbackModel };
                     delete fallbackParams.reasoning_effort;
+                    delete fallbackParams.response_format;
                     completion = await ai.chat.completions.create(fallbackParams, { signal: requestSignal });
                     if (completion?.choices?.[0]?.message?.content) {
                         return { completion, activeProvider: 'groq', activeModel: fallbackModel };
@@ -502,7 +503,7 @@ async function generateScenePlan({
         // OpenAI-compatible API supports reasoning_effort='low', which maps
         // to its low thinking level and reduces avoidable latency here.
         if (effectiveProvider === 'gemini') requestParams.reasoning_effort = 'low';
-        if (!/gemma/i.test(model)) {
+        if (!/gemma/i.test(model) && effectiveProvider !== 'groq') {
             requestParams.response_format = { type: 'json_object' };
         }
 
@@ -716,7 +717,7 @@ async function generateMotionScript({
             temperature: 0.6,
             max_tokens: 2500,
         };
-        if (!/gemma/i.test(model)) {
+        if (!/gemma/i.test(model) && effectiveProvider !== 'groq') {
             requestParams.response_format = { type: 'json_object' };
         }
 

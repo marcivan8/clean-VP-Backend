@@ -23,7 +23,8 @@
  */
 
 const express        = require('express');
-const { getAIClient, getAIFor, isAIConfigured, resolveModel } = require('../services/AIProvider');
+const { getAIClient, getAIFor, isAIConfigured, resolveModel, resolveProvider } = require('../services/AIProvider');
+const { repairAndParseJSON } = require('../services/motionProvider');
 const { sanitizeEditingStyle, rhythmZoomStyle, keepsRecordedOrder } = require('../server/brain/editingStyles');
 const router         = express.Router();
 const path           = require('path');
@@ -2633,7 +2634,8 @@ router.post('/classify-pauses', ...authAndGate, async (req, res) => {
             after:  String(p.after  || '').slice(0, 140),
         }));
 
-        const completion = await openai.chat.completions.create({
+        const provider = resolveProvider({ capability: 'chat' });
+        const requestParams = {
             model: resolveModel('gpt-4o-mini', 'chat'),
             messages: [{
                 role: 'user',
@@ -2654,23 +2656,38 @@ Return ONLY valid JSON: {"d":[{"i":N,"a":"cut"|"keep"|"shorten"}]}
 
 Pauses: ${JSON.stringify(compact)}`,
             }],
-            response_format: { type: 'json_object' },
             temperature: 0.1,
             max_tokens: 1500,
-        });
+        };
+        if (provider !== 'groq' && !/gemma/i.test(requestParams.model)) {
+            requestParams.response_format = { type: 'json_object' };
+        }
+
+        let completion;
+        try {
+            completion = await openai.chat.completions.create(requestParams);
+        } catch (callErr) {
+            if (requestParams.response_format && (callErr.status === 400 || /validate json/i.test(callErr.message))) {
+                console.warn('[interviewRoutes] classify-pauses: JSON mode rejected by model, retrying without response_format');
+                delete requestParams.response_format;
+                completion = await openai.chat.completions.create(requestParams);
+            } else {
+                throw callErr;
+            }
+        }
 
         let decisions = [];
-        try {
-            const parsed = JSON.parse(completion.choices[0].message.content);
-            decisions = (parsed.d || []).map(d => ({
-                i:      d.i,
-                action: ['cut', 'keep', 'shorten'].includes(d.a) ? d.a : 'keep',
-            }));
-        } catch (parseErr) {
-            console.warn(`[interviewRoutes] classify-pauses: parse failure (${parseErr.message}) — falling back to heuristics`);
+        const raw = completion?.choices?.[0]?.message?.content || '';
+        const parsed = repairAndParseJSON(raw);
+        if (!parsed.ok || !parsed.data) {
+            console.warn(`[interviewRoutes] classify-pauses: parse failure — falling back to heuristics`);
             decisions = classifyPausesHeuristically(pauses);
             return res.json({ decisions, fallback: true, source: 'heuristics' });
         }
+        decisions = (parsed.data.d || []).map(d => ({
+            i:      d.i,
+            action: ['cut', 'keep', 'shorten'].includes(d.a) ? d.a : 'keep',
+        }));
 
         const counts = { cut: 0, keep: 0, shorten: 0 };
         decisions.forEach(d => { counts[d.action] = (counts[d.action] || 0) + 1; });
@@ -2776,6 +2793,8 @@ router.post('/refine-cut-frames', ...authOnly, async (req, res) => {
                 '-ss', windowStart.toFixed(3),
                 '-i', inputArg,
                 '-t', windowDur.toFixed(3),
+                '-an', '-sn',
+                '-threads', '4',
                 '-vf', `fps=${CUT_FRAME_FPS},scale=${CUT_FRAME_W}:${CUT_FRAME_H},format=gray`,
                 '-f', 'rawvideo',
                 '-pix_fmt', 'gray',
@@ -2802,14 +2821,13 @@ router.post('/refine-cut-frames', ...authOnly, async (req, res) => {
             // file, which makes an -ss seek over a signed HTTP URL slow or outright
             // unsupported (server-side Range support varies). A single-frame grab
             // (extractVideoFrame) tolerates that; a multi-second window read here
-            // doesn't always. Failing fast (8s, not 25s) matters because this runs
-            // once per asset inside a job with a shared time budget (see
-            // useJobStore's EXECUTING timeout) — a slow failure here shouldn't eat
-            // a big chunk of it for what's a best-effort polish pass.
+            // doesn't always. Scaling the timeout proportionally with windowDur (up to 25s)
+            // allows 4K multi-minute files to decode cleanly without premature abort.
+            const killTimeoutMs = Math.min(25_000, Math.max(8_000, Math.ceil(windowDur * 120)));
             const killTimer = setTimeout(() => {
                 proc.kill('SIGKILL');
-                finish(new Error(`refine-cut-frames: ffmpeg decode timed out. stderr: ${stderrTail.slice(-400)}`));
-            }, 8_000);
+                finish(new Error(`refine-cut-frames: ffmpeg decode timed out after ${killTimeoutMs}ms. stderr: ${stderrTail.slice(-400)}`));
+            }, killTimeoutMs);
 
             proc.stdout.on('data', chunk => {
                 total += chunk.length;

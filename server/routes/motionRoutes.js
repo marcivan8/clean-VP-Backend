@@ -19,9 +19,9 @@ const express = require('express');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { authenticateUser } = require('../../middleware/auth.js');
-const { getAIClient, getAIFor, isAIConfigured, resolveModel } = require('../../services/AIProvider');
+const { getAIClient, getAIFor, isAIConfigured, resolveModel, resolveProvider } = require('../../services/AIProvider');
 const { sanitizeEditingStyle, isCalmStyle } = require('../brain/editingStyles');
-const { generateScenePlan, generateMotionScript } = require('../../services/motionProvider.js');
+const { generateScenePlan, generateMotionScript, repairAndParseJSON } = require('../../services/motionProvider.js');
 // R103 — the Motion Design Knowledge Base. Retrieval is deterministic and
 // local (see MotionTechniqueIndex.js on why it is not the asset search engine
 // yet), so an unreachable AI provider or an empty shortlist costs nothing:
@@ -824,15 +824,31 @@ router.post('/short-plan', authenticateUser, async (req, res) => {
     if (!isAIConfigured()) return res.json({ source: 'rules', plan: null });
     try {
         const ai = getAIClient({ timeout: 30_000 });
-        const completion = await ai.chat.completions.create({
+        const provider = resolveProvider({ capability: 'chat' });
+        const requestParams = {
             model: resolveModel('gpt-4o', 'chat'),
             messages: [{ role: 'user', content: buildShortPlanPrompt({ text: cleanText, platform: label, duration: Number(duration) || 30 }) }],
-            response_format: { type: 'json_object' },
             temperature: 0.7,
             max_tokens: 400,
-        });
+        };
+        if (provider !== 'groq' && !/gemma/i.test(requestParams.model)) {
+            requestParams.response_format = { type: 'json_object' };
+        }
+        let completion;
+        try {
+            completion = await ai.chat.completions.create(requestParams);
+        } catch (callErr) {
+            if (requestParams.response_format && (callErr.status === 400 || /validate json/i.test(callErr.message))) {
+                console.warn('[motionRoutes /short-plan] JSON mode rejected, retrying without response_format');
+                delete requestParams.response_format;
+                completion = await ai.chat.completions.create(requestParams);
+            } else {
+                throw callErr;
+            }
+        }
         const raw = completion?.choices?.[0]?.message?.content;
-        const plan = raw ? cleanShortPlan(JSON.parse(raw)) : null;
+        const parsed = raw ? repairAndParseJSON(raw) : null;
+        const plan = (parsed?.ok && parsed.data) ? cleanShortPlan(parsed.data) : (raw ? cleanShortPlan(JSON.parse(raw)) : null);
         return res.json({ source: plan ? 'llm' : 'rules', plan });
     } catch (err) {
         console.warn('[motionRoutes /short-plan] LLM failed, client uses rules:', err.message);

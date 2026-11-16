@@ -29,9 +29,27 @@ export function getMainVideoTrackId(tracks) {
         .map((t, idx) => ({ t, idx }))
         .filter(({ t }) => t && (t.type === 'video' || t.type === 'image') && Array.isArray(t.clips));
     if (visual.length === 0) return null;
-    const orderOf = ({ t, idx }) => (Number.isFinite(Number(t.order)) ? Number(t.order) : idx);
-    visual.sort((a, b) => orderOf(a) - orderOf(b));
-    return visual[0].t.id;
+
+    // Direct hit for standard main track id
+    const defaultTrack = visual.find(({ t }) => t.id === 'track-default-video');
+    if (defaultTrack) return defaultTrack.t.id;
+
+    // Filter out obvious B-roll / overlay tracks if other visual tracks exist
+    const isBroll = ({ t }) => /b-?roll/i.test(t.name || '') || String(t.id || '').includes('broll');
+    const nonBroll = visual.filter(entry => !isBroll(entry));
+    const candidates = nonBroll.length > 0 ? nonBroll : visual;
+
+    // Pick candidate with largest duration of clips, breaking ties by base track order (higher order = base)
+    candidates.sort((a, b) => {
+        const durA = (a.t.clips || []).reduce((sum, c) => sum + (Number(c.duration) || 0), 0);
+        const durB = (b.t.clips || []).reduce((sum, c) => sum + (Number(c.duration) || 0), 0);
+        if (Math.abs(durB - durA) > 0.01) return durB - durA;
+        const orderA = Number.isFinite(Number(a.t.order)) ? Number(a.t.order) : a.idx;
+        const orderB = Number.isFinite(Number(b.t.order)) ? Number(b.t.order) : b.idx;
+        return orderB - orderA;
+    });
+
+    return candidates[0].t.id;
 }
 
 /** Deleted main-track time strictly before timeline time t. */

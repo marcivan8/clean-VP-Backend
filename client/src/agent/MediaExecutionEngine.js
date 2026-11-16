@@ -5609,11 +5609,11 @@ export class MediaExecutionEngine {
         const { pieces: segOut, end: timelineEnd } = packSegments(validSegs, baseClips, effectiveRangeStart);
         const keptDuration = Math.max(0, timelineEnd - effectiveRangeStart);
         const wipedEverything = keptDuration < 0.1 && totalOriginalDuration > 0.5;
-        const wipedMostOfIt   = totalOriginalDuration > 0.5 && keptDuration < totalOriginalDuration * 0.60;
+        const wipedMostOfIt   = totalOriginalDuration > 1.0 && keptDuration < totalOriginalDuration * 0.15;
         if (wipedEverything || wipedMostOfIt || segOut.length === 0) {
             console.error(
                 `[MediaExecutionEngine] _applySegmentsToTimeline: REJECTED — kept duration ` +
-                `${keptDuration.toFixed(1)}s would survive, below the 60% safety floor for this clip's current ` +
+                `${keptDuration.toFixed(1)}s would survive, below the safety floor for this clip's current ` +
                 `${totalOriginalDuration.toFixed(1)}s (the server's detection was run against the ` +
                 `whole source file and no longer lines up with what's left on the timeline).`
             );
@@ -5622,10 +5622,10 @@ export class MediaExecutionEngine {
                 type: 'error',
                 message: wipedEverything || segOut.length === 0
                     ? `Detection result rejected — it would have removed this clip entirely (kept ${keptDuration.toFixed(1)}s of ${totalOriginalDuration.toFixed(1)}s). Nothing was changed.`
-                    : `Detection result rejected — only ${keptDuration.toFixed(1)}s would survive out of ${totalOriginalDuration.toFixed(1)}s, below the 60% safety floor. Nothing was changed. Try reviewing the detected cuts or adjusting settings.`,
+                    : `Detection result rejected — only ${keptDuration.toFixed(1)}s would survive out of ${totalOriginalDuration.toFixed(1)}s, below the safety floor. Nothing was changed. Try reviewing the detected cuts or adjusting settings.`,
                 timestamp: new Date().toLocaleTimeString()
             });
-            return { applied: false, reason: wipedEverything || segOut.length === 0 ? 'no detected kept footage overlaps the current clips' : 'the result would remove more than 40% of current timeline footage' };
+            return { applied: false, reason: wipedEverything || segOut.length === 0 ? 'no detected kept footage overlaps the current clips' : 'the result would remove more than 85% of current timeline footage' };
         }
 
         const ts = Date.now();
