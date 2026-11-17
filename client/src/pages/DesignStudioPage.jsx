@@ -26,7 +26,8 @@ import {
     AlignRight, Maximize2, Move, Crop, CheckCircle2, Compass, Layers, Sliders,
     ChevronDown, Video, FileText, Share2, ExternalLink, RefreshCw, Send, Plus,
     ArrowUp, Users, Film, PanelLeftClose, PanelLeftOpen, MousePointer, Trash2,
-    Palette, ChevronLeft, ChevronRight, Save, Copy, RotateCw, ArrowUpRight, Star, Upload
+    Palette, ChevronLeft, ChevronRight, Save, Copy, RotateCw, ArrowUpRight, Star, Upload,
+    X, FolderOpen, UploadCloud
 } from 'lucide-react';
 
 import { Logo } from '../components/Logo.jsx';
@@ -76,7 +77,7 @@ const DIRECTIONS = [
 export default function DesignStudioPage() {
     const navigate = useNavigate();
     const { isPro, plan } = useUserPlan();
-    const { projectName, addOverlayClip } = useTimelineStore();
+    const { projectName, addOverlayClip, assets: timelineAssets = [] } = useTimelineStore();
 
     // Sidebar Collapse state (Option A)
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -90,6 +91,38 @@ export default function DesignStudioPage() {
     const currentFormat = FORMAT_PRESETS.find(f => f.id === selectedFormat) || FORMAT_PRESETS[0];
     const [briefText, setBriefText] = useState('Lead with the ratio, keep the hand in frame, must read at 120px wide');
     const [videoFrame, setVideoFrame] = useState('Frame 0:11');
+
+    // Creative Directions State
+    const [directions, setDirections] = useState(DIRECTIONS);
+
+    // Context Menu State (Figma-class canvas right-click menu)
+    const [contextMenu, setContextMenu] = useState(null); // { x: number, y: number, layerId: string|null }
+
+    // Asset & Media Drawer State
+    const [assetDrawerOpen, setAssetDrawerOpen] = useState(false);
+    const [assetDrawerTab, setAssetDrawerTab] = useState('upload'); // 'upload' | 'timeline'
+
+    // Visual Brand Kit Panel State
+    const [brandKitModalOpen, setBrandKitModalOpen] = useState(false);
+    const [brandKit, setBrandKit] = useState({
+        name: 'VIBED Studio Kit',
+        accent: '#00E5FF',
+        accent2: '#C85A17',
+        surface: '#1F140E',
+        text: '#F4EDE2',
+        display: 'Plus Jakarta Sans',
+        body: 'Geist',
+        mono: 'JetBrains Mono',
+        logoUrl: '',
+    });
+
+    // File Input Refs
+    const exportCanvasRef = useRef(null);
+    const canvasContainerRef = useRef(null);
+    const cutoutInputRef = useRef(null);
+    const assetInputRef = useRef(null);
+    const brandKitInputRef = useRef(null);
+    const logoInputRef = useRef(null);
 
     // Canvas Layers State
     const [layers, setLayers] = useState([
@@ -165,11 +198,6 @@ export default function DesignStudioPage() {
     const [aiStatusMessage, setAiStatusMessage] = useState('');
     const [toastMessage, setToastMessage] = useState('');
 
-    // Off-screen canvas ref & file input ref
-    const exportCanvasRef = useRef(null);
-    const canvasContainerRef = useRef(null);
-    const cutoutInputRef = useRef(null);
-
     // Undo / Redo History Stacks
     const [undoStack, setUndoStack] = useState([]);
     const [redoStack, setRedoStack] = useState([]);
@@ -178,6 +206,26 @@ export default function DesignStudioPage() {
         setToastMessage(msg);
         setTimeout(() => setToastMessage(''), 3500);
     };
+
+    // Close context menu & modals on escape or click outside
+    useEffect(() => {
+        const handleCloseMenu = () => {
+            if (contextMenu) setContextMenu(null);
+        };
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape') {
+                setContextMenu(null);
+                setAssetDrawerOpen(false);
+                setBrandKitModalOpen(false);
+            }
+        };
+        window.addEventListener('click', handleCloseMenu);
+        window.addEventListener('keydown', handleKeyDown);
+        return () => {
+            window.removeEventListener('click', handleCloseMenu);
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [contextMenu]);
 
     const pushUndo = () => {
         setUndoStack(prev => [...prev.slice(-25), layers]);
@@ -206,27 +254,207 @@ export default function DesignStudioPage() {
         setLayers(prev => prev.map(l => l.id === selectedLayerId ? { ...l, [prop]: value } : l));
     };
 
-    // Direction swap handler
+    // Direction swap handler (supports both static directions and AI-synthesized directions)
     const applyDirection = (dir) => {
         pushUndo();
-        const d = typeof dir === 'string' ? (DIRECTIONS.find(item => item.id === dir) || DIRECTIONS[0]) : dir;
+        const d = typeof dir === 'string'
+            ? (directions.find(item => item.id === dir) || DIRECTIONS.find(item => item.id === dir) || DIRECTIONS[0])
+            : dir;
+
+        if (d.layers && Array.isArray(d.layers)) {
+            setLayers(d.layers);
+            showToast(`Loaded ${d.title || d.name || 'Direction'}`);
+            return;
+        }
+
         setLayers(prev => prev.map(l => {
             if (l.id === 'headline') {
                 return {
                     ...l,
-                    text: d.headline,
-                    fill: d.textColor,
+                    text: d.headline || l.text,
+                    fill: d.textColor || d.textFill || l.fill,
+                    fontFamily: d.fontFamily || l.fontFamily,
+                };
+            }
+            if (l.id === 'duration') {
+                return {
+                    ...l,
+                    fill: d.badgeColor || d.badgeFill || l.fill,
+                    text: d.badgeText || l.text,
                 };
             }
             if (l.id === 'background') {
                 return {
                     ...l,
-                    fill: d.bg,
+                    fill: d.canvasBg || d.bg || l.fill,
                 };
             }
             return l;
         }));
-        showToast(`Applied direction: ${d.title}`);
+        showToast(`Applied direction: ${d.title || d.name}`);
+    };
+
+    // Right-Click Context Menu Trigger
+    const handleContextMenu = (e, layerId = null) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (layerId) {
+            setSelectedLayerId(layerId);
+        }
+        setContextMenu({
+            x: Math.min(window.innerWidth - 240, e.clientX),
+            y: Math.min(window.innerHeight - 380, e.clientY),
+            layerId,
+        });
+    };
+
+    // Direct Canvas Drag & Drop Image Handler
+    const handleCanvasDrop = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            const file = e.dataTransfer.files[0];
+            if (file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = (uploadEvent) => {
+                    const dataUrl = uploadEvent.target.result;
+                    const rect = canvasContainerRef.current?.getBoundingClientRect();
+                    const dropX = rect ? Math.round(((e.clientX - rect.left) / rect.width) * currentFormat.w) : 400;
+                    const dropY = rect ? Math.round(((e.clientY - rect.top) / rect.height) * currentFormat.h) : 250;
+
+                    const newLayer = {
+                        id: `img_${Date.now()}`,
+                        name: file.name.replace(/\.[^.]+$/, ''),
+                        type: 'image',
+                        src: dataUrl,
+                        x: Math.max(0, dropX - 160),
+                        y: Math.max(0, dropY - 160),
+                        w: 320,
+                        h: 320,
+                        opacity: 100,
+                        rotation: 0,
+                        visible: true,
+                        locked: false,
+                    };
+                    pushUndo();
+                    setLayers(prev => [...prev, newLayer]);
+                    setSelectedLayerId(newLayer.id);
+                    showToast(`Imported ${newLayer.name} to canvas`);
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+    };
+
+    // Add Asset to Canvas (from local upload or timeline media bin)
+    const handleAddAssetToCanvas = (assetOrUrl, name = 'Asset') => {
+        const url = typeof assetOrUrl === 'string' ? assetOrUrl : (assetOrUrl.url || assetOrUrl.thumbnailUrl || assetOrUrl.path);
+        const id = `asset_${Date.now()}`;
+        const newLayer = {
+            id,
+            name: (typeof assetOrUrl === 'object' && assetOrUrl.name) ? assetOrUrl.name : name,
+            type: 'image',
+            src: url,
+            x: Math.round(currentFormat.w * 0.25),
+            y: Math.round(currentFormat.h * 0.2),
+            w: 360,
+            h: 360,
+            opacity: 100,
+            rotation: 0,
+            dropShadow: true,
+            shadowBlur: 20,
+            shadowOffsetY: 6,
+            shadowColor: 'rgba(0,0,0,0.3)',
+            visible: true,
+            locked: false,
+        };
+        pushUndo();
+        setLayers(prev => [...prev, newLayer]);
+        setSelectedLayerId(id);
+        setAssetDrawerOpen(false);
+        showToast(`Added ${newLayer.name} to canvas`);
+    };
+
+    // Toggle Brand Kit Styling on/off
+    const toggleBrandKit = () => {
+        const nextState = !kitOn;
+        setKitOn(nextState);
+        if (nextState) {
+            pushUndo();
+            setLayers(prev => prev.map(l => {
+                if (l.id === 'background') {
+                    return { ...l, fill: brandKit.surface };
+                }
+                if (l.id === 'headline' || l.type === 'text') {
+                    return { ...l, fill: brandKit.text, fontFamily: brandKit.display };
+                }
+                if (l.id === 'duration' || l.type === 'badge') {
+                    return { ...l, fill: brandKit.accent2, textFill: '#FFFFFF' };
+                }
+                if (l.type === 'line' || l.type === 'star') {
+                    return { ...l, fill: brandKit.accent };
+                }
+                return l;
+            }));
+            showToast('Applied brand kit colors & typography to canvas.');
+        } else {
+            showToast('Brand kit styling toggled off.');
+        }
+    };
+
+    // Apply Brand Kit explicitly from modal
+    const handleApplyBrandKit = () => {
+        setKitOn(true);
+        pushUndo();
+        setLayers(prev => prev.map(l => {
+            if (l.id === 'background') {
+                return { ...l, fill: brandKit.surface };
+            }
+            if (l.id === 'headline' || l.type === 'text') {
+                return { ...l, fill: brandKit.text, fontFamily: brandKit.display };
+            }
+            if (l.id === 'duration' || l.type === 'badge') {
+                return { ...l, fill: brandKit.accent2, textFill: '#FFFFFF' };
+            }
+            if (l.type === 'line' || l.type === 'star') {
+                return { ...l, fill: brandKit.accent };
+            }
+            return l;
+        }));
+        showToast('Brand kit applied to active composition.');
+        setBrandKitModalOpen(false);
+    };
+
+    // Brand Kit JSON Export
+    const handleExportBrandKit = () => {
+        const blob = new Blob([JSON.stringify(brandKit, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${(brandKit.name || 'brand-kit').toLowerCase().replace(/\s+/g, '-')}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('Brand kit exported.');
+    };
+
+    // Brand Kit JSON Import
+    const handleImportBrandKit = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            try {
+                const parsed = JSON.parse(evt.target.result);
+                setBrandKit(prev => ({
+                    ...prev,
+                    ...parsed,
+                }));
+                showToast(`Imported brand kit: ${parsed.name || file.name}`);
+            } catch (err) {
+                showToast('Invalid brand kit JSON file');
+            }
+        };
+        reader.readAsText(file);
     };
 
     // Add elements to canvas
@@ -626,16 +854,20 @@ export default function DesignStudioPage() {
                 layers,
                 setLayers,
                 selectedLayerId,
+                setSelectedLayerId,
                 selectedFormat,
                 setSelectedFormat,
                 applyDirection,
+                setDirections,
+                directions,
                 setSafeAreasEnabled,
                 handleExport2Sizes: handleExportSizes,
             });
 
             setAiStatusMessage(res.message || 'Layers updated. Reversible via history.');
-            setTimeout(() => setAiStatusMessage(''), 3500);
-        }, 300);
+            showToast(res.message || 'Layers updated.');
+            setTimeout(() => setAiStatusMessage(''), 4500);
+        }, 200);
     };
 
     // Render Canvas to Image DataURL
@@ -1086,6 +1318,94 @@ export default function DesignStudioPage() {
                         <Sliders size={16} color="#5F6876" />
                         {!sidebarCollapsed && <span>Badge Pill</span>}
                     </button>
+                    <button
+                        type="button"
+                        onClick={handleAddStar}
+                        title="Add Star"
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            padding: '9px 10px',
+                            borderRadius: 8,
+                            background: '#F8F9FA',
+                            border: '1px solid rgba(16, 21, 29, 0.08)',
+                            color: '#10151D',
+                            fontSize: 13,
+                            fontWeight: 500,
+                            cursor: 'pointer',
+                            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+                        }}
+                    >
+                        <Star size={16} color="#5F6876" />
+                        {!sidebarCollapsed && <span>Star</span>}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleAddLine}
+                        title="Add Line"
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            padding: '9px 10px',
+                            borderRadius: 8,
+                            background: '#F8F9FA',
+                            border: '1px solid rgba(16, 21, 29, 0.08)',
+                            color: '#10151D',
+                            fontSize: 13,
+                            fontWeight: 500,
+                            cursor: 'pointer',
+                            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+                        }}
+                    >
+                        <PenTool size={16} color="#5F6876" />
+                        {!sidebarCollapsed && <span>Line Divider</span>}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setAssetDrawerOpen(true)}
+                        title="Open Assets & Media Drawer"
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            padding: '9px 10px',
+                            borderRadius: 8,
+                            background: '#F0F9FB',
+                            border: '1px solid rgba(11, 124, 145, 0.25)',
+                            color: '#0B7C91',
+                            fontSize: 13,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+                        }}
+                    >
+                        <FolderOpen size={16} color="#0B7C91" />
+                        {!sidebarCollapsed && <span>Assets & Media</span>}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setBrandKitModalOpen(true)}
+                        title="Manage Brand Kit"
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            padding: '9px 10px',
+                            borderRadius: 8,
+                            background: '#F8F9FA',
+                            border: '1px solid rgba(16, 21, 29, 0.08)',
+                            color: '#10151D',
+                            fontSize: 13,
+                            fontWeight: 500,
+                            cursor: 'pointer',
+                            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+                        }}
+                    >
+                        <Palette size={16} color="#5F6876" />
+                        {!sidebarCollapsed && <span>Brand Kit</span>}
+                    </button>
                 </div>
 
                 <div style={{ height: 1, background: 'rgba(16, 21, 29, 0.08)' }} />
@@ -1293,6 +1613,75 @@ export default function DesignStudioPage() {
                             </button>
                         </div>
 
+                        {/* Brand Kit Quick Toggle & Settings */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <button
+                                type="button"
+                                onClick={toggleBrandKit}
+                                style={{
+                                    height: 36,
+                                    padding: '0 12px',
+                                    borderRadius: 8,
+                                    background: kitOn ? '#F0F9FB' : '#FFFFFF',
+                                    border: kitOn ? '1px solid #0B7C91' : '1px solid rgba(16, 21, 29, 0.12)',
+                                    color: kitOn ? '#0B7C91' : '#5F6876',
+                                    fontSize: 12.5,
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                }}
+                                title="Toggle Brand Kit styling on/off"
+                            >
+                                <span style={{ width: 8, height: 8, borderRadius: '50%', background: kitOn ? '#0B7C91' : '#5F6876' }} />
+                                {kitOn ? 'Kit on' : 'Kit off'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setBrandKitModalOpen(true)}
+                                style={{
+                                    width: 36,
+                                    height: 36,
+                                    borderRadius: 8,
+                                    background: '#FFFFFF',
+                                    border: '1px solid rgba(16, 21, 29, 0.12)',
+                                    color: '#5F6876',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                }}
+                                title="Configure Brand Kit"
+                            >
+                                <Palette size={15} />
+                            </button>
+                        </div>
+
+                        {/* Assets Drawer Quick Button */}
+                        <button
+                            type="button"
+                            onClick={() => setAssetDrawerOpen(true)}
+                            style={{
+                                height: 36,
+                                padding: '0 12px',
+                                borderRadius: 8,
+                                background: '#FFFFFF',
+                                border: '1px solid rgba(16, 21, 29, 0.12)',
+                                color: '#10151D',
+                                fontSize: 12.5,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                            }}
+                            title="Open Assets & Media Drawer"
+                        >
+                            <FolderOpen size={15} color="#0B7C91" />
+                            Assets
+                        </button>
+
                         {/* Save to Timeline (Primary Integration) */}
                         <button
                             type="button"
@@ -1401,11 +1790,12 @@ export default function DesignStudioPage() {
                         </div>
 
                         {/* Prompt & Generation Strip */}
-                        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                        <form onSubmit={(e) => handleApplyAiTweak(e, briefText)} style={{ display: 'flex', gap: 10, alignItems: 'center', width: '100%' }}>
                             <input
                                 type="text"
                                 value={briefText}
                                 onChange={e => setBriefText(e.target.value)}
+                                placeholder='e.g. create a simple thumbnail with text saying "goodbye"'
                                 style={{
                                     flex: 1,
                                     height: 40,
@@ -1419,8 +1809,7 @@ export default function DesignStudioPage() {
                                 }}
                             />
                             <button
-                                type="button"
-                                onClick={() => handleApplyAiTweak()}
+                                type="submit"
                                 style={{
                                     height: 40,
                                     padding: '0 18px',
@@ -1440,7 +1829,7 @@ export default function DesignStudioPage() {
                                 <Sparkles size={14} color="#00E5FF" />
                                 Generate four
                             </button>
-                        </div>
+                        </form>
                     </section>
 
                     {/* Middle Row: Canvas Stage + Right Inspector */}
@@ -1669,6 +2058,9 @@ export default function DesignStudioPage() {
                                 {/* Active Composition Aspect Frame */}
                                 <div
                                     ref={canvasContainerRef}
+                                    onContextMenu={(e) => handleContextMenu(e, null)}
+                                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+                                    onDrop={handleCanvasDrop}
                                     style={{
                                         width: '100%',
                                         maxWidth: Math.round(760 * (zoomLevel / 100)),
@@ -1694,6 +2086,7 @@ export default function DesignStudioPage() {
                                             <div
                                                 key={layer.id}
                                                 onMouseDown={(e) => startDrag(e, layer.id)}
+                                                onContextMenu={(e) => handleContextMenu(e, layer.id)}
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     setSelectedLayerId(layer.id);
@@ -2524,6 +2917,115 @@ export default function DesignStudioPage() {
                         </div>
                     </div>
 
+                    {/* Creative Directions Preview Strip (4 Synthesized Thumbnail Variants) */}
+                    <section style={{
+                        border: '1px solid rgba(16, 21, 29, 0.08)',
+                        borderRadius: 16,
+                        background: '#FFFFFF',
+                        padding: '18px 22px',
+                        boxShadow: '0 2px 8px rgba(16, 21, 29, 0.03)',
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <Sparkles size={16} color="#0B7C91" />
+                                <h2 style={{
+                                    margin: 0,
+                                    fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
+                                    fontWeight: 700,
+                                    fontSize: 16,
+                                    color: '#10151D',
+                                }}>
+                                    Creative Directions
+                                </h2>
+                                <span style={{
+                                    fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
+                                    fontSize: 11,
+                                    color: '#5F6876',
+                                    marginLeft: 6,
+                                }}>
+                                    4 live generated variations · click to apply
+                                </span>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={(e) => handleApplyAiTweak(e, briefText)}
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: '#0B7C91',
+                                    fontSize: 12.5,
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 5,
+                                }}
+                            >
+                                <RefreshCw size={13} />
+                                Regenerate four
+                            </button>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+                            {directions.map((dir, idx) => (
+                                <div
+                                    key={dir.id || idx}
+                                    onClick={() => applyDirection(dir)}
+                                    style={{
+                                        border: '1px solid rgba(16, 21, 29, 0.12)',
+                                        borderRadius: 12,
+                                        padding: 12,
+                                        background: '#FFFFFF',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.18s ease',
+                                        boxShadow: '0 2px 8px rgba(16, 21, 29, 0.03)',
+                                    }}
+                                >
+                                    <div style={{
+                                        height: 72,
+                                        borderRadius: 8,
+                                        background: dir.bg || '#1F140E',
+                                        padding: '10px 12px',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        justifyContent: 'space-between',
+                                        marginBottom: 10,
+                                        border: '1px solid rgba(0,0,0,0.12)',
+                                    }}>
+                                        <div style={{
+                                            color: dir.textFill || '#FFFFFF',
+                                            fontFamily: `"${dir.fontFamily || 'Plus Jakarta Sans'}", sans-serif`,
+                                            fontWeight: 800,
+                                            fontSize: 14,
+                                            lineHeight: 1.15,
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            whiteSpace: 'nowrap',
+                                            letterSpacing: '-0.02em',
+                                        }}>
+                                            {dir.layers?.find(l => l.id === 'headline')?.text || dir.headline || 'HEADLINE'}
+                                        </div>
+                                        <div style={{
+                                            display: 'inline-block',
+                                            alignSelf: 'flex-start',
+                                            padding: '2px 6px',
+                                            borderRadius: 4,
+                                            background: dir.badgeFill || '#C85A17',
+                                            color: '#FFFFFF',
+                                            fontSize: 9.5,
+                                            fontFamily: 'var(--f-mono, monospace)',
+                                            fontWeight: 700,
+                                        }}>
+                                            {dir.badgeText || '0:38'}
+                                        </div>
+                                    </div>
+                                    <div style={{ fontWeight: 600, fontSize: 13, color: '#10151D' }}>{dir.title || dir.name}</div>
+                                    <div style={{ fontSize: 11.5, color: '#5F6876', marginTop: 2 }}>{dir.desc || dir.style}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </section>
+
                     {/* Checks Row */}
                     <section style={{
                         border: '1px solid rgba(16, 21, 29, 0.08)',
@@ -2653,6 +3155,749 @@ export default function DesignStudioPage() {
                         </div>
                     </section>
                 </div>
+
+                {/* Right-Click Figma-Style Canvas Context Menu */}
+                {contextMenu && (
+                    <div
+                        style={{
+                            position: 'fixed',
+                            left: contextMenu.x,
+                            top: contextMenu.y,
+                            zIndex: 9999,
+                            minWidth: 220,
+                            background: '#FFFFFF',
+                            borderRadius: 10,
+                            border: '1px solid rgba(16, 21, 29, 0.12)',
+                            boxShadow: '0 12px 32px rgba(16, 21, 29, 0.16), 0 2px 6px rgba(16, 21, 29, 0.08)',
+                            padding: 6,
+                            fontFamily: 'var(--f-sans, "Geist", sans-serif)',
+                            fontSize: 12.5,
+                            color: '#10151D',
+                            userSelect: 'none',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {contextMenu.layerId && contextMenu.layerId !== 'background' ? (
+                            <>
+                                <div style={{
+                                    padding: '4px 8px 6px',
+                                    fontSize: 10,
+                                    fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
+                                    color: '#5F6876',
+                                    letterSpacing: '0.12em',
+                                    textTransform: 'uppercase',
+                                    borderBottom: '1px solid rgba(16, 21, 29, 0.08)',
+                                    marginBottom: 4,
+                                }}>
+                                    Layer · {(layers.find(l => l.id === contextMenu.layerId)?.name || 'Element').toUpperCase()}
+                                </div>
+
+                                <div
+                                    onClick={() => { handleDuplicateLayer(contextMenu.layerId); setContextMenu(null); }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Copy size={13} /> Duplicate</span>
+                                    <span style={{ fontSize: 10, color: '#5F6876', fontFamily: 'var(--f-mono, monospace)' }}>Cmd+D</span>
+                                </div>
+
+                                <div
+                                    onClick={() => { handleBringForward(contextMenu.layerId); setContextMenu(null); }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><ArrowUp size={13} /> Bring Forward</span>
+                                    <span style={{ fontSize: 10, color: '#5F6876', fontFamily: 'var(--f-mono, monospace)' }}>Cmd+]</span>
+                                </div>
+
+                                <div
+                                    onClick={() => { handleBringToFront(contextMenu.layerId); setContextMenu(null); }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><ChevronsUp size={13} /> Bring to Front</span>
+                                </div>
+
+                                <div
+                                    onClick={() => { handleSendBackward(contextMenu.layerId); setContextMenu(null); }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><ArrowDown size={13} /> Send Backward</span>
+                                    <span style={{ fontSize: 10, color: '#5F6876', fontFamily: 'var(--f-mono, monospace)' }}>Cmd+[</span>
+                                </div>
+
+                                <div
+                                    onClick={() => { handleSendToBack(contextMenu.layerId); setContextMenu(null); }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><ChevronsDown size={13} /> Send to Back</span>
+                                </div>
+
+                                <div style={{ height: 1, background: 'rgba(16, 21, 29, 0.08)', margin: '4px 0' }} />
+
+                                <div
+                                    onClick={() => {
+                                        setLayers(prev => prev.map(l => l.id === contextMenu.layerId ? { ...l, locked: !l.locked } : l));
+                                        setContextMenu(null);
+                                    }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    {layers.find(l => l.id === contextMenu.layerId)?.locked ? <Unlock size={13} /> : <Lock size={13} />}
+                                    {layers.find(l => l.id === contextMenu.layerId)?.locked ? 'Unlock Layer' : 'Lock Layer'}
+                                </div>
+
+                                <div
+                                    onClick={() => {
+                                        setLayers(prev => prev.map(l => l.id === contextMenu.layerId ? { ...l, visible: !l.visible } : l));
+                                        setContextMenu(null);
+                                    }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    {layers.find(l => l.id === contextMenu.layerId)?.visible ? <EyeOff size={13} /> : <Eye size={13} />}
+                                    {layers.find(l => l.id === contextMenu.layerId)?.visible ? 'Hide Layer' : 'Show Layer'}
+                                </div>
+
+                                <div style={{ height: 1, background: 'rgba(16, 21, 29, 0.08)', margin: '4px 0' }} />
+
+                                <div
+                                    onClick={() => {
+                                        pushUndo();
+                                        setLayers(prev => prev.filter(l => l.id !== contextMenu.layerId));
+                                        setSelectedLayerId('background');
+                                        setContextMenu(null);
+                                        showToast('Layer deleted');
+                                    }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', color: '#D9383A' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#FDF2F2'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Trash2 size={13} /> Delete Layer</span>
+                                    <span style={{ fontSize: 10, color: '#D9383A', fontFamily: 'var(--f-mono, monospace)' }}>Del</span>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div style={{
+                                    padding: '4px 8px 6px',
+                                    fontSize: 10,
+                                    fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
+                                    color: '#5F6876',
+                                    letterSpacing: '0.12em',
+                                    textTransform: 'uppercase',
+                                    borderBottom: '1px solid rgba(16, 21, 29, 0.08)',
+                                    marginBottom: 4,
+                                }}>
+                                    Canvas Actions
+                                </div>
+
+                                <div
+                                    onClick={() => { handleAddText(); setContextMenu(null); }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <Type size={13} color="#0B7C91" /> Add Text Layer
+                                </div>
+
+                                <div
+                                    onClick={() => { handleAddRect(); setContextMenu(null); }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <Square size={13} color="#5F6876" /> Add Rectangle
+                                </div>
+
+                                <div
+                                    onClick={() => { handleAddCircle(); setContextMenu(null); }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <Circle size={13} color="#5F6876" /> Add Circle
+                                </div>
+
+                                <div
+                                    onClick={() => { handleAddStar(); setContextMenu(null); }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <Star size={13} color="#5F6876" /> Add Star
+                                </div>
+
+                                <div
+                                    onClick={() => { handleAddLine(); setContextMenu(null); }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <PenTool size={13} color="#5F6876" /> Add Line Divider
+                                </div>
+
+                                <div
+                                    onClick={() => { handleAddBadge(); setContextMenu(null); }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <Sliders size={13} color="#5F6876" /> Add Badge Pill
+                                </div>
+
+                                <div style={{ height: 1, background: 'rgba(16, 21, 29, 0.08)', margin: '4px 0' }} />
+
+                                <div
+                                    onClick={() => { setAssetDrawerOpen(true); setContextMenu(null); }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <FolderOpen size={13} color="#0B7C91" /> Import Asset / Image...
+                                </div>
+
+                                <div
+                                    onClick={() => { setBrandKitModalOpen(true); setContextMenu(null); }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <Palette size={13} color="#0B7C91" /> Brand Kit Settings...
+                                </div>
+
+                                <div
+                                    onClick={() => { setSafeAreasEnabled(s => !s); setContextMenu(null); }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <CheckCircle2 size={13} color={safeAreasEnabled ? '#0F7A52' : '#5F6876'} />
+                                    {safeAreasEnabled ? 'Disable Safe Areas' : 'Enable Safe Areas'}
+                                </div>
+
+                                <div
+                                    onClick={() => { setZoomLevel(100); setContextMenu(null); }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <Maximize2 size={13} /> Reset Zoom (100%)
+                                </div>
+                            </>
+                        )}
+                    </div>
+                )}
+
+                {/* Asset & Media Import Drawer Modal */}
+                {assetDrawerOpen && (
+                    <div
+                        style={{
+                            position: 'fixed',
+                            inset: 0,
+                            zIndex: 9998,
+                            background: 'rgba(16, 21, 29, 0.45)',
+                            backdropFilter: 'blur(4px)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                        }}
+                        onClick={() => setAssetDrawerOpen(false)}
+                    >
+                        <div
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                                width: 660,
+                                maxWidth: '92vw',
+                                maxHeight: '85vh',
+                                background: '#FFFFFF',
+                                borderRadius: 16,
+                                padding: 24,
+                                boxShadow: '0 24px 64px rgba(16, 21, 29, 0.25)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                overflow: 'hidden',
+                            }}
+                        >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                                <div>
+                                    <h2 style={{
+                                        margin: 0,
+                                        fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
+                                        fontWeight: 700,
+                                        fontSize: 18,
+                                        color: '#10151D',
+                                    }}>
+                                        Assets & Media Bin
+                                    </h2>
+                                    <p style={{ margin: '4px 0 0', fontSize: 12, color: '#5F6876' }}>
+                                        Import local images, cutout subjects, or choose footage from your active project timeline.
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setAssetDrawerOpen(false)}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#5F6876', padding: 4 }}
+                                >
+                                    <X size={20} />
+                                </button>
+                            </div>
+
+                            {/* Tab switch: Upload vs Timeline Media */}
+                            <div style={{ display: 'flex', gap: 8, borderBottom: '1px solid rgba(16, 21, 29, 0.08)', paddingBottom: 10, marginBottom: 16 }}>
+                                <button
+                                    type="button"
+                                    onClick={() => setAssetDrawerTab('upload')}
+                                    style={{
+                                        padding: '6px 14px',
+                                        borderRadius: 8,
+                                        border: 'none',
+                                        background: assetDrawerTab === 'upload' ? '#F0F9FB' : 'transparent',
+                                        color: assetDrawerTab === 'upload' ? '#0B7C91' : '#5F6876',
+                                        fontSize: 13,
+                                        fontWeight: assetDrawerTab === 'upload' ? 600 : 500,
+                                        cursor: 'pointer',
+                                    }}
+                                >
+                                    Upload Local Image
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setAssetDrawerTab('timeline')}
+                                    style={{
+                                        padding: '6px 14px',
+                                        borderRadius: 8,
+                                        border: 'none',
+                                        background: assetDrawerTab === 'timeline' ? '#F0F9FB' : 'transparent',
+                                        color: assetDrawerTab === 'timeline' ? '#0B7C91' : '#5F6876',
+                                        fontSize: 13,
+                                        fontWeight: assetDrawerTab === 'timeline' ? 600 : 500,
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 6,
+                                    }}
+                                >
+                                    Project Media Bin ({timelineAssets.length})
+                                </button>
+                            </div>
+
+                            {/* Tab 1: Upload */}
+                            {assetDrawerTab === 'upload' && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                                    <div
+                                        onClick={() => assetInputRef.current?.click()}
+                                        style={{
+                                            border: '2px dashed rgba(11, 124, 145, 0.35)',
+                                            borderRadius: 12,
+                                            padding: '40px 20px',
+                                            background: '#F9FAFB',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            cursor: 'pointer',
+                                            textAlign: 'center',
+                                            gap: 10,
+                                        }}
+                                    >
+                                        <UploadCloud size={38} color="#0B7C91" />
+                                        <div>
+                                            <div style={{ fontWeight: 600, fontSize: 14, color: '#10151D' }}>
+                                                Click to browse, or drag & drop files here
+                                            </div>
+                                            <div style={{ fontSize: 12, color: '#5F6876', marginTop: 4 }}>
+                                                Supports PNG, JPG, SVG, WebP with transparency
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Tab 2: Timeline Media Bin */}
+                            {assetDrawerTab === 'timeline' && (
+                                <div style={{ overflowY: 'auto', maxHeight: 380, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                    {timelineAssets.length === 0 ? (
+                                        <div style={{ textAlign: 'center', padding: '40px 20px', color: '#5F6876' }}>
+                                            <Film size={32} color="#5F6876" style={{ margin: '0 auto 10px' }} />
+                                            <div style={{ fontSize: 13, fontWeight: 500 }}>No media files in timeline yet</div>
+                                            <div style={{ fontSize: 12, marginTop: 4 }}>Upload video footage or images in the Video Editor to access them here.</div>
+                                        </div>
+                                    ) : (
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
+                                            {timelineAssets.map((asset, idx) => (
+                                                <div
+                                                    key={asset.id || idx}
+                                                    style={{
+                                                        border: '1px solid rgba(16, 21, 29, 0.1)',
+                                                        borderRadius: 10,
+                                                        overflow: 'hidden',
+                                                        background: '#FFFFFF',
+                                                        display: 'flex',
+                                                        flexDirection: 'column',
+                                                    }}
+                                                >
+                                                    <div style={{
+                                                        height: 96,
+                                                        background: '#10151D',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        position: 'relative',
+                                                        overflow: 'hidden',
+                                                    }}>
+                                                        {asset.thumbnailUrl || asset.url ? (
+                                                            <img
+                                                                src={asset.thumbnailUrl || asset.url}
+                                                                alt={asset.name}
+                                                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                                            />
+                                                        ) : (
+                                                            <Film size={26} color="#FFFFFF" />
+                                                        )}
+                                                        <span style={{
+                                                            position: 'absolute',
+                                                            bottom: 4,
+                                                            left: 4,
+                                                            padding: '2px 5px',
+                                                            borderRadius: 4,
+                                                            background: 'rgba(0,0,0,0.6)',
+                                                            color: '#FFFFFF',
+                                                            fontSize: 9,
+                                                            fontFamily: 'var(--f-mono, monospace)',
+                                                        }}>
+                                                            {asset.type || 'VIDEO'}
+                                                        </span>
+                                                    </div>
+                                                    <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                                        <div style={{ fontSize: 12, fontWeight: 600, color: '#10151D', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                            {asset.name || `Asset ${idx + 1}`}
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleAddAssetToCanvas(asset, asset.name)}
+                                                            style={{
+                                                                padding: '6px 8px',
+                                                                borderRadius: 6,
+                                                                background: '#0B7C91',
+                                                                color: '#FFFFFF',
+                                                                border: 'none',
+                                                                fontSize: 11.5,
+                                                                fontWeight: 600,
+                                                                cursor: 'pointer',
+                                                            }}
+                                                        >
+                                                            Add to Canvas
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* Visual Brand Kit Panel Modal */}
+                {brandKitModalOpen && (
+                    <div
+                        style={{
+                            position: 'fixed',
+                            inset: 0,
+                            zIndex: 9998,
+                            background: 'rgba(16, 21, 29, 0.45)',
+                            backdropFilter: 'blur(4px)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                        }}
+                        onClick={() => setBrandKitModalOpen(false)}
+                    >
+                        <div
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                                width: 600,
+                                maxWidth: '92vw',
+                                maxHeight: '90vh',
+                                background: '#FFFFFF',
+                                borderRadius: 16,
+                                padding: 24,
+                                boxShadow: '0 24px 64px rgba(16, 21, 29, 0.25)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                overflowY: 'auto',
+                                gap: 18,
+                            }}
+                        >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <div>
+                                    <h2 style={{
+                                        margin: 0,
+                                        fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
+                                        fontWeight: 700,
+                                        fontSize: 18,
+                                        color: '#10151D',
+                                    }}>
+                                        Brand Kit Manager
+                                    </h2>
+                                    <p style={{ margin: '4px 0 0', fontSize: 12, color: '#5F6876' }}>
+                                        Configure brand colors, typography, and logos for one-click styling.
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setBrandKitModalOpen(false)}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#5F6876', padding: 4 }}
+                                >
+                                    <X size={20} />
+                                </button>
+                            </div>
+
+                            {/* Presets */}
+                            <div>
+                                <div style={{ fontFamily: 'var(--f-mono, monospace)', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#5F6876', marginBottom: 8 }}>
+                                    Brand Presets
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                                    {[
+                                        { name: 'Minimalist Studio', accent: '#C85A17', accent2: '#1F140E', surface: '#1F140E', text: '#F4EDE2', display: 'Plus Jakarta Sans' },
+                                        { name: 'Electric Cyber', accent: '#00E5FF', accent2: '#0B7C91', surface: '#0A0E17', text: '#00E5FF', display: 'Plus Jakarta Sans' },
+                                        { name: 'Warm Editorial', accent: '#C85A17', accent2: '#10151D', surface: '#F4EDE2', text: '#10151D', display: 'Instrument Serif' },
+                                        { name: 'Monochrome Pro', accent: '#10151D', accent2: '#5F6876', surface: '#10151D', text: '#FFFFFF', display: 'Geist' },
+                                    ].map(preset => (
+                                        <button
+                                            key={preset.name}
+                                            type="button"
+                                            onClick={() => {
+                                                setBrandKit(prev => ({ ...prev, ...preset }));
+                                                showToast(`Loaded ${preset.name} preset`);
+                                            }}
+                                            style={{
+                                                padding: '8px 10px',
+                                                borderRadius: 8,
+                                                border: '1px solid rgba(16, 21, 29, 0.12)',
+                                                background: '#FFFFFF',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: 8,
+                                                cursor: 'pointer',
+                                                textAlign: 'left',
+                                            }}
+                                        >
+                                            <span style={{ width: 14, height: 14, borderRadius: 4, background: preset.accent }} />
+                                            <span style={{ fontSize: 12, fontWeight: 500, color: '#10151D' }}>{preset.name}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Color Palette */}
+                            <div>
+                                <div style={{ fontFamily: 'var(--f-mono, monospace)', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#5F6876', marginBottom: 8 }}>
+                                    Color Palette
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                                    <div style={{ border: '1px solid #DFE6ED', borderRadius: 8, padding: '6px 10px' }}>
+                                        <div style={{ fontSize: 11, color: '#5F6876', marginBottom: 4 }}>Primary Accent</div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <input
+                                                type="color"
+                                                value={brandKit.accent}
+                                                onChange={e => setBrandKit(b => ({ ...b, accent: e.target.value }))}
+                                                style={{ width: 26, height: 26, border: 'none', background: 'none', cursor: 'pointer' }}
+                                            />
+                                            <input
+                                                type="text"
+                                                value={brandKit.accent}
+                                                onChange={e => setBrandKit(b => ({ ...b, accent: e.target.value }))}
+                                                style={{ flex: 1, border: 'none', outline: 'none', fontSize: 12, fontFamily: 'var(--f-mono, monospace)' }}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div style={{ border: '1px solid #DFE6ED', borderRadius: 8, padding: '6px 10px' }}>
+                                        <div style={{ fontSize: 11, color: '#5F6876', marginBottom: 4 }}>Secondary Accent</div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <input
+                                                type="color"
+                                                value={brandKit.accent2}
+                                                onChange={e => setBrandKit(b => ({ ...b, accent2: e.target.value }))}
+                                                style={{ width: 26, height: 26, border: 'none', background: 'none', cursor: 'pointer' }}
+                                            />
+                                            <input
+                                                type="text"
+                                                value={brandKit.accent2}
+                                                onChange={e => setBrandKit(b => ({ ...b, accent2: e.target.value }))}
+                                                style={{ flex: 1, border: 'none', outline: 'none', fontSize: 12, fontFamily: 'var(--f-mono, monospace)' }}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div style={{ border: '1px solid #DFE6ED', borderRadius: 8, padding: '6px 10px' }}>
+                                        <div style={{ fontSize: 11, color: '#5F6876', marginBottom: 4 }}>Surface Background</div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <input
+                                                type="color"
+                                                value={brandKit.surface}
+                                                onChange={e => setBrandKit(b => ({ ...b, surface: e.target.value }))}
+                                                style={{ width: 26, height: 26, border: 'none', background: 'none', cursor: 'pointer' }}
+                                            />
+                                            <input
+                                                type="text"
+                                                value={brandKit.surface}
+                                                onChange={e => setBrandKit(b => ({ ...b, surface: e.target.value }))}
+                                                style={{ flex: 1, border: 'none', outline: 'none', fontSize: 12, fontFamily: 'var(--f-mono, monospace)' }}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div style={{ border: '1px solid #DFE6ED', borderRadius: 8, padding: '6px 10px' }}>
+                                        <div style={{ fontSize: 11, color: '#5F6876', marginBottom: 4 }}>Text Primary</div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <input
+                                                type="color"
+                                                value={brandKit.text}
+                                                onChange={e => setBrandKit(b => ({ ...b, text: e.target.value }))}
+                                                style={{ width: 26, height: 26, border: 'none', background: 'none', cursor: 'pointer' }}
+                                            />
+                                            <input
+                                                type="text"
+                                                value={brandKit.text}
+                                                onChange={e => setBrandKit(b => ({ ...b, text: e.target.value }))}
+                                                style={{ flex: 1, border: 'none', outline: 'none', fontSize: 12, fontFamily: 'var(--f-mono, monospace)' }}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Typography */}
+                            <div>
+                                <div style={{ fontFamily: 'var(--f-mono, monospace)', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#5F6876', marginBottom: 8 }}>
+                                    Brand Typography
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                                    <div>
+                                        <div style={{ fontSize: 11, color: '#5F6876', marginBottom: 4 }}>Display Headline</div>
+                                        <select
+                                            value={brandKit.display}
+                                            onChange={e => setBrandKit(b => ({ ...b, display: e.target.value }))}
+                                            style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #DFE6ED', fontSize: 12 }}
+                                        >
+                                            <option value="Plus Jakarta Sans">Plus Jakarta Sans</option>
+                                            <option value="Instrument Serif">Instrument Serif</option>
+                                            <option value="Geist">Geist</option>
+                                            <option value="JetBrains Mono">JetBrains Mono</option>
+                                            <option value="Inter">Inter</option>
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <div style={{ fontSize: 11, color: '#5F6876', marginBottom: 4 }}>Body Text</div>
+                                        <select
+                                            value={brandKit.body}
+                                            onChange={e => setBrandKit(b => ({ ...b, body: e.target.value }))}
+                                            style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #DFE6ED', fontSize: 12 }}
+                                        >
+                                            <option value="Geist">Geist</option>
+                                            <option value="Plus Jakarta Sans">Plus Jakarta Sans</option>
+                                            <option value="Inter">Inter</option>
+                                            <option value="JetBrains Mono">JetBrains Mono</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Actions */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid rgba(16, 21, 29, 0.08)', paddingTop: 16 }}>
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                    <button
+                                        type="button"
+                                        onClick={() => brandKitInputRef.current?.click()}
+                                        style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #DFE6ED', background: '#FFFFFF', fontSize: 12, cursor: 'pointer', color: '#10151D' }}
+                                    >
+                                        Import JSON
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleExportBrandKit}
+                                        style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #DFE6ED', background: '#FFFFFF', fontSize: 12, cursor: 'pointer', color: '#10151D' }}
+                                    >
+                                        Export JSON
+                                    </button>
+                                </div>
+
+                                <button
+                                    type="button"
+                                    onClick={handleApplyBrandKit}
+                                    style={{
+                                        padding: '8px 18px',
+                                        borderRadius: 8,
+                                        background: '#0B7C91',
+                                        color: '#FFFFFF',
+                                        border: 'none',
+                                        fontSize: 13,
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                    }}
+                                >
+                                    Apply to Canvas
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Hidden File Inputs */}
+                <input
+                    type="file"
+                    ref={assetInputRef}
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                            const reader = new FileReader();
+                            reader.onload = ev => handleAddAssetToCanvas(ev.target.result, file.name.replace(/\.[^.]+$/, ''));
+                            reader.readAsDataURL(file);
+                        }
+                    }}
+                />
+                <input
+                    type="file"
+                    ref={brandKitInputRef}
+                    accept=".json,application/json"
+                    style={{ display: 'none' }}
+                    onChange={handleImportBrandKit}
+                />
+                <input
+                    type="file"
+                    ref={logoInputRef}
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                            const reader = new FileReader();
+                            reader.onload = ev => {
+                                setBrandKit(b => ({ ...b, logoUrl: ev.target.result }));
+                                showToast('Logo loaded into brand kit');
+                            };
+                            reader.readAsDataURL(file);
+                        }
+                    }}
+                />
             </main>
         </div>
     );

@@ -504,7 +504,566 @@ export const DESIGN_COMMANDS = [
             return { success: false, message: 'setSelectedFormat not available' };
         },
     },
+
+    // ── 14. Add Shape Layer ───────────────────────────────────────────────────
+    {
+        id: 'ds_add_shape',
+        category: 'creation',
+        label: 'Add shape layer',
+        summary: 'Creates a new circle, rectangle, line, star, or badge layer on the canvas.',
+        phrases: [
+            'add a circle', 'add circle', 'insert circle', 'new circle', 'draw circle',
+            'add a rectangle', 'add rectangle', 'insert rectangle', 'add box', 'add square', 'new rectangle',
+            'add a star', 'add star', 'insert star', 'new star',
+            'add a line', 'add line', 'insert line', 'add divider',
+            'add a badge', 'add badge', 'add pill', 'insert badge'
+        ],
+        execute: (params, ctx) => {
+            const shapeType = params.shapeType || 'circle';
+            const id = `${shapeType}_${Date.now()}`;
+            const canvasW = 1280;
+            const canvasH = 720;
+
+            let newLayer = null;
+            if (shapeType === 'circle') {
+                newLayer = {
+                    id,
+                    name: 'Circle',
+                    type: 'circle',
+                    x: Math.round(canvasW * 0.4),
+                    y: Math.round(canvasH * 0.35),
+                    w: 220,
+                    h: 220,
+                    fill: params.color || '#0B7C91',
+                    opacity: params.opacity ?? 100,
+                    rotation: 0,
+                    dropShadow: true,
+                    shadowBlur: 20,
+                    shadowOffsetY: 6,
+                    shadowColor: 'rgba(0,0,0,0.3)',
+                    visible: true,
+                    locked: false,
+                };
+            } else if (shapeType === 'rect') {
+                newLayer = {
+                    id,
+                    name: 'Rectangle',
+                    type: 'rect',
+                    x: Math.round(canvasW * 0.35),
+                    y: Math.round(canvasH * 0.3),
+                    w: 360,
+                    h: 240,
+                    fill: params.color || '#1F140E',
+                    borderRadius: params.radius ?? 16,
+                    opacity: params.opacity ?? 100,
+                    rotation: 0,
+                    dropShadow: true,
+                    shadowBlur: 24,
+                    shadowOffsetY: 8,
+                    shadowColor: 'rgba(0,0,0,0.35)',
+                    visible: true,
+                    locked: false,
+                };
+            } else if (shapeType === 'star') {
+                newLayer = {
+                    id,
+                    name: 'Star',
+                    type: 'star',
+                    x: Math.round(canvasW * 0.45),
+                    y: Math.round(canvasH * 0.4),
+                    w: 160,
+                    h: 160,
+                    fill: params.color || '#00E5FF',
+                    opacity: params.opacity ?? 100,
+                    rotation: 0,
+                    visible: true,
+                    locked: false,
+                };
+            } else if (shapeType === 'line') {
+                newLayer = {
+                    id,
+                    name: 'Line Divider',
+                    type: 'line',
+                    x: Math.round(canvasW * 0.1),
+                    y: Math.round(canvasH * 0.6),
+                    w: 480,
+                    h: 4,
+                    fill: params.color || '#00E5FF',
+                    opacity: params.opacity ?? 100,
+                    rotation: 0,
+                    visible: true,
+                    locked: false,
+                };
+            } else if (shapeType === 'badge') {
+                newLayer = {
+                    id,
+                    name: 'Badge Pill',
+                    type: 'badge',
+                    x: Math.round(canvasW * 0.05),
+                    y: Math.round(canvasH * 0.08),
+                    w: 80,
+                    h: 36,
+                    text: params.textContent || 'NEW',
+                    fill: params.color || '#C85A17',
+                    opacity: params.opacity ?? 100,
+                    rotation: 0,
+                    visible: true,
+                    locked: false,
+                };
+            }
+
+            if (!newLayer) return { success: false, message: `Could not create shape of type ${shapeType}` };
+
+            ctx.setLayers(prev => [...prev, newLayer]);
+            if (typeof ctx.setSelectedLayerId === 'function') {
+                ctx.setSelectedLayerId(id);
+            }
+            return { success: true, message: `Added new ${shapeType} to canvas.` };
+        },
+    },
+
+    // ── 15. Add Text Layer ────────────────────────────────────────────────────
+    {
+        id: 'ds_add_text',
+        category: 'creation',
+        label: 'Add text layer',
+        summary: 'Creates a new typography headline or label on the canvas.',
+        phrases: [
+            'add text', 'add a text', 'insert text', 'new text', 'create text',
+            'add headline', 'add title', 'add label', 'add caption', 'write text'
+        ],
+        execute: (params, ctx) => {
+            const id = `text_${Date.now()}`;
+            const canvasW = 1280;
+            const canvasH = 720;
+            const text = params.textContent || 'NEW HEADLINE';
+
+            const newLayer = {
+                id,
+                name: text.length > 20 ? `${text.slice(0, 18)}...` : text,
+                type: 'text',
+                text,
+                x: Math.round(canvasW * 0.1),
+                y: Math.round(canvasH * 0.4),
+                w: Math.min(800, Math.max(300, text.length * 28)),
+                h: 120,
+                fontSize: params.fontSize || 64,
+                fontFamily: params.fontFamily || 'Plus Jakarta Sans',
+                fill: params.color || '#FFFFFF',
+                opacity: 100,
+                rotation: 0,
+                textAlign: params.alignment || 'left',
+                visible: true,
+                locked: false,
+            };
+
+            ctx.setLayers(prev => [...prev, newLayer]);
+            if (typeof ctx.setSelectedLayerId === 'function') {
+                ctx.setSelectedLayerId(id);
+            }
+            return { success: true, message: `Added text layer "${text}".` };
+        },
+    },
+
+    // ── 16. Update Text Content ───────────────────────────────────────────────
+    {
+        id: 'ds_set_text',
+        category: 'typography',
+        label: 'Set text content',
+        summary: 'Changes the copy or headline wording of a text layer.',
+        phrases: [
+            'change text to', 'set text to', 'set headline to', 'rename text to',
+            'change title to', 'make headline say', 'text saying', 'saying', 'say'
+        ],
+        execute: (params, ctx) => {
+            const newText = params.textContent;
+            if (!newText) return { success: false, message: 'No text content provided.' };
+
+            let updated = false;
+            ctx.setLayers(prev => prev.map(l => {
+                if (l.id === 'headline' || l.type === 'text' || l.id === ctx.selectedLayerId) {
+                    updated = true;
+                    return { ...l, text: newText, name: newText.length > 18 ? `${newText.slice(0, 16)}...` : newText };
+                }
+                return l;
+            }));
+
+            if (!updated) return { success: false, message: 'No text layer found to update.' };
+            return { success: true, message: `Updated text to "${newText}".` };
+        },
+    },
+
+    // ── 17. Delete Layer ──────────────────────────────────────────────────────
+    {
+        id: 'ds_delete_layer',
+        category: 'hierarchy',
+        label: 'Delete layer',
+        summary: 'Removes target or selected layer from the canvas.',
+        phrases: [
+            'delete', 'remove', 'delete layer', 'remove layer', 'trash layer',
+            'delete circle', 'delete rectangle', 'delete star', 'delete badge', 'remove circle'
+        ],
+        execute: (params, ctx) => {
+            const target = params.targetLayer || ctx.selectedLayerId;
+            if (!target || target === 'background') {
+                return { success: false, message: 'Cannot delete canvas background layer.' };
+            }
+
+            let deleted = false;
+            ctx.setLayers(prev => {
+                const filtered = prev.filter(l => {
+                    const match = l.id === target ||
+                        (params.shapeType && l.type === params.shapeType) ||
+                        (target === 'subject' && l.type === 'image') ||
+                        (target === 'headline' && l.type === 'text') ||
+                        (target === 'duration' && l.type === 'badge');
+                    if (match) deleted = true;
+                    return !match;
+                });
+                return filtered;
+            });
+
+            if (!deleted) return { success: false, message: `Layer "${target}" not found to delete.` };
+            return { success: true, message: `Deleted layer "${target}".` };
+        },
+    },
+
+    // ── 18. Generate Thumbnail From Brief ─────────────────────────────────────
+    {
+        id: 'ds_generate_thumbnail',
+        category: 'generation',
+        label: 'Generate thumbnail from brief',
+        summary: 'Synthesizes 4 distinct creative thumbnail directions from natural language brief.',
+        phrases: [
+            'create a simple thumbnail', 'create a thumbnail', 'create thumbnail',
+            'generate thumbnail', 'generate four', 'make a thumbnail', 'design thumbnail',
+            'new thumbnail', 'build thumbnail', 'generate 4'
+        ],
+        execute: (params, ctx) => {
+            const rawBrief = params.rawText || 'create a simple thumbnail';
+            const headline = params.textContent || (params.rawText ? extractHeadlineFromBrief(params.rawText) : 'GOODBYE');
+
+            // Synthesize 4 distinct directions
+            const directions = generateThumbnailDirections(headline, rawBrief);
+
+            if (typeof ctx.setDirections === 'function') {
+                ctx.setDirections(directions);
+            }
+            if (typeof ctx.applyDirection === 'function') {
+                ctx.applyDirection(directions[0]);
+            } else if (directions[0]?.layers) {
+                ctx.setLayers(directions[0].layers);
+            }
+
+            return {
+                success: true,
+                message: `Generated 4 creative thumbnail directions for "${headline}". Direction A loaded.`,
+            };
+        },
+    },
 ];
+
+// ── Thumbnail Direction Synthesizer ──────────────────────────────────────────
+
+/**
+ * Extracts headline text or quoted copy from a natural language brief.
+ * E.g. 'create a simple thumbnail with text saying "goodbye"' -> "GOODBYE"
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function extractHeadlineFromBrief(text) {
+    if (!text || typeof text !== 'string') return 'GOODBYE';
+
+    // 1. Explicit quotes: "goodbye" or 'goodbye'
+    const quoteMatch = text.match(/["'“]([^"'”]+)["'”]/);
+    if (quoteMatch && quoteMatch[1].trim()) return quoteMatch[1].trim().toUpperCase();
+
+    // 2. Phrases following "saying", "with text", "say", "headline"
+    const sayingMatch = text.match(/(?:saying|with text|text saying|headline saying|say|title)\s+["']?([a-z0-9\s!?,.-]+)["']?$/i);
+    if (sayingMatch && sayingMatch[1].trim()) return sayingMatch[1].trim().toUpperCase();
+
+    // 3. Clean common brief prefixes
+    const cleaned = text
+        .replace(/^(?:please\s+)?(?:create|make|generate|design|build)\s+(?:a\s+)?(?:simple\s+)?(?:thumbnail|graphic|cover)\s*(?:with\s+)?/i, '')
+        .replace(/^(?:text|saying|words)\s+/i, '')
+        .trim();
+    if (cleaned.length > 0 && cleaned.length < 50) return cleaned.toUpperCase();
+
+    return 'GOODBYE';
+}
+
+/**
+ * Generates 4 production-grade creative directions from natural language brief and headline.
+ *
+ * @param {string} headline
+ * @param {string} brief
+ * @returns {Array<object>}
+ */
+export function generateThumbnailDirections(headline, brief) {
+    const text = (headline || 'GOODBYE').trim();
+
+    return [
+        {
+            id: 'dir-a',
+            name: 'The 94° rule',
+            title: 'Direction A · Editorial Minimal',
+            desc: 'A — Light, editorial',
+            bg: '#1F140E',
+            textFill: '#F4EDE2',
+            badgeFill: '#C85A17',
+            badgeText: '0:38',
+            fontFamily: 'Plus Jakarta Sans',
+            layers: [
+                { id: 'background', name: 'Background', type: 'bg', fill: '#1F140E', visible: true, locked: true },
+                {
+                    id: 'headline',
+                    name: 'Headline',
+                    type: 'text',
+                    text: text,
+                    x: 64,
+                    y: 360,
+                    w: Math.min(800, Math.max(400, text.length * 36)),
+                    h: 160,
+                    fontSize: 76,
+                    fontFamily: 'Plus Jakarta Sans',
+                    fill: '#F4EDE2',
+                    opacity: 100,
+                    rotation: 0,
+                    visible: true,
+                    locked: false,
+                },
+                {
+                    id: 'duration',
+                    name: 'Duration badge',
+                    type: 'badge',
+                    text: '0:38',
+                    x: 48,
+                    y: 48,
+                    w: 64,
+                    h: 32,
+                    fill: '#C85A17',
+                    opacity: 100,
+                    rotation: 0,
+                    visible: true,
+                    locked: false,
+                },
+                {
+                    id: 'subject',
+                    name: 'Subject Cutout',
+                    type: 'image',
+                    x: 740,
+                    y: 120,
+                    w: 440,
+                    h: 580,
+                    opacity: 100,
+                    rotation: 0,
+                    visible: true,
+                    locked: false,
+                },
+            ],
+        },
+        {
+            id: 'dir-b',
+            name: 'Terracotta Bold',
+            title: 'Direction B · Bold Impact',
+            desc: 'B — Split, high contrast',
+            bg: '#C85A17',
+            textFill: '#FFFFFF',
+            badgeFill: '#10151D',
+            badgeText: '1:16',
+            fontFamily: 'Plus Jakarta Sans',
+            layers: [
+                { id: 'background', name: 'Background', type: 'bg', fill: '#C85A17', visible: true, locked: true },
+                {
+                    id: 'headline',
+                    name: 'Headline',
+                    type: 'text',
+                    text: text,
+                    x: 64,
+                    y: 340,
+                    w: Math.min(800, Math.max(400, text.length * 36)),
+                    h: 160,
+                    fontSize: 82,
+                    fontFamily: 'Plus Jakarta Sans',
+                    fill: '#FFFFFF',
+                    opacity: 100,
+                    rotation: 0,
+                    dropShadow: true,
+                    shadowBlur: 20,
+                    shadowOffsetY: 8,
+                    shadowColor: 'rgba(0,0,0,0.3)',
+                    visible: true,
+                    locked: false,
+                },
+                {
+                    id: 'duration',
+                    name: 'Duration badge',
+                    type: 'badge',
+                    text: '1:16',
+                    x: 48,
+                    y: 48,
+                    w: 64,
+                    h: 32,
+                    fill: '#10151D',
+                    opacity: 100,
+                    rotation: 0,
+                    visible: true,
+                    locked: false,
+                },
+                {
+                    id: 'subject',
+                    name: 'Subject Cutout',
+                    type: 'image',
+                    x: 720,
+                    y: 100,
+                    w: 480,
+                    h: 620,
+                    opacity: 100,
+                    rotation: 0,
+                    visible: true,
+                    locked: false,
+                },
+            ],
+        },
+        {
+            id: 'dir-c',
+            name: 'Electric Cyan Obsidian',
+            title: 'Direction C · Electric High-Tech',
+            desc: 'C — Cyber Cyan Glow',
+            bg: '#0A0E17',
+            textFill: '#00E5FF',
+            badgeFill: '#0B7C91',
+            badgeText: 'PRO',
+            fontFamily: 'Plus Jakarta Sans',
+            layers: [
+                { id: 'background', name: 'Background', type: 'bg', fill: '#0A0E17', visible: true, locked: true },
+                {
+                    id: 'headline',
+                    name: 'Headline',
+                    type: 'text',
+                    text: text,
+                    x: 64,
+                    y: 350,
+                    w: Math.min(800, Math.max(400, text.length * 36)),
+                    h: 160,
+                    fontSize: 78,
+                    fontFamily: 'Plus Jakarta Sans',
+                    fill: '#00E5FF',
+                    opacity: 100,
+                    rotation: 0,
+                    dropShadow: true,
+                    shadowBlur: 32,
+                    shadowOffsetY: 0,
+                    shadowColor: 'rgba(0,229,255,0.45)',
+                    visible: true,
+                    locked: false,
+                },
+                {
+                    id: 'duration',
+                    name: 'Duration badge',
+                    type: 'badge',
+                    text: 'PRO',
+                    x: 48,
+                    y: 48,
+                    w: 64,
+                    h: 32,
+                    fill: '#0B7C91',
+                    opacity: 100,
+                    rotation: 0,
+                    visible: true,
+                    locked: false,
+                },
+                {
+                    id: 'accent_line',
+                    name: 'Cyan Accent Line',
+                    type: 'line',
+                    x: 64,
+                    y: 530,
+                    w: 240,
+                    h: 4,
+                    fill: '#00E5FF',
+                    opacity: 100,
+                    rotation: 0,
+                    visible: true,
+                    locked: false,
+                },
+                {
+                    id: 'subject',
+                    name: 'Subject Cutout',
+                    type: 'image',
+                    x: 730,
+                    y: 110,
+                    w: 450,
+                    h: 600,
+                    opacity: 100,
+                    rotation: 0,
+                    visible: true,
+                    locked: false,
+                },
+            ],
+        },
+        {
+            id: 'dir-d',
+            name: 'Studio Clean Warm',
+            title: 'Direction D · Studio Warm',
+            desc: 'D — Editorial Serif & Cream',
+            bg: '#F4EDE2',
+            textFill: '#10151D',
+            badgeFill: '#10151D',
+            badgeText: '0:38',
+            fontFamily: 'Instrument Serif',
+            layers: [
+                { id: 'background', name: 'Background', type: 'bg', fill: '#F4EDE2', visible: true, locked: true },
+                {
+                    id: 'headline',
+                    name: 'Headline',
+                    type: 'text',
+                    text: text,
+                    x: 64,
+                    y: 350,
+                    w: Math.min(800, Math.max(400, text.length * 36)),
+                    h: 160,
+                    fontSize: 84,
+                    fontFamily: 'Instrument Serif',
+                    fill: '#10151D',
+                    opacity: 100,
+                    rotation: 0,
+                    visible: true,
+                    locked: false,
+                },
+                {
+                    id: 'duration',
+                    name: 'Duration badge',
+                    type: 'badge',
+                    text: '0:38',
+                    x: 48,
+                    y: 48,
+                    w: 64,
+                    h: 32,
+                    fill: '#10151D',
+                    opacity: 100,
+                    rotation: 0,
+                    visible: true,
+                    locked: false,
+                },
+                {
+                    id: 'subject',
+                    name: 'Subject Cutout',
+                    type: 'image',
+                    x: 740,
+                    y: 120,
+                    w: 430,
+                    h: 570,
+                    opacity: 100,
+                    rotation: 0,
+                    visible: true,
+                    locked: false,
+                },
+            ],
+        },
+    ];
+}
 
 // ── Compound Prompt Parsing & Parameter Extraction ───────────────────────────
 
@@ -533,7 +1092,26 @@ export function splitCompoundPrompt(text) {
  */
 export function extractDesignParams(cmd, text) {
     const s = String(text || '').toLowerCase();
-    const params = {};
+    const params = { rawText: text };
+
+    // 0. Extract text content / quoted copy if present
+    const quoteMatch = s.match(/["'“]([^"'”]+)["'”]/);
+    if (quoteMatch && quoteMatch[1].trim()) {
+        params.textContent = quoteMatch[1].trim();
+    } else {
+        const sayingMatch = s.match(/(?:saying|with text|text saying|headline saying|say|text to|headline to|words)\s+["']?([a-z0-9\s!?,.-]+)["']?$/i);
+        if (sayingMatch && sayingMatch[1].trim()) {
+            params.textContent = sayingMatch[1].trim();
+        }
+    }
+
+    // 0b. Shape types for creation / deletion
+    if (/\b(?:circle|oval|ellipse)\b/i.test(s)) params.shapeType = 'circle';
+    else if (/\b(?:rect|rectangle|box|square)\b/i.test(s)) params.shapeType = 'rect';
+    else if (/\b(?:star)\b/i.test(s)) params.shapeType = 'star';
+    else if (/\b(?:line|divider|rule)\b/i.test(s)) params.shapeType = 'line';
+    else if (/\b(?:badge|pill)\b/i.test(s)) params.shapeType = 'badge';
+    else if (/\b(?:text|headline|title)\b/i.test(s)) params.shapeType = 'text';
 
     // 1. Resolve target layer via semantic dictionary
     params.targetLayer = resolveTargetLayer(s, null);
@@ -703,6 +1281,21 @@ export function scoreDesignCommand(cmd, text) {
     }
     if (cmd.id === 'ds_set_font_size' && /(?:font\s*size|text\s*size|type\s*size|\bsize\s*\d+)/i.test(s)) {
         score = Math.max(score, 85);
+    }
+    if (cmd.id === 'ds_add_shape' && /\b(?:add|insert|draw|create|new)\s+(?:a\s+)?(?:circle|rectangle|rect|star|line|badge|box|square|pill)\b/i.test(s)) {
+        score = Math.max(score, 90);
+    }
+    if (cmd.id === 'ds_add_text' && /\b(?:add|insert|write|create|new)\s+(?:a\s+)?(?:text|headline|title|label|caption)\b/i.test(s)) {
+        score = Math.max(score, 90);
+    }
+    if (cmd.id === 'ds_set_text' && (/\b(?:change|set|rename|update)\s+(?:text|headline|title)\s+to\b/i.test(s) || (/\b(?:saying|with text saying)\b/i.test(s) && !/thumbnail/i.test(s)))) {
+        score = Math.max(score, 88);
+    }
+    if (cmd.id === 'ds_delete_layer' && /\b(?:delete|remove|trash)\b/i.test(s)) {
+        score = Math.max(score, 88);
+    }
+    if (cmd.id === 'ds_generate_thumbnail' && /\b(?:create|generate|make|build|design)\s+(?:a\s+)?(?:simple\s+)?thumbnail\b/i.test(s)) {
+        score = Math.max(score, 95);
     }
 
     return score;
