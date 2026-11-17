@@ -165,10 +165,10 @@ export async function fetchGenerativeScenePlan({ brief, transcript, platform, to
                 transcript: String(transcript || '').slice(0, 2000),
                 platform: platform || 'reels',
                 tone: tone || 'punchy',
-                timeoutMs: 15000,
+                timeoutMs: PLAN_TIMEOUT_MS,
             }),
             ...(signal ? { signal } : {}),
-        }, 15000);
+        }, PLAN_TIMEOUT_MS);
         if (!res.ok) return null;
         const data = await res.json().catch(() => ({}));
         return (data && data.plan) ? data.plan : null;

@@ -255,18 +255,45 @@ async function executeChatCompletionWithFailover({
         return error;
     };
 
+    const isLongTimeout = Number(timeout) >= 18_000;
+    const primaryAttemptMs = isLongTimeout ? Math.min(18_000, Number(timeout) - 10_000) : Number(timeout);
+
+    let primaryController = null;
+    let primaryTimer = null;
+    let primarySignal = requestSignal;
+
+    if (isLongTimeout) {
+        primaryController = new AbortController();
+        primaryTimer = setTimeout(() => primaryController.abort(), primaryAttemptMs);
+        const onDeadlineAbort = () => primaryController.abort(deadlineController.signal.reason);
+        deadlineController.signal.addEventListener('abort', onDeadlineAbort, { once: true });
+        primarySignal = primaryController.signal;
+    }
+
     try {
-        completion = await ai.chat.completions.create(requestParams, { signal: requestSignal });
+        completion = await ai.chat.completions.create(requestParams, { signal: primarySignal });
+        if (primaryTimer) clearTimeout(primaryTimer);
         return { completion, activeProvider, activeModel };
     } catch (err) {
+        if (primaryTimer) clearTimeout(primaryTimer);
         if (deadlineController.signal.aborted && !signal?.aborted) throw timeoutError();
+        if (signal?.aborted) throw err;
+
+        const isPrimaryTimeout = primaryController?.signal?.aborted && !deadlineController.signal.aborted;
         const status = err.status ?? err.statusCode ?? err.response?.status;
         const msg = String(err.message || '');
-        const isRetryable = status === 503 || status === 429 || status === 404 || status === 400 ||
-            /503|429|404|400|demand|capacity|overloaded|rate limit|quota|not found|validate json|failed_generation/i.test(msg);
+        const isRetryable = isPrimaryTimeout || status === 503 || status === 429 || status === 404 || status === 400 ||
+            /503|429|404|400|demand|capacity|overloaded|rate limit|quota|not found|validate json|failed_generation|timeout/i.test(msg);
 
         if (!isRetryable) {
             throw err;
+        }
+
+        if (isPrimaryTimeout) {
+            console.warn(
+                `[motionProvider] Model "${activeModel}" exceeded initial ${primaryAttemptMs}ms budget; ` +
+                `failing over to high-capacity fast fallback...`
+            );
         }
 
         // 1. Try Gemini model fallbacks
@@ -532,7 +559,7 @@ async function generateScenePlan({
     } catch (err) {
         if (err.name === 'AbortError' || signal?.aborted) {
             failureCategory = 'cancelled';
-        } else if (/timeout/i.test(err.message)) {
+        } else if (/timeout/i.test(err.message) || err.name === 'TimeoutError' || err.code === 'ETIMEDOUT') {
             failureCategory = 'timeout';
         } else {
             failureCategory = describeAIError(err) || 'api_error';
@@ -740,7 +767,7 @@ async function generateMotionScript({
     } catch (err) {
         if (err.name === 'AbortError' || signal?.aborted) {
             failureCategory = 'cancelled';
-        } else if (/timeout/i.test(err.message)) {
+        } else if (/timeout/i.test(err.message) || err.name === 'TimeoutError' || err.code === 'ETIMEDOUT') {
             failureCategory = 'timeout';
         } else {
             failureCategory = describeAIError(err) || 'api_error';

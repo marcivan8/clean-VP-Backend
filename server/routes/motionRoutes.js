@@ -870,7 +870,7 @@ router.post('/scene-plan', authenticateUser, async (req, res) => {
     // transcript/technique fallback. Leave enough time for Gemini to finish
     // its structured response; clamp client input so it cannot extend this.
     const sceneTimeoutMs = Number(requestedTimeoutMs) > 0
-        ? Math.min(30_000, Math.max(1_000, Number(requestedTimeoutMs)))
+        ? Math.min(45_000, Math.max(1_000, Number(requestedTimeoutMs)))
         : undefined;
 
     // R103 — retrieve the knowledge-base shortlist for this brief before the
