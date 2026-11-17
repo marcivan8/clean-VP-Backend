@@ -409,25 +409,8 @@ class EditorialBrain {
                     const waitSec = match ? parseFloat(match[1]) : null;
 
                     const callGroqFallback = async () => {
-                        const groqCandidates = [
-                            process.env.GROQ_FALLBACK_MODEL,
-                            'openai/gpt-oss-20b',
-                            'llama-3.1-8b-instant',
-                        ].filter(Boolean).filter(m => m !== callPayload.model);
-
-                        for (const fallbackModel of groqCandidates) {
-                            const fallbackPayload = { ...callPayload, model: fallbackModel };
-                            delete fallbackPayload.reasoning_effort;
-                            try {
-                                console.warn(`[EditorialBrain] Trying Groq fallback model "${fallbackModel}"...`);
-                                return await this.openai.chat.completions.create(fallbackPayload);
-                            } catch (fbErr) {
-                                console.warn(`[EditorialBrain] Groq fallback model "${fallbackModel}" failed:`, fbErr.message);
-                            }
-                        }
-
-                        // If Groq models are exhausted or hit rate limits, failover to Gemini
-                        if (process.env.GEMINI_API_KEY) {
+                        // If Groq hits organization-wide TPM or rate limits, failover to Gemini FIRST
+                        if (process.env.GEMINI_API_KEY || isAIConfigured({ provider: 'gemini' })) {
                             try {
                                 const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
                                 if (geminiAi) {
@@ -444,6 +427,27 @@ class EditorialBrain {
                                 }
                             } catch (geminiErr) {
                                 console.warn('[EditorialBrain] Gemini failover error:', geminiErr.message);
+                            }
+                        }
+
+                        const groqCandidates = [
+                            process.env.GROQ_FALLBACK_MODEL,
+                            'llama-3.3-70b-versatile',
+                            'openai/gpt-oss-20b',
+                        ].filter(Boolean).filter(m => m !== callPayload.model);
+
+                        for (const fallbackModel of groqCandidates) {
+                            const fallbackPayload = {
+                                ...callPayload,
+                                model: fallbackModel,
+                                response_format: { type: 'json_object' },
+                            };
+                            delete fallbackPayload.reasoning_effort;
+                            try {
+                                console.warn(`[EditorialBrain] Trying Groq fallback model "${fallbackModel}"...`);
+                                return await this.openai.chat.completions.create(fallbackPayload);
+                            } catch (fbErr) {
+                                console.warn(`[EditorialBrain] Groq fallback model "${fallbackModel}" failed:`, fbErr.message);
                             }
                         }
 

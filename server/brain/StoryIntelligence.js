@@ -170,7 +170,7 @@ class StoryIntelligence {
                 i,                                   // position IS the story
                 c.id,
                 Math.round((c.duration || 0) * 10),  // 100ms resolution
-                (c.transcript || '').length > 0 ? 't' : '-',
+                ((c.transcript || c.text || '').trim().length > 0) ? 't' : '-',
             ].join(':'));
         // R91: the hook rules depend on the editing style; no style keeps the old hash.
         if (editingStyle) parts.push(`style:${editingStyle}`);
@@ -268,7 +268,7 @@ class StoryIntelligence {
             return `only ${clips.length} clip(s) on the timeline — no sequence to read`;
         }
         const transcriptChars = clips
-            .reduce((n, c) => n + (c.transcript || '').trim().length, 0);
+            .reduce((n, c) => n + (c.transcript || c.text || '').trim().length, 0);
         if (transcriptChars < MIN_TRANSCRIPT_CHARS) {
             return 'no usable transcript on the timeline — beats would be guesswork';
         }
@@ -370,13 +370,37 @@ class StoryIntelligence {
             completion = await openai.chat.completions.create(callPayload);
         } catch (callErr) {
             const isRateLimit = callErr.status === 429 || callErr.status === 413 || /rate limit|tpm|tokens per minute|request too large/i.test(callErr.message);
-            const isTruncated = callErr.status === 400 && /max completion tokens|max_tokens|truncated|missing properties/i.test(callErr.message);
-            if ((isRateLimit || isTruncated) && isGroq) {
-                const groqFallbacks = ['openai/gpt-oss-20b', 'llama-3.1-8b-instant'].filter(m => m !== callPayload.model);
+            const isTruncated = callErr.status === 400 && /max completion tokens|max_tokens|truncated|missing properties|validate json/i.test(callErr.message);
+
+            // Failover to Gemini FIRST on TPM limits, rate limits, or schema/truncation issues
+            if ((isRateLimit || isTruncated) && (process.env.GEMINI_API_KEY || isAIConfigured({ provider: 'gemini' }))) {
+                try {
+                    const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                    if (geminiAi) {
+                        console.warn('[StoryIntelligence] Rate limits / truncation reached on primary model; failing over to Gemini...');
+                        completion = await createGeminiChatCompletionWithFailover(geminiAi, {
+                            messages: [{ role: 'user', content: prompt }],
+                            response_format: STORY_MAP_SCHEMA,
+                            temperature: 0.2,
+                            max_tokens: 3500,
+                        });
+                    }
+                } catch (geminiErr) {
+                    console.warn('[StoryIntelligence] Gemini failover failed:', geminiErr.message);
+                }
+            }
+
+            if (!completion && (isRateLimit || isTruncated) && isGroq) {
+                const groqFallbacks = ['llama-3.3-70b-versatile', 'openai/gpt-oss-20b'].filter(m => m !== callPayload.model);
                 for (const fallbackModel of groqFallbacks) {
                     try {
                         console.warn(`[StoryIntelligence] Primary Groq model failed (${callErr.message}); trying fallback "${fallbackModel}"...`);
-                        const fallbackPayload = { ...callPayload, model: fallbackModel, max_tokens: 1500 };
+                        const fallbackPayload = {
+                            ...callPayload,
+                            model: fallbackModel,
+                            max_tokens: 1500,
+                            response_format: { type: 'json_object' },
+                        };
                         delete fallbackPayload.reasoning_effort;
                         completion = await openai.chat.completions.create(fallbackPayload);
                         break;
@@ -385,7 +409,8 @@ class StoryIntelligence {
                     }
                 }
             }
-            if (!completion && process.env.GEMINI_API_KEY) {
+
+            if (!completion && (process.env.GEMINI_API_KEY || isAIConfigured({ provider: 'gemini' }))) {
                 try {
                     const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
                     if (geminiAi) {
@@ -425,7 +450,7 @@ class StoryIntelligence {
         const lines = clips.map((c, i) => {
             const start = Math.round(cursor * 10) / 10;
             cursor += (c.duration || 0);
-            const transcript = (c.transcript || '').trim().slice(0, 220);
+            const transcript = (c.transcript || c.text || '').trim().slice(0, 220);
             return [
                 `${i + 1}. [${start}s–${Math.round(cursor * 10) / 10}s] id:${c.id}` +
                     ` "${c.name || 'untitled'}"${c.role ? ` (role: ${c.role})` : ''}`,

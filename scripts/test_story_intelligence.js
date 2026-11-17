@@ -99,6 +99,12 @@ function load(supabaseStub, { body = null, throwOnCall = false } = {}) {
             // keeps the reasoning_effort branch off, matching what a real
             // non-Groq provider would do.
             resolveProvider: () => 'openai',
+            isAIConfigured: () => true,
+            createGeminiChatCompletionWithFailover: async (client, payload) => {
+                state.calls++;
+                if (throwOnCall) throw new Error('model unavailable');
+                return { choices: [{ message: { content: JSON.stringify(body) } }] };
+            },
         },
     };
     delete require.cache[SI_PATH];

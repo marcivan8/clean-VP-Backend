@@ -172,13 +172,14 @@ function buildProjectState() {
                         .trim()
                         .slice(0, 300);
                     const asset = assets.find(a => a.id === c.assetId);
+                    const textFallback = c.text || c.transcript || c.captionText || asset?.transcript_text || asset?.transcript || '';
                     return {
                         id:         c.id,
                         assetId:    c.assetId || null,
                         name:       asset?.name || c.name || null,
                         start:      c.start ?? 0,
                         duration:   c.duration ?? 0,
-                        transcript: said || '',
+                        transcript: said || textFallback || '',
                     };
                 });
         })(),

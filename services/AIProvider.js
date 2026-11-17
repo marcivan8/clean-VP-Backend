@@ -648,10 +648,14 @@ async function createGeminiChatCompletionWithFailover(geminiClient, payload, opt
     const primaryModel = payload.model || process.env.GEMINI_MODEL || 'gemini-3.8-flash';
     const fallbackModels = [
         primaryModel,
+        'gemini-3.8-flash',
+        'gemini-2.0-flash',
+        'gemini-2.0-flash-lite',
+        'gemini-1.5-flash',
+        'gemini-1.5-flash-8b',
         'gemini-3.1-flash-lite',
         'gemini-flash-lite-latest',
         'gemini-flash-latest',
-        'gemini-3.8-flash',
     ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
     let lastError = null;
@@ -666,8 +670,24 @@ async function createGeminiChatCompletionWithFailover(geminiClient, payload, opt
             const is503 = err.status === 503 || /high demand|temporarily unavailable|overloaded/i.test(err.message);
             const is404 = err.status === 404 || /not found|does not exist|no longer available/i.test(err.message);
             const is429 = err.status === 429 || /rate limit|quota/i.test(err.message);
+            const isSchemaErr = err.status === 400 && payload.response_format?.type === 'json_schema' && /schema|validate json|failed_generation/i.test(err.message);
+            if (isSchemaErr) {
+                try {
+                    console.warn(`[AIProvider] Gemini model "${model}" rejected json_schema; retrying with json_object...`);
+                    return await geminiClient.chat.completions.create({
+                        ...payload,
+                        model,
+                        response_format: { type: 'json_object' },
+                    }, options);
+                } catch (schemaRetryErr) {
+                    lastError = schemaRetryErr;
+                }
+            }
             if (is503 || is404 || is429) {
                 console.warn(`[AIProvider] Gemini model "${model}" failed (${err.status || err.message}); trying alternate model...`);
+                if (is503) {
+                    await new Promise(r => setTimeout(r, 400));
+                }
                 continue;
             }
             throw err;

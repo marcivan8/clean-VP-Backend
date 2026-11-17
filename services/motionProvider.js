@@ -75,7 +75,12 @@ function repairAndParseJSON(raw) {
         return res(null, 'empty_input');
     }
 
-    const trimmed = raw.trim();
+    // Strip <think>...</think> reasoning blocks before parsing
+    const withoutThink = raw
+        .replace(/<think>[\s\S]*?<\/think>/gi, '')
+        .replace(/<think>[\s\S]*$/gi, '')
+        .trim();
+    const trimmed = withoutThink || raw.trim();
 
     // 1. Direct parse attempt
     try {
@@ -325,25 +330,29 @@ async function executeChatCompletionWithFailover({
 
         // 1b. Try Groq model fallbacks
         if (provider === 'groq') {
-            const groqFallbacks = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.1-8b-instant'];
-            const candidateModels = groqFallbacks.filter(m => m !== model);
-            for (const fallbackModel of candidateModels) {
-                if (requestSignal.aborted) break;
-                console.warn(
-                    `[motionProvider] Groq model "${activeModel}" failed (${status || msg}); ` +
-                    `retrying with fallback "${fallbackModel}"...`
-                );
-                try {
-                    const fallbackParams = { ...requestParams, model: fallbackModel };
-                    delete fallbackParams.reasoning_effort;
-                    delete fallbackParams.response_format;
-                    completion = await ai.chat.completions.create(fallbackParams, { signal: requestSignal });
-                    if (completion?.choices?.[0]?.message?.content) {
-                        return { completion, activeProvider: 'groq', activeModel: fallbackModel };
+            const isGroqQuotaLimit = status === 429 || status === 413 || /tpm|tokens per minute|rate limit/i.test(msg);
+            // If Groq hits organization-wide TPM limit, skip secondary Groq models and jump straight to Gemini failover
+            if (!isGroqQuotaLimit) {
+                const groqFallbacks = ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+                const candidateModels = groqFallbacks.filter(m => m !== model);
+                for (const fallbackModel of candidateModels) {
+                    if (requestSignal.aborted) break;
+                    console.warn(
+                        `[motionProvider] Groq model "${activeModel}" failed (${status || msg}); ` +
+                        `retrying with fallback "${fallbackModel}"...`
+                    );
+                    try {
+                        const fallbackParams = { ...requestParams, model: fallbackModel };
+                        delete fallbackParams.reasoning_effort;
+                        delete fallbackParams.response_format;
+                        completion = await ai.chat.completions.create(fallbackParams, { signal: requestSignal });
+                        if (completion?.choices?.[0]?.message?.content) {
+                            return { completion, activeProvider: 'groq', activeModel: fallbackModel };
+                        }
+                    } catch (fbErr) {
+                        if (deadlineController.signal.aborted && !signal?.aborted) throw timeoutError();
+                        console.warn(`[motionProvider] Groq fallback model "${fallbackModel}" failed: ${describeAIError(fbErr)}`);
                     }
-                } catch (fbErr) {
-                    if (deadlineController.signal.aborted && !signal?.aborted) throw timeoutError();
-                    console.warn(`[motionProvider] Groq fallback model "${fallbackModel}" failed: ${describeAIError(fbErr)}`);
                 }
             }
         }

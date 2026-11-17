@@ -642,7 +642,7 @@ USER REQUEST:
                 max_tokens: activeProvider === 'groq' ? 1200 : 2000,
             }, { timeout: 15000 }); // 15s strict timeout to trigger fallback fast on network errors
         } catch (callErr) {
-            const isQuotaOrLimit = callErr.status === 429 || callErr.status === 413 || /quota|rate limit|tokens per minute|tpm/i.test(callErr.message || '');
+            const isQuotaOrLimit = callErr.status === 429 || callErr.status === 413 || callErr.status === 400 || /quota|rate limit|tokens per minute|tpm|validate json|failed_generation/i.test(callErr.message || '');
             if (isQuotaOrLimit && isAIConfigured({ provider: 'gemini' })) {
                 try {
                     const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
@@ -1591,7 +1591,7 @@ Keep steps atomic and ordered. Include all necessary parameters. Use only tools 
                 max_tokens: planMaxTokens,
             });
         } catch (callErr) {
-            const isQuotaOrLimit = callErr.status === 429 || callErr.status === 413 || /quota|rate limit|tokens per minute|tpm/i.test(callErr.message || '');
+            const isQuotaOrLimit = callErr.status === 429 || callErr.status === 413 || callErr.status === 400 || /quota|rate limit|tokens per minute|tpm|validate json|failed_generation/i.test(callErr.message || '');
             if (isQuotaOrLimit && isAIConfigured({ provider: 'gemini' })) {
                 try {
                     const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
@@ -2033,7 +2033,7 @@ USER PROMPT:
                 max_tokens: planMaxTokens,
             }, { timeout: 15000 });
         } catch (callErr) {
-            const isQuotaOrLimit = callErr.status === 429 || callErr.status === 413 || /quota|rate limit|tokens per minute|tpm/i.test(callErr.message || '');
+            const isQuotaOrLimit = callErr.status === 429 || callErr.status === 413 || callErr.status === 400 || /quota|rate limit|tokens per minute|tpm|validate json|failed_generation/i.test(callErr.message || '');
             if (isQuotaOrLimit && isAIConfigured({ provider: 'gemini' })) {
                 try {
                     const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
@@ -2628,15 +2628,18 @@ const detectRepeatedTakesHandler = async (req, res) => {
             ? async (prompt) => {
                 let out;
                 try {
-                    out = await openai.chat.completions.create({
+                    const reqOpts = {
                         model: resolveModel('gpt-4o', 'chat'),
                         messages: [{ role: 'user', content: prompt }],
-                        response_format: { type: 'json_object' },
                         temperature: 0.1,
                         max_tokens: retakeMaxTokens,
-                    }, { timeout: 60_000 });
+                    };
+                    if (activeProvider !== 'groq') {
+                        reqOpts.response_format = { type: 'json_object' };
+                    }
+                    out = await openai.chat.completions.create(reqOpts, { timeout: 60_000 });
                 } catch (callErr) {
-                    const isLimit = callErr.status === 429 || callErr.status === 413 || /quota|rate limit|tokens per minute|tpm/i.test(callErr.message || '');
+                    const isLimit = callErr.status === 429 || callErr.status === 413 || callErr.status === 400 || /quota|rate limit|tokens per minute|tpm|validate json|failed_generation/i.test(callErr.message || '');
                     if (isLimit && isAIConfigured({ provider: 'gemini' })) {
                         try {
                             const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });

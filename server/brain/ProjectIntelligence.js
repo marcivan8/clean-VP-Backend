@@ -304,8 +304,27 @@ class ProjectIntelligence {
             completion = await openai.chat.completions.create(callPayload);
         } catch (callErr) {
             const isRateLimit = callErr.status === 429 || callErr.status === 413 || /rate limit|tpm|tokens per minute|request too large/i.test(callErr.message);
-            if (isRateLimit && isGroq) {
-                const groqFallbacks = ['openai/gpt-oss-20b', 'llama-3.1-8b-instant'].filter(m => m !== callPayload.model);
+
+            // Failover to Gemini FIRST on TPM limits or rate limits (Gemini does not have Groq's 8k TPM ceiling)
+            if (isRateLimit && (process.env.GEMINI_API_KEY || isAIConfigured({ provider: 'gemini' }))) {
+                try {
+                    const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                    if (geminiAi) {
+                        console.warn('[ProjectIntelligence] Rate limits reached on primary model; failing over to Gemini...');
+                        completion = await createGeminiChatCompletionWithFailover(geminiAi, {
+                            messages: [{ role: 'user', content: prompt }],
+                            response_format: { type: 'json_object' },
+                            temperature: 0.15,
+                            max_tokens: 1200,
+                        });
+                    }
+                } catch (geminiErr) {
+                    console.warn('[ProjectIntelligence] Gemini failover failed:', geminiErr.message);
+                }
+            }
+
+            if (!completion && isRateLimit && isGroq) {
+                const groqFallbacks = ['llama-3.3-70b-versatile', 'openai/gpt-oss-20b'].filter(m => m !== callPayload.model);
                 for (const fallbackModel of groqFallbacks) {
                     try {
                         console.warn(`[ProjectIntelligence] Primary Groq model rate-limited; trying fallback "${fallbackModel}"...`);
@@ -318,11 +337,12 @@ class ProjectIntelligence {
                     }
                 }
             }
-            if (!completion && process.env.GEMINI_API_KEY) {
+
+            if (!completion && (process.env.GEMINI_API_KEY || isAIConfigured({ provider: 'gemini' }))) {
                 try {
                     const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
                     if (geminiAi) {
-                        console.warn('[ProjectIntelligence] Rate limits reached on primary model; failing over to Gemini...');
+                        console.warn('[ProjectIntelligence] Primary model failed; failing over to Gemini...');
                         completion = await createGeminiChatCompletionWithFailover(geminiAi, {
                             messages: [{ role: 'user', content: prompt }],
                             response_format: { type: 'json_object' },

@@ -195,10 +195,21 @@ router.post('/analyze', authenticateUser, async (req, res) => {
         let storyMap = null;
         try {
             if (projectState.projectId && Array.isArray(projectState.cut) && projectState.cut.length) {
+                // Enrich cut clips with transcript_text from media asset intelligence when missing
+                const enrichedCut = projectState.cut.map(clip => {
+                    const text = (clip.transcript || clip.text || '').trim();
+                    if (text) return { ...clip, transcript: text };
+                    const asset = (assetIntelligence || []).find(a => a.id === clip.assetId);
+                    if (asset?.transcript_text) {
+                        return { ...clip, transcript: String(asset.transcript_text).slice(0, 300) };
+                    }
+                    return clip;
+                });
+
                 storyMap = await storyIntel.ensureMap({
                     projectId:  projectState.projectId,
                     userId:     req.user.id,
-                    clips:      projectState.cut,
+                    clips:      enrichedCut,
                     projectMap,
                     platform,
                     editingStyle,
