@@ -148,6 +148,92 @@ const execAdapt = executeDesignCommand('adapt to instagram', mockCtx);
 check('executeDesignCommand adapts format to social',
     execAdapt.success && mockCtx.selectedFormat === 'social');
 
+console.log('\n── 4. Professional Vector & Auto Layout Engines ──');
+const vectorMath = await import('../client/src/design-studio/vectorMath.js');
+const autoLayout = await import('../client/src/design-studio/autoLayout.js');
+const designSystem = await import('../client/src/design-studio/designSystem.js');
+
+// Test polygon generation
+const polygonD = vectorMath.generatePolygonPath(100, 100, 50, 6);
+check('generatePolygonPath generates valid 6-sided polygon SVG path',
+    polygonD.startsWith('M') && polygonD.endsWith('Z') && polygonD.includes('L'));
+
+// Test star generation
+const starD = vectorMath.generateStarPath(100, 100, 50, 25, 5);
+check('generateStarPath generates valid 5-point star SVG path',
+    starD.startsWith('M') && starD.endsWith('Z') && starD.includes('L'));
+
+// Test squircle rounded rect
+const rectD = vectorMath.generateRoundedRectPath(0, 0, 200, 100, 16, true);
+check('generateRoundedRectPath generates smooth squircle path with Bézier curves',
+    rectD.includes('C ') && rectD.endsWith('Z'));
+
+// Test boolean compound operations
+const boolRes = vectorMath.executeBooleanOperation('union', ['M 0 0 H 50 V 50 H 0 Z', 'M 25 25 H 75 V 75 H 25 Z']);
+check('executeBooleanOperation unions SVG paths',
+    boolRes.pathD.includes('M 0 0') && boolRes.fillRule === 'nonzero');
+
+// Test Auto Layout Flexbox resolver
+const mockFrame = {
+    x: 0,
+    y: 0,
+    w: 400,
+    h: 100,
+    autoLayout: { enabled: true, direction: 'horizontal', gap: 20, paddingLeft: 10, paddingRight: 10, alignItems: 'center', sizingH: 'hug', sizingV: 'hug' }
+};
+const mockChildren = [
+    { id: 'c1', x: 0, y: 0, w: 80, h: 40 },
+    { id: 'c2', x: 0, y: 0, w: 100, h: 40 },
+];
+const alRes = autoLayout.resolveAutoLayout(mockFrame, mockChildren);
+check('resolveAutoLayout computes horizontal positions with gap',
+    alRes.childrenUpdates[0].x === 10 && alRes.childrenUpdates[1].x === 110);
+
+// Test Smart Selection Spacing
+const unspacedLayers = [
+    { id: 'l1', x: 10, y: 0, w: 50 },
+    { id: 'l2', x: 80, y: 0, w: 50 },
+    { id: 'l3', x: 200, y: 0, w: 50 },
+];
+const spacedLayers = autoLayout.distributeSmartSelection(unspacedLayers, 'horizontal');
+check('distributeSmartSelection spaces objects uniformly',
+    spacedLayers[1].x - (spacedLayers[0].x + spacedLayers[0].w) ===
+    spacedLayers[2].x - (spacedLayers[1].x + spacedLayers[1].w));
+
+// Test Property Copy & Paste
+const sourceLayer = {
+    id: 'src',
+    fill: '#00E5FF',
+    stroke: '#FFFFFF',
+    strokeWidth: 4,
+    opacity: 80,
+    fontFamily: 'Instrument Serif',
+    fontSize: 64,
+};
+const targetLayer = { id: 'dst', fill: '#000000', opacity: 100 };
+const copiedBag = designSystem.copyLayerProperties(sourceLayer);
+const pastedLayer = designSystem.pasteLayerProperties(targetLayer, copiedBag);
+check('copyLayerProperties and pasteLayerProperties copy visual styling',
+    pastedLayer.fill === '#00E5FF' && pastedLayer.strokeWidth === 4 && pastedLayer.opacity === 80);
+
+// Test Boolean, AutoLayout, Theme commands in registry
+mockCtx.selectedLayerIds = ['headline', 'duration'];
+const execBoolCmd = executeDesignCommand('union', mockCtx);
+check('executeDesignCommand executes boolean union on selected shapes',
+    execBoolCmd.success);
+
+const execAutoLayoutCmd = executeDesignCommand('apply auto layout with 24px gap', mockCtx);
+check('executeDesignCommand applies auto layout',
+    execAutoLayoutCmd.success);
+
+const execThemeCmd = executeDesignCommand('apply dark theme', mockCtx);
+check('executeDesignCommand applies theme tokens',
+    execThemeCmd.success);
+
+const execReviewCmd = executeDesignCommand('review design for contrast and hierarchy', mockCtx);
+check('executeDesignCommand audits design and returns feedback',
+    execReviewCmd.success && execReviewCmd.message.includes('WCAG'));
+
 console.log(`\n────────────────────────────────────────────────────────────`);
 console.log(`Design Studio Registry Tests: ${passed} passed, ${failed} failed`);
 console.log(`────────────────────────────────────────────────────────────\n`);

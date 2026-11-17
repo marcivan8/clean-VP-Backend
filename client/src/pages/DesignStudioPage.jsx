@@ -34,6 +34,13 @@ import { Logo } from '../components/Logo.jsx';
 import { useUserPlan } from '../hooks/useUserPlan.js';
 import useTimelineStore from '../store/useTimelineStore.js';
 import { executeDesignCommand } from '../agent/DesignStudioCommandRegistry.js';
+import CanvasToolbar from '../design-studio/components/CanvasToolbar.jsx';
+import InteractiveVectorCanvas from '../design-studio/components/InteractiveVectorCanvas.jsx';
+import PropertiesInspector from '../design-studio/components/PropertiesInspector.jsx';
+import LayersAndAssetsPanel from '../design-studio/components/LayersAndAssetsPanel.jsx';
+import DesignStudioAiDirector from '../design-studio/components/DesignStudioAiDirector.jsx';
+import { executeBooleanOperation, generateRoundedRectPath } from '../design-studio/vectorMath.js';
+import { distributeSmartSelection } from '../design-studio/autoLayout.js';
 
 const FORMAT_PRESETS = [
     { id: 'thumbnail', label: 'Video thumbnail', res: '1280 × 720 · YouTube', w: 1280, h: 720, aspect: '16/9' },
@@ -180,6 +187,159 @@ export default function DesignStudioPage() {
     ]);
 
     const [selectedLayerId, setSelectedLayerId] = useState('headline');
+    const [selectedLayerIds, setSelectedLayerIds] = useState(['headline']);
+    const [showGuides, setShowGuides] = useState(false);
+    const [zoom, setZoom] = useState(0.75);
+
+    const handleExecuteBoolean = (op) => {
+        const selLayers = layers.filter(l => selectedLayerIds.includes(l.id));
+        if (selLayers.length < 2) return;
+        const paths = selLayers.map(l => l.pathD || generateRoundedRectPath(l.x, l.y, l.w || 100, l.h || 100, l.cornerRadius || 0));
+        const { pathD, fillRule } = executeBooleanOperation(op, paths);
+        const compoundId = `compound_${Date.now()}`;
+        const compound = {
+            id: compoundId,
+            name: `Compound (${op})`,
+            type: 'vector',
+            pathD,
+            fillRule,
+            x: Math.min(...selLayers.map(l => l.x)),
+            y: Math.min(...selLayers.map(l => l.y)),
+            w: Math.max(...selLayers.map(l => l.x + (l.w || 100))) - Math.min(...selLayers.map(l => l.x)),
+            h: Math.max(...selLayers.map(l => l.y + (l.h || 100))) - Math.min(...selLayers.map(l => l.y)),
+            fill: selLayers[0].fill || '#00E5FF',
+            stroke: 'transparent',
+            strokeWidth: 0,
+            opacity: 100,
+            visible: true,
+            locked: false,
+        };
+        setLayers(prev => [...prev.filter(l => !selectedLayerIds.includes(l.id)), compound]);
+        setSelectedLayerIds([compoundId]);
+        setSelectedLayerId(compoundId);
+    };
+
+    const handleGroupSelected = () => {
+        if (selectedLayerIds.length < 2) return;
+        const groupId = `group_${Date.now()}`;
+        const selLayers = layers.filter(l => selectedLayerIds.includes(l.id));
+        const minX = Math.min(...selLayers.map(l => l.x));
+        const minY = Math.min(...selLayers.map(l => l.y));
+        const maxX = Math.max(...selLayers.map(l => l.x + (l.w || 100)));
+        const maxY = Math.max(...selLayers.map(l => l.y + (l.h || 100)));
+        const groupFrame = {
+            id: groupId,
+            name: 'Group Container',
+            type: 'frame',
+            x: minX,
+            y: minY,
+            w: Math.max(40, maxX - minX),
+            h: Math.max(40, maxY - minY),
+            fill: 'transparent',
+            stroke: '#2A2E39',
+            strokeWidth: 1,
+            strokeStyle: 'dashed',
+            opacity: 100,
+            visible: true,
+            locked: false,
+        };
+        setLayers(prev => [...prev, groupFrame]);
+        setSelectedLayerIds([groupId]);
+        setSelectedLayerId(groupId);
+    };
+
+    const handleUngroupSelected = () => {
+        const frameLayer = layers.find(l => selectedLayerIds.includes(l.id) && l.type === 'frame');
+        if (!frameLayer) return;
+        setLayers(prev => prev.filter(l => l.id !== frameLayer.id));
+        setSelectedLayerIds([]);
+        setSelectedLayerId(null);
+    };
+
+    const handleAlignLayers = (type) => {
+        const ids = selectedLayerIds.length > 0 ? selectedLayerIds : (selectedLayerId ? [selectedLayerId] : []);
+        if (ids.length === 0) return;
+        setLayers(prev => {
+            const sel = prev.filter(l => ids.includes(l.id));
+            if (sel.length === 0) return prev;
+            let targetX = 0;
+            let targetY = 0;
+            if (type === 'left') targetX = Math.min(...sel.map(l => l.x));
+            else if (type === 'right') targetX = Math.max(...sel.map(l => l.x + (l.w || 100)));
+            else if (type === 'center_h' || type === 'center') targetX = Math.round((currentFormat.w - (sel[0].w || 100)) / 2);
+            else if (type === 'top') targetY = Math.min(...sel.map(l => l.y));
+            else if (type === 'bottom') targetY = Math.max(...sel.map(l => l.y + (l.h || 100)));
+            else if (type === 'center_v' || type === 'middle') targetY = Math.round((currentFormat.h - (sel[0].h || 40)) / 2);
+
+            return prev.map(l => {
+                if (!ids.includes(l.id)) return l;
+                if (type === 'left') return { ...l, x: targetX };
+                if (type === 'right') return { ...l, x: targetX - (l.w || 100) };
+                if (type === 'center_h' || type === 'center') return { ...l, x: targetX };
+                if (type === 'top') return { ...l, y: targetY };
+                if (type === 'bottom') return { ...l, y: targetY - (l.h || 40) };
+                if (type === 'center_v' || type === 'middle') return { ...l, y: targetY };
+                return l;
+            });
+        });
+    };
+
+    const handleDistributeLayers = (axis = 'horizontal') => {
+        const sel = layers.filter(l => selectedLayerIds.includes(l.id));
+        if (sel.length < 2) return;
+        const updated = distributeSmartSelection(sel, axis);
+        const map = {};
+        updated.forEach(u => { map[u.id] = { x: u.x, y: u.y }; });
+        setLayers(prev => prev.map(l => map[l.id] ? { ...l, ...map[l.id] } : l));
+    };
+
+    const handleInsertComponent = (cmp) => {
+        const instanceId = `${cmp.id}_${Date.now()}`;
+        const newLayers = (cmp.layers || []).map(child => ({
+            ...child,
+            id: `${instanceId}_${child.id}`,
+            x: child.x + 80,
+            y: child.y + 80,
+        }));
+        setLayers(prev => [...prev, ...newLayers]);
+        setSelectedLayerIds(newLayers.map(l => l.id));
+        setSelectedLayerId(newLayers[0]?.id || null);
+    };
+
+    const handleApplyTheme = (tm) => {
+        setLayers(prev => prev.map(l => {
+            if (l.id === 'background' || l.type === 'frame') return { ...l, fill: tm.colors.surface };
+            if (l.type === 'text') return { ...l, fill: tm.colors.text };
+            if (l.type === 'badge' || l.id === 'duration') return { ...l, fill: tm.colors.brand };
+            return l;
+        }));
+    };
+
+    const handleApplyTypographyStyle = (style) => {
+        setLayers(prev => prev.map(l => {
+            if (selectedLayerIds.includes(l.id) && (l.type === 'text' || l.type === 'badge')) {
+                return {
+                    ...l,
+                    fontFamily: style.fontFamily,
+                    fontSize: style.fontSize,
+                    fontWeight: style.fontWeight,
+                    lineHeight: style.lineHeight,
+                    letterSpacing: style.letterSpacing,
+                };
+            }
+            return l;
+        }));
+    };
+
+    const handleUpdateLayer = (layerId, updates) => {
+        setLayers(prev => prev.map(l => l.id === layerId ? { ...l, ...updates } : l));
+    };
+
+    const handleAddLayer = (newLayer) => {
+        setLayers(prev => [...prev, newLayer]);
+        setSelectedLayerIds([newLayer.id]);
+        setSelectedLayerId(newLayer.id);
+    };
     const selectedLayer = layers.find(l => l.id === selectedLayerId) || layers[0] || {};
 
     // Interactive Drag & Resize State
@@ -925,7 +1085,16 @@ export default function DesignStudioPage() {
 
             const radius = (l.borderRadius || l.radius || 0) * sx;
 
-            if (l.type === 'rect') {
+            if ((l.type === 'vector' || l.type === 'compound') && l.pathD && typeof Path2D !== 'undefined') {
+                ctx.fillStyle = l.fill || 'transparent';
+                const p2d = new Path2D(l.pathD);
+                if (l.fill && l.fill !== 'transparent') ctx.fill(p2d, l.fillRule || 'nonzero');
+                if (l.strokeWidth) {
+                    ctx.strokeStyle = l.stroke || '#00E5FF';
+                    ctx.lineWidth = (l.strokeWidth || 1) * sx;
+                    ctx.stroke(p2d);
+                }
+            } else if (l.type === 'rect' || l.type === 'frame') {
                 ctx.fillStyle = l.fill || '#0B7C91';
                 ctx.beginPath();
                 if (ctx.roundRect && radius > 0) {
@@ -934,10 +1103,26 @@ export default function DesignStudioPage() {
                     ctx.rect(lx, ly, lw, lh);
                 }
                 ctx.fill();
-            } else if (l.type === 'circle') {
+            } else if (l.type === 'circle' || l.type === 'ellipse') {
                 ctx.fillStyle = l.fill || '#C85A17';
                 ctx.beginPath();
                 ctx.ellipse(lx + lw / 2, ly + lh / 2, lw / 2, lh / 2, 0, 0, Math.PI * 2);
+                ctx.fill();
+            } else if (l.type === 'polygon') {
+                ctx.fillStyle = l.fill || '#0B7C91';
+                ctx.beginPath();
+                const cx = lx + lw / 2;
+                const cy = ly + lh / 2;
+                const r = Math.min(lw, lh) / 2;
+                const sides = l.sides || 6;
+                for (let i = 0; i < sides; i++) {
+                    const angle = (i * 2 * Math.PI) / sides - Math.PI / 2;
+                    const px = cx + r * Math.cos(angle);
+                    const py = cy + r * Math.sin(angle);
+                    if (i === 0) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                }
+                ctx.closePath();
                 ctx.fill();
             } else if (l.type === 'line') {
                 ctx.fillStyle = l.fill || '#00E5FF';
@@ -1850,1089 +2035,98 @@ export default function DesignStudioPage() {
                         </form>
                     </section>
 
-                    {/* Middle Row: Canvas Stage + Right Inspector */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 20, alignItems: 'start' }}>
-                        {/* Center Stage Section */}
-                        <section style={{
-                            border: '1px solid rgba(16, 21, 29, 0.08)',
-                            borderRadius: 16,
-                            overflow: 'hidden',
-                            background: '#FFFFFF',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            boxShadow: '0 4px 16px rgba(16, 21, 29, 0.04)',
-                        }}>
-                            {/* Canvas Toolbar */}
+                    {/* Middle Row: Professional Figma-grade 3-Pane Studio Workspace */}
+                    <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: '260px 1fr 320px',
+                        gap: '16px',
+                        alignItems: 'start',
+                        background: '#12141A',
+                        padding: '16px',
+                        borderRadius: '16px',
+                        border: '1px solid #2A2E39',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                    }}>
+                        {/* 1. Left Panel: Layers, Components & Design Tokens */}
+                        <LayersAndAssetsPanel
+                            layers={layers}
+                            setLayers={setLayers}
+                            selectedLayerIds={selectedLayerIds}
+                            setSelectedLayerIds={(ids) => {
+                                setSelectedLayerIds(ids);
+                                if (ids.length > 0) setSelectedLayerId(ids[0]);
+                            }}
+                            onInsertComponent={handleInsertComponent}
+                            onApplyTheme={handleApplyTheme}
+                            onApplyTypographyStyle={handleApplyTypographyStyle}
+                        />
+
+                        {/* 2. Center Stage: Canvas Toolbar, Interactive Vector Canvas & AI Director */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', minWidth: 0 }}>
                             <div style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                flexWrap: 'wrap',
-                                gap: 10,
-                                padding: '8px 16px',
-                                borderBottom: '1px solid rgba(16, 21, 29, 0.08)',
-                                background: '#FFFFFF',
+                                background: '#161920',
+                                border: '1px solid #2A2E39',
+                                borderRadius: '12px',
+                                overflow: 'hidden',
+                                boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
                             }}>
-                                {/* Tool icons */}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                                    {[
-                                        { id: 'select', icon: Move, label: 'Move / Select' },
-                                        { id: 'text', icon: Type, label: 'Add Text', action: handleAddText },
-                                        { id: 'rect', icon: Square, label: 'Add Rectangle', action: handleAddRect },
-                                        { id: 'circle', icon: Circle, label: 'Add Circle', action: handleAddCircle },
-                                        { id: 'line', icon: ArrowUpRight, label: 'Add Line', action: handleAddLine },
-                                        { id: 'star', icon: Star, label: 'Add Star', action: handleAddStar },
-                                        { id: 'badge', icon: Sliders, label: 'Add Badge', action: handleAddBadge },
-                                    ].map(tool => {
-                                        const isSel = activeTool === tool.id;
-                                        const IconComp = tool.icon;
-                                        return (
-                                            <button
-                                                key={tool.id}
-                                                type="button"
-                                                onClick={() => {
-                                                    setActiveTool(tool.id);
-                                                    if (tool.action) tool.action();
-                                                }}
-                                                title={tool.label}
-                                                style={{
-                                                    width: 32,
-                                                    height: 32,
-                                                    borderRadius: 6,
-                                                    border: 'none',
-                                                    background: isSel ? '#F0F9FB' : 'transparent',
-                                                    color: isSel ? '#0B7C91' : '#5F6876',
-                                                    cursor: 'pointer',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                }}
-                                            >
-                                                <IconComp size={15} />
-                                            </button>
-                                        );
-                                    })}
+                                <CanvasToolbar
+                                    activeTool={activeTool}
+                                    setActiveTool={setActiveTool}
+                                    selectedLayersCount={selectedLayerIds.length}
+                                    onExecuteBoolean={handleExecuteBoolean}
+                                    onGroupSelected={handleGroupSelected}
+                                    onUngroupSelected={handleUngroupSelected}
+                                    snapToGrid={snapEnabled}
+                                    setSnapToGrid={setSnapEnabled}
+                                    showGuides={showGuides}
+                                    setShowGuides={setShowGuides}
+                                    zoom={zoom}
+                                    setZoom={setZoom}
+                                    onUploadImageClick={() => cutoutInputRef.current?.click()}
+                                />
 
-                                    {/* Upload Cutout Button & Hidden File Input */}
-                                    <input
-                                        type="file"
-                                        ref={cutoutInputRef}
-                                        onChange={handleImageUpload}
-                                        accept="image/*"
-                                        style={{ display: 'none' }}
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => cutoutInputRef.current?.click()}
-                                        title="Upload custom cutout / image"
-                                        style={{
-                                            width: 32,
-                                            height: 32,
-                                            borderRadius: 6,
-                                            border: 'none',
-                                            background: 'transparent',
-                                            color: '#5F6876',
-                                            cursor: 'pointer',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                        }}
-                                    >
-                                        <Upload size={15} />
-                                    </button>
-
-                                    <div style={{ width: 1, height: 20, background: 'rgba(16, 21, 29, 0.1)', margin: '0 4px' }} />
-
-                                    {/* Alignment Toolbar Group */}
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleAlign('left')}
-                                            title="Align Left"
-                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#5F6876', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                        >
-                                            <AlignLeft size={15} />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleAlign('center')}
-                                            title="Align Horizontal Center"
-                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#5F6876', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                        >
-                                            <AlignCenter size={15} />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleAlign('right')}
-                                            title="Align Right"
-                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#5F6876', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                        >
-                                            <AlignRight size={15} />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleAlign('top')}
-                                            title="Align Top"
-                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#5F6876', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                        >
-                                            <ArrowUp size={15} />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleAlign('middle')}
-                                            title="Align Vertical Middle"
-                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#5F6876', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                        >
-                                            <Maximize2 size={13} />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleAlign('bottom')}
-                                            title="Align Bottom"
-                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#5F6876', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                        >
-                                            <ArrowDown size={15} />
-                                        </button>
-                                    </div>
-
-                                    <div style={{ width: 1, height: 20, background: 'rgba(16, 21, 29, 0.1)', margin: '0 4px' }} />
-
-                                    {/* Hierarchy & Duplicate Group */}
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                                        <button
-                                            type="button"
-                                            onClick={handleBringForward}
-                                            title="Bring Forward (Cmd+])"
-                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#5F6876', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                        >
-                                            <ChevronsUp size={15} />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={handleSendBackward}
-                                            title="Send Backward (Cmd+[)"
-                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#5F6876', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                        >
-                                            <ChevronsDown size={15} />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={handleDuplicateLayer}
-                                            title="Duplicate Layer (Cmd+D)"
-                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#5F6876', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                        >
-                                            <Copy size={14} />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={handleDeleteSelectedLayer}
-                                            title="Delete Layer (Backspace)"
-                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#DC2626', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                        >
-                                            <Trash2 size={14} />
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {/* Safe areas & Zoom */}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#5F6876', cursor: 'pointer' }}>
-                                        <input
-                                            type="checkbox"
-                                            checked={safeAreasEnabled}
-                                            onChange={e => setSafeAreasEnabled(e.target.checked)}
-                                        />
-                                        Safe areas
-                                    </label>
-                                    <div style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: 6,
-                                        fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                                        fontSize: 12,
-                                        color: '#5F6876',
-                                        border: '1px solid rgba(16, 21, 29, 0.12)',
-                                        padding: '2px 8px',
-                                        borderRadius: 6,
-                                    }}>
-                                        <button onClick={() => setZoomLevel(z => Math.max(50, z - 10))} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px', color: '#10151D' }}>-</button>
-                                        <span>{zoomLevel}%</span>
-                                        <button onClick={() => setZoomLevel(z => Math.min(150, z + 10))} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px', color: '#10151D' }}>+</button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Canvas Visual Viewport */}
-                            <div style={{
-                                padding: 28,
-                                background: '#E2DDD5',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                minHeight: 480,
-                                position: 'relative',
-                                overflow: 'auto',
-                            }}>
-                                {/* Active Composition Aspect Frame */}
-                                <div
-                                    ref={canvasContainerRef}
-                                    onContextMenu={(e) => handleContextMenu(e, null)}
-                                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
-                                    onDrop={handleCanvasDrop}
-                                    style={{
-                                        width: '100%',
-                                        maxWidth: Math.round(760 * (zoomLevel / 100)),
-                                        aspectRatio: currentFormat.aspect || '16/9',
-                                        background: layers.find(l => l.id === 'background')?.fill || '#1F140E',
-                                        borderRadius: 12,
-                                        position: 'relative',
-                                        overflow: 'hidden',
-                                        boxShadow: '0 20px 48px -12px rgba(16, 21, 29, 0.28), 0 0 0 1px rgba(16, 21, 29, 0.12)',
-                                        userSelect: 'none',
+                                <InteractiveVectorCanvas
+                                    layers={layers}
+                                    setLayers={setLayers}
+                                    selectedLayerIds={selectedLayerIds}
+                                    setSelectedLayerIds={(ids) => {
+                                        setSelectedLayerIds(ids);
+                                        if (ids.length > 0) setSelectedLayerId(ids[0]);
                                     }}
-                                    onClick={() => setSelectedLayerId('background')}
-                                >
-                                    {/* All Rendered Layers */}
-                                    {layers.filter(l => l.visible && l.id !== 'background').map(layer => {
-                                        const isSel = selectedLayerId === layer.id;
-                                        const leftPct = (layer.x / currentFormat.w) * 100;
-                                        const topPct = (layer.y / currentFormat.h) * 100;
-                                        const widthPct = (layer.w / currentFormat.w) * 100;
-                                        const heightPct = (layer.h / currentFormat.h) * 100;
-
-                                        return (
-                                            <div
-                                                key={layer.id}
-                                                onMouseDown={(e) => startDrag(e, layer.id)}
-                                                onContextMenu={(e) => handleContextMenu(e, layer.id)}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setSelectedLayerId(layer.id);
-                                                }}
-                                                onDoubleClick={(e) => {
-                                                    e.stopPropagation();
-                                                    if (layer.type === 'text') setEditingTextId(layer.id);
-                                                }}
-                                                style={{
-                                                    position: 'absolute',
-                                                    left: `${leftPct}%`,
-                                                    top: `${topPct}%`,
-                                                    width: `${widthPct}%`,
-                                                    height: `${heightPct}%`,
-                                                    cursor: layer.locked ? 'default' : 'move',
-                                                    border: isSel ? '1.5px solid #00E5FF' : (layer.strokeWidth ? `${layer.strokeWidth}px solid ${layer.strokeColor || '#00E5FF'}` : '1.5px solid transparent'),
-                                                    borderRadius: layer.borderRadius ? `${layer.borderRadius}px` : (layer.type === 'circle' ? '50%' : (layer.radius || 4)),
-                                                    transform: `rotate(${layer.rotation || 0}deg)`,
-                                                    boxShadow: layer.dropShadow ? `0 ${layer.shadowOffsetY || 8}px ${layer.shadowBlur || 24}px ${layer.shadowColor || 'rgba(0,0,0,0.35)'}` : 'none',
-                                                    boxSizing: 'border-box',
-                                                    opacity: (layer.opacity ?? 100) / 100,
-                                                    display: 'flex',
-                                                    alignItems: layer.type === 'badge' ? 'center' : 'flex-start',
-                                                    justifyContent: layer.type === 'badge' ? 'center' : 'flex-start',
-                                                }}
-                                            >
-                                                {/* Text Content */}
-                                                {layer.type === 'text' && (
-                                                    editingTextId === layer.id ? (
-                                                        <textarea
-                                                            autoFocus
-                                                            value={layer.text}
-                                                            onChange={e => updateActiveLayer('text', e.target.value)}
-                                                            onBlur={() => setEditingTextId(null)}
-                                                            onKeyDown={e => { if (e.key === 'Escape') setEditingTextId(null); }}
-                                                            style={{
-                                                                width: '100%',
-                                                                height: '100%',
-                                                                background: 'rgba(0, 0, 0, 0.45)',
-                                                                color: layer.fill || '#FFFFFF',
-                                                                fontFamily: `"${layer.fontFamily || 'Plus Jakarta Sans'}", sans-serif`,
-                                                                fontSize: layer.fontSize ? `${Math.round(layer.fontSize * (760 / currentFormat.w) * (zoomLevel / 100))}px` : 'clamp(14px, 3.2vw, 42px)',
-                                                                fontWeight: 800,
-                                                                textAlign: layer.textAlign || 'left',
-                                                                lineHeight: 1.05,
-                                                                letterSpacing: '-0.025em',
-                                                                border: 'none',
-                                                                outline: 'none',
-                                                                resize: 'none',
-                                                                padding: 4,
-                                                            }}
-                                                        />
-                                                    ) : (
-                                                        <div style={{
-                                                            width: '100%',
-                                                            height: '100%',
-                                                            fontFamily: `"${layer.fontFamily || 'Plus Jakarta Sans'}", sans-serif`,
-                                                            fontWeight: 800,
-                                                            fontSize: layer.fontSize ? `${Math.round(layer.fontSize * (760 / currentFormat.w) * (zoomLevel / 100))}px` : 'clamp(14px, 3.2vw, 42px)',
-                                                            textAlign: layer.textAlign || 'left',
-                                                            color: layer.fill || '#F4EDE2',
-                                                            lineHeight: 1.05,
-                                                            letterSpacing: '-0.025em',
-                                                            whiteSpace: 'pre-line',
-                                                            padding: 2,
-                                                            pointerEvents: 'none',
-                                                        }}>
-                                                            {layer.text}
-                                                        </div>
-                                                    )
-                                                )}
-
-                                                {/* Rectangle Content */}
-                                                {layer.type === 'rect' && (
-                                                    <div style={{
-                                                        width: '100%',
-                                                        height: '100%',
-                                                        background: layer.fill || '#0B7C91',
-                                                        borderRadius: layer.borderRadius || layer.radius || 8,
-                                                    }} />
-                                                )}
-
-                                                {/* Circle Content */}
-                                                {layer.type === 'circle' && (
-                                                    <div style={{
-                                                        width: '100%',
-                                                        height: '100%',
-                                                        background: layer.fill || '#C85A17',
-                                                        borderRadius: '50%',
-                                                    }} />
-                                                )}
-
-                                                {/* Line Content */}
-                                                {layer.type === 'line' && (
-                                                    <div style={{
-                                                        width: '100%',
-                                                        height: '100%',
-                                                        background: layer.fill || '#00E5FF',
-                                                        borderRadius: 2,
-                                                    }} />
-                                                )}
-
-                                                {/* Star Content */}
-                                                {layer.type === 'star' && (
-                                                    <svg viewBox="0 0 24 24" style={{ width: '100%', height: '100%', fill: layer.fill || '#F4EDE2' }}>
-                                                        <polygon points="12,2 15,9 22,9 17,14 19,21 12,17 5,21 7,14 2,9 9,9" />
-                                                    </svg>
-                                                )}
-
-                                                {/* Badge Content */}
-                                                {layer.type === 'badge' && (
-                                                    <div style={{
-                                                        width: '100%',
-                                                        height: '100%',
-                                                        background: layer.fill || '#C85A17',
-                                                        borderRadius: layer.borderRadius || 6,
-                                                        color: '#FFFFFF',
-                                                        fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                                                        fontSize: 'clamp(10px, 1.2vw, 13px)',
-                                                        fontWeight: 600,
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        justifyContent: 'center',
-                                                    }}>
-                                                        {layer.text}
-                                                    </div>
-                                                )}
-
-                                                {/* Image / Silhouette Cutout */}
-                                                {layer.type === 'image' && (
-                                                    layer.src ? (
-                                                        <img
-                                                            src={layer.src}
-                                                            alt={layer.name}
-                                                            style={{
-                                                                width: '100%',
-                                                                height: '100%',
-                                                                objectFit: 'contain',
-                                                                borderRadius: layer.borderRadius || 0,
-                                                                pointerEvents: 'none',
-                                                            }}
-                                                        />
-                                                    ) : (
-                                                        <div style={{
-                                                            width: '100%',
-                                                            height: '100%',
-                                                            background: layer.fill || 'linear-gradient(180deg, #42291A 0%, #1A1109 100%)',
-                                                            borderRadius: layer.borderRadius ? `${layer.borderRadius}px` : '40px 40px 0 0',
-                                                            opacity: 0.9,
-                                                            display: 'flex',
-                                                            alignItems: 'flex-end',
-                                                            justifyContent: 'center',
-                                                            paddingBottom: 12,
-                                                        }}>
-                                                            <span style={{
-                                                                fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                                                                fontSize: 9.5,
-                                                                color: 'rgba(255, 255, 255, 0.45)',
-                                                            }}>
-                                                                {layer.meta || 'Cutout layer'}
-                                                            </span>
-                                                        </div>
-                                                    )
-                                                )}
-
-                                                {/* 4 Corner Resize Handles when Selected */}
-                                                {isSel && !layer.locked && (
-                                                    <>
-                                                        <div
-                                                            onMouseDown={(e) => startResize(e, layer.id, 'nw')}
-                                                            style={{
-                                                                position: 'absolute', top: -5, left: -5, width: 9, height: 9,
-                                                                background: '#FFFFFF', border: '1.5px solid #00E5FF', borderRadius: 2,
-                                                                cursor: 'nwse-resize', zIndex: 10,
-                                                            }}
-                                                        />
-                                                        <div
-                                                            onMouseDown={(e) => startResize(e, layer.id, 'ne')}
-                                                            style={{
-                                                                position: 'absolute', top: -5, right: -5, width: 9, height: 9,
-                                                                background: '#FFFFFF', border: '1.5px solid #00E5FF', borderRadius: 2,
-                                                                cursor: 'nesw-resize', zIndex: 10,
-                                                            }}
-                                                        />
-                                                        <div
-                                                            onMouseDown={(e) => startResize(e, layer.id, 'se')}
-                                                            style={{
-                                                                position: 'absolute', bottom: -5, right: -5, width: 9, height: 9,
-                                                                background: '#FFFFFF', border: '1.5px solid #00E5FF', borderRadius: 2,
-                                                                cursor: 'nwse-resize', zIndex: 10,
-                                                            }}
-                                                        />
-                                                        <div
-                                                            onMouseDown={(e) => startResize(e, layer.id, 'sw')}
-                                                            style={{
-                                                                position: 'absolute', bottom: -5, left: -5, width: 9, height: 9,
-                                                                background: '#FFFFFF', border: '1.5px solid #00E5FF', borderRadius: 2,
-                                                                cursor: 'nesw-resize', zIndex: 10,
-                                                            }}
-                                                        />
-                                                        {/* Dimension Indicator Pill */}
-                                                        <span style={{
-                                                            position: 'absolute',
-                                                            bottom: -22,
-                                                            left: 0,
-                                                            background: '#10151D',
-                                                            color: '#00E5FF',
-                                                            fontSize: 9.5,
-                                                            fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                                                            padding: '2px 6px',
-                                                            borderRadius: 4,
-                                                            whiteSpace: 'nowrap',
-                                                            boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
-                                                        }}>
-                                                            {layer.w} × {layer.h}
-                                                        </span>
-                                                    </>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-
-                                    {/* Safe Area Marker */}
-                                    {safeAreasEnabled && (
-                                        <div style={{
-                                            position: 'absolute',
-                                            bottom: 12,
-                                            right: 12,
-                                            border: '1px dashed rgba(255, 255, 255, 0.4)',
-                                            padding: '4px 8px',
-                                            borderRadius: 4,
-                                            color: 'rgba(255, 255, 255, 0.6)',
-                                            fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                                            fontSize: 10,
-                                            pointerEvents: 'none',
-                                        }}>
-                                            timestamp safe area
-                                        </div>
-                                    )}
-                                </div>
+                                    activeTool={activeTool}
+                                    setActiveTool={setActiveTool}
+                                    canvasWidth={currentFormat.w}
+                                    canvasHeight={currentFormat.h}
+                                    zoom={zoom}
+                                    snapToGrid={snapEnabled}
+                                    showGuides={showGuides}
+                                    onContextMenu={(ctx) => setContextMenu(ctx)}
+                                    onUpdateLayer={handleUpdateLayer}
+                                    onAddLayer={handleAddLayer}
+                                />
                             </div>
-                        </section>
 
-                        {/* Right Column: Properties Inspector & Layers Stack */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                            {/* Properties Inspector */}
-                            <section style={{
-                                border: '1px solid rgba(16, 21, 29, 0.08)',
-                                borderRadius: 16,
-                                background: '#FFFFFF',
-                                padding: 18,
-                                boxShadow: '0 2px 8px rgba(16, 21, 29, 0.03)',
-                            }}>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                                    <h2 style={{
-                                        margin: 0,
-                                        fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
-                                        fontWeight: 700,
-                                        fontSize: 16,
-                                        color: '#10151D',
-                                    }}>
-                                        Properties
-                                    </h2>
-                                    <span style={{
-                                        fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                                        fontSize: 10,
-                                        letterSpacing: '0.1em',
-                                        color: '#0B7C91',
-                                        background: '#F0F9FB',
-                                        border: '1px solid rgba(11, 124, 145, 0.25)',
-                                        borderRadius: 5,
-                                        padding: '2px 6px',
-                                        fontWeight: 600,
-                                    }}>
-                                        {(selectedLayer.type || 'LAYER').toUpperCase()}
-                                    </span>
-                                </div>
-                                <p style={{ margin: '0 0 14px', fontSize: 12, color: '#5F6876' }}>
-                                    {selectedLayer.name || 'No layer selected'} · selected
-                                </p>
-
-                                {/* Position and Size Grid */}
-                                <div style={{
-                                    fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                                    fontSize: 10,
-                                    letterSpacing: '0.14em',
-                                    textTransform: 'uppercase',
-                                    color: '#5F6876',
-                                    marginBottom: 6,
-                                }}>
-                                    Position & size
-                                </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: '1px solid #DFE6ED', borderRadius: 8, padding: '4px 8px' }}>
-                                        <span style={{ color: '#5F6876', fontSize: 11, fontFamily: 'var(--f-mono, monospace)' }}>X</span>
-                                        <input
-                                            type="number"
-                                            value={selectedLayer.x ?? 0}
-                                            onChange={e => updateActiveLayer('x', parseInt(e.target.value) || 0)}
-                                            style={{ width: '100%', border: 'none', outline: 'none', fontSize: 12, fontFamily: 'var(--f-mono, monospace)', color: '#10151D' }}
-                                        />
-                                    </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: '1px solid #DFE6ED', borderRadius: 8, padding: '4px 8px' }}>
-                                        <span style={{ color: '#5F6876', fontSize: 11, fontFamily: 'var(--f-mono, monospace)' }}>Y</span>
-                                        <input
-                                            type="number"
-                                            value={selectedLayer.y ?? 0}
-                                            onChange={e => updateActiveLayer('y', parseInt(e.target.value) || 0)}
-                                            style={{ width: '100%', border: 'none', outline: 'none', fontSize: 12, fontFamily: 'var(--f-mono, monospace)', color: '#10151D' }}
-                                        />
-                                    </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: '1px solid #DFE6ED', borderRadius: 8, padding: '4px 8px' }}>
-                                        <span style={{ color: '#5F6876', fontSize: 11, fontFamily: 'var(--f-mono, monospace)' }}>W</span>
-                                        <input
-                                            type="number"
-                                            value={selectedLayer.w ?? 100}
-                                            onChange={e => updateActiveLayer('w', parseInt(e.target.value) || 0)}
-                                            style={{ width: '100%', border: 'none', outline: 'none', fontSize: 12, fontFamily: 'var(--f-mono, monospace)', color: '#10151D' }}
-                                        />
-                                    </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: '1px solid #DFE6ED', borderRadius: 8, padding: '4px 8px' }}>
-                                        <span style={{ color: '#5F6876', fontSize: 11, fontFamily: 'var(--f-mono, monospace)' }}>H</span>
-                                        <input
-                                            type="number"
-                                            value={selectedLayer.h ?? 50}
-                                            onChange={e => updateActiveLayer('h', parseInt(e.target.value) || 0)}
-                                            style={{ width: '100%', border: 'none', outline: 'none', fontSize: 12, fontFamily: 'var(--f-mono, monospace)', color: '#10151D' }}
-                                        />
-                                    </div>
-                                </div>
-
-                                {/* Typography Section (for text layers) */}
-                                {selectedLayer.type === 'text' && (
-                                    <div style={{ marginBottom: 16 }}>
-                                        <div style={{
-                                            fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                                            fontSize: 10,
-                                            letterSpacing: '0.14em',
-                                            textTransform: 'uppercase',
-                                            color: '#5F6876',
-                                            marginBottom: 6,
-                                        }}>
-                                            Typography
-                                        </div>
-
-                                        {/* Text Content */}
-                                        <textarea
-                                            value={selectedLayer.text || ''}
-                                            onChange={e => updateActiveLayer('text', e.target.value)}
-                                            rows={2}
-                                            placeholder="Layer copy..."
-                                            style={{
-                                                width: '100%',
-                                                padding: '8px 10px',
-                                                borderRadius: 8,
-                                                border: '1px solid #DFE6ED',
-                                                fontSize: 12,
-                                                fontFamily: 'var(--f-sans, sans-serif)',
-                                                marginBottom: 8,
-                                                boxSizing: 'border-box',
-                                                resize: 'vertical',
-                                                color: '#10151D',
-                                            }}
-                                        />
-
-                                        {/* Typeface Selector */}
-                                        <select
-                                            value={selectedLayer.fontFamily || 'Plus Jakarta Sans'}
-                                            onChange={e => updateActiveLayer('fontFamily', e.target.value)}
-                                            style={{
-                                                width: '100%',
-                                                padding: '7px 10px',
-                                                borderRadius: 8,
-                                                border: '1px solid #DFE6ED',
-                                                fontSize: 12,
-                                                marginBottom: 8,
-                                                color: '#10151D',
-                                                background: '#FFFFFF',
-                                            }}
-                                        >
-                                            <option value="Plus Jakarta Sans">Plus Jakarta Sans — kit display</option>
-                                            <option value="Geist">Geist — clean grotesque</option>
-                                            <option value="JetBrains Mono">JetBrains Mono — tabular</option>
-                                            <option value="Instrument Serif">Instrument Serif — editorial serif</option>
-                                            <option value="Inter">Inter — neutral system</option>
-                                        </select>
-
-                                        {/* Font Size & Text Align Controls */}
-                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, alignItems: 'center' }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: '1px solid #DFE6ED', borderRadius: 8, padding: '4px 8px' }}>
-                                                <span style={{ color: '#5F6876', fontSize: 10, fontFamily: 'var(--f-mono, monospace)' }}>SIZE</span>
-                                                <input
-                                                    type="range"
-                                                    min="14"
-                                                    max="140"
-                                                    value={selectedLayer.fontSize || 64}
-                                                    onChange={e => updateActiveLayer('fontSize', parseInt(e.target.value) || 64)}
-                                                    style={{ flex: 1, accentColor: '#0B7C91', cursor: 'pointer' }}
-                                                />
-                                                <span style={{ fontSize: 11, fontFamily: 'var(--f-mono, monospace)', color: '#10151D', minWidth: 26, textAlign: 'right' }}>
-                                                    {selectedLayer.fontSize || 64}
-                                                </span>
-                                            </div>
-
-                                            {/* Alignment Buttons */}
-                                            <div style={{ display: 'flex', border: '1px solid #DFE6ED', borderRadius: 8, overflow: 'hidden' }}>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => updateActiveLayer('textAlign', 'left')}
-                                                    style={{
-                                                        padding: '6px 8px',
-                                                        border: 'none',
-                                                        background: (!selectedLayer.textAlign || selectedLayer.textAlign === 'left') ? '#F0F9FB' : '#FFFFFF',
-                                                        color: (!selectedLayer.textAlign || selectedLayer.textAlign === 'left') ? '#0B7C91' : '#5F6876',
-                                                        cursor: 'pointer',
-                                                    }}
-                                                    title="Align Left"
-                                                >
-                                                    <AlignLeft size={13} />
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => updateActiveLayer('textAlign', 'center')}
-                                                    style={{
-                                                        padding: '6px 8px',
-                                                        border: 'none',
-                                                        borderLeft: '1px solid #DFE6ED',
-                                                        borderRight: '1px solid #DFE6ED',
-                                                        background: selectedLayer.textAlign === 'center' ? '#F0F9FB' : '#FFFFFF',
-                                                        color: selectedLayer.textAlign === 'center' ? '#0B7C91' : '#5F6876',
-                                                        cursor: 'pointer',
-                                                    }}
-                                                    title="Align Center"
-                                                >
-                                                    <AlignCenter size={13} />
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => updateActiveLayer('textAlign', 'right')}
-                                                    style={{
-                                                        padding: '6px 8px',
-                                                        border: 'none',
-                                                        background: selectedLayer.textAlign === 'right' ? '#F0F9FB' : '#FFFFFF',
-                                                        color: selectedLayer.textAlign === 'right' ? '#0B7C91' : '#5F6876',
-                                                        cursor: 'pointer',
-                                                    }}
-                                                    title="Align Right"
-                                                >
-                                                    <AlignRight size={13} />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Transform: Rotation & Corner Radius */}
-                                <div style={{ marginBottom: 16 }}>
-                                    <div style={{
-                                        fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                                        fontSize: 10,
-                                        letterSpacing: '0.14em',
-                                        textTransform: 'uppercase',
-                                        color: '#5F6876',
-                                        marginBottom: 6,
-                                    }}>
-                                        Transform
-                                    </div>
-
-                                    {/* Rotation */}
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, border: '1px solid #DFE6ED', borderRadius: 8, padding: '4px 8px' }}>
-                                            <span style={{ color: '#5F6876', fontSize: 10, fontFamily: 'var(--f-mono, monospace)' }}>ROT</span>
-                                            <input
-                                                type="range"
-                                                min="-180"
-                                                max="180"
-                                                value={selectedLayer.rotation || 0}
-                                                onChange={e => updateActiveLayer('rotation', parseInt(e.target.value) || 0)}
-                                                style={{ flex: 1, accentColor: '#0B7C91', cursor: 'pointer' }}
-                                            />
-                                            <span style={{ fontSize: 11, fontFamily: 'var(--f-mono, monospace)', color: '#10151D', minWidth: 32, textAlign: 'right' }}>
-                                                {selectedLayer.rotation || 0}°
-                                            </span>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => updateActiveLayer('rotation', 0)}
-                                            style={{
-                                                padding: '5px 8px',
-                                                border: '1px solid #DFE6ED',
-                                                borderRadius: 8,
-                                                background: '#FFFFFF',
-                                                fontSize: 10,
-                                                fontFamily: 'var(--f-mono, monospace)',
-                                                color: '#5F6876',
-                                                cursor: 'pointer',
-                                            }}
-                                            title="Reset rotation to 0°"
-                                        >
-                                            0°
-                                        </button>
-                                    </div>
-
-                                    {/* Corner Radius (for rects, images, badges) */}
-                                    {selectedLayer.type !== 'circle' && selectedLayer.type !== 'star' && selectedLayer.type !== 'line' && (
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: '1px solid #DFE6ED', borderRadius: 8, padding: '4px 8px' }}>
-                                            <span style={{ color: '#5F6876', fontSize: 10, fontFamily: 'var(--f-mono, monospace)' }}>RADIUS</span>
-                                            <input
-                                                type="range"
-                                                min="0"
-                                                max="64"
-                                                value={selectedLayer.borderRadius ?? (selectedLayer.radius || 0)}
-                                                onChange={e => updateActiveLayer('borderRadius', parseInt(e.target.value) || 0)}
-                                                style={{ flex: 1, accentColor: '#0B7C91', cursor: 'pointer' }}
-                                            />
-                                            <span style={{ fontSize: 11, fontFamily: 'var(--f-mono, monospace)', color: '#10151D', minWidth: 28, textAlign: 'right' }}>
-                                                {selectedLayer.borderRadius ?? (selectedLayer.radius || 0)}px
-                                            </span>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Appearance: Opacity, Stroke, Drop Shadow */}
-                                <div style={{ marginBottom: 16 }}>
-                                    <div style={{
-                                        fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                                        fontSize: 10,
-                                        letterSpacing: '0.14em',
-                                        textTransform: 'uppercase',
-                                        color: '#5F6876',
-                                        marginBottom: 6,
-                                    }}>
-                                        Appearance
-                                    </div>
-
-                                    {/* Opacity Slider */}
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: '1px solid #DFE6ED', borderRadius: 8, padding: '4px 8px', marginBottom: 8 }}>
-                                        <span style={{ color: '#5F6876', fontSize: 10, fontFamily: 'var(--f-mono, monospace)' }}>OPACITY</span>
-                                        <input
-                                            type="range"
-                                            min="0"
-                                            max="100"
-                                            value={selectedLayer.opacity ?? 100}
-                                            onChange={e => updateActiveLayer('opacity', parseInt(e.target.value) || 0)}
-                                            style={{ flex: 1, accentColor: '#0B7C91', cursor: 'pointer' }}
-                                        />
-                                        <span style={{ fontSize: 11, fontFamily: 'var(--f-mono, monospace)', color: '#10151D', minWidth: 28, textAlign: 'right' }}>
-                                            {selectedLayer.opacity ?? 100}%
-                                        </span>
-                                    </div>
-
-                                    {/* Stroke / Outline */}
-                                    <div style={{ border: '1px solid #DFE6ED', borderRadius: 8, padding: '6px 8px', marginBottom: 8 }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: (selectedLayer.strokeWidth > 0 ? 6 : 0) }}>
-                                            <span style={{ color: '#5F6876', fontSize: 10, fontFamily: 'var(--f-mono, monospace)' }}>STROKE</span>
-                                            <input
-                                                type="range"
-                                                min="0"
-                                                max="16"
-                                                value={selectedLayer.strokeWidth || 0}
-                                                onChange={e => updateActiveLayer('strokeWidth', parseInt(e.target.value) || 0)}
-                                                style={{ flex: 1, accentColor: '#0B7C91', cursor: 'pointer' }}
-                                            />
-                                            <span style={{ fontSize: 11, fontFamily: 'var(--f-mono, monospace)', color: '#10151D', minWidth: 26, textAlign: 'right' }}>
-                                                {selectedLayer.strokeWidth || 0}px
-                                            </span>
-                                        </div>
-                                        {selectedLayer.strokeWidth > 0 && (
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                                {['#FFFFFF', '#10151D', '#00E5FF', '#0B7C91', '#C85A17'].map(sc => (
-                                                    <div
-                                                        key={sc}
-                                                        onClick={() => updateActiveLayer('strokeColor', sc)}
-                                                        style={{
-                                                            width: 18,
-                                                            height: 18,
-                                                            borderRadius: 4,
-                                                            background: sc,
-                                                            border: (selectedLayer.strokeColor || '#00E5FF') === sc ? '2px solid #10151D' : '1px solid rgba(0,0,0,0.15)',
-                                                            cursor: 'pointer',
-                                                        }}
-                                                    />
-                                                ))}
-                                                <input
-                                                    type="text"
-                                                    value={selectedLayer.strokeColor || '#00E5FF'}
-                                                    onChange={e => updateActiveLayer('strokeColor', e.target.value)}
-                                                    style={{
-                                                        flex: 1,
-                                                        height: 22,
-                                                        padding: '0 6px',
-                                                        borderRadius: 4,
-                                                        border: '1px solid #DFE6ED',
-                                                        fontSize: 10,
-                                                        fontFamily: 'var(--f-mono, monospace)',
-                                                    }}
-                                                />
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Drop Shadow */}
-                                    <div style={{ border: '1px solid #DFE6ED', borderRadius: 8, padding: '6px 8px' }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (selectedLayer.dropShadow ? 6 : 0) }}>
-                                            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 11, color: '#10151D', fontWeight: 500 }}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={!!selectedLayer.dropShadow}
-                                                    onChange={e => updateActiveLayer('dropShadow', e.target.checked)}
-                                                    style={{ accentColor: '#0B7C91', cursor: 'pointer' }}
-                                                />
-                                                Drop Shadow
-                                            </label>
-                                            {selectedLayer.dropShadow && (
-                                                <span style={{ fontSize: 10, fontFamily: 'var(--f-mono, monospace)', color: '#5F6876' }}>
-                                                    {selectedLayer.shadowBlur || 24}px blur
-                                                </span>
-                                            )}
-                                        </div>
-                                        {selectedLayer.dropShadow && (
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                                    <span style={{ color: '#5F6876', fontSize: 9, fontFamily: 'var(--f-mono, monospace)', minWidth: 32 }}>BLUR</span>
-                                                    <input
-                                                        type="range"
-                                                        min="0"
-                                                        max="50"
-                                                        value={selectedLayer.shadowBlur ?? 24}
-                                                        onChange={e => updateActiveLayer('shadowBlur', parseInt(e.target.value) || 0)}
-                                                        style={{ flex: 1, accentColor: '#0B7C91', cursor: 'pointer' }}
-                                                    />
-                                                </div>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                                    <span style={{ color: '#5F6876', fontSize: 9, fontFamily: 'var(--f-mono, monospace)', minWidth: 32 }}>Y-OFF</span>
-                                                    <input
-                                                        type="range"
-                                                        min="0"
-                                                        max="30"
-                                                        value={selectedLayer.shadowOffsetY ?? 8}
-                                                        onChange={e => updateActiveLayer('shadowOffsetY', parseInt(e.target.value) || 0)}
-                                                        style={{ flex: 1, accentColor: '#0B7C91', cursor: 'pointer' }}
-                                                    />
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-
-                                {/* Fill Swatches */}
-                                <div style={{
-                                    fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                                    fontSize: 10,
-                                    letterSpacing: '0.14em',
-                                    textTransform: 'uppercase',
-                                    color: '#5F6876',
-                                    marginBottom: 6,
-                                }}>
-                                    Fill
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-                                    {['#F4EDE2', '#C85A17', '#1F140E', '#0B7C91', '#FFFFFF', '#00E5FF'].map(col => (
-                                        <div
-                                            key={col}
-                                            onClick={() => updateActiveLayer('fill', col)}
-                                            style={{
-                                                width: 24,
-                                                height: 24,
-                                                borderRadius: 6,
-                                                background: col,
-                                                border: selectedLayer.fill === col ? '2.5px solid #10151D' : '1px solid rgba(0,0,0,0.15)',
-                                                cursor: 'pointer',
-                                            }}
-                                        />
-                                    ))}
-                                    <input
-                                        type="text"
-                                        value={selectedLayer.fill || '#FFFFFF'}
-                                        onChange={e => updateActiveLayer('fill', e.target.value)}
-                                        style={{
-                                            flex: 1,
-                                            height: 26,
-                                            padding: '0 8px',
-                                            borderRadius: 6,
-                                            border: '1px solid #DFE6ED',
-                                            fontSize: 11,
-                                            fontFamily: 'var(--f-mono, monospace)',
-                                        }}
-                                    />
-                                </div>
-
-                                <p style={{ margin: 0, fontSize: 11, color: '#5F6876', lineHeight: 1.4 }}>
-                                    A colour you set by hand is preserved across surface adaptations.
-                                </p>
-                            </section>
-
-                            {/* Layers Stack */}
-                            <section style={{
-                                border: '1px solid rgba(16, 21, 29, 0.08)',
-                                borderRadius: 16,
-                                background: '#FFFFFF',
-                                padding: 18,
-                                boxShadow: '0 2px 8px rgba(16, 21, 29, 0.03)',
-                            }}>
-                                <h2 style={{
-                                    margin: '0 0 12px',
-                                    fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
-                                    fontWeight: 700,
-                                    fontSize: 16,
-                                    color: '#10151D',
-                                }}>
-                                    Layers
-                                </h2>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                    {layers.map(layer => {
-                                        const isSel = selectedLayerId === layer.id;
-                                        return (
-                                            <div
-                                                key={layer.id}
-                                                onClick={() => setSelectedLayerId(layer.id)}
-                                                style={{
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: 8,
-                                                    border: isSel ? '1.5px solid #0B7C91' : '1px solid rgba(16, 21, 29, 0.08)',
-                                                    borderRadius: 8,
-                                                    background: isSel ? '#F0F9FB' : '#FFFFFF',
-                                                    padding: '8px 10px',
-                                                    cursor: 'pointer',
-                                                    transition: 'all 0.15s ease',
-                                                }}
-                                            >
-                                                <span style={{ flex: 1, fontSize: 13, fontWeight: isSel ? 600 : 400, color: '#10151D' }}>
-                                                    {layer.name}
-                                                </span>
-                                                <button
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setLayers(prev => prev.map(l => l.id === layer.id ? { ...l, visible: !l.visible } : l));
-                                                    }}
-                                                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#5F6876' }}
-                                                >
-                                                    {layer.visible ? <Eye size={14} /> : <EyeOff size={14} />}
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setLayers(prev => prev.map(l => l.id === layer.id ? { ...l, locked: !l.locked } : l));
-                                                    }}
-                                                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#5F6876' }}
-                                                >
-                                                    {layer.locked ? <Lock size={14} /> : <Unlock size={14} />}
-                                                </button>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </section>
-
-                            {/* "Or just say it" Conversational AI Director */}
-                            <section style={{
-                                border: '1px solid rgba(11, 124, 145, 0.25)',
-                                borderRadius: 16,
-                                background: '#FFFFFF',
-                                padding: 18,
-                                boxShadow: '0 2px 8px rgba(11, 124, 145, 0.04)',
-                            }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                                    <Sparkles size={16} color="#0B7C91" />
-                                    <h2 style={{
-                                        margin: 0,
-                                        fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
-                                        fontWeight: 700,
-                                        fontSize: 16,
-                                        color: '#10151D',
-                                    }}>
-                                        Or just say it
-                                    </h2>
-                                </div>
-                                <form onSubmit={handleApplyAiTweak} style={{ display: 'flex', gap: 6, position: 'relative' }}>
-                                    <input
-                                        type="text"
-                                        value={aiPrompt}
-                                        onChange={e => setAiPrompt(e.target.value)}
-                                        placeholder="Make the headline larger, add safe area..."
-                                        style={{
-                                            flex: 1,
-                                            height: 40,
-                                            padding: '0 40px 0 12px',
-                                            borderRadius: 8,
-                                            border: '1px solid rgba(16, 21, 29, 0.16)',
-                                            fontSize: 12.5,
-                                            outline: 'none',
-                                            color: '#10151D',
-                                        }}
-                                    />
-                                    <button
-                                        type="submit"
-                                        style={{
-                                            position: 'absolute',
-                                            right: 4,
-                                            top: 4,
-                                            width: 32,
-                                            height: 32,
-                                            borderRadius: 6,
-                                            background: '#0B7C91',
-                                            color: '#FFFFFF',
-                                            border: 'none',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            cursor: 'pointer',
-                                        }}
-                                    >
-                                        <ArrowUp size={16} />
-                                    </button>
-                                </form>
-                                {aiStatusMessage && (
-                                    <div style={{ marginTop: 8, fontSize: 11, color: '#0B7C91', fontFamily: 'var(--f-mono, monospace)' }}>
-                                        {aiStatusMessage}
-                                    </div>
-                                )}
-                                <p style={{ margin: '10px 0 0', fontSize: 11, color: '#5F6876', lineHeight: 1.4 }}>
-                                    Every AI change lands as ordinary layers you can drag, retype, or undo.
-                                </p>
-                            </section>
+                            {/* Conversational AI Director ("Or just say it") */}
+                            <DesignStudioAiDirector
+                                layers={layers}
+                                setLayers={setLayers}
+                                selectedLayerIds={selectedLayerIds}
+                                setSelectedLayerIds={setSelectedLayerIds}
+                                onDirectionApply={applyDirection}
+                            />
                         </div>
+
+                        {/* 3. Right Panel: Properties Inspector */}
+                        <PropertiesInspector
+                            selectedLayers={layers.filter(l => selectedLayerIds.includes(l.id))}
+                            onUpdateLayer={handleUpdateLayer}
+                            onAlign={handleAlignLayers}
+                            onDistribute={handleDistributeLayers}
+                            onCreateComponent={(layer) => {
+                                showToast(`Created master component "${layer.name || 'Component'}"`);
+                            }}
+                        />
                     </div>
 
                     {/* Creative Directions Preview Strip (4 Synthesized Thumbnail Variants) */}
