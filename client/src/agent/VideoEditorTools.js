@@ -522,6 +522,11 @@ export const TOOL_DEFINITIONS = [
     { name: 'layout_picture_in_picture', description: 'Place the selected visual asset in a picture-in-picture frame.', parameters: { type: 'object', properties: { clipId: { type: 'string' }, assetId: { type: 'string' }, position: { type: 'string' }, scale: { type: 'number' } } } },
     { name: 'layout_fullscreen', description: 'Show the selected visual asset full-frame for the requested range.', parameters: { type: 'object', properties: { clipId: { type: 'string' }, assetId: { type: 'string' }, start: { type: 'number' }, duration: { type: 'number' } } } },
     {
+        name: 'open_design_studio',
+        description: 'Open the Figma-class Design Studio for thumbnail creation, graphic design, multi-surface layouts, and asset generation.',
+        parameters: { type: 'object', properties: {} },
+    },
+    {
         name: 'design_scene',
         description: 'Design and place an editable multi-layer motion graphics sequence from the user brief. The scene designer chooses the sequence beats, adapts colors and placement to footage when available, and checks layout before placement.',
         parameters: { type: 'object', properties: { brief: { type: 'string', description: 'What the sequence should communicate and its intended tone.' } }, required: ['brief'] },
@@ -1280,6 +1285,12 @@ export class VideoEditorTools {
             case 'layout_split_screen':       return this.applyLayoutPreset('split', action.args);
             case 'layout_picture_in_picture': return this.applyLayoutPreset('pip', action.args);
             case 'layout_fullscreen':         return this.applyLayoutPreset('fullscreen', action.args);
+            case 'open_design_studio': {
+                if (typeof window !== 'undefined') {
+                    window.location.href = '/design';
+                }
+                return { success: true, message: 'Opening Design Studio.' };
+            }
             case 'design_scene': return await this.executeMotionEngineAction('design_scene', action.args, action.signal || null);
             case 'compose_motion': return await this.executeMotionEngineAction('compose_motion', action.args, action.signal || null);
             case 'add_motion_component': return this.addMotionComponent(action.args);

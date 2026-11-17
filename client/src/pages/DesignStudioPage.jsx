@@ -20,13 +20,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-    Sparkles, ArrowLeft, ArrowRight, Undo, Redo, Eye, EyeOff, Lock, Unlock,
-    Check, AlertCircle, Download, Type, Square, Circle, Image as ImageIcon,
-    PenTool, AlignLeft, AlignCenter, AlignRight, Maximize2, Move, Crop,
-    CheckCircle2, Compass, Layers, Sliders, ChevronDown, Video, FileText,
-    Share2, ExternalLink, RefreshCw, Send, Plus, ArrowUp, Users, Film,
-    PanelLeftClose, PanelLeftOpen, MousePointer, Trash2, Palette, ChevronLeft, ChevronRight,
-    Save
+    Sparkles, ArrowLeft, ArrowRight, ArrowDown, ChevronsUp, ChevronsDown,
+    Undo, Redo, Eye, EyeOff, Lock, Unlock, Check, AlertCircle, Download,
+    Type, Square, Circle, Image as ImageIcon, PenTool, AlignLeft, AlignCenter,
+    AlignRight, Maximize2, Move, Crop, CheckCircle2, Compass, Layers, Sliders,
+    ChevronDown, Video, FileText, Share2, ExternalLink, RefreshCw, Send, Plus,
+    ArrowUp, Users, Film, PanelLeftClose, PanelLeftOpen, MousePointer, Trash2,
+    Palette, ChevronLeft, ChevronRight, Save, Copy, RotateCw, ArrowUpRight, Star, Upload
 } from 'lucide-react';
 
 import { Logo } from '../components/Logo.jsx';
@@ -165,9 +165,10 @@ export default function DesignStudioPage() {
     const [aiStatusMessage, setAiStatusMessage] = useState('');
     const [toastMessage, setToastMessage] = useState('');
 
-    // Off-screen canvas ref
+    // Off-screen canvas ref & file input ref
     const exportCanvasRef = useRef(null);
     const canvasContainerRef = useRef(null);
+    const cutoutInputRef = useRef(null);
 
     // Undo / Redo History Stacks
     const [undoStack, setUndoStack] = useState([]);
@@ -314,6 +315,180 @@ export default function DesignStudioPage() {
         showToast('Badge pill added');
     };
 
+    const handleAddLine = () => {
+        pushUndo();
+        const newLayer = {
+            id: `line-${Date.now()}`,
+            name: `Line ${layers.length + 1}`,
+            type: 'line',
+            x: Math.round(currentFormat.w * 0.15),
+            y: Math.round(currentFormat.h * 0.5),
+            w: 280,
+            h: 4,
+            fill: '#00E5FF',
+            opacity: 100,
+            visible: true,
+            locked: false,
+        };
+        setLayers(prev => [...prev, newLayer]);
+        setSelectedLayerId(newLayer.id);
+        showToast('Line added to canvas');
+    };
+
+    const handleAddStar = () => {
+        pushUndo();
+        const newLayer = {
+            id: `star-${Date.now()}`,
+            name: `Star ${layers.length + 1}`,
+            type: 'star',
+            x: Math.round(currentFormat.w * 0.25),
+            y: Math.round(currentFormat.h * 0.35),
+            w: 140,
+            h: 140,
+            fill: '#F4EDE2',
+            opacity: 100,
+            visible: true,
+            locked: false,
+        };
+        setLayers(prev => [...prev, newLayer]);
+        setSelectedLayerId(newLayer.id);
+        showToast('Star polygon added');
+    };
+
+    const handleImageUpload = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const dataUrl = event.target?.result;
+            if (!dataUrl) return;
+            pushUndo();
+            if (selectedLayerId && selectedLayer.type === 'image') {
+                setLayers(prev => prev.map(l => l.id === selectedLayerId ? { ...l, src: dataUrl } : l));
+                showToast('Cutout image replaced');
+            } else {
+                const newLayer = {
+                    id: `image-${Date.now()}`,
+                    name: file.name.replace(/\.[^/.]+$/, ''),
+                    type: 'image',
+                    src: dataUrl,
+                    x: Math.round(currentFormat.w * 0.4),
+                    y: Math.round(currentFormat.h * 0.2),
+                    w: 360,
+                    h: 480,
+                    visible: true,
+                    locked: false,
+                };
+                setLayers(prev => [...prev, newLayer]);
+                setSelectedLayerId(newLayer.id);
+                showToast('Custom cutout uploaded');
+            }
+        };
+        reader.readAsDataURL(file);
+    };
+
+    // Alignment operations
+    const handleAlign = (alignment) => {
+        if (!selectedLayerId || selectedLayerId === 'background') return;
+        pushUndo();
+        const lw = selectedLayer.w || 200;
+        const lh = selectedLayer.h || 100;
+        setLayers(prev => prev.map(l => {
+            if (l.id !== selectedLayerId) return l;
+            if (alignment === 'left') return { ...l, x: 48 };
+            if (alignment === 'center') return { ...l, x: Math.max(0, Math.round((currentFormat.w - lw) / 2)) };
+            if (alignment === 'right') return { ...l, x: Math.max(0, currentFormat.w - lw - 48) };
+            if (alignment === 'top') return { ...l, y: 48 };
+            if (alignment === 'middle') return { ...l, y: Math.max(0, Math.round((currentFormat.h - lh) / 2)) };
+            if (alignment === 'bottom') return { ...l, y: Math.max(0, currentFormat.h - lh - 48) };
+            return l;
+        }));
+        showToast(`Aligned layer: ${alignment}`);
+    };
+
+    // Layer Hierarchy operations
+    const handleBringToFront = () => {
+        if (!selectedLayerId || selectedLayerId === 'background') return;
+        pushUndo();
+        setLayers(prev => {
+            const idx = prev.findIndex(l => l.id === selectedLayerId);
+            if (idx === -1) return prev;
+            const copy = [...prev];
+            const [item] = copy.splice(idx, 1);
+            copy.unshift(item);
+            return copy;
+        });
+        showToast('Brought to front');
+    };
+
+    const handleBringForward = () => {
+        if (!selectedLayerId || selectedLayerId === 'background') return;
+        pushUndo();
+        setLayers(prev => {
+            const idx = prev.findIndex(l => l.id === selectedLayerId);
+            if (idx <= 0) return prev;
+            const copy = [...prev];
+            const [item] = copy.splice(idx, 1);
+            copy.splice(idx - 1, 0, item);
+            return copy;
+        });
+        showToast('Brought forward');
+    };
+
+    const handleSendBackward = () => {
+        if (!selectedLayerId || selectedLayerId === 'background') return;
+        pushUndo();
+        setLayers(prev => {
+            const idx = prev.findIndex(l => l.id === selectedLayerId);
+            if (idx === -1 || idx >= prev.length - 2) return prev; // Keep above background
+            const copy = [...prev];
+            const [item] = copy.splice(idx, 1);
+            copy.splice(idx + 1, 0, item);
+            return copy;
+        });
+        showToast('Sent backward');
+    };
+
+    const handleSendToBack = () => {
+        if (!selectedLayerId || selectedLayerId === 'background') return;
+        pushUndo();
+        setLayers(prev => {
+            const idx = prev.findIndex(l => l.id === selectedLayerId);
+            if (idx === -1) return prev;
+            const copy = [...prev];
+            const [item] = copy.splice(idx, 1);
+            // Place right above background
+            const bgIdx = copy.findIndex(l => l.id === 'background' || l.type === 'bg');
+            if (bgIdx !== -1) {
+                copy.splice(bgIdx, 0, item);
+            } else {
+                copy.push(item);
+            }
+            return copy;
+        });
+        showToast('Sent to back');
+    };
+
+    const handleDuplicateLayer = () => {
+        if (!selectedLayerId || selectedLayerId === 'background') return;
+        pushUndo();
+        const idx = layers.findIndex(l => l.id === selectedLayerId);
+        if (idx === -1) return;
+        const target = layers[idx];
+        const newLayer = {
+            ...target,
+            id: `${target.id}-copy-${Date.now()}`,
+            name: `${target.name} (Copy)`,
+            x: (target.x || 0) + 24,
+            y: (target.y || 0) + 24,
+        };
+        const copy = [...layers];
+        copy.splice(idx, 0, newLayer);
+        setLayers(copy);
+        setSelectedLayerId(newLayer.id);
+        showToast(`Duplicated ${target.name}`);
+    };
+
     const handleDeleteSelectedLayer = () => {
         if (!selectedLayerId || selectedLayerId === 'background') return;
         pushUndo();
@@ -418,15 +593,19 @@ export default function DesignStudioPage() {
         };
     }, [dragState, resizeState, currentFormat]);
 
-    // Keyboard delete listener
+    // Keyboard shortcuts listener (Delete, Duplicate)
     useEffect(() => {
         const handleKeyDown = (e) => {
             if (editingTextId) return;
+            const tag = document.activeElement?.tagName?.toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
             if ((e.key === 'Delete' || e.key === 'Backspace') && selectedLayerId && selectedLayerId !== 'background') {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
                 e.preventDefault();
                 handleDeleteSelectedLayer();
+            } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd' && selectedLayerId && selectedLayerId !== 'background') {
+                e.preventDefault();
+                handleDuplicateLayer();
             }
         };
         window.addEventListener('keydown', handleKeyDown);
@@ -498,11 +677,27 @@ export default function DesignStudioPage() {
             ctx.save();
             ctx.globalAlpha = (l.opacity ?? 100) / 100;
 
+            // Rotation around center
+            if (l.rotation) {
+                ctx.translate(lx + lw / 2, ly + lh / 2);
+                ctx.rotate((l.rotation * Math.PI) / 180);
+                ctx.translate(-(lx + lw / 2), -(ly + lh / 2));
+            }
+
+            // Drop shadow
+            if (l.dropShadow) {
+                ctx.shadowColor = l.shadowColor || 'rgba(0, 0, 0, 0.4)';
+                ctx.shadowBlur = (l.shadowBlur || 20) * sx;
+                ctx.shadowOffsetY = (l.shadowOffsetY || 8) * sy;
+            }
+
+            const radius = (l.borderRadius || l.radius || 0) * sx;
+
             if (l.type === 'rect') {
                 ctx.fillStyle = l.fill || '#0B7C91';
                 ctx.beginPath();
-                if (ctx.roundRect) {
-                    ctx.roundRect(lx, ly, lw, lh, (l.radius || 8) * sx);
+                if (ctx.roundRect && radius > 0) {
+                    ctx.roundRect(lx, ly, lw, lh, radius);
                 } else {
                     ctx.rect(lx, ly, lw, lh);
                 }
@@ -512,11 +707,33 @@ export default function DesignStudioPage() {
                 ctx.beginPath();
                 ctx.ellipse(lx + lw / 2, ly + lh / 2, lw / 2, lh / 2, 0, 0, Math.PI * 2);
                 ctx.fill();
+            } else if (l.type === 'line') {
+                ctx.fillStyle = l.fill || '#00E5FF';
+                ctx.fillRect(lx, ly, lw, Math.max(2, lh));
+            } else if (l.type === 'star') {
+                ctx.fillStyle = l.fill || '#F4EDE2';
+                ctx.beginPath();
+                const cx = lx + lw / 2;
+                const cy = ly + lh / 2;
+                const spikes = 5;
+                const outerRadius = lw / 2;
+                const innerRadius = outerRadius * 0.45;
+                let rot = (Math.PI / 2) * 3;
+                let step = Math.PI / spikes;
+                ctx.moveTo(cx, cy - outerRadius);
+                for (let i = 0; i < spikes; i++) {
+                    ctx.lineTo(cx + Math.cos(rot) * outerRadius, cy + Math.sin(rot) * outerRadius);
+                    rot += step;
+                    ctx.lineTo(cx + Math.cos(rot) * innerRadius, cy + Math.sin(rot) * innerRadius);
+                    rot += step;
+                }
+                ctx.closePath();
+                ctx.fill();
             } else if (l.type === 'badge') {
                 ctx.fillStyle = l.fill || '#C85A17';
                 ctx.beginPath();
                 if (ctx.roundRect) {
-                    ctx.roundRect(lx, ly, lw, lh, 8 * sx);
+                    ctx.roundRect(lx, ly, lw, lh, (l.borderRadius || 8) * sx);
                 } else {
                     ctx.rect(lx, ly, lw, lh);
                 }
@@ -529,7 +746,7 @@ export default function DesignStudioPage() {
                 ctx.fillStyle = l.fill || 'rgba(66, 41, 26, 0.9)';
                 ctx.beginPath();
                 if (ctx.roundRect) {
-                    ctx.roundRect(lx, ly, lw, lh, 40 * sx);
+                    ctx.roundRect(lx, ly, lw, lh, (l.borderRadius || 40) * sx);
                 } else {
                     ctx.rect(lx, ly, lw, lh);
                 }
@@ -539,10 +756,19 @@ export default function DesignStudioPage() {
                 const fontSize = Math.round((l.fontSize || 64) * sx);
                 ctx.font = `800 ${fontSize}px "${l.fontFamily || 'Plus Jakarta Sans'}", sans-serif`;
                 ctx.textBaseline = 'top';
+                ctx.textAlign = l.textAlign || 'left';
+                const textX = l.textAlign === 'center' ? (lx + lw / 2) : l.textAlign === 'right' ? (lx + lw) : lx;
                 const lines = (l.text || '').split('\n');
                 lines.forEach((line, idx) => {
-                    ctx.fillText(line, lx, ly + (idx * fontSize * 1.15));
+                    ctx.fillText(line, textX, ly + (idx * fontSize * 1.15));
                 });
+            }
+
+            // Stroke outline if defined
+            if (l.strokeWidth) {
+                ctx.strokeStyle = l.strokeColor || '#00E5FF';
+                ctx.lineWidth = l.strokeWidth * sx;
+                ctx.stroke();
             }
 
             ctx.restore();
@@ -1234,18 +1460,22 @@ export default function DesignStudioPage() {
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'space-between',
-                                padding: '10px 16px',
+                                flexWrap: 'wrap',
+                                gap: 10,
+                                padding: '8px 16px',
                                 borderBottom: '1px solid rgba(16, 21, 29, 0.08)',
                                 background: '#FFFFFF',
                             }}>
                                 {/* Tool icons */}
-                                <div style={{ display: 'flex', gap: 4 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
                                     {[
                                         { id: 'select', icon: Move, label: 'Move / Select' },
-                                        { id: 'text', icon: Type, label: 'Add Text' },
-                                        { id: 'rect', icon: Square, label: 'Add Rectangle' },
-                                        { id: 'circle', icon: Circle, label: 'Add Circle' },
-                                        { id: 'badge', icon: Sliders, label: 'Add Badge' },
+                                        { id: 'text', icon: Type, label: 'Add Text', action: handleAddText },
+                                        { id: 'rect', icon: Square, label: 'Add Rectangle', action: handleAddRect },
+                                        { id: 'circle', icon: Circle, label: 'Add Circle', action: handleAddCircle },
+                                        { id: 'line', icon: ArrowUpRight, label: 'Add Line', action: handleAddLine },
+                                        { id: 'star', icon: Star, label: 'Add Star', action: handleAddStar },
+                                        { id: 'badge', icon: Sliders, label: 'Add Badge', action: handleAddBadge },
                                     ].map(tool => {
                                         const isSel = activeTool === tool.id;
                                         const IconComp = tool.icon;
@@ -1255,15 +1485,12 @@ export default function DesignStudioPage() {
                                                 type="button"
                                                 onClick={() => {
                                                     setActiveTool(tool.id);
-                                                    if (tool.id === 'text') handleAddText();
-                                                    else if (tool.id === 'rect') handleAddRect();
-                                                    else if (tool.id === 'circle') handleAddCircle();
-                                                    else if (tool.id === 'badge') handleAddBadge();
+                                                    if (tool.action) tool.action();
                                                 }}
                                                 title={tool.label}
                                                 style={{
-                                                    width: 34,
-                                                    height: 34,
+                                                    width: 32,
+                                                    height: 32,
                                                     borderRadius: 6,
                                                     border: 'none',
                                                     background: isSel ? '#F0F9FB' : 'transparent',
@@ -1274,13 +1501,133 @@ export default function DesignStudioPage() {
                                                     justifyContent: 'center',
                                                 }}
                                             >
-                                                <IconComp size={16} />
+                                                <IconComp size={15} />
                                             </button>
                                         );
                                     })}
+
+                                    {/* Upload Cutout Button & Hidden File Input */}
+                                    <input
+                                        type="file"
+                                        ref={cutoutInputRef}
+                                        onChange={handleImageUpload}
+                                        accept="image/*"
+                                        style={{ display: 'none' }}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => cutoutInputRef.current?.click()}
+                                        title="Upload custom cutout / image"
+                                        style={{
+                                            width: 32,
+                                            height: 32,
+                                            borderRadius: 6,
+                                            border: 'none',
+                                            background: 'transparent',
+                                            color: '#5F6876',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                        }}
+                                    >
+                                        <Upload size={15} />
+                                    </button>
+
+                                    <div style={{ width: 1, height: 20, background: 'rgba(16, 21, 29, 0.1)', margin: '0 4px' }} />
+
+                                    {/* Alignment Toolbar Group */}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleAlign('left')}
+                                            title="Align Left"
+                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#5F6876', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                        >
+                                            <AlignLeft size={15} />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleAlign('center')}
+                                            title="Align Horizontal Center"
+                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#5F6876', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                        >
+                                            <AlignCenter size={15} />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleAlign('right')}
+                                            title="Align Right"
+                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#5F6876', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                        >
+                                            <AlignRight size={15} />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleAlign('top')}
+                                            title="Align Top"
+                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#5F6876', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                        >
+                                            <ArrowUp size={15} />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleAlign('middle')}
+                                            title="Align Vertical Middle"
+                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#5F6876', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                        >
+                                            <Maximize2 size={13} />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleAlign('bottom')}
+                                            title="Align Bottom"
+                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#5F6876', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                        >
+                                            <ArrowDown size={15} />
+                                        </button>
+                                    </div>
+
+                                    <div style={{ width: 1, height: 20, background: 'rgba(16, 21, 29, 0.1)', margin: '0 4px' }} />
+
+                                    {/* Hierarchy & Duplicate Group */}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                                        <button
+                                            type="button"
+                                            onClick={handleBringForward}
+                                            title="Bring Forward (Cmd+])"
+                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#5F6876', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                        >
+                                            <ChevronsUp size={15} />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleSendBackward}
+                                            title="Send Backward (Cmd+[)"
+                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#5F6876', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                        >
+                                            <ChevronsDown size={15} />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleDuplicateLayer}
+                                            title="Duplicate Layer (Cmd+D)"
+                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#5F6876', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                        >
+                                            <Copy size={14} />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleDeleteSelectedLayer}
+                                            title="Delete Layer (Backspace)"
+                                            style={{ width: 30, height: 30, borderRadius: 6, border: 'none', background: 'transparent', color: '#DC2626', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                        >
+                                            <Trash2 size={14} />
+                                        </button>
+                                    </div>
                                 </div>
 
-                                {/* Alignments, Toggles & Zoom */}
+                                {/* Safe areas & Zoom */}
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                                     <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#5F6876', cursor: 'pointer' }}>
                                         <input
@@ -1362,8 +1709,10 @@ export default function DesignStudioPage() {
                                                     width: `${widthPct}%`,
                                                     height: `${heightPct}%`,
                                                     cursor: layer.locked ? 'default' : 'move',
-                                                    border: isSel ? '1.5px solid #00E5FF' : '1.5px solid transparent',
-                                                    borderRadius: layer.type === 'circle' ? '50%' : (layer.radius || 4),
+                                                    border: isSel ? '1.5px solid #00E5FF' : (layer.strokeWidth ? `${layer.strokeWidth}px solid ${layer.strokeColor || '#00E5FF'}` : '1.5px solid transparent'),
+                                                    borderRadius: layer.borderRadius ? `${layer.borderRadius}px` : (layer.type === 'circle' ? '50%' : (layer.radius || 4)),
+                                                    transform: `rotate(${layer.rotation || 0}deg)`,
+                                                    boxShadow: layer.dropShadow ? `0 ${layer.shadowOffsetY || 8}px ${layer.shadowBlur || 24}px ${layer.shadowColor || 'rgba(0,0,0,0.35)'}` : 'none',
                                                     boxSizing: 'border-box',
                                                     opacity: (layer.opacity ?? 100) / 100,
                                                     display: 'flex',
@@ -1386,8 +1735,9 @@ export default function DesignStudioPage() {
                                                                 background: 'rgba(0, 0, 0, 0.45)',
                                                                 color: layer.fill || '#FFFFFF',
                                                                 fontFamily: `"${layer.fontFamily || 'Plus Jakarta Sans'}", sans-serif`,
-                                                                fontSize: 'clamp(14px, 3.2vw, 42px)',
+                                                                fontSize: layer.fontSize ? `${Math.round(layer.fontSize * (760 / currentFormat.w) * (zoomLevel / 100))}px` : 'clamp(14px, 3.2vw, 42px)',
                                                                 fontWeight: 800,
+                                                                textAlign: layer.textAlign || 'left',
                                                                 lineHeight: 1.05,
                                                                 letterSpacing: '-0.025em',
                                                                 border: 'none',
@@ -1402,7 +1752,8 @@ export default function DesignStudioPage() {
                                                             height: '100%',
                                                             fontFamily: `"${layer.fontFamily || 'Plus Jakarta Sans'}", sans-serif`,
                                                             fontWeight: 800,
-                                                            fontSize: 'clamp(14px, 3.2vw, 42px)',
+                                                            fontSize: layer.fontSize ? `${Math.round(layer.fontSize * (760 / currentFormat.w) * (zoomLevel / 100))}px` : 'clamp(14px, 3.2vw, 42px)',
+                                                            textAlign: layer.textAlign || 'left',
                                                             color: layer.fill || '#F4EDE2',
                                                             lineHeight: 1.05,
                                                             letterSpacing: '-0.025em',
@@ -1421,7 +1772,7 @@ export default function DesignStudioPage() {
                                                         width: '100%',
                                                         height: '100%',
                                                         background: layer.fill || '#0B7C91',
-                                                        borderRadius: layer.radius || 8,
+                                                        borderRadius: layer.borderRadius || layer.radius || 8,
                                                     }} />
                                                 )}
 
@@ -1435,13 +1786,30 @@ export default function DesignStudioPage() {
                                                     }} />
                                                 )}
 
+                                                {/* Line Content */}
+                                                {layer.type === 'line' && (
+                                                    <div style={{
+                                                        width: '100%',
+                                                        height: '100%',
+                                                        background: layer.fill || '#00E5FF',
+                                                        borderRadius: 2,
+                                                    }} />
+                                                )}
+
+                                                {/* Star Content */}
+                                                {layer.type === 'star' && (
+                                                    <svg viewBox="0 0 24 24" style={{ width: '100%', height: '100%', fill: layer.fill || '#F4EDE2' }}>
+                                                        <polygon points="12,2 15,9 22,9 17,14 19,21 12,17 5,21 7,14 2,9 9,9" />
+                                                    </svg>
+                                                )}
+
                                                 {/* Badge Content */}
                                                 {layer.type === 'badge' && (
                                                     <div style={{
                                                         width: '100%',
                                                         height: '100%',
                                                         background: layer.fill || '#C85A17',
-                                                        borderRadius: 6,
+                                                        borderRadius: layer.borderRadius || 6,
                                                         color: '#FFFFFF',
                                                         fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
                                                         fontSize: 'clamp(10px, 1.2vw, 13px)',
@@ -1456,13 +1824,39 @@ export default function DesignStudioPage() {
 
                                                 {/* Image / Silhouette Cutout */}
                                                 {layer.type === 'image' && (
-                                                    <div style={{
-                                                        width: '100%',
-                                                        height: '100%',
-                                                        background: layer.fill || 'linear-gradient(180deg, #42291A 0%, #1A1109 100%)',
-                                                        borderRadius: '40px 40px 0 0',
-                                                        opacity: 0.9,
-                                                    }} />
+                                                    layer.src ? (
+                                                        <img
+                                                            src={layer.src}
+                                                            alt={layer.name}
+                                                            style={{
+                                                                width: '100%',
+                                                                height: '100%',
+                                                                objectFit: 'contain',
+                                                                borderRadius: layer.borderRadius || 0,
+                                                                pointerEvents: 'none',
+                                                            }}
+                                                        />
+                                                    ) : (
+                                                        <div style={{
+                                                            width: '100%',
+                                                            height: '100%',
+                                                            background: layer.fill || 'linear-gradient(180deg, #42291A 0%, #1A1109 100%)',
+                                                            borderRadius: layer.borderRadius ? `${layer.borderRadius}px` : '40px 40px 0 0',
+                                                            opacity: 0.9,
+                                                            display: 'flex',
+                                                            alignItems: 'flex-end',
+                                                            justifyContent: 'center',
+                                                            paddingBottom: 12,
+                                                        }}>
+                                                            <span style={{
+                                                                fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
+                                                                fontSize: 9.5,
+                                                                color: 'rgba(255, 255, 255, 0.45)',
+                                                            }}>
+                                                                {layer.meta || 'Cutout layer'}
+                                                            </span>
+                                                        </div>
+                                                    )
                                                 )}
 
                                                 {/* 4 Corner Resize Handles when Selected */}
@@ -1631,9 +2025,9 @@ export default function DesignStudioPage() {
                                     </div>
                                 </div>
 
-                                {/* Text content input if text layer */}
+                                {/* Typography Section (for text layers) */}
                                 {selectedLayer.type === 'text' && (
-                                    <>
+                                    <div style={{ marginBottom: 16 }}>
                                         <div style={{
                                             fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
                                             fontSize: 10,
@@ -1642,12 +2036,15 @@ export default function DesignStudioPage() {
                                             color: '#5F6876',
                                             marginBottom: 6,
                                         }}>
-                                            Text content
+                                            Typography
                                         </div>
+
+                                        {/* Text Content */}
                                         <textarea
                                             value={selectedLayer.text || ''}
                                             onChange={e => updateActiveLayer('text', e.target.value)}
                                             rows={2}
+                                            placeholder="Layer copy..."
                                             style={{
                                                 width: '100%',
                                                 padding: '8px 10px',
@@ -1655,41 +2052,295 @@ export default function DesignStudioPage() {
                                                 border: '1px solid #DFE6ED',
                                                 fontSize: 12,
                                                 fontFamily: 'var(--f-sans, sans-serif)',
-                                                marginBottom: 10,
+                                                marginBottom: 8,
                                                 boxSizing: 'border-box',
                                                 resize: 'vertical',
+                                                color: '#10151D',
                                             }}
                                         />
 
-                                        <div style={{
-                                            fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                                            fontSize: 10,
-                                            letterSpacing: '0.14em',
-                                            textTransform: 'uppercase',
-                                            color: '#5F6876',
-                                            marginBottom: 6,
-                                        }}>
-                                            Typeface
-                                        </div>
+                                        {/* Typeface Selector */}
                                         <select
                                             value={selectedLayer.fontFamily || 'Plus Jakarta Sans'}
                                             onChange={e => updateActiveLayer('fontFamily', e.target.value)}
                                             style={{
                                                 width: '100%',
-                                                padding: '8px 10px',
+                                                padding: '7px 10px',
                                                 borderRadius: 8,
                                                 border: '1px solid #DFE6ED',
                                                 fontSize: 12,
-                                                marginBottom: 10,
+                                                marginBottom: 8,
                                                 color: '#10151D',
+                                                background: '#FFFFFF',
                                             }}
                                         >
                                             <option value="Plus Jakarta Sans">Plus Jakarta Sans — kit display</option>
                                             <option value="Geist">Geist — clean grotesque</option>
                                             <option value="JetBrains Mono">JetBrains Mono — tabular</option>
+                                            <option value="Instrument Serif">Instrument Serif — editorial serif</option>
+                                            <option value="Inter">Inter — neutral system</option>
                                         </select>
-                                    </>
+
+                                        {/* Font Size & Text Align Controls */}
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, alignItems: 'center' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: '1px solid #DFE6ED', borderRadius: 8, padding: '4px 8px' }}>
+                                                <span style={{ color: '#5F6876', fontSize: 10, fontFamily: 'var(--f-mono, monospace)' }}>SIZE</span>
+                                                <input
+                                                    type="range"
+                                                    min="14"
+                                                    max="140"
+                                                    value={selectedLayer.fontSize || 64}
+                                                    onChange={e => updateActiveLayer('fontSize', parseInt(e.target.value) || 64)}
+                                                    style={{ flex: 1, accentColor: '#0B7C91', cursor: 'pointer' }}
+                                                />
+                                                <span style={{ fontSize: 11, fontFamily: 'var(--f-mono, monospace)', color: '#10151D', minWidth: 26, textAlign: 'right' }}>
+                                                    {selectedLayer.fontSize || 64}
+                                                </span>
+                                            </div>
+
+                                            {/* Alignment Buttons */}
+                                            <div style={{ display: 'flex', border: '1px solid #DFE6ED', borderRadius: 8, overflow: 'hidden' }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => updateActiveLayer('textAlign', 'left')}
+                                                    style={{
+                                                        padding: '6px 8px',
+                                                        border: 'none',
+                                                        background: (!selectedLayer.textAlign || selectedLayer.textAlign === 'left') ? '#F0F9FB' : '#FFFFFF',
+                                                        color: (!selectedLayer.textAlign || selectedLayer.textAlign === 'left') ? '#0B7C91' : '#5F6876',
+                                                        cursor: 'pointer',
+                                                    }}
+                                                    title="Align Left"
+                                                >
+                                                    <AlignLeft size={13} />
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => updateActiveLayer('textAlign', 'center')}
+                                                    style={{
+                                                        padding: '6px 8px',
+                                                        border: 'none',
+                                                        borderLeft: '1px solid #DFE6ED',
+                                                        borderRight: '1px solid #DFE6ED',
+                                                        background: selectedLayer.textAlign === 'center' ? '#F0F9FB' : '#FFFFFF',
+                                                        color: selectedLayer.textAlign === 'center' ? '#0B7C91' : '#5F6876',
+                                                        cursor: 'pointer',
+                                                    }}
+                                                    title="Align Center"
+                                                >
+                                                    <AlignCenter size={13} />
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => updateActiveLayer('textAlign', 'right')}
+                                                    style={{
+                                                        padding: '6px 8px',
+                                                        border: 'none',
+                                                        background: selectedLayer.textAlign === 'right' ? '#F0F9FB' : '#FFFFFF',
+                                                        color: selectedLayer.textAlign === 'right' ? '#0B7C91' : '#5F6876',
+                                                        cursor: 'pointer',
+                                                    }}
+                                                    title="Align Right"
+                                                >
+                                                    <AlignRight size={13} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
                                 )}
+
+                                {/* Transform: Rotation & Corner Radius */}
+                                <div style={{ marginBottom: 16 }}>
+                                    <div style={{
+                                        fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
+                                        fontSize: 10,
+                                        letterSpacing: '0.14em',
+                                        textTransform: 'uppercase',
+                                        color: '#5F6876',
+                                        marginBottom: 6,
+                                    }}>
+                                        Transform
+                                    </div>
+
+                                    {/* Rotation */}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, border: '1px solid #DFE6ED', borderRadius: 8, padding: '4px 8px' }}>
+                                            <span style={{ color: '#5F6876', fontSize: 10, fontFamily: 'var(--f-mono, monospace)' }}>ROT</span>
+                                            <input
+                                                type="range"
+                                                min="-180"
+                                                max="180"
+                                                value={selectedLayer.rotation || 0}
+                                                onChange={e => updateActiveLayer('rotation', parseInt(e.target.value) || 0)}
+                                                style={{ flex: 1, accentColor: '#0B7C91', cursor: 'pointer' }}
+                                            />
+                                            <span style={{ fontSize: 11, fontFamily: 'var(--f-mono, monospace)', color: '#10151D', minWidth: 32, textAlign: 'right' }}>
+                                                {selectedLayer.rotation || 0}°
+                                            </span>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => updateActiveLayer('rotation', 0)}
+                                            style={{
+                                                padding: '5px 8px',
+                                                border: '1px solid #DFE6ED',
+                                                borderRadius: 8,
+                                                background: '#FFFFFF',
+                                                fontSize: 10,
+                                                fontFamily: 'var(--f-mono, monospace)',
+                                                color: '#5F6876',
+                                                cursor: 'pointer',
+                                            }}
+                                            title="Reset rotation to 0°"
+                                        >
+                                            0°
+                                        </button>
+                                    </div>
+
+                                    {/* Corner Radius (for rects, images, badges) */}
+                                    {selectedLayer.type !== 'circle' && selectedLayer.type !== 'star' && selectedLayer.type !== 'line' && (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: '1px solid #DFE6ED', borderRadius: 8, padding: '4px 8px' }}>
+                                            <span style={{ color: '#5F6876', fontSize: 10, fontFamily: 'var(--f-mono, monospace)' }}>RADIUS</span>
+                                            <input
+                                                type="range"
+                                                min="0"
+                                                max="64"
+                                                value={selectedLayer.borderRadius ?? (selectedLayer.radius || 0)}
+                                                onChange={e => updateActiveLayer('borderRadius', parseInt(e.target.value) || 0)}
+                                                style={{ flex: 1, accentColor: '#0B7C91', cursor: 'pointer' }}
+                                            />
+                                            <span style={{ fontSize: 11, fontFamily: 'var(--f-mono, monospace)', color: '#10151D', minWidth: 28, textAlign: 'right' }}>
+                                                {selectedLayer.borderRadius ?? (selectedLayer.radius || 0)}px
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Appearance: Opacity, Stroke, Drop Shadow */}
+                                <div style={{ marginBottom: 16 }}>
+                                    <div style={{
+                                        fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
+                                        fontSize: 10,
+                                        letterSpacing: '0.14em',
+                                        textTransform: 'uppercase',
+                                        color: '#5F6876',
+                                        marginBottom: 6,
+                                    }}>
+                                        Appearance
+                                    </div>
+
+                                    {/* Opacity Slider */}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, border: '1px solid #DFE6ED', borderRadius: 8, padding: '4px 8px', marginBottom: 8 }}>
+                                        <span style={{ color: '#5F6876', fontSize: 10, fontFamily: 'var(--f-mono, monospace)' }}>OPACITY</span>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="100"
+                                            value={selectedLayer.opacity ?? 100}
+                                            onChange={e => updateActiveLayer('opacity', parseInt(e.target.value) || 0)}
+                                            style={{ flex: 1, accentColor: '#0B7C91', cursor: 'pointer' }}
+                                        />
+                                        <span style={{ fontSize: 11, fontFamily: 'var(--f-mono, monospace)', color: '#10151D', minWidth: 28, textAlign: 'right' }}>
+                                            {selectedLayer.opacity ?? 100}%
+                                        </span>
+                                    </div>
+
+                                    {/* Stroke / Outline */}
+                                    <div style={{ border: '1px solid #DFE6ED', borderRadius: 8, padding: '6px 8px', marginBottom: 8 }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: (selectedLayer.strokeWidth > 0 ? 6 : 0) }}>
+                                            <span style={{ color: '#5F6876', fontSize: 10, fontFamily: 'var(--f-mono, monospace)' }}>STROKE</span>
+                                            <input
+                                                type="range"
+                                                min="0"
+                                                max="16"
+                                                value={selectedLayer.strokeWidth || 0}
+                                                onChange={e => updateActiveLayer('strokeWidth', parseInt(e.target.value) || 0)}
+                                                style={{ flex: 1, accentColor: '#0B7C91', cursor: 'pointer' }}
+                                            />
+                                            <span style={{ fontSize: 11, fontFamily: 'var(--f-mono, monospace)', color: '#10151D', minWidth: 26, textAlign: 'right' }}>
+                                                {selectedLayer.strokeWidth || 0}px
+                                            </span>
+                                        </div>
+                                        {selectedLayer.strokeWidth > 0 && (
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                {['#FFFFFF', '#10151D', '#00E5FF', '#0B7C91', '#C85A17'].map(sc => (
+                                                    <div
+                                                        key={sc}
+                                                        onClick={() => updateActiveLayer('strokeColor', sc)}
+                                                        style={{
+                                                            width: 18,
+                                                            height: 18,
+                                                            borderRadius: 4,
+                                                            background: sc,
+                                                            border: (selectedLayer.strokeColor || '#00E5FF') === sc ? '2px solid #10151D' : '1px solid rgba(0,0,0,0.15)',
+                                                            cursor: 'pointer',
+                                                        }}
+                                                    />
+                                                ))}
+                                                <input
+                                                    type="text"
+                                                    value={selectedLayer.strokeColor || '#00E5FF'}
+                                                    onChange={e => updateActiveLayer('strokeColor', e.target.value)}
+                                                    style={{
+                                                        flex: 1,
+                                                        height: 22,
+                                                        padding: '0 6px',
+                                                        borderRadius: 4,
+                                                        border: '1px solid #DFE6ED',
+                                                        fontSize: 10,
+                                                        fontFamily: 'var(--f-mono, monospace)',
+                                                    }}
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Drop Shadow */}
+                                    <div style={{ border: '1px solid #DFE6ED', borderRadius: 8, padding: '6px 8px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (selectedLayer.dropShadow ? 6 : 0) }}>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 11, color: '#10151D', fontWeight: 500 }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={!!selectedLayer.dropShadow}
+                                                    onChange={e => updateActiveLayer('dropShadow', e.target.checked)}
+                                                    style={{ accentColor: '#0B7C91', cursor: 'pointer' }}
+                                                />
+                                                Drop Shadow
+                                            </label>
+                                            {selectedLayer.dropShadow && (
+                                                <span style={{ fontSize: 10, fontFamily: 'var(--f-mono, monospace)', color: '#5F6876' }}>
+                                                    {selectedLayer.shadowBlur || 24}px blur
+                                                </span>
+                                            )}
+                                        </div>
+                                        {selectedLayer.dropShadow && (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                    <span style={{ color: '#5F6876', fontSize: 9, fontFamily: 'var(--f-mono, monospace)', minWidth: 32 }}>BLUR</span>
+                                                    <input
+                                                        type="range"
+                                                        min="0"
+                                                        max="50"
+                                                        value={selectedLayer.shadowBlur ?? 24}
+                                                        onChange={e => updateActiveLayer('shadowBlur', parseInt(e.target.value) || 0)}
+                                                        style={{ flex: 1, accentColor: '#0B7C91', cursor: 'pointer' }}
+                                                    />
+                                                </div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                    <span style={{ color: '#5F6876', fontSize: 9, fontFamily: 'var(--f-mono, monospace)', minWidth: 32 }}>Y-OFF</span>
+                                                    <input
+                                                        type="range"
+                                                        min="0"
+                                                        max="30"
+                                                        value={selectedLayer.shadowOffsetY ?? 8}
+                                                        onChange={e => updateActiveLayer('shadowOffsetY', parseInt(e.target.value) || 0)}
+                                                        style={{ flex: 1, accentColor: '#0B7C91', cursor: 'pointer' }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
 
                                 {/* Fill Swatches */}
                                 <div style={{
