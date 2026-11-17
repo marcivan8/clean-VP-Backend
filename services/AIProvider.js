@@ -79,7 +79,7 @@
 
 'use strict';
 
-const VALID_PROVIDERS = ['openai', 'ollama', 'groq', 'gemini', 'gemma-local', 'mock'];
+const VALID_PROVIDERS = ['openai', 'ollama', 'groq', 'gemini', 'gemma-local', 'custom', 'railway', 'mock'];
 
 /** Providers refused in production — local/dev-only or non-real output. */
 const PRODUCTION_REFUSED_PROVIDERS = ['ollama', 'gemma-local', 'mock'];
@@ -91,7 +91,8 @@ const PRODUCTION_REFUSED_PROVIDERS = ['ollama', 'gemma-local', 'mock'];
  * in the header comment above.
  */
 const CAPABILITY_PROVIDERS = {
-    chat:       ['openai', 'ollama', 'groq', 'gemini', 'gemma-local'],
+    chat:       ['openai', 'ollama', 'groq', 'gemini', 'gemma-local', 'custom', 'railway'],
+    brain:      ['openai', 'groq', 'gemini', 'custom', 'railway', 'ollama'],
     motion:     ['openai', 'ollama', 'groq', 'gemini', 'gemma-local'],
     vision:     ['openai', 'ollama', 'gemini'],
     audio:      ['openai', 'groq'],
@@ -145,6 +146,9 @@ function resolveProvider(opts = {}) {
     } else if (capability === 'judge' && env.AI_JUDGE_PROVIDER) {
         raw = env.AI_JUDGE_PROVIDER;
         source = 'AI_JUDGE_PROVIDER';
+    } else if (capability === 'brain' && (env.AI_BRAIN_PROVIDER || env.BRAIN_AI_BASE_URL)) {
+        raw = env.AI_BRAIN_PROVIDER || 'custom';
+        source = 'AI_BRAIN_PROVIDER';
     }
 
     raw = String(raw || 'openai').toLowerCase().trim();
@@ -273,6 +277,9 @@ function getAIClient(opts = {}) {
         // key, but the SDK requires a non-empty string.
         config.baseURL = env.OLLAMA_BASE_URL || 'http://localhost:11434/v1';
         config.apiKey  = 'ollama';
+    } else if (provider === 'custom' || provider === 'railway') {
+        config.baseURL = env.BRAIN_AI_BASE_URL || env.CUSTOM_AI_BASE_URL || 'http://editorial-brain.railway.internal:8080/v1';
+        config.apiKey  = env.BRAIN_AI_API_KEY || env.CUSTOM_AI_API_KEY || 'custom-key';
     } else if (provider === 'gemma-local') {
         config.baseURL = env.GEMMA_BASE_URL || env.OLLAMA_BASE_URL || 'http://localhost:11434/v1';
         config.apiKey  = env.GEMMA_API_KEY || 'gemma-local';
@@ -349,6 +356,10 @@ function resolveModel(requestedModel, capabilityOrOpts) {
     // fallback hands back.
     const provider = opts.provider || effectiveProvider({ capability });
     if (provider === 'openai') return requestedModel;
+
+    if (provider === 'custom' || provider === 'railway') {
+        return process.env.BRAIN_AI_MODEL || process.env.CUSTOM_AI_MODEL || 'editorial-brain-3b';
+    }
 
     if (provider === 'gemma-local') {
         return process.env.GEMMA_MODEL || 'gemma2:2b';
@@ -577,9 +588,41 @@ function mockBodyFor(prompt = '') {
 function isAIConfigured(opts = {}) {
     const provider = opts.provider || resolveProvider(opts);
     if (provider === 'mock' || provider === 'ollama' || provider === 'gemma-local') return true;
+    if (provider === 'custom' || provider === 'railway') {
+        return !!(process.env.BRAIN_AI_BASE_URL || process.env.CUSTOM_AI_BASE_URL || process.env.AI_BRAIN_PROVIDER === 'custom' || process.env.AI_BRAIN_PROVIDER === 'railway');
+    }
     if (provider === 'groq') return !!process.env.GROQ_API_KEY;
     if (provider === 'gemini') return !!process.env.GEMINI_API_KEY;
     return !!process.env.OPENAI_API_KEY;
+}
+
+/**
+ * Resolves client and model for the Editorial Brain.
+ * Uses the custom Railway CPU model if configured (via AI_BRAIN_PROVIDER or BRAIN_AI_BASE_URL),
+ * falling back cleanly to the primary chat provider (Groq/Gemini/OpenAI).
+ *
+ * @param {Object} [opts]
+ * @returns {{ client: Object|null, model: string, provider: string, isCustom: boolean }}
+ */
+function getBrainAIClient(opts = {}) {
+    const isCustomBrain = process.env.AI_BRAIN_PROVIDER === 'custom' ||
+                          process.env.AI_BRAIN_PROVIDER === 'railway' ||
+                          Boolean(process.env.BRAIN_AI_BASE_URL);
+
+    if (isCustomBrain) {
+        const client = getAIClient({ ...opts, provider: 'custom', capability: 'chat', timeout: opts.timeout || 25_000 });
+        if (client) {
+            return {
+                client,
+                model: process.env.BRAIN_AI_MODEL || 'editorial-brain-3b',
+                provider: 'custom',
+                isCustom: true,
+            };
+        }
+    }
+
+    const { client, model, provider } = getAIFor('chat', 'gpt-4o', opts);
+    return { client, model, provider, isCustom: false };
 }
 
 /** Test seam — clears the memoised clients so env changes take effect. */
@@ -698,6 +741,7 @@ async function createGeminiChatCompletionWithFailover(geminiClient, payload, opt
 
 module.exports = {
     getAIClient,
+    getBrainAIClient,
     getAIFor,
     isAIConfigured,
     resolveProvider,

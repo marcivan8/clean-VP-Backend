@@ -39,7 +39,7 @@
 const crypto = require('crypto');
 const { projectMapStyleNote } = require('./editingStyles');
 
-const { getAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../../services/AIProvider');
+const { getAIClient, getBrainAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../../services/AIProvider');
 const { repairAndParseJSON } = require('../../services/motionProvider');
 const { supabaseAdmin } = require('../../config/database');
 const { ASSET_ANALYSIS_DONE } = require('./media/analysisStatus');
@@ -299,10 +299,27 @@ class ProjectIntelligence {
             ...(isGroq ? { reasoning_effort: 'low' } : {}),
         };
 
+        const brainTarget = getBrainAIClient();
         let completion;
-        try {
-            completion = await openai.chat.completions.create(callPayload);
-        } catch (callErr) {
+
+        // 1. Try Custom Railway Editorial Brain model if configured
+        if (brainTarget.isCustom && brainTarget.client) {
+            try {
+                console.log(`[ProjectIntelligence] Routing to custom Railway Brain model (${brainTarget.model})...`);
+                completion = await brainTarget.client.chat.completions.create({
+                    ...callPayload,
+                    model: brainTarget.model,
+                    response_format: { type: 'json_object' },
+                }, { timeout: 25_000 });
+            } catch (customErr) {
+                console.warn(`[ProjectIntelligence] Custom Railway Brain model failed (${customErr.message}); failing over to primary...`);
+            }
+        }
+
+        if (!completion) {
+            try {
+                completion = await openai.chat.completions.create(callPayload);
+            } catch (callErr) {
             const isRateLimit = callErr.status === 429 || callErr.status === 413 || /rate limit|tpm|tokens per minute|request too large/i.test(callErr.message);
 
             // Failover to Gemini FIRST on TPM limits or rate limits (Gemini does not have Groq's 8k TPM ceiling)
@@ -356,6 +373,7 @@ class ProjectIntelligence {
             }
             if (!completion) throw callErr;
         }
+    }
 
         const raw = completion?.choices?.[0]?.message?.content;
         if (!raw) throw new Error('model returned no content');

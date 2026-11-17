@@ -27,7 +27,7 @@ const { brainStyleSection, styleFocusSection, ledgerSection } = require('./editi
 // list that had drifted to 14 entries against 61 registered commands, so 47
 // real capabilities were invisible to the Brain and could never be suggested.
 const { commandsPromptSection } = require('./capabilityCatalog');
-const { getAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../../services/AIProvider');
+const { getAIClient, getBrainAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../../services/AIProvider');
 const { repairAndParseJSON } = require('../../services/motionProvider');
 const { ContextEngine } = require('./ContextEngine');
 const { UserProfileEngine } = require('./UserProfileEngine');
@@ -365,8 +365,9 @@ class EditorialBrain {
             const profile = input?.context?.profile || await this.profileEngine.getProfile(input?.userId);
             const platform = input?.context?.platform || null;
 
-            const primaryModel = resolveModel('gpt-4o', 'chat');
-            const isGroq = resolveProvider({ capability: 'chat' }) === 'groq';
+            const brainTarget = getBrainAIClient();
+            const primaryModel = brainTarget.isCustom ? brainTarget.model : resolveModel('gpt-4o', 'chat');
+            const isGroq = !brainTarget.isCustom && resolveProvider({ capability: 'chat' }) === 'groq';
 
             // Groq free-tier has a strict 8,000 TPM limit where requested = prompt_tokens + max_tokens.
             // When running under Groq (or when compact mode is requested), compact the prompt
@@ -399,9 +400,24 @@ class EditorialBrain {
             };
 
             let completion;
-            try {
-                completion = await this.openai.chat.completions.create(callPayload);
-            } catch (firstErr) {
+            // 1. Try Custom Railway Editorial Brain model if configured
+            if (brainTarget.isCustom && brainTarget.client) {
+                try {
+                    console.log(`[EditorialBrain] Routing to custom Railway Brain model (${brainTarget.model})...`);
+                    completion = await brainTarget.client.chat.completions.create({
+                        ...callPayload,
+                        model: brainTarget.model,
+                        response_format: { type: 'json_object' },
+                    }, { timeout: 25_000 });
+                } catch (customErr) {
+                    console.warn(`[EditorialBrain] Custom Railway Brain model failed (${customErr.message}); failing over to cloud providers...`);
+                }
+            }
+
+            if (!completion) {
+                try {
+                    completion = await this.openai.chat.completions.create(callPayload);
+                } catch (firstErr) {
                 const isRateLimit = firstErr.status === 429 || /429|rate limit/i.test(firstErr.message);
                 const isTokenLimit = firstErr.status === 413 || /413|request too large|tokens per minute|tpm/i.test(firstErr.message);
                 if (isRateLimit || isTokenLimit) {
