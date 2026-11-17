@@ -1503,6 +1503,17 @@ export class MediaExecutionEngine {
                 };
             }
 
+            case 'open_design_studio': {
+                try {
+                    if (typeof window !== 'undefined') {
+                        window.location.href = '/design';
+                    }
+                    return { action, success: true, message: 'Opening Design Studio.' };
+                } catch (err) {
+                    return { action, success: false, message: `Could not open Design Studio: ${err.message}` };
+                }
+            }
+
             case 'design_scene': {
                 const st = useTimelineStore.getState();
                 const clipsBefore = new Set((st.tracks || []).flatMap(track => (track.clips || []).map(clip => clip.id)));

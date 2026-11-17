@@ -565,6 +565,17 @@ export const COMMANDS = [
         destructive: false,
     },
     {
+        id: 'open_design_studio',
+        category: 'text',
+        label: 'Open Design Studio',
+        summary: 'Opens the Figma-class Design Studio to create video thumbnails, social graphics, packaging, or marketing collateral.',
+        phrases: ['open design studio', 'launch design studio', 'go to design studio',
+                  'design a thumbnail', 'create a thumbnail', 'make a thumbnail', 'generate a thumbnail',
+                  'design thumbnail', 'creer une miniature', 'ouvrir le design studio'],
+        negative: ['remove', 'clear', 'enleve', 'retire', 'supprime'],
+        destructive: false,
+    },
+    {
         id: 'set_brand_kit',
         category: 'text',
         label: 'Set the brand colours and fonts',

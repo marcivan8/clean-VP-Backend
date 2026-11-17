@@ -1174,6 +1174,7 @@ const COMMAND_REGISTRY = new Map([
     ['addMotionComponent',        { compiler: compileAtomicStore('addMotionComponent', 'Add a motion graphics component') }],
     ['add_motion_component',       { compiler: compileAtomicStore('addMotionComponent', 'Add a motion graphics component') }],
     ['design_scene',              { compiler: compileAtomicStore('design_scene', 'Design a graphics sequence from the brief') }],
+    ['open_design_studio',        { compiler: compileAtomicStore('open_design_studio', 'Open the Figma-class Design Studio') }],
     ['apply_motion_effect_stack', { compiler: compileAtomicStore('apply_motion_effect_stack', 'Apply a footage effect stack') }],
     ['set_brand_kit',             { compiler: compileAtomicStore('set_brand_kit', 'Store the brand colours and fonts') }],
     ['storyboard_video',          { compiler: compileAtomicStore('storyboard_video', 'Plan and place graphics across the whole video') }],

@@ -21,6 +21,7 @@
 
 const catalog = require('./commandCatalog.generated.json');
 const { buildEditorKnowledgePrompt } = require('../knowledge/vibedEditorKnowledge');
+const { buildDesignStudioKnowledgePrompt } = require('../knowledge/vibedDesignStudioKnowledge');
 
 /**
  * Resources this module can actually determine from the server's context
@@ -299,6 +300,13 @@ function commandsPromptSection(ctx, options = {}) {
         }
     }
 
+    if (options.includeDesignStudio || (ctx && ctx.includeDesignStudio)) {
+        const designKnowledgeBlock = buildDesignStudioKnowledgePrompt([], ctx, { compact: isCompact });
+        if (designKnowledgeBlock) {
+            parts.push('', designKnowledgeBlock);
+        }
+    }
+
     return parts.join('\n');
 }
 
@@ -312,4 +320,5 @@ module.exports = {
     deriveResources,
     partition,
     commandsPromptSection,
+    buildDesignStudioKnowledgePrompt,
 };

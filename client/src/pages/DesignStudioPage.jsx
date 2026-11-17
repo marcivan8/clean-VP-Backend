@@ -33,6 +33,7 @@ import {
 import { Logo } from '../components/Logo.jsx';
 import { useUserPlan } from '../hooks/useUserPlan.js';
 import useTimelineStore from '../store/useTimelineStore.js';
+import { executeDesignCommand } from '../agent/DesignStudioCommandRegistry.js';
 
 const FORMAT_PRESETS = [
     { id: 'thumbnail', label: 'Video thumbnail', res: '1280 × 720 · YouTube', w: 1280, h: 720, aspect: '16:9' },
@@ -157,55 +158,83 @@ export default function DesignStudioPage() {
     // Off-screen canvas ref for real PNG export
     const exportCanvasRef = useRef(null);
 
+    // Undo / Redo History Stacks
+    const [undoStack, setUndoStack] = useState([]);
+    const [redoStack, setRedoStack] = useState([]);
+
+    const pushUndo = () => {
+        setUndoStack(prev => [...prev.slice(-25), layers]);
+        setRedoStack([]);
+    };
+
+    const handleUndo = () => {
+        if (undoStack.length === 0) return;
+        const prev = undoStack[undoStack.length - 1];
+        setRedoStack(r => [...r, layers]);
+        setUndoStack(u => u.slice(0, -1));
+        setLayers(prev);
+    };
+
+    const handleRedo = () => {
+        if (redoStack.length === 0) return;
+        const next = redoStack[redoStack.length - 1];
+        setUndoStack(u => [...u, layers]);
+        setRedoStack(r => r.slice(0, -1));
+        setLayers(next);
+    };
+
     // Update active layer property
     const updateActiveLayer = (prop, value) => {
+        pushUndo();
         setLayers(prev => prev.map(l => l.id === selectedLayerId ? { ...l, [prop]: value } : l));
     };
 
     // Direction swap handler
     const applyDirection = (dir) => {
+        pushUndo();
+        const d = typeof dir === 'string' ? (DIRECTIONS.find(item => item.id === dir) || DIRECTIONS[0]) : dir;
         setLayers(prev => prev.map(l => {
             if (l.id === 'headline') {
                 return {
                     ...l,
-                    text: dir.headline,
-                    fill: dir.textColor,
+                    text: d.headline,
+                    fill: d.textColor,
                 };
             }
             if (l.id === 'background') {
                 return {
                     ...l,
-                    fill: dir.bg,
+                    fill: d.bg,
                 };
             }
             return l;
         }));
     };
 
-    // AI Director tweak submission
-    const handleApplyAiTweak = (e) => {
+    // AI Director tweak submission powered by DesignStudioCommandRegistry
+    const handleApplyAiTweak = (e, overridePrompt) => {
         e?.preventDefault();
-        if (!aiPrompt.trim()) return;
+        const promptToRun = overridePrompt || aiPrompt;
+        if (!promptToRun.trim()) return;
 
-        const p = aiPrompt.toLowerCase();
         setAiStatusMessage('Applying AI layout composition...');
 
         setTimeout(() => {
-            setLayers(prev => prev.map(l => {
-                if (l.id === 'headline') {
-                    if (p.includes('left')) return { ...l, x: Math.max(30, l.x - 30) };
-                    if (p.includes('right')) return { ...l, x: l.x + 30 };
-                    if (p.includes('larger')) return { ...l, fontSize: l.fontSize + 12, h: l.h + 20 };
-                    if (p.includes('smaller')) return { ...l, fontSize: Math.max(24, l.fontSize - 12) };
-                }
-                if (l.id === 'subject') {
-                    if (p.includes('larger')) return { ...l, w: Math.round(l.w * 1.15), h: Math.round(l.h * 1.15) };
-                }
-                return l;
-            }));
-            setAiStatusMessage('Layers updated. Reversible via history.');
-            setTimeout(() => setAiStatusMessage(''), 3000);
-        }, 500);
+            pushUndo();
+            const res = executeDesignCommand(promptToRun, {
+                layers,
+                setLayers,
+                selectedLayerId,
+                selectedFormat,
+                setSelectedFormat,
+                applyDirection,
+                setSafeAreasEnabled,
+                handleExport2Sizes: handleExportSizes,
+            });
+
+            setAiStatusMessage(res.message || 'Layers updated. Reversible via history.');
+            setTimeout(() => setAiStatusMessage(''), 3500);
+        }, 300);
     };
 
     // Real dynamic PNG export for "Export 2 sizes"
@@ -613,7 +642,7 @@ export default function DesignStudioPage() {
 
                     {/* Mode & Action Controls */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        {/* Segmented Mode: Generate | Edit by hand */}
+                        {/* Segmented Mode: Generate | Manual */}
                         <div style={{
                             display: 'flex',
                             background: '#F4F2ED',
@@ -653,7 +682,7 @@ export default function DesignStudioPage() {
                                     boxShadow: editMode === 'edit' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none',
                                 }}
                             >
-                                Edit by hand
+                                Manual
                             </button>
                         </div>
 
@@ -661,6 +690,8 @@ export default function DesignStudioPage() {
                         <div style={{ display: 'flex', gap: 4 }}>
                             <button
                                 type="button"
+                                onClick={handleUndo}
+                                disabled={undoStack.length === 0}
                                 style={{
                                     width: 36,
                                     height: 36,
@@ -670,14 +701,17 @@ export default function DesignStudioPage() {
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'center',
-                                    color: 'rgba(26, 28, 34, 0.74)',
-                                    cursor: 'pointer',
+                                    color: undoStack.length > 0 ? '#1A1C22' : 'rgba(26, 28, 34, 0.3)',
+                                    cursor: undoStack.length > 0 ? 'pointer' : 'default',
                                 }}
+                                title="Undo"
                             >
                                 <Undo size={15} />
                             </button>
                             <button
                                 type="button"
+                                onClick={handleRedo}
+                                disabled={redoStack.length === 0}
                                 style={{
                                     width: 36,
                                     height: 36,
@@ -687,9 +721,10 @@ export default function DesignStudioPage() {
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'center',
-                                    color: 'rgba(26, 28, 34, 0.74)',
-                                    cursor: 'pointer',
+                                    color: redoStack.length > 0 ? '#1A1C22' : 'rgba(26, 28, 34, 0.3)',
+                                    cursor: redoStack.length > 0 ? 'pointer' : 'default',
                                 }}
+                                title="Redo"
                             >
                                 <Redo size={15} />
                             </button>

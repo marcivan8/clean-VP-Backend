@@ -145,6 +145,7 @@ export const CAPABILITIES = Object.freeze({
     place_contextual_illustrations: { requires: [R.CLIPS, R.TRANSCRIPT] },
     // Designs from a written brief, so it needs no timeline state of its own.
     design_scene:        { requires: [] },
+    open_design_studio:  { requires: [] },
     set_brand_kit:       { requires: [], provides: [R.BRAND_KIT] },
 
     // ── Short-form finishing ─────────────────────────────────────────────────

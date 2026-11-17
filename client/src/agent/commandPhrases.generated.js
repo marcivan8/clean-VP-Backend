@@ -46,6 +46,7 @@ export const COMMAND_PHRASE = Object.freeze({
     "clear_keywords": "Remove key word highlights",
     "design_scene": "Design a graphics sequence",
     "emphasize_keywords": "Highlight key words",
+    "open_design_studio": "Open Design Studio",
     "place_contextual_illustrations": "Add contextual vector illustrations",
     "set_brand_kit": "Set the brand colours and fonts",
     "storyboard_video": "Storyboard the whole video",

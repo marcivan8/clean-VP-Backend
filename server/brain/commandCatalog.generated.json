@@ -183,8 +183,8 @@
       "execution": "This Brain response is advisory only; do not claim Auto ran or report an edit as complete."
     }
   },
-  "commandCount": 69,
-  "registryDeclaredCount": 67,
+  "commandCount": 70,
+  "registryDeclaredCount": 68,
   "supplementCount": 2,
   "commands": [
     {
@@ -900,6 +900,25 @@
       "provides": [
         "keywordEmphasis"
       ],
+      "inputs": [],
+      "effects": "May update timeline or project state.",
+      "cost": "local",
+      "verification": "Require a checked execution result and verify the resulting timeline or asset state before reporting success.",
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "open_design_studio",
+      "executes": "open_design_studio",
+      "phrase": "Open Design Studio",
+      "category": "text",
+      "registryDeclared": true,
+      "label": "Open Design Studio",
+      "summary": "Opens the Figma-class Design Studio to create video thumbnails, social graphics, packaging, or marketing collateral.",
+      "requires": [],
+      "prefers": [],
+      "provides": [],
       "inputs": [],
       "effects": "May update timeline or project state.",
       "cost": "local",
