@@ -472,7 +472,9 @@ export default function InteractiveVectorCanvas({
                 width: '100%',
                 height: '100%',
                 minHeight: '620px',
-                background: '#0D0F12',
+                background: '#F8FAFC',
+                backgroundImage: 'radial-gradient(#CBD5E1 1.2px, transparent 1.2px)',
+                backgroundSize: '24px 24px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -493,9 +495,9 @@ export default function InteractiveVectorCanvas({
                 style={{
                     width: `${canvasWidth * zoom}px`,
                     height: `${canvasHeight * zoom}px`,
-                    background: '#12141A',
-                    boxShadow: '0 24px 64px rgba(0,0,0,0.7)',
-                    borderRadius: '4px',
+                    background: '#FFFFFF',
+                    boxShadow: '0 20px 48px -12px rgba(16, 21, 29, 0.16), 0 0 0 1px rgba(16, 21, 29, 0.08)',
+                    borderRadius: '8px',
                     overflow: 'visible',
                 }}
                 onContextMenu={(e) => {
@@ -770,6 +772,30 @@ export default function InteractiveVectorCanvas({
                 {/* Selection Bounding Box & Transform Handles */}
                 {selectionBounds && selectedLayers.length > 0 && (
                     <g transform={`translate(${selectionBounds.x}, ${selectionBounds.y})`}>
+                        {/* Layer Label Pill (Image 5 Inspiration) */}
+                        {selectedLayers[0] && (
+                            <g transform="translate(0, -22)">
+                                <rect
+                                    x={0}
+                                    y={0}
+                                    width={Math.min(220, Math.max(64, (selectedLayers[0].name || selectedLayers[0].id).length * 7.5 + 16))}
+                                    height={18}
+                                    rx={4}
+                                    fill="#0B7C91"
+                                />
+                                <text
+                                    x={8}
+                                    y={12.5}
+                                    fill="#FFFFFF"
+                                    fontSize={10}
+                                    fontFamily="Plus Jakarta Sans"
+                                    fontWeight={600}
+                                >
+                                    {selectedLayers[0].name || selectedLayers[0].id}
+                                </text>
+                            </g>
+                        )}
+
                         {/* Outer Selection Border */}
                         <rect
                             x={0}
@@ -777,7 +803,7 @@ export default function InteractiveVectorCanvas({
                             width={selectionBounds.w}
                             height={selectionBounds.h}
                             fill="none"
-                            stroke="#00E5FF"
+                            stroke="#0B7C91"
                             strokeWidth={1.5}
                             pointerEvents="none"
                         />
@@ -800,7 +826,7 @@ export default function InteractiveVectorCanvas({
                                 width={8}
                                 height={8}
                                 fill="#FFFFFF"
-                                stroke="#00E5FF"
+                                stroke="#0B7C91"
                                 strokeWidth={1.5}
                                 style={{ cursor: h.cursor }}
                                 onPointerDown={(e) => handleResizeHandleDown(e, h.id)}
@@ -809,13 +835,13 @@ export default function InteractiveVectorCanvas({
 
                         {/* Top Rotation Handle */}
                         <g transform={`translate(${selectionBounds.w / 2}, -20)`}>
-                            <line x1={0} y1={0} x2={0} y2={20} stroke="#00E5FF" strokeWidth={1} />
+                            <line x1={0} y1={0} x2={0} y2={20} stroke="#0B7C91" strokeWidth={1} />
                             <circle
                                 cx={0}
                                 cy={0}
                                 r={4.5}
                                 fill="#FFFFFF"
-                                stroke="#00E5FF"
+                                stroke="#0B7C91"
                                 strokeWidth={1.5}
                                 style={{ cursor: 'grab' }}
                                 onPointerDown={handleRotationHandleDown}
@@ -853,6 +879,44 @@ export default function InteractiveVectorCanvas({
                     </g>
                 )}
             </svg>
+
+            {/* Floating Bottom Canvas Controls (Images 1 & 3 Inspiration) */}
+            <div style={{
+                position: 'absolute',
+                bottom: '16px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                background: '#FFFFFF',
+                border: '1px solid #E2E8F0',
+                borderRadius: '999px',
+                padding: '4px 14px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+                zIndex: 10,
+            }}>
+                <button
+                    type="button"
+                    onClick={() => setActiveTool(activeTool === 'hand' ? 'select' : 'hand')}
+                    style={{
+                        padding: '4px 8px',
+                        background: activeTool === 'hand' ? '#F0F9FB' : 'transparent',
+                        color: activeTool === 'hand' ? '#0B7C91' : '#64748B',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                    }}
+                >
+                    Pan
+                </button>
+                <div style={{ width: '1px', height: '14px', background: '#E2E8F0' }} />
+                <span style={{ fontSize: '11px', fontWeight: 600, color: '#1E293B', minWidth: '40px', textAlign: 'center' }}>
+                    {Math.round(zoom * 100)}%
+                </span>
+            </div>
         </div>
     );
 }

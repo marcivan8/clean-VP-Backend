@@ -2035,19 +2035,19 @@ export default function DesignStudioPage() {
                         </form>
                     </section>
 
-                    {/* Middle Row: Professional Figma-grade 3-Pane Studio Workspace */}
+                    {/* Middle Row: Modern Hybrid Studio Workspace (Images 4 & 5 Inspiration) */}
                     <div style={{
                         display: 'grid',
-                        gridTemplateColumns: '260px 1fr 320px',
+                        gridTemplateColumns: 'auto 1fr 300px',
                         gap: '16px',
                         alignItems: 'start',
-                        background: '#12141A',
-                        padding: '16px',
+                        background: '#F1F5F9',
+                        padding: '12px',
                         borderRadius: '16px',
-                        border: '1px solid #2A2E39',
-                        boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                        border: '1px solid #E2E8F0',
+                        boxShadow: '0 4px 20px rgba(16, 21, 29, 0.04)',
                     }}>
-                        {/* 1. Left Panel: Layers, Components & Design Tokens */}
+                        {/* 1. Left Panel: 2-Tier Slim Rail + Expandable Layers/Assets Drawer */}
                         <LayersAndAssetsPanel
                             layers={layers}
                             setLayers={setLayers}
@@ -2061,14 +2061,14 @@ export default function DesignStudioPage() {
                             onApplyTypographyStyle={handleApplyTypographyStyle}
                         />
 
-                        {/* 2. Center Stage: Canvas Toolbar, Interactive Vector Canvas & AI Director */}
+                        {/* 2. Center Stage: Canvas Toolbar, Interactive Vector Canvas & AI Copilot */}
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', minWidth: 0 }}>
                             <div style={{
-                                background: '#161920',
-                                border: '1px solid #2A2E39',
+                                background: '#FFFFFF',
+                                border: '1px solid #E2E8F0',
                                 borderRadius: '12px',
                                 overflow: 'hidden',
-                                boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                                boxShadow: '0 4px 16px rgba(16, 21, 29, 0.04)',
                             }}>
                                 <CanvasToolbar
                                     activeTool={activeTool}
@@ -2105,9 +2105,33 @@ export default function DesignStudioPage() {
                                     onUpdateLayer={handleUpdateLayer}
                                     onAddLayer={handleAddLayer}
                                 />
+
+                                {/* Bottom Breadcrumb Bar (Image 5 Inspiration) */}
+                                <div style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    padding: '8px 16px',
+                                    background: '#FFFFFF',
+                                    borderTop: '1px solid #E2E8F0',
+                                    fontSize: '11px',
+                                    color: '#64748B',
+                                }}>
+                                    <span style={{ fontWeight: 600, color: '#0F172A' }}>Artboard</span>
+                                    <span>/</span>
+                                    <span>{currentFormat.label}</span>
+                                    {selectedLayerId && (
+                                        <>
+                                            <span>/</span>
+                                            <span style={{ color: '#0B7C91', fontWeight: 600 }}>
+                                                {selectedLayer.name || selectedLayerId}
+                                            </span>
+                                        </>
+                                    )}
+                                </div>
                             </div>
 
-                            {/* Conversational AI Director ("Or just say it") */}
+                            {/* Floating Collapsible AI Copilot Drawer (Image 1 Inspiration) */}
                             <DesignStudioAiDirector
                                 layers={layers}
                                 setLayers={setLayers}
@@ -2117,7 +2141,7 @@ export default function DesignStudioPage() {
                             />
                         </div>
 
-                        {/* 3. Right Panel: Properties Inspector */}
+                        {/* 3. Right Panel: Properties Inspector with Visual Box-Model Spacing */}
                         <PropertiesInspector
                             selectedLayers={layers.filter(l => selectedLayerIds.includes(l.id))}
                             onUpdateLayer={handleUpdateLayer}

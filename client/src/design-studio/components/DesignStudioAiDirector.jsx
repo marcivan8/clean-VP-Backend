@@ -1,25 +1,31 @@
 /**
  * client/src/design-studio/components/DesignStudioAiDirector.jsx
  *
- * Conversational AI Layer Director ("Or just say it")
- * Bridges natural language commands to the Figma-class vector canvas,
- * with quick suggestion chips, instant execution, and feedback status.
+ * Floating Collapsible AI Copilot Drawer (Directly inspired by Image 1):
+ * - Clean light card styling with soft drop shadow
+ * - Interactive conversation history of design edits
+ * - Contextual quick action pills
+ * - Multi-action natural language input bar
+ * - Expand / Minimize floating toggle
  *
  * Strictly zero emojis.
  */
 
 import React, { useState } from 'react';
-import { Sparkles, ArrowUp, Send, AlertCircle, CheckCircle2 } from 'lucide-react';
+import {
+    Sparkles, ArrowUp, CheckCircle2, AlertCircle,
+    ChevronDown, ChevronUp, Bot, CornerDownLeft, Plus
+} from 'lucide-react';
 import { executeDesignCommand } from '../../agent/DesignStudioCommandRegistry.js';
 
 const QUICK_SUGGESTIONS = [
-    'Make the headline larger, push left',
+    'Make headline larger, push left',
     'Set corner radius to 24px',
     'Apply auto layout with 16px gap',
     'Union selected shapes',
     'Distribute spacing evenly',
     'Apply dark theme mode',
-    'Review design for contrast and legibility',
+    'Review design for contrast',
 ];
 
 export default function DesignStudioAiDirector({
@@ -29,12 +35,22 @@ export default function DesignStudioAiDirector({
     setSelectedLayerIds,
     onDirectionApply,
 }) {
+    const [isExpanded, setIsExpanded] = useState(true);
     const [promptText, setPromptText] = useState('');
-    const [statusMessage, setStatusMessage] = useState(null); // { type: 'success'|'error', text: string }
+    const [history, setHistory] = useState([
+        {
+            role: 'assistant',
+            text: 'I can help you build, transform, and arrange vector layers, auto layout, and typography. Type a command or pick a suggestion.',
+        },
+    ]);
+    const [statusMessage, setStatusMessage] = useState(null);
 
     const handleExecute = (customPrompt = null) => {
         const textToRun = (customPrompt || promptText).trim();
         if (!textToRun) return;
+
+        // Add user prompt to history
+        setHistory(prev => [...prev, { role: 'user', text: textToRun }]);
 
         const ctx = {
             layers,
@@ -47,6 +63,16 @@ export default function DesignStudioAiDirector({
 
         const result = executeDesignCommand(textToRun, ctx);
 
+        // Add assistant response to history
+        setHistory(prev => [
+            ...prev,
+            {
+                role: 'assistant',
+                text: result.message,
+                success: result.success,
+            },
+        ]);
+
         if (result.success) {
             setStatusMessage({ type: 'success', text: result.message });
             setPromptText('');
@@ -54,114 +80,149 @@ export default function DesignStudioAiDirector({
             setStatusMessage({ type: 'error', text: result.message });
         }
 
-        setTimeout(() => {
-            setStatusMessage(null);
-        }, 6000);
+        setTimeout(() => setStatusMessage(null), 5000);
     };
 
-    return (
-        <div style={{
-            background: '#161920',
-            border: '1px solid #2A2E39',
-            borderRadius: '12px',
-            padding: '16px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '12px',
-            userSelect: 'none',
-        }}>
-            {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Sparkles size={16} style={{ color: '#00E5FF' }} />
-                    <span style={{ fontSize: '13px', fontWeight: 700, color: '#FFFFFF', letterSpacing: '0.2px' }}>
-                        Or just say it
-                    </span>
-                </div>
-                <span style={{ fontSize: '11px', color: '#6B7280' }}>
-                    Natural language canvas control
-                </span>
-            </div>
-
-            {/* Prompt Input Form */}
-            <form
-                onSubmit={(e) => {
-                    e.preventDefault();
-                    handleExecute();
-                }}
-                style={{ position: 'relative', display: 'flex', alignItems: 'center' }}
-            >
-                <input
-                    type="text"
-                    value={promptText}
-                    onChange={(e) => setPromptText(e.target.value)}
-                    placeholder="e.g. Make headline larger, add 4px cyan stroke, distribute spacing"
-                    style={{
-                        width: '100%',
-                        padding: '12px 48px 12px 14px',
-                        background: '#1E222B',
-                        border: '1px solid #2A2E39',
-                        borderRadius: '8px',
-                        color: '#FFFFFF',
-                        fontSize: '13px',
-                        outline: 'none',
-                    }}
-                />
+    if (!isExpanded) {
+        return (
+            <div style={{
+                position: 'fixed',
+                bottom: '24px',
+                right: '24px',
+                zIndex: 90,
+            }}>
                 <button
-                    type="submit"
-                    title="Execute design command"
+                    type="button"
+                    onClick={() => setIsExpanded(true)}
                     style={{
-                        position: 'absolute',
-                        right: '8px',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        padding: '6px',
+                        padding: '10px 16px',
                         background: '#0B7C91',
                         color: '#FFFFFF',
                         border: 'none',
-                        borderRadius: '6px',
+                        borderRadius: '999px',
+                        boxShadow: '0 8px 24px rgba(11, 124, 145, 0.35)',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center',
+                        gap: '8px',
+                        fontWeight: 700,
+                        fontSize: '13px',
                     }}
                 >
-                    <ArrowUp size={16} />
+                    <Sparkles size={16} />
+                    <span>AI Copilot</span>
                 </button>
-            </form>
+            </div>
+        );
+    }
 
-            {/* Feedback Message */}
-            {statusMessage && (
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '8px 10px',
-                    borderRadius: '6px',
-                    fontSize: '11px',
-                    background: statusMessage.type === 'error' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(11, 124, 145, 0.15)',
-                    color: statusMessage.type === 'error' ? '#F87171' : '#00E5FF',
-                    border: `1px solid ${statusMessage.type === 'error' ? '#DC2626' : '#0B7C91'}`,
-                }}>
-                    {statusMessage.type === 'error' ? <AlertCircle size={13} /> : <CheckCircle2 size={13} />}
-                    <span>{statusMessage.text}</span>
+    return (
+        <div style={{
+            background: '#FFFFFF',
+            border: '1px solid #E2E8F0',
+            borderRadius: '16px',
+            boxShadow: '0 8px 24px rgba(16, 21, 29, 0.08)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            userSelect: 'none',
+        }}>
+            {/* Header (Image 1 Inspiration) */}
+            <div style={{
+                padding: '12px 16px',
+                background: '#F8FAFC',
+                borderBottom: '1px solid #F1F5F9',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '6px',
+                        background: '#F0F9FB',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#0B7C91',
+                    }}>
+                        <Sparkles size={14} />
+                    </div>
+                    <div>
+                        <div style={{ fontSize: '13px', fontWeight: 700, color: '#0F172A' }}>
+                            VIBED AI Copilot
+                        </div>
+                    </div>
                 </div>
-            )}
 
-            {/* Quick Suggestion Chips */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                {QUICK_SUGGESTIONS.map((sug, idx) => (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10B981' }} />
+                        <span style={{ fontSize: '10px', color: '#64748B', fontWeight: 600 }}>Active</span>
+                    </div>
                     <button
-                        key={idx}
+                        type="button"
+                        onClick={() => setIsExpanded(false)}
+                        title="Minimize"
+                        style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: '2px' }}
+                    >
+                        <ChevronDown size={16} />
+                    </button>
+                </div>
+            </div>
+
+            {/* Message Stream */}
+            <div style={{
+                maxHeight: '140px',
+                overflowY: 'auto',
+                padding: '12px 16px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                fontSize: '12px',
+                background: '#FFFFFF',
+            }}>
+                {history.map((msg, i) => (
+                    <div
+                        key={i}
+                        style={{
+                            alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                            maxWidth: '90%',
+                            padding: '8px 12px',
+                            borderRadius: msg.role === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
+                            background: msg.role === 'user' ? '#0B7C91' : '#F1F5F9',
+                            color: msg.role === 'user' ? '#FFFFFF' : '#1E293B',
+                            lineHeight: 1.4,
+                        }}
+                    >
+                        {msg.text}
+                    </div>
+                ))}
+            </div>
+
+            {/* Quick Prompt Suggestions */}
+            <div style={{
+                padding: '6px 14px',
+                display: 'flex',
+                gap: '6px',
+                overflowX: 'auto',
+                background: '#FAFAFA',
+                borderTop: '1px solid #F1F5F9',
+            }}>
+                {QUICK_SUGGESTIONS.map((sug, i) => (
+                    <button
+                        key={i}
                         type="button"
                         onClick={() => handleExecute(sug)}
                         style={{
                             padding: '4px 8px',
-                            background: '#1E222B',
-                            border: '1px solid #2A2E39',
-                            borderRadius: '12px',
-                            color: '#9CA3AF',
+                            background: '#FFFFFF',
+                            border: '1px solid #E2E8F0',
+                            borderRadius: '999px',
                             fontSize: '11px',
+                            color: '#64748B',
+                            whiteSpace: 'nowrap',
                             cursor: 'pointer',
                         }}
                     >
@@ -170,8 +231,54 @@ export default function DesignStudioAiDirector({
                 ))}
             </div>
 
-            <div style={{ fontSize: '11px', color: '#6B7280' }}>
-                Every AI change lands as ordinary vector layers you can drag, retype, transform, or undo.
+            {/* Input Bar (Image 1 Inspiration) */}
+            <div style={{ padding: '10px 14px 12px', background: '#FFFFFF', borderTop: '1px solid #F1F5F9' }}>
+                <form
+                    onSubmit={(e) => {
+                        e.preventDefault();
+                        handleExecute();
+                    }}
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        background: '#F8FAFC',
+                        border: '1px solid #E2E8F0',
+                        borderRadius: '10px',
+                        padding: '4px 6px 4px 12px',
+                    }}
+                >
+                    <input
+                        type="text"
+                        value={promptText}
+                        onChange={(e) => setPromptText(e.target.value)}
+                        placeholder="Type / for quick access or describe changes..."
+                        style={{
+                            flex: 1,
+                            background: 'transparent',
+                            border: 'none',
+                            outline: 'none',
+                            fontSize: '12.5px',
+                            color: '#0F172A',
+                        }}
+                    />
+                    <button
+                        type="submit"
+                        style={{
+                            padding: '6px 10px',
+                            background: '#0B7C91',
+                            color: '#FFFFFF',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                        }}
+                    >
+                        <ArrowUp size={14} />
+                    </button>
+                </form>
             </div>
         </div>
     );

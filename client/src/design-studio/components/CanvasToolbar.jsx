@@ -1,8 +1,8 @@
 /**
  * client/src/design-studio/components/CanvasToolbar.jsx
  *
- * Professional Figma-grade top canvas tool shelf.
- * Includes Selection, Frame, Vector Shapes (Rect, Ellipse, Line, Polygon, Star),
+ * Professional Clean Light Canvas Toolbar (Inspired by Images 4 & 5).
+ * Tools: Select, Hand, Frame, Shapes (Rect, Ellipse, Line, Polygon, Star),
  * Pen & Bézier, Pencil, Text, Image, Boolean Operations, and Layout Guides.
  *
  * Strictly zero emojis.
@@ -11,9 +11,8 @@
 import React, { useState } from 'react';
 import {
     MousePointer, Hand, Frame, Square, Circle, Minus, Hexagon,
-    Star, PenTool, Edit3, Type, Image as ImageIcon, Combine,
-    Layers, Grid, Magnet, ZoomIn, ZoomOut, Maximize2,
-    FolderPlus, Scissors, Sparkles, ChevronDown
+    Star, PenTool, Edit3, Type, Image as ImageIcon,
+    Magnet, Grid, ZoomIn, ZoomOut, FolderPlus, ChevronDown
 } from 'lucide-react';
 
 export default function CanvasToolbar({
@@ -41,8 +40,8 @@ export default function CanvasToolbar({
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '8px 16px',
-            background: 'var(--surface, #161920)',
-            borderBottom: '1px solid var(--border, #2A2E39)',
+            background: '#FFFFFF',
+            borderBottom: '1px solid #E2E8F0',
             borderRadius: '12px 12px 0 0',
             userSelect: 'none',
         }}>
@@ -55,9 +54,9 @@ export default function CanvasToolbar({
                     title="Select (V)"
                     style={{
                         padding: '6px 10px',
-                        background: activeTool === 'select' ? '#0B7C91' : 'transparent',
-                        color: activeTool === 'select' ? '#FFFFFF' : '#EDEAE3',
-                        border: 'none',
+                        background: activeTool === 'select' ? '#F0F9FB' : 'transparent',
+                        color: activeTool === 'select' ? '#0B7C91' : '#475569',
+                        border: activeTool === 'select' ? '1px solid #0B7C91' : '1px solid transparent',
                         borderRadius: '6px',
                         cursor: 'pointer',
                         display: 'flex',
@@ -77,9 +76,9 @@ export default function CanvasToolbar({
                     title="Hand Tool (H)"
                     style={{
                         padding: '6px 10px',
-                        background: activeTool === 'hand' ? '#0B7C91' : 'transparent',
-                        color: activeTool === 'hand' ? '#FFFFFF' : '#EDEAE3',
-                        border: 'none',
+                        background: activeTool === 'hand' ? '#F0F9FB' : 'transparent',
+                        color: activeTool === 'hand' ? '#0B7C91' : '#475569',
+                        border: activeTool === 'hand' ? '1px solid #0B7C91' : '1px solid transparent',
                         borderRadius: '6px',
                         cursor: 'pointer',
                         display: 'flex',
@@ -89,7 +88,7 @@ export default function CanvasToolbar({
                     <Hand size={15} />
                 </button>
 
-                <div style={{ width: '1px', height: '20px', background: '#2A2E39', margin: '0 4px' }} />
+                <div style={{ width: '1px', height: '18px', background: '#E2E8F0', margin: '0 4px' }} />
 
                 {/* Frame Tool */}
                 <button
@@ -98,9 +97,9 @@ export default function CanvasToolbar({
                     title="Frame (F)"
                     style={{
                         padding: '6px 10px',
-                        background: activeTool === 'frame' ? '#0B7C91' : 'transparent',
-                        color: activeTool === 'frame' ? '#FFFFFF' : '#EDEAE3',
-                        border: 'none',
+                        background: activeTool === 'frame' ? '#F0F9FB' : 'transparent',
+                        color: activeTool === 'frame' ? '#0B7C91' : '#475569',
+                        border: activeTool === 'frame' ? '1px solid #0B7C91' : '1px solid transparent',
                         borderRadius: '6px',
                         cursor: 'pointer',
                         display: 'flex',
@@ -119,9 +118,9 @@ export default function CanvasToolbar({
                             title="Shapes (R)"
                             style={{
                                 padding: '6px 8px',
-                                background: isShapeTool ? '#0B7C91' : 'transparent',
-                                color: isShapeTool ? '#FFFFFF' : '#EDEAE3',
-                                border: 'none',
+                                background: isShapeTool ? '#F0F9FB' : 'transparent',
+                                color: isShapeTool ? '#0B7C91' : '#475569',
+                                border: isShapeTool ? '1px solid #0B7C91' : '1px solid transparent',
                                 borderRadius: '6px 0 0 6px',
                                 cursor: 'pointer',
                                 display: 'flex',
@@ -139,9 +138,10 @@ export default function CanvasToolbar({
                             onClick={() => setShapeDropdownOpen(!shapeDropdownOpen)}
                             style={{
                                 padding: '6px 4px',
-                                background: isShapeTool ? '#0B7C91' : 'transparent',
-                                color: isShapeTool ? '#FFFFFF' : '#EDEAE3',
-                                border: 'none',
+                                background: isShapeTool ? '#F0F9FB' : 'transparent',
+                                color: isShapeTool ? '#0B7C91' : '#475569',
+                                border: isShapeTool ? '1px solid #0B7C91' : '1px solid transparent',
+                                borderLeft: 'none',
                                 borderRadius: '0 6px 6px 0',
                                 cursor: 'pointer',
                                 display: 'flex',
@@ -159,8 +159,8 @@ export default function CanvasToolbar({
                                 top: '100%',
                                 left: 0,
                                 marginTop: '4px',
-                                background: '#161920',
-                                border: '1px solid #2A2E39',
+                                background: '#FFFFFF',
+                                border: '1px solid #E2E8F0',
                                 borderRadius: '8px',
                                 padding: '4px',
                                 display: 'flex',
@@ -168,7 +168,7 @@ export default function CanvasToolbar({
                                 gap: '2px',
                                 zIndex: 100,
                                 minWidth: '130px',
-                                boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                                boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
                             }}
                             onMouseLeave={() => setShapeDropdownOpen(false)}
                         >
@@ -191,8 +191,8 @@ export default function CanvasToolbar({
                                         alignItems: 'center',
                                         justifyContent: 'space-between',
                                         padding: '6px 8px',
-                                        background: activeTool === item.id ? '#0B7C91' : 'transparent',
-                                        color: '#EDEAE3',
+                                        background: activeTool === item.id ? '#F0F9FB' : 'transparent',
+                                        color: activeTool === item.id ? '#0B7C91' : '#1E293B',
                                         border: 'none',
                                         borderRadius: '4px',
                                         cursor: 'pointer',
@@ -204,7 +204,7 @@ export default function CanvasToolbar({
                                         <item.icon size={14} />
                                         <span>{item.label}</span>
                                     </div>
-                                    <span style={{ color: '#6B7280', fontSize: '10px' }}>{item.shortcut}</span>
+                                    <span style={{ color: '#94A3B8', fontSize: '10px' }}>{item.shortcut}</span>
                                 </button>
                             ))}
                         </div>
@@ -218,9 +218,9 @@ export default function CanvasToolbar({
                     title="Pen Tool (P)"
                     style={{
                         padding: '6px 10px',
-                        background: activeTool === 'pen' ? '#0B7C91' : 'transparent',
-                        color: activeTool === 'pen' ? '#FFFFFF' : '#EDEAE3',
-                        border: 'none',
+                        background: activeTool === 'pen' ? '#F0F9FB' : 'transparent',
+                        color: activeTool === 'pen' ? '#0B7C91' : '#475569',
+                        border: activeTool === 'pen' ? '1px solid #0B7C91' : '1px solid transparent',
                         borderRadius: '6px',
                         cursor: 'pointer',
                         display: 'flex',
@@ -237,9 +237,9 @@ export default function CanvasToolbar({
                     title="Pencil Tool (Shift+P)"
                     style={{
                         padding: '6px 10px',
-                        background: activeTool === 'pencil' ? '#0B7C91' : 'transparent',
-                        color: activeTool === 'pencil' ? '#FFFFFF' : '#EDEAE3',
-                        border: 'none',
+                        background: activeTool === 'pencil' ? '#F0F9FB' : 'transparent',
+                        color: activeTool === 'pencil' ? '#0B7C91' : '#475569',
+                        border: activeTool === 'pencil' ? '1px solid #0B7C91' : '1px solid transparent',
                         borderRadius: '6px',
                         cursor: 'pointer',
                         display: 'flex',
@@ -256,9 +256,9 @@ export default function CanvasToolbar({
                     title="Text (T)"
                     style={{
                         padding: '6px 10px',
-                        background: activeTool === 'text' ? '#0B7C91' : 'transparent',
-                        color: activeTool === 'text' ? '#FFFFFF' : '#EDEAE3',
-                        border: 'none',
+                        background: activeTool === 'text' ? '#F0F9FB' : 'transparent',
+                        color: activeTool === 'text' ? '#0B7C91' : '#475569',
+                        border: activeTool === 'text' ? '1px solid #0B7C91' : '1px solid transparent',
                         borderRadius: '6px',
                         cursor: 'pointer',
                         display: 'flex',
@@ -276,7 +276,7 @@ export default function CanvasToolbar({
                     style={{
                         padding: '6px 10px',
                         background: 'transparent',
-                        color: '#EDEAE3',
+                        color: '#475569',
                         border: 'none',
                         borderRadius: '6px',
                         cursor: 'pointer',
@@ -294,82 +294,34 @@ export default function CanvasToolbar({
                     display: 'flex',
                     alignItems: 'center',
                     gap: '4px',
-                    background: '#1F242D',
+                    background: '#F8FAFC',
                     padding: '2px 6px',
                     borderRadius: '8px',
-                    border: '1px solid #333842',
+                    border: '1px solid #E2E8F0',
                 }}>
-                    <span style={{ fontSize: '11px', color: '#9CA3AF', paddingRight: '4px', fontWeight: 600 }}>
+                    <span style={{ fontSize: '11px', color: '#64748B', paddingRight: '4px', fontWeight: 600 }}>
                         Boolean:
                     </span>
-                    <button
-                        type="button"
-                        onClick={() => onExecuteBoolean('union')}
-                        title="Union Selection"
-                        style={{
-                            padding: '4px 6px',
-                            background: 'transparent',
-                            color: '#00E5FF',
-                            border: 'none',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontSize: '11px',
-                            fontWeight: 600,
-                        }}
-                    >
-                        Union
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => onExecuteBoolean('subtract')}
-                        title="Subtract Selection"
-                        style={{
-                            padding: '4px 6px',
-                            background: 'transparent',
-                            color: '#00E5FF',
-                            border: 'none',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontSize: '11px',
-                            fontWeight: 600,
-                        }}
-                    >
-                        Subtract
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => onExecuteBoolean('intersect')}
-                        title="Intersect Selection"
-                        style={{
-                            padding: '4px 6px',
-                            background: 'transparent',
-                            color: '#00E5FF',
-                            border: 'none',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontSize: '11px',
-                            fontWeight: 600,
-                        }}
-                    >
-                        Intersect
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => onExecuteBoolean('exclude')}
-                        title="Exclude Selection"
-                        style={{
-                            padding: '4px 6px',
-                            background: 'transparent',
-                            color: '#00E5FF',
-                            border: 'none',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontSize: '11px',
-                            fontWeight: 600,
-                        }}
-                    >
-                        Exclude
-                    </button>
+                    {['union', 'subtract', 'intersect', 'exclude'].map(op => (
+                        <button
+                            key={op}
+                            type="button"
+                            onClick={() => onExecuteBoolean(op)}
+                            style={{
+                                padding: '4px 6px',
+                                background: 'transparent',
+                                color: '#0B7C91',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                textTransform: 'capitalize',
+                            }}
+                        >
+                            {op}
+                        </button>
+                    ))}
                 </div>
             )}
 
@@ -383,15 +335,16 @@ export default function CanvasToolbar({
                         title="Group Selected (Cmd+G)"
                         style={{
                             padding: '5px 8px',
-                            background: 'transparent',
-                            color: '#EDEAE3',
-                            border: '1px solid #2A2E39',
+                            background: '#F8FAFC',
+                            color: '#1E293B',
+                            border: '1px solid #E2E8F0',
                             borderRadius: '6px',
                             cursor: 'pointer',
                             fontSize: '11px',
                             display: 'flex',
                             alignItems: 'center',
                             gap: '4px',
+                            fontWeight: 500,
                         }}
                     >
                         <FolderPlus size={13} />
@@ -406,9 +359,9 @@ export default function CanvasToolbar({
                     title={snapToGrid ? 'Snap enabled' : 'Snap disabled'}
                     style={{
                         padding: '6px',
-                        background: snapToGrid ? '#0B7C91' : 'transparent',
-                        color: snapToGrid ? '#FFFFFF' : '#9CA3AF',
-                        border: 'none',
+                        background: snapToGrid ? '#F0F9FB' : 'transparent',
+                        color: snapToGrid ? '#0B7C91' : '#94A3B8',
+                        border: snapToGrid ? '1px solid #0B7C91' : '1px solid transparent',
                         borderRadius: '6px',
                         cursor: 'pointer',
                         display: 'flex',
@@ -425,9 +378,9 @@ export default function CanvasToolbar({
                     title={showGuides ? 'Hide layout guides' : 'Show layout guides'}
                     style={{
                         padding: '6px',
-                        background: showGuides ? '#0B7C91' : 'transparent',
-                        color: showGuides ? '#FFFFFF' : '#9CA3AF',
-                        border: 'none',
+                        background: showGuides ? '#F0F9FB' : 'transparent',
+                        color: showGuides ? '#0B7C91' : '#94A3B8',
+                        border: showGuides ? '1px solid #0B7C91' : '1px solid transparent',
                         borderRadius: '6px',
                         cursor: 'pointer',
                         display: 'flex',
@@ -441,10 +394,10 @@ export default function CanvasToolbar({
                 <div style={{
                     display: 'flex',
                     alignItems: 'center',
-                    background: '#1E222B',
+                    background: '#F8FAFC',
                     borderRadius: '6px',
                     padding: '2px 4px',
-                    border: '1px solid #2A2E39',
+                    border: '1px solid #E2E8F0',
                 }}>
                     <button
                         type="button"
@@ -453,7 +406,7 @@ export default function CanvasToolbar({
                         style={{
                             padding: '4px',
                             background: 'transparent',
-                            color: '#EDEAE3',
+                            color: '#475569',
                             border: 'none',
                             cursor: 'pointer',
                             display: 'flex',
@@ -462,7 +415,7 @@ export default function CanvasToolbar({
                     >
                         <ZoomOut size={13} />
                     </button>
-                    <span style={{ fontSize: '11px', color: '#EDEAE3', minWidth: '38px', textAlign: 'center', fontWeight: 600 }}>
+                    <span style={{ fontSize: '11px', color: '#0F172A', minWidth: '38px', textAlign: 'center', fontWeight: 600 }}>
                         {Math.round(zoom * 100)}%
                     </span>
                     <button
@@ -472,7 +425,7 @@ export default function CanvasToolbar({
                         style={{
                             padding: '4px',
                             background: 'transparent',
-                            color: '#EDEAE3',
+                            color: '#475569',
                             border: 'none',
                             cursor: 'pointer',
                             display: 'flex',
