@@ -17,8 +17,9 @@ ENV LLAMA_ARG_CONT_BATCHING="true"
 # Overridable with your own fine-tuned model via Railway env vars:
 ENV LLAMA_ARG_HF_REPO="Qwen/Qwen2.5-3B-Instruct-GGUF"
 ENV LLAMA_ARG_HF_FILE="qwen2.5-3b-instruct-q4_k_m.gguf"
+ENV LLAMA_ARG_ALIAS="editorial-brain-3b,qwen2.5-3b-instruct-q4_k_m.gguf"
 
 # Expose standard Railway HTTP port
 EXPOSE 8080
 
-CMD ["--hf-repo", "Qwen/Qwen2.5-3B-Instruct-GGUF", "--hf-file", "qwen2.5-3b-instruct-q4_k_m.gguf"]
+CMD ["--hf-repo", "Qwen/Qwen2.5-3B-Instruct-GGUF", "--hf-file", "qwen2.5-3b-instruct-q4_k_m.gguf", "--alias", "editorial-brain-3b,qwen2.5-3b-instruct-q4_k_m.gguf"]

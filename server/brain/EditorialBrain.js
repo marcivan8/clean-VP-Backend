@@ -366,8 +366,8 @@ class EditorialBrain {
             const platform = input?.context?.platform || null;
 
             const brainTarget = getBrainAIClient();
-            const primaryModel = brainTarget.isCustom ? brainTarget.model : resolveModel('gpt-4o', 'chat');
-            const isGroq = !brainTarget.isCustom && resolveProvider({ capability: 'chat' }) === 'groq';
+            const cloudModel = resolveModel('gpt-4o', 'chat');
+            const isGroq = resolveProvider({ capability: 'chat' }) === 'groq';
 
             // Groq free-tier has a strict 8,000 TPM limit where requested = prompt_tokens + max_tokens.
             // When running under Groq (or when compact mode is requested), compact the prompt
@@ -388,7 +388,7 @@ class EditorialBrain {
 
             const maxTokens = isGroq ? 700 : 1200;
             const callPayload = {
-                model: primaryModel,
+                model: cloudModel,
                 temperature,
                 max_tokens: maxTokens,
                 ...(isGroq ? { reasoning_effort: 'low' } : {}),
@@ -418,9 +418,9 @@ class EditorialBrain {
                 try {
                     completion = await this.openai.chat.completions.create(callPayload);
                 } catch (firstErr) {
-                const isRateLimit = firstErr.status === 429 || /429|rate limit/i.test(firstErr.message);
-                const isTokenLimit = firstErr.status === 413 || /413|request too large|tokens per minute|tpm/i.test(firstErr.message);
-                if (isRateLimit || isTokenLimit) {
+                    console.warn(`[EditorialBrain] Primary cloud model (${callPayload.model}) failed: ${firstErr.message}`);
+                    const isRateLimit = firstErr.status === 429 || /429|rate limit/i.test(firstErr.message);
+                    const isTokenLimit = firstErr.status === 413 || /413|request too large|tokens per minute|tpm/i.test(firstErr.message);
                     const match = firstErr.message?.match(/try again in ([\d\.]+)s/i);
                     const waitSec = match ? parseFloat(match[1]) : null;
 
@@ -476,32 +476,22 @@ class EditorialBrain {
                         callPayload.messages[0].content = ultraCompactPrompt;
                         callPayload.max_tokens = Math.min(callPayload.max_tokens, 500);
                         completion = await callGroqFallback();
-                    } else if (waitSec !== null && waitSec <= 6) {
+                    } else if (isRateLimit && waitSec !== null && waitSec <= 6) {
                         console.warn(`[EditorialBrain] 429 rate limit hit — backing off for ${waitSec.toFixed(1)}s...`);
                         await new Promise(r => setTimeout(r, Math.ceil(waitSec * 1000) + 250));
                         try {
                             completion = await this.openai.chat.completions.create(callPayload);
                         } catch (retryErr) {
-                            if (isGroq && callPayload.model.includes('gpt-oss')) {
-                                console.warn('[EditorialBrain] Still rate limited on gpt-oss; switching to fallback');
-                                completion = await callGroqFallback();
-                            } else {
-                                throw retryErr;
-                            }
+                            console.warn('[EditorialBrain] Retry after rate limit failed; switching to fallback:', retryErr.message);
+                            completion = await callGroqFallback();
                         }
-                    } else if (isGroq && callPayload.model.includes('gpt-oss')) {
-                        console.warn('[EditorialBrain] 429 limit on gpt-oss; immediately falling back to alternative model');
-                        completion = await callGroqFallback();
                     } else {
-                        throw firstErr;
+                        completion = await callGroqFallback();
                     }
-                } else {
-                    throw firstErr;
                 }
             }
-        }
 
-            const raw = completion.choices[0]?.message?.content;
+            const raw = completion?.choices?.[0]?.message?.content;
             if (!raw) return this.fallbackOutput(input?.rawInput);
 
             const parseResult = repairAndParseJSON(raw);
