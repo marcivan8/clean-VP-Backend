@@ -16,7 +16,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
     Search, Filter, MapPin, Star, ShieldCheck, CheckCircle2,
-    Calendar, Clock, Check, ChevronDown, ArrowRight, Lock, Users, Sparkles,
+    Calendar, Clock, Check, ChevronDown, ChevronLeft, ArrowRight, Lock, Users, Sparkles,
     Menu, X
 } from 'lucide-react';
 
@@ -199,8 +199,8 @@ export default function MarketplacePage() {
                     border: '1px solid rgba(16, 21, 29, 0.1)',
                     boxShadow: '0 12px 36px -6px rgba(16, 21, 29, 0.09), 0 2px 8px -2px rgba(16, 21, 29, 0.04)',
                 }}>
-                    {/* Left: Brand Logo & Wordmark */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    {/* Left: Brand Logo & Wordmark + Quick Back to Projects */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <div
                             onClick={() => navigate('/dashboard')}
                             style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}
@@ -216,99 +216,104 @@ export default function MarketplacePage() {
                                 VIBED
                             </span>
                         </div>
-                    </div>
-
-                    {/* Center: Desktop Navigation Pills */}
-                    <nav className="hidden md:flex" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <button
                             type="button"
                             onClick={() => navigate('/dashboard')}
+                            title="Return to Projects"
                             style={{
-                                background: 'transparent',
-                                border: 'none',
-                                color: '#5F6876',
-                                fontSize: 13,
-                                fontWeight: 500,
-                                padding: '6px 14px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                background: '#F4F6F8',
+                                border: '1px solid rgba(16, 21, 29, 0.08)',
                                 borderRadius: 999,
-                                cursor: 'pointer',
-                                transition: 'all 0.15s ease',
-                            }}
-                        >
-                            Projects
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => navigate('/marketplace')}
-                            style={{
-                                background: '#10151D',
-                                border: 'none',
-                                color: '#FFFFFF',
-                                fontSize: 13,
+                                padding: '3px 10px',
+                                fontSize: 11.5,
                                 fontWeight: 600,
-                                padding: '6px 16px',
-                                borderRadius: 999,
-                                cursor: 'pointer',
-                                boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
-                            }}
-                        >
-                            Market
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => navigate('/design')}
-                            style={{
-                                background: 'transparent',
-                                border: 'none',
                                 color: '#5F6876',
-                                fontSize: 13,
-                                fontWeight: 500,
-                                padding: '6px 14px',
-                                borderRadius: 999,
                                 cursor: 'pointer',
                                 transition: 'all 0.15s ease',
                             }}
                         >
-                            Design Studio
+                            <ChevronLeft size={13} />
+                            <span>Projects</span>
                         </button>
-                        <button
-                            type="button"
-                            onClick={() => navigate('/style')}
-                            style={{
-                                background: 'transparent',
-                                border: 'none',
-                                color: '#5F6876',
-                                fontSize: 13,
-                                fontWeight: 500,
-                                padding: '6px 14px',
-                                borderRadius: 999,
-                                cursor: 'pointer',
-                                transition: 'all 0.15s ease',
-                            }}
-                        >
-                            Style
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => navigate('/account')}
-                            style={{
-                                background: 'transparent',
-                                border: 'none',
-                                color: '#5F6876',
-                                fontSize: 13,
-                                fontWeight: 500,
-                                padding: '6px 14px',
-                                borderRadius: 999,
-                                cursor: 'pointer',
-                                transition: 'all 0.15s ease',
-                            }}
-                        >
-                            Billing
-                        </button>
+                    </div>
+
+                    {/* Center: Primary Marketplace Tabs (Discover, Bookings, Call Sheet, Messages, Asset Room) */}
+                    <nav className="hidden md:flex" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {[
+                            { id: 'discover', label: 'Discover' },
+                            { id: 'bookings', label: 'Bookings', badge: metrics.needsYou > 0 ? metrics.needsYou : null },
+                            { id: 'callsheet', label: 'Call Sheet' },
+                            { id: 'messages', label: 'Messages', badge: '3' },
+                            { id: 'assetroom', label: 'Asset Room' },
+                        ].map(tab => {
+                            const isSel = activeTab === tab.id;
+                            return (
+                                <button
+                                    key={tab.id}
+                                    type="button"
+                                    onClick={() => setActiveTab(tab.id)}
+                                    style={{
+                                        background: isSel ? '#10151D' : 'transparent',
+                                        color: isSel ? '#FFFFFF' : '#5F6876',
+                                        border: isSel ? '1px solid #10151D' : 'none',
+                                        padding: isSel ? '6px 14px' : '6px 12px',
+                                        borderRadius: 999,
+                                        fontSize: 13,
+                                        fontWeight: isSel ? 700 : 500,
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 6,
+                                        transition: 'all 0.15s ease',
+                                        boxShadow: isSel ? '0 2px 8px rgba(0,0,0,0.12)' : 'none',
+                                    }}
+                                >
+                                    <span>{tab.label}</span>
+                                    {tab.badge && (
+                                        <span style={{
+                                            background: isSel ? '#00E5FF' : 'rgba(11, 124, 145, 0.12)',
+                                            color: isSel ? '#10151D' : '#0B7C91',
+                                            fontSize: 10,
+                                            fontWeight: 800,
+                                            padding: '1px 6px',
+                                            borderRadius: 999,
+                                        }}>
+                                            {tab.badge}
+                                        </span>
+                                    )}
+                                </button>
+                            );
+                        })}
                     </nav>
 
-                    {/* Right: Pro Badge & User Status */}
+                    {/* Right: Escrow & Ledger + Pro Badge */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <button
+                            type="button"
+                            onClick={() => setLedgerOpen(true)}
+                            className="hidden sm:flex"
+                            style={{
+                                background: '#FAF9F6',
+                                border: '1px solid rgba(26, 28, 34, 0.12)',
+                                color: '#10151D',
+                                padding: '5px 12px',
+                                borderRadius: 999,
+                                fontSize: 11.5,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 5,
+                                transition: 'all 0.15s ease',
+                            }}
+                        >
+                            <ShieldCheck size={13} color="#0B7C91" />
+                            <span>Escrow & Ledger</span>
+                        </button>
+
                         <div style={{
                             display: 'flex',
                             alignItems: 'center',
@@ -363,11 +368,34 @@ export default function MarketplacePage() {
                     flexDirection: 'column',
                     gap: 6,
                 }}>
-                    <button onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: '#10151D', fontSize: 14 }}>Projects</button>
-                    <button onClick={() => { setMobileMenuOpen(false); navigate('/marketplace'); }} style={{ textAlign: 'left', padding: '10px 14px', background: '#F6F7F9', border: 'none', color: '#0B7C91', fontSize: 14, fontWeight: 600, borderRadius: 8 }}>Market</button>
-                    <button onClick={() => { setMobileMenuOpen(false); navigate('/design'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: '#10151D', fontSize: 14 }}>Design Studio</button>
-                    <button onClick={() => { setMobileMenuOpen(false); navigate('/style'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: '#10151D', fontSize: 14 }}>Style</button>
-                    <button onClick={() => { setMobileMenuOpen(false); navigate('/account'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: '#10151D', fontSize: 14 }}>Billing</button>
+                    {[
+                        { id: 'discover', label: 'Discover' },
+                        { id: 'bookings', label: 'Bookings' },
+                        { id: 'callsheet', label: 'Call Sheet' },
+                        { id: 'messages', label: 'Messages' },
+                        { id: 'assetroom', label: 'Asset Room' },
+                    ].map(tab => (
+                        <button
+                            key={tab.id}
+                            onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }}
+                            style={{
+                                textAlign: 'left',
+                                padding: '10px 14px',
+                                background: activeTab === tab.id ? '#10151D' : 'none',
+                                border: 'none',
+                                color: activeTab === tab.id ? '#FFFFFF' : '#10151D',
+                                fontSize: 14,
+                                fontWeight: activeTab === tab.id ? 700 : 500,
+                                borderRadius: 8,
+                            }}
+                        >
+                            {tab.label}
+                        </button>
+                    ))}
+                    <div style={{ height: 1, background: 'rgba(16, 21, 29, 0.08)', margin: '6px 0' }} />
+                    <button onClick={() => { setMobileMenuOpen(false); setLedgerOpen(true); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: '#0B7C91', fontSize: 14, fontWeight: 600 }}>Escrow & Ledger</button>
+                    <button onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: '#5F6876', fontSize: 13 }}>← Back to Projects</button>
+                    <button onClick={() => { setMobileMenuOpen(false); navigate('/design'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: '#5F6876', fontSize: 13 }}>Design Studio</button>
                 </div>
             )}
 
@@ -375,92 +403,10 @@ export default function MarketplacePage() {
             <main style={{
                 maxWidth: 1240,
                 margin: '0 auto',
-                padding: '36px 20px 80px',
+                padding: '24px 20px 80px',
                 position: 'relative',
                 zIndex: 1,
             }}>
-                {/* Marketplace Sub-Navigation Hub */}
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    flexWrap: 'wrap',
-                    gap: 12,
-                    marginBottom: 28,
-                    borderBottom: '1px solid rgba(26, 28, 34, 0.08)',
-                    paddingBottom: 14,
-                }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        {[
-                            { id: 'discover', label: 'Discover' },
-                            { id: 'bookings', label: 'Bookings', badge: metrics.needsYou > 0 ? metrics.needsYou : null },
-                            { id: 'callsheet', label: 'Call Sheet' },
-                            { id: 'messages', label: 'Messages', badge: '3' },
-                            { id: 'assetroom', label: 'Asset Room' },
-                        ].map(tab => {
-                            const isSel = activeTab === tab.id;
-                            return (
-                                <button
-                                    key={tab.id}
-                                    type="button"
-                                    onClick={() => setActiveTab(tab.id)}
-                                    style={{
-                                        background: isSel ? '#1A1C22' : '#FFFFFF',
-                                        color: isSel ? '#FFFFFF' : '#1A1C22',
-                                        border: isSel ? '1px solid #1A1C22' : '1px solid rgba(26, 28, 34, 0.12)',
-                                        padding: '7px 16px',
-                                        borderRadius: 999,
-                                        fontSize: 13,
-                                        fontWeight: isSel ? 700 : 500,
-                                        cursor: 'pointer',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: 6,
-                                        transition: 'all 0.15s',
-                                        boxShadow: isSel ? '0 2px 8px rgba(0,0,0,0.15)' : 'none',
-                                    }}
-                                >
-                                    <span>{tab.label}</span>
-                                    {tab.badge && (
-                                        <span style={{
-                                            background: isSel ? '#00E5FF' : 'rgba(11, 124, 145, 0.12)',
-                                            color: isSel ? '#1A1C22' : '#0B7C91',
-                                            fontSize: 10,
-                                            fontWeight: 800,
-                                            padding: '1px 6px',
-                                            borderRadius: 999,
-                                        }}>
-                                            {tab.badge}
-                                        </span>
-                                    )}
-                                </button>
-                            );
-                        })}
-                    </div>
-
-                    {/* Right action: Escrow & Ledger modal trigger */}
-                    <button
-                        type="button"
-                        onClick={() => setLedgerOpen(true)}
-                        style={{
-                            background: '#FAF9F6',
-                            border: '1px solid rgba(26, 28, 34, 0.14)',
-                            color: '#1A1C22',
-                            padding: '7px 16px',
-                            borderRadius: 999,
-                            fontSize: 12.5,
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 6,
-                        }}
-                    >
-                        <ShieldCheck size={14} color="#0B7C91" />
-                        Escrow & Ledger
-                    </button>
-                </div>
-
                 {/* Sub-view switcher */}
                 {activeTab === 'bookings' && <MarketplaceBookings />}
                 {activeTab === 'callsheet' && <MarketplaceCallSheet />}
@@ -1015,6 +961,15 @@ export default function MarketplacePage() {
                                 if (newLoc && newLoc.trim()) {
                                     setUserLocation(newLoc.trim());
                                 }
+                            }}
+                            onQuickBook={(item) => {
+                                setBookingItemData({
+                                    listing: item,
+                                    serviceType: item.type === 'studio' ? 'Studio half-day hire' : 'Half-day operator session',
+                                    date: requestedDate,
+                                    timeSlot: 'Morning (09:00 - 13:00)',
+                                    totalPrice: item.priceHalfDay,
+                                });
                             }}
                         />
                     </div>
