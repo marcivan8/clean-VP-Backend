@@ -86,8 +86,9 @@ export default function DesignStudioPage() {
     const { isPro, plan } = useUserPlan();
     const { projectName, addOverlayClip, assets: timelineAssets = [] } = useTimelineStore();
 
-    // Sidebar Collapse state (Option A)
-    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+    // Format Dropdown & Variations Tray State
+    const [formatDropdownOpen, setFormatDropdownOpen] = useState(false);
+    const [showVariationsTray, setShowVariationsTray] = useState(false);
 
     // Work Mode: 'generate' | 'edit'
     const [editMode, setEditMode] = useState('edit');
@@ -1260,9 +1261,12 @@ export default function DesignStudioPage() {
 
     return (
         <div style={{
+            height: '100vh',
+            width: '100vw',
             display: 'flex',
-            minHeight: '100vh',
-            background: '#EDEAE3',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            background: '#F1F5F9',
             color: '#10151D',
             fontFamily: 'var(--f-sans, "Geist", -apple-system, sans-serif)',
             position: 'relative',
@@ -1295,82 +1299,36 @@ export default function DesignStudioPage() {
                 </div>
             )}
 
-            {/* Left Collapsible Creative Tool Shelf */}
-            <aside style={{
-                width: sidebarCollapsed ? 64 : 240,
-                transition: 'width 0.22s cubic-bezier(0.16, 1, 0.3, 1)',
+            {/* Top Unified Navigation & Action Bar (Height 52px) */}
+            <header style={{
+                height: 52,
                 flexShrink: 0,
-                background: '#FFFFFF',
-                borderRight: '1px solid rgba(16, 21, 29, 0.09)',
-                padding: sidebarCollapsed ? '20px 8px' : '20px 14px',
                 display: 'flex',
-                flexDirection: 'column',
-                gap: 20,
-                position: 'sticky',
-                top: 0,
-                height: '100vh',
-                overflowY: 'auto',
-                overflowX: 'hidden',
-                zIndex: 30,
-                boxShadow: '2px 0 12px rgba(16, 21, 29, 0.03)',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0 16px',
+                borderBottom: '1px solid #E2E8F0',
+                background: '#FFFFFF',
+                zIndex: 40,
+                userSelect: 'none',
             }}>
-                {/* Brand Logo & Collapse Toggle */}
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: sidebarCollapsed ? 'center' : 'space-between',
-                    padding: '0 4px',
-                }}>
-                    {!sidebarCollapsed ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <Logo size={22} />
-                            <span style={{
-                                fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
-                                fontWeight: 800,
-                                fontSize: 16,
-                                letterSpacing: '-0.02em',
-                                color: '#10151D',
-                            }}>
-                                VIBED
-                            </span>
-                        </div>
-                    ) : (
-                        <Logo size={22} />
-                    )}
-                    <button
-                        type="button"
-                        onClick={() => setSidebarCollapsed(c => !c)}
-                        title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                        style={{
-                            background: 'transparent',
-                            border: 'none',
-                            color: '#5F6876',
-                            cursor: 'pointer',
-                            padding: 6,
-                            borderRadius: 6,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                        }}
-                    >
-                        {sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
-                    </button>
-                </div>
-
-                {/* Section 1: Navigation Links */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {!sidebarCollapsed && (
-                        <div style={{
-                            fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                            fontSize: 10,
-                            letterSpacing: '0.14em',
-                            textTransform: 'uppercase',
-                            color: '#5F6876',
-                            padding: '0 8px 4px',
+                {/* Left: Brand, Navigation, Project */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Logo size={20} />
+                        <span style={{
+                            fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
+                            fontWeight: 800,
+                            fontSize: 15,
+                            letterSpacing: '-0.02em',
+                            color: '#10151D',
                         }}>
-                            Navigation
-                        </div>
-                    )}
+                            VIBED
+                        </span>
+                    </div>
+
+                    <span style={{ color: '#CBD5E1', fontSize: 14 }}>/</span>
+
                     <button
                         type="button"
                         onClick={() => navigate('/editor')}
@@ -1378,21 +1336,21 @@ export default function DesignStudioPage() {
                         style={{
                             display: 'flex',
                             alignItems: 'center',
-                            gap: 10,
-                            padding: '8px 10px',
-                            borderRadius: 8,
+                            gap: 6,
+                            padding: '5px 8px',
+                            borderRadius: 6,
                             background: 'transparent',
                             border: 'none',
-                            color: '#10151D',
-                            fontSize: 13,
+                            color: '#475569',
+                            fontSize: 12.5,
                             fontWeight: 500,
                             cursor: 'pointer',
-                            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
                         }}
                     >
-                        <ArrowLeft size={16} color="#5F6876" />
-                        {!sidebarCollapsed && <span>Back to Editor</span>}
+                        <ArrowLeft size={14} color="#64748B" />
+                        <span>Editor</span>
                     </button>
+
                     <button
                         type="button"
                         onClick={() => navigate('/dashboard')}
@@ -1400,997 +1358,580 @@ export default function DesignStudioPage() {
                         style={{
                             display: 'flex',
                             alignItems: 'center',
-                            gap: 10,
-                            padding: '8px 10px',
-                            borderRadius: 8,
+                            gap: 6,
+                            padding: '5px 8px',
+                            borderRadius: 6,
                             background: 'transparent',
                             border: 'none',
-                            color: '#10151D',
-                            fontSize: 13,
+                            color: '#475569',
+                            fontSize: 12.5,
                             fontWeight: 500,
                             cursor: 'pointer',
-                            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
                         }}
                     >
-                        <Film size={16} color="#5F6876" />
-                        {!sidebarCollapsed && <span>Projects</span>}
+                        <Film size={14} color="#64748B" />
+                        <span>Projects</span>
                     </button>
+
+                    <span style={{ color: '#CBD5E1', fontSize: 14 }}>/</span>
+
+                    <div style={{
+                        padding: '3px 8px',
+                        borderRadius: 6,
+                        background: '#F0F9FB',
+                        color: '#0B7C91',
+                        fontSize: 11.5,
+                        fontWeight: 600,
+                        fontFamily: 'var(--f-mono, monospace)',
+                    }}>
+                        {projectName || 'Scene & Thumbnail Design'}
+                    </div>
                 </div>
 
-                <div style={{ height: 1, background: 'rgba(16, 21, 29, 0.08)' }} />
-
-                {/* Section 2: Creative Tool Shelf */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {!sidebarCollapsed && (
-                        <div style={{
-                            fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                            fontSize: 10,
-                            letterSpacing: '0.14em',
-                            textTransform: 'uppercase',
-                            color: '#5F6876',
-                            padding: '0 8px 4px',
-                        }}>
-                            Add to Canvas
-                        </div>
-                    )}
-                    <button
-                        type="button"
-                        onClick={handleAddText}
-                        title="Add Text Layer"
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 10,
-                            padding: '9px 10px',
-                            borderRadius: 8,
-                            background: '#F8F9FA',
-                            border: '1px solid rgba(16, 21, 29, 0.08)',
-                            color: '#10151D',
-                            fontSize: 13,
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                        }}
-                    >
-                        <Type size={16} color="#0B7C91" />
-                        {!sidebarCollapsed && <span>Add Text</span>}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={handleAddRect}
-                        title="Add Rectangle"
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 10,
-                            padding: '9px 10px',
-                            borderRadius: 8,
-                            background: '#F8F9FA',
-                            border: '1px solid rgba(16, 21, 29, 0.08)',
-                            color: '#10151D',
-                            fontSize: 13,
-                            fontWeight: 500,
-                            cursor: 'pointer',
-                            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                        }}
-                    >
-                        <Square size={16} color="#5F6876" />
-                        {!sidebarCollapsed && <span>Rectangle</span>}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={handleAddCircle}
-                        title="Add Circle"
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 10,
-                            padding: '9px 10px',
-                            borderRadius: 8,
-                            background: '#F8F9FA',
-                            border: '1px solid rgba(16, 21, 29, 0.08)',
-                            color: '#10151D',
-                            fontSize: 13,
-                            fontWeight: 500,
-                            cursor: 'pointer',
-                            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                        }}
-                    >
-                        <Circle size={16} color="#5F6876" />
-                        {!sidebarCollapsed && <span>Circle</span>}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={handleAddBadge}
-                        title="Add Badge Pill"
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 10,
-                            padding: '9px 10px',
-                            borderRadius: 8,
-                            background: '#F8F9FA',
-                            border: '1px solid rgba(16, 21, 29, 0.08)',
-                            color: '#10151D',
-                            fontSize: 13,
-                            fontWeight: 500,
-                            cursor: 'pointer',
-                            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                        }}
-                    >
-                        <Sliders size={16} color="#5F6876" />
-                        {!sidebarCollapsed && <span>Badge Pill</span>}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={handleAddStar}
-                        title="Add Star"
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 10,
-                            padding: '9px 10px',
-                            borderRadius: 8,
-                            background: '#F8F9FA',
-                            border: '1px solid rgba(16, 21, 29, 0.08)',
-                            color: '#10151D',
-                            fontSize: 13,
-                            fontWeight: 500,
-                            cursor: 'pointer',
-                            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                        }}
-                    >
-                        <Star size={16} color="#5F6876" />
-                        {!sidebarCollapsed && <span>Star</span>}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={handleAddLine}
-                        title="Add Line"
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 10,
-                            padding: '9px 10px',
-                            borderRadius: 8,
-                            background: '#F8F9FA',
-                            border: '1px solid rgba(16, 21, 29, 0.08)',
-                            color: '#10151D',
-                            fontSize: 13,
-                            fontWeight: 500,
-                            cursor: 'pointer',
-                            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                        }}
-                    >
-                        <PenTool size={16} color="#5F6876" />
-                        {!sidebarCollapsed && <span>Line Divider</span>}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setAssetDrawerOpen(true)}
-                        title="Open Assets & Media Drawer"
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 10,
-                            padding: '9px 10px',
-                            borderRadius: 8,
-                            background: '#F0F9FB',
-                            border: '1px solid rgba(11, 124, 145, 0.25)',
-                            color: '#0B7C91',
-                            fontSize: 13,
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                        }}
-                    >
-                        <FolderOpen size={16} color="#0B7C91" />
-                        {!sidebarCollapsed && <span>Assets & Media</span>}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setBrandKitModalOpen(true)}
-                        title="Manage Brand Kit"
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 10,
-                            padding: '9px 10px',
-                            borderRadius: 8,
-                            background: '#F8F9FA',
-                            border: '1px solid rgba(16, 21, 29, 0.08)',
-                            color: '#10151D',
-                            fontSize: 13,
-                            fontWeight: 500,
-                            cursor: 'pointer',
-                            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                        }}
-                    >
-                        <Palette size={16} color="#5F6876" />
-                        {!sidebarCollapsed && <span>Brand Kit</span>}
-                    </button>
-                </div>
-
-                <div style={{ height: 1, background: 'rgba(16, 21, 29, 0.08)' }} />
-
-                {/* Section 3: Brand Directions Quick-Swap */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {!sidebarCollapsed && (
-                        <div style={{
-                            fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                            fontSize: 10,
-                            letterSpacing: '0.14em',
-                            textTransform: 'uppercase',
-                            color: '#5F6876',
-                            padding: '0 8px 4px',
-                        }}>
-                            Directions
-                        </div>
-                    )}
-                    {DIRECTIONS.map(dir => (
+                {/* Center: Format Dropdown & Quick AI Prompt */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, justifyContent: 'center', maxWidth: 640 }}>
+                    {/* Format Selector Pill */}
+                    <div style={{ position: 'relative' }}>
                         <button
-                            key={dir.id}
                             type="button"
-                            onClick={() => applyDirection(dir)}
-                            title={dir.title}
+                            onClick={() => setFormatDropdownOpen(o => !o)}
                             style={{
                                 display: 'flex',
-                                alignItems: 'center',
-                                gap: 10,
-                                padding: '8px 10px',
-                                borderRadius: 8,
-                                background: 'transparent',
-                                border: '1px solid rgba(16, 21, 29, 0.06)',
-                                cursor: 'pointer',
-                                textAlign: 'left',
-                                justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                            }}
-                        >
-                            <span style={{ width: 10, height: 10, borderRadius: '50%', background: dir.accentColor, flexShrink: 0 }} />
-                            {!sidebarCollapsed && (
-                                <span style={{ fontSize: 12, fontWeight: 500, color: '#10151D', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {dir.title}
-                                </span>
-                            )}
-                        </button>
-                    ))}
-                </div>
-
-                {/* Delete Selected Layer Action */}
-                {selectedLayerId && selectedLayerId !== 'background' && (
-                    <div style={{ marginTop: 'auto', paddingTop: 10 }}>
-                        <button
-                            type="button"
-                            onClick={handleDeleteSelectedLayer}
-                            title="Delete Selected Layer"
-                            style={{
-                                width: '100%',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 8,
-                                padding: '8px 10px',
-                                borderRadius: 8,
-                                background: '#FFF1F0',
-                                border: '1px solid #FFCCC7',
-                                color: '#CF1322',
-                                fontSize: 12,
-                                fontWeight: 500,
-                                cursor: 'pointer',
-                                justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                            }}
-                        >
-                            <Trash2 size={15} />
-                            {!sidebarCollapsed && <span>Delete Layer</span>}
-                        </button>
-                    </div>
-                )}
-            </aside>
-
-            {/* Main Stage & Studio Work Area */}
-            <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                {/* Top Context & Action Bar */}
-                <header style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '14px 28px',
-                    borderBottom: '1px solid rgba(16, 21, 29, 0.08)',
-                    background: '#FFFFFF',
-                    position: 'sticky',
-                    top: 0,
-                    zIndex: 25,
-                    boxShadow: '0 2px 10px rgba(16, 21, 29, 0.03)',
-                }}>
-                    <div>
-                        <div style={{
-                            fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                            fontSize: 11,
-                            letterSpacing: '0.12em',
-                            textTransform: 'uppercase',
-                            color: '#0B7C91',
-                            fontWeight: 600,
-                            marginBottom: 2,
-                        }}>
-                            {projectName ? `${projectName} · Scene & Thumbnail Design` : 'PROJECT · FIGMA STUDIO'}
-                        </div>
-                        <h1 style={{
-                            fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
-                            fontSize: 24,
-                            fontWeight: 800,
-                            margin: 0,
-                            color: '#10151D',
-                            letterSpacing: '-0.025em',
-                            lineHeight: 1.2,
-                        }}>
-                            Design Studio
-                        </h1>
-                    </div>
-
-                    {/* Mode & Action Controls */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        {/* Segmented Mode: Generate | Manual */}
-                        <div style={{
-                            display: 'flex',
-                            background: '#F0EFEA',
-                            padding: 3,
-                            borderRadius: 10,
-                            border: '1px solid rgba(16, 21, 29, 0.08)',
-                        }}>
-                            <button
-                                type="button"
-                                onClick={() => setEditMode('generate')}
-                                style={{
-                                    padding: '6px 14px',
-                                    borderRadius: 8,
-                                    border: 'none',
-                                    background: editMode === 'generate' ? '#10151D' : 'transparent',
-                                    color: editMode === 'generate' ? '#FFFFFF' : '#5F6876',
-                                    fontSize: 13,
-                                    fontWeight: editMode === 'generate' ? 600 : 500,
-                                    cursor: 'pointer',
-                                    boxShadow: editMode === 'generate' ? '0 2px 6px rgba(0,0,0,0.1)' : 'none',
-                                }}
-                            >
-                                Generate
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setEditMode('edit')}
-                                style={{
-                                    padding: '6px 14px',
-                                    borderRadius: 8,
-                                    border: 'none',
-                                    background: editMode === 'edit' ? '#10151D' : 'transparent',
-                                    color: editMode === 'edit' ? '#FFFFFF' : '#5F6876',
-                                    fontSize: 13,
-                                    fontWeight: editMode === 'edit' ? 600 : 500,
-                                    cursor: 'pointer',
-                                    boxShadow: editMode === 'edit' ? '0 2px 6px rgba(0,0,0,0.1)' : 'none',
-                                }}
-                            >
-                                Manual
-                            </button>
-                        </div>
-
-                        {/* Undo / Redo */}
-                        <div style={{ display: 'flex', gap: 4 }}>
-                            <button
-                                type="button"
-                                onClick={handleUndo}
-                                disabled={undoStack.length === 0}
-                                style={{
-                                    width: 36,
-                                    height: 36,
-                                    borderRadius: 8,
-                                    background: '#FFFFFF',
-                                    border: '1px solid rgba(16, 21, 29, 0.12)',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    color: undoStack.length > 0 ? '#10151D' : 'rgba(16, 21, 29, 0.3)',
-                                    cursor: undoStack.length > 0 ? 'pointer' : 'default',
-                                }}
-                                title="Undo"
-                            >
-                                <Undo size={15} />
-                            </button>
-                            <button
-                                type="button"
-                                onClick={handleRedo}
-                                disabled={redoStack.length === 0}
-                                style={{
-                                    width: 36,
-                                    height: 36,
-                                    borderRadius: 8,
-                                    background: '#FFFFFF',
-                                    border: '1px solid rgba(16, 21, 29, 0.12)',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    color: redoStack.length > 0 ? '#10151D' : 'rgba(16, 21, 29, 0.3)',
-                                    cursor: redoStack.length > 0 ? 'pointer' : 'default',
-                                }}
-                                title="Redo"
-                            >
-                                <Redo size={15} />
-                            </button>
-                        </div>
-
-                        {/* Brand Kit Quick Toggle & Settings */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <button
-                                type="button"
-                                onClick={toggleBrandKit}
-                                style={{
-                                    height: 36,
-                                    padding: '0 12px',
-                                    borderRadius: 8,
-                                    background: kitOn ? '#F0F9FB' : '#FFFFFF',
-                                    border: kitOn ? '1px solid #0B7C91' : '1px solid rgba(16, 21, 29, 0.12)',
-                                    color: kitOn ? '#0B7C91' : '#5F6876',
-                                    fontSize: 12.5,
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 6,
-                                }}
-                                title="Toggle Brand Kit styling on/off"
-                            >
-                                <span style={{ width: 8, height: 8, borderRadius: '50%', background: kitOn ? '#0B7C91' : '#5F6876' }} />
-                                {kitOn ? 'Kit on' : 'Kit off'}
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setBrandKitModalOpen(true)}
-                                style={{
-                                    width: 36,
-                                    height: 36,
-                                    borderRadius: 8,
-                                    background: '#FFFFFF',
-                                    border: '1px solid rgba(16, 21, 29, 0.12)',
-                                    color: '#5F6876',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    cursor: 'pointer',
-                                }}
-                                title="Configure Brand Kit"
-                            >
-                                <Palette size={15} />
-                            </button>
-                        </div>
-
-                        {/* Assets Drawer Quick Button */}
-                        <button
-                            type="button"
-                            onClick={() => setAssetDrawerOpen(true)}
-                            style={{
-                                height: 36,
-                                padding: '0 12px',
-                                borderRadius: 8,
-                                background: '#FFFFFF',
-                                border: '1px solid rgba(16, 21, 29, 0.12)',
-                                color: '#10151D',
-                                fontSize: 12.5,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                display: 'inline-flex',
                                 alignItems: 'center',
                                 gap: 6,
-                            }}
-                            title="Open Assets & Media Drawer"
-                        >
-                            <FolderOpen size={15} color="#0B7C91" />
-                            Assets
-                        </button>
-
-                        {/* Save to Timeline (Primary Integration) */}
-                        <button
-                            type="button"
-                            onClick={handleSaveToTimeline}
-                            style={{
-                                height: 38,
-                                padding: '0 16px',
+                                padding: '5px 10px',
                                 borderRadius: 8,
-                                background: '#10151D',
-                                color: '#FFFFFF',
-                                border: 'none',
-                                fontSize: 13,
+                                border: '1px solid #E2E8F0',
+                                background: '#F8FAFC',
+                                color: '#0F172A',
+                                fontSize: 12,
                                 fontWeight: 600,
                                 cursor: 'pointer',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 7,
-                                boxShadow: '0 2px 8px rgba(16, 21, 29, 0.18)',
                             }}
                         >
-                            <Save size={15} />
-                            Save to timeline
-                        </button>
-
-                        {/* Export Sizes */}
-                        <button
-                            type="button"
-                            onClick={handleExportSizes}
-                            style={{
-                                height: 38,
-                                padding: '0 14px',
-                                borderRadius: 8,
-                                background: '#0B7C91',
-                                color: '#FFFFFF',
-                                border: 'none',
-                                fontSize: 13,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 7,
-                                boxShadow: '0 2px 8px rgba(11, 124, 145, 0.25)',
-                            }}
-                        >
-                            <Download size={15} />
-                            Export sizes
-                        </button>
-                    </div>
-                </header>
-
-                {/* Workspace Canvas & Panels */}
-                <div style={{ padding: '24px 28px 60px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-                    {/* Top Section: Brief & Format Controller */}
-                    <section style={{
-                        border: '1px solid rgba(16, 21, 29, 0.08)',
-                        borderRadius: 16,
-                        background: '#FFFFFF',
-                        padding: '18px 20px',
-                        boxShadow: '0 2px 8px rgba(16, 21, 29, 0.03)',
-                    }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                            <h2 style={{
-                                margin: 0,
-                                fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
-                                fontWeight: 700,
-                                fontSize: 16,
-                                color: '#10151D',
-                            }}>
-                                Format & Brief
-                            </h2>
-                            <span style={{
-                                fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                                fontSize: 11,
-                                color: '#5F6876',
-                            }}>
-                                {currentFormat.res}
+                            <Crop size={13} color="#0B7C91" />
+                            <span>{currentFormat.label}</span>
+                            <span style={{ color: '#64748B', fontFamily: 'var(--f-mono, monospace)', fontSize: 10.5 }}>
+                                {currentFormat.res.split('·')[0].trim()}
                             </span>
-                        </div>
+                            <ChevronDown size={12} color="#64748B" />
+                        </button>
 
-                        {/* Format Pills */}
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
-                            {FORMAT_PRESETS.map(fmt => {
-                                const isSel = selectedFormat === fmt.id;
-                                return (
-                                    <button
+                        {formatDropdownOpen && (
+                            <div style={{
+                                position: 'absolute',
+                                top: 'calc(100% + 6px)',
+                                left: 0,
+                                zIndex: 120,
+                                width: 240,
+                                background: '#FFFFFF',
+                                borderRadius: 10,
+                                border: '1px solid #E2E8F0',
+                                boxShadow: '0 12px 32px rgba(15, 23, 42, 0.12)',
+                                padding: 6,
+                            }}>
+                                <div style={{ padding: '4px 8px 6px', fontSize: 10, fontFamily: 'var(--f-mono, monospace)', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                                    Preset Formats
+                                </div>
+                                {FORMAT_PRESETS.map(fmt => (
+                                    <div
                                         key={fmt.id}
-                                        type="button"
-                                        onClick={() => setSelectedFormat(fmt.id)}
+                                        onClick={() => {
+                                            setSelectedFormat(fmt.id);
+                                            setFormatDropdownOpen(false);
+                                        }}
                                         style={{
-                                            minHeight: 36,
-                                            padding: '0 14px',
-                                            borderRadius: 999,
-                                            border: isSel ? '1.5px solid #0B7C91' : '1px solid rgba(16, 21, 29, 0.12)',
-                                            background: isSel ? '#F0F9FB' : '#FFFFFF',
-                                            color: isSel ? '#0B7C91' : '#5F6876',
-                                            fontSize: 13,
-                                            fontWeight: isSel ? 600 : 400,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            padding: '7px 10px',
+                                            borderRadius: 6,
                                             cursor: 'pointer',
-                                            transition: 'all 0.15s ease',
+                                            background: selectedFormat === fmt.id ? '#F0F9FB' : 'transparent',
+                                            color: selectedFormat === fmt.id ? '#0B7C91' : '#0F172A',
+                                            fontWeight: selectedFormat === fmt.id ? 600 : 500,
+                                            fontSize: 12,
                                         }}
                                     >
-                                        {fmt.label}
-                                    </button>
-                                );
-                            })}
-                        </div>
+                                        <span>{fmt.label}</span>
+                                        <span style={{ fontSize: 10.5, color: '#64748B', fontFamily: 'var(--f-mono, monospace)' }}>
+                                            {fmt.res}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
 
-                        {/* Prompt & Generation Strip */}
-                        <form onSubmit={(e) => handleApplyAiTweak(e, briefText)} style={{ display: 'flex', gap: 10, alignItems: 'center', width: '100%' }}>
+                    {/* AI Prompt Input Bar */}
+                    <form
+                        onSubmit={(e) => {
+                            e.preventDefault();
+                            handleApplyAiTweak(e, briefText);
+                        }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, maxWidth: 380 }}
+                    >
+                        <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            flex: 1,
+                            height: 32,
+                            padding: '0 10px',
+                            borderRadius: 8,
+                            border: '1px solid #E2E8F0',
+                            background: '#F8FAFC',
+                        }}>
+                            <Sparkles size={13} color="#0B7C91" />
                             <input
                                 type="text"
                                 value={briefText}
                                 onChange={e => setBriefText(e.target.value)}
-                                placeholder='e.g. create a simple thumbnail with text saying "goodbye"'
+                                placeholder="Describe layout changes or generate..."
                                 style={{
                                     flex: 1,
-                                    height: 40,
-                                    padding: '0 16px',
-                                    borderRadius: 8,
-                                    border: '1px solid rgba(16, 21, 29, 0.14)',
-                                    background: '#F8F9FA',
-                                    color: '#10151D',
-                                    fontSize: 13,
+                                    border: 'none',
+                                    background: 'transparent',
                                     outline: 'none',
+                                    fontSize: 12,
+                                    color: '#0F172A',
                                 }}
                             />
-                            <button
-                                type="submit"
-                                style={{
-                                    height: 40,
-                                    padding: '0 18px',
-                                    borderRadius: 8,
-                                    background: '#10151D',
-                                    color: '#FFFFFF',
-                                    border: 'none',
-                                    fontSize: 13,
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                    whiteSpace: 'nowrap',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 6,
-                                }}
-                            >
-                                <Sparkles size={14} color="#00E5FF" />
-                                Generate four
-                            </button>
-                        </form>
-                    </section>
-
-                    {/* Middle Row: Modern Hybrid Studio Workspace (Images 4 & 5 Inspiration) */}
-                    <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'auto 1fr 300px',
-                        gap: '16px',
-                        alignItems: 'start',
-                        background: '#F1F5F9',
-                        padding: '12px',
-                        borderRadius: '16px',
-                        border: '1px solid #E2E8F0',
-                        boxShadow: '0 4px 20px rgba(16, 21, 29, 0.04)',
-                    }}>
-                        {/* 1. Left Panel: 2-Tier Slim Rail + Expandable Layers/Assets Drawer */}
-                        <LayersAndAssetsPanel
-                            layers={layers}
-                            setLayers={setLayers}
-                            selectedLayerIds={selectedLayerIds}
-                            setSelectedLayerIds={(ids) => {
-                                setSelectedLayerIds(ids);
-                                if (ids.length > 0) setSelectedLayerId(ids[0]);
+                        </div>
+                        <button
+                            type="submit"
+                            style={{
+                                height: 32,
+                                padding: '0 10px',
+                                borderRadius: 8,
+                                border: 'none',
+                                background: '#0F172A',
+                                color: '#FFFFFF',
+                                fontSize: 11.5,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 5,
+                                whiteSpace: 'nowrap',
                             }}
-                            onInsertComponent={handleInsertComponent}
-                            onApplyTheme={handleApplyTheme}
-                            onApplyTypographyStyle={handleApplyTypographyStyle}
-                        />
+                        >
+                            <Sparkles size={12} color="#00E5FF" />
+                            Generate
+                        </button>
+                    </form>
+                </div>
 
-                        {/* 2. Center Stage: Canvas Toolbar, Interactive Vector Canvas & AI Copilot */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', minWidth: 0 }}>
-                            <div style={{
-                                background: '#FFFFFF',
-                                border: '1px solid #E2E8F0',
-                                borderRadius: '12px',
-                                overflow: 'hidden',
-                                boxShadow: '0 4px 16px rgba(16, 21, 29, 0.04)',
-                            }}>
-                                <CanvasToolbar
-                                    activeTool={activeTool}
-                                    setActiveTool={setActiveTool}
-                                    selectedLayersCount={selectedLayerIds.length}
-                                    onExecuteBoolean={handleExecuteBoolean}
-                                    onGroupSelected={handleGroupSelected}
-                                    onUngroupSelected={handleUngroupSelected}
-                                    snapToGrid={snapEnabled}
-                                    setSnapToGrid={setSnapEnabled}
-                                    showGuides={showGuides}
-                                    setShowGuides={setShowGuides}
-                                    zoom={zoom}
-                                    setZoom={setZoom}
-                                    onUploadImageClick={() => cutoutInputRef.current?.click()}
-                                />
-
-                                <InteractiveVectorCanvas
-                                    layers={layers}
-                                    setLayers={setLayers}
-                                    selectedLayerIds={selectedLayerIds}
-                                    setSelectedLayerIds={(ids) => {
-                                        setSelectedLayerIds(ids);
-                                        if (ids.length > 0) setSelectedLayerId(ids[0]);
-                                    }}
-                                    activeTool={activeTool}
-                                    setActiveTool={setActiveTool}
-                                    canvasWidth={currentFormat.w}
-                                    canvasHeight={currentFormat.h}
-                                    zoom={zoom}
-                                    snapToGrid={snapEnabled}
-                                    showGuides={showGuides}
-                                    onContextMenu={(ctx) => setContextMenu(ctx)}
-                                    onUpdateLayer={handleUpdateLayer}
-                                    onAddLayer={handleAddLayer}
-                                />
-
-                                {/* Bottom Breadcrumb Bar (Image 5 Inspiration) */}
-                                <div style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '6px',
-                                    padding: '8px 16px',
-                                    background: '#FFFFFF',
-                                    borderTop: '1px solid #E2E8F0',
-                                    fontSize: '11px',
-                                    color: '#64748B',
-                                }}>
-                                    <span style={{ fontWeight: 600, color: '#0F172A' }}>Artboard</span>
-                                    <span>/</span>
-                                    <span>{currentFormat.label}</span>
-                                    {selectedLayerId && (
-                                        <>
-                                            <span>/</span>
-                                            <span style={{ color: '#0B7C91', fontWeight: 600 }}>
-                                                {selectedLayer.name || selectedLayerId}
-                                            </span>
-                                        </>
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Floating Collapsible AI Copilot Drawer (Image 1 Inspiration) */}
-                            <DesignStudioAiDirector
-                                layers={layers}
-                                setLayers={setLayers}
-                                selectedLayerIds={selectedLayerIds}
-                                setSelectedLayerIds={setSelectedLayerIds}
-                                onDirectionApply={applyDirection}
-                            />
-                        </div>
-
-                        {/* 3. Right Panel: Properties Inspector with Visual Box-Model Spacing */}
-                        <PropertiesInspector
-                            selectedLayers={layers.filter(l => selectedLayerIds.includes(l.id))}
-                            onUpdateLayer={handleUpdateLayer}
-                            onAlign={handleAlignLayers}
-                            onDistribute={handleDistributeLayers}
-                            onCreateComponent={(layer) => {
-                                showToast(`Created master component "${layer.name || 'Component'}"`);
-                            }}
-                        />
-                    </div>
-
-                    {/* Creative Directions Preview Strip (4 Synthesized Thumbnail Variants) */}
-                    <section style={{
-                        border: '1px solid rgba(16, 21, 29, 0.08)',
-                        borderRadius: 16,
-                        background: '#FFFFFF',
-                        padding: '18px 22px',
-                        boxShadow: '0 2px 8px rgba(16, 21, 29, 0.03)',
-                    }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <Sparkles size={16} color="#0B7C91" />
-                                <h2 style={{
-                                    margin: 0,
-                                    fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
-                                    fontWeight: 700,
-                                    fontSize: 16,
-                                    color: '#10151D',
-                                }}>
-                                    Creative Directions
-                                </h2>
-                                <span style={{
-                                    fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                                    fontSize: 11,
-                                    color: '#5F6876',
-                                    marginLeft: 6,
-                                }}>
-                                    4 live generated variations · click to apply
-                                </span>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={(e) => handleApplyAiTweak(e, briefText)}
-                                style={{
-                                    background: 'none',
-                                    border: 'none',
-                                    color: '#0B7C91',
-                                    fontSize: 12.5,
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 5,
-                                }}
-                            >
-                                <RefreshCw size={13} />
-                                Regenerate four
-                            </button>
-                        </div>
-
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
-                            {directions.map((dir, idx) => (
-                                <div
-                                    key={dir.id || idx}
-                                    onClick={() => applyDirection(dir)}
-                                    style={{
-                                        border: '1px solid rgba(16, 21, 29, 0.12)',
-                                        borderRadius: 12,
-                                        padding: 12,
-                                        background: '#FFFFFF',
-                                        cursor: 'pointer',
-                                        transition: 'all 0.18s ease',
-                                        boxShadow: '0 2px 8px rgba(16, 21, 29, 0.03)',
-                                    }}
-                                >
-                                    <div style={{
-                                        height: 72,
-                                        borderRadius: 8,
-                                        background: dir.bg || '#1F140E',
-                                        padding: '10px 12px',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        justifyContent: 'space-between',
-                                        marginBottom: 10,
-                                        border: '1px solid rgba(0,0,0,0.12)',
-                                    }}>
-                                        <div style={{
-                                            color: dir.textFill || '#FFFFFF',
-                                            fontFamily: `"${dir.fontFamily || 'Plus Jakarta Sans'}", sans-serif`,
-                                            fontWeight: 800,
-                                            fontSize: 14,
-                                            lineHeight: 1.15,
-                                            overflow: 'hidden',
-                                            textOverflow: 'ellipsis',
-                                            whiteSpace: 'nowrap',
-                                            letterSpacing: '-0.02em',
-                                        }}>
-                                            {dir.layers?.find(l => l.id === 'headline')?.text || dir.headline || 'HEADLINE'}
-                                        </div>
-                                        <div style={{
-                                            display: 'inline-block',
-                                            alignSelf: 'flex-start',
-                                            padding: '2px 6px',
-                                            borderRadius: 4,
-                                            background: dir.badgeFill || '#C85A17',
-                                            color: '#FFFFFF',
-                                            fontSize: 9.5,
-                                            fontFamily: 'var(--f-mono, monospace)',
-                                            fontWeight: 700,
-                                        }}>
-                                            {dir.badgeText || '0:38'}
-                                        </div>
-                                    </div>
-                                    <div style={{ fontWeight: 600, fontSize: 13, color: '#10151D' }}>{dir.title || dir.name}</div>
-                                    <div style={{ fontSize: 11.5, color: '#5F6876', marginTop: 2 }}>{dir.desc || dir.style}</div>
-                                </div>
-                            ))}
-                        </div>
-                    </section>
-
-                    {/* Checks Row */}
-                    <section style={{
-                        border: '1px solid rgba(16, 21, 29, 0.08)',
-                        borderRadius: 16,
-                        background: '#FFFFFF',
-                        padding: '16px 24px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        flexWrap: 'wrap',
-                        gap: 16,
-                        boxShadow: '0 2px 8px rgba(16, 21, 29, 0.03)',
-                    }}>
-                        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 20 }}>
-                            <h2 style={{
-                                margin: 0,
-                                fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
-                                fontWeight: 700,
-                                fontSize: 16,
-                                color: '#10151D',
-                            }}>
-                                Checks
-                            </h2>
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#5F6876' }}>
-                                <Check size={14} color="#0F7A52" strokeWidth={2.5} />
-                                Legible at 120px wide
-                            </span>
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#5F6876' }}>
-                                <Check size={14} color="#0F7A52" strokeWidth={2.5} />
-                                Clear of the player's timestamp
-                            </span>
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#5F6876' }}>
-                                <Check size={14} color="#0F7A52" strokeWidth={2.5} />
-                                Text on accent passes 4.5:1
-                            </span>
-                        </div>
-
+                {/* Right: Actions, Undo, Kit, Drawer, Save & Export */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {/* Undo / Redo */}
+                    <div style={{ display: 'flex', gap: 2 }}>
                         <button
                             type="button"
-                            onClick={handleExportSizes}
+                            onClick={handleUndo}
+                            disabled={undoStack.length === 0}
                             style={{
-                                padding: '10px 18px',
-                                borderRadius: 8,
-                                background: '#0B7C91',
-                                color: '#FFFFFF',
-                                border: 'none',
-                                fontSize: 13,
+                                width: 30,
+                                height: 30,
+                                borderRadius: 6,
+                                background: '#FFFFFF',
+                                border: '1px solid #E2E8F0',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: undoStack.length > 0 ? '#0F172A' : '#CBD5E1',
+                                cursor: undoStack.length > 0 ? 'pointer' : 'default',
+                            }}
+                            title="Undo"
+                        >
+                            <Undo size={13} />
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleRedo}
+                            disabled={redoStack.length === 0}
+                            style={{
+                                width: 30,
+                                height: 30,
+                                borderRadius: 6,
+                                background: '#FFFFFF',
+                                border: '1px solid #E2E8F0',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: redoStack.length > 0 ? '#0F172A' : '#CBD5E1',
+                                cursor: redoStack.length > 0 ? 'pointer' : 'default',
+                            }}
+                            title="Redo"
+                        >
+                            <Redo size={13} />
+                        </button>
+                    </div>
+
+                    {/* Variations Toggle Pill */}
+                    <button
+                        type="button"
+                        onClick={() => setShowVariationsTray(v => !v)}
+                        style={{
+                            height: 32,
+                            padding: '0 10px',
+                            borderRadius: 6,
+                            background: showVariationsTray ? '#F0F9FB' : '#FFFFFF',
+                            border: showVariationsTray ? '1px solid #0B7C91' : '1px solid #E2E8F0',
+                            color: showVariationsTray ? '#0B7C91' : '#475569',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 5,
+                        }}
+                    >
+                        <Sparkles size={13} color="#0B7C91" />
+                        <span>Variations (4)</span>
+                    </button>
+
+                    {/* Brand Kit Quick Toggle */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                        <button
+                            type="button"
+                            onClick={toggleBrandKit}
+                            style={{
+                                height: 32,
+                                padding: '0 10px',
+                                borderRadius: 6,
+                                background: kitOn ? '#F0F9FB' : '#FFFFFF',
+                                border: kitOn ? '1px solid #0B7C91' : '1px solid #E2E8F0',
+                                color: kitOn ? '#0B7C91' : '#475569',
+                                fontSize: 12,
                                 fontWeight: 600,
                                 cursor: 'pointer',
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                gap: 8,
-                                boxShadow: '0 2px 8px rgba(11, 124, 145, 0.25)',
+                                gap: 5,
                             }}
+                            title="Toggle Brand Kit styling on/off"
                         >
-                            <Download size={15} />
-                            Export 2 sizes
+                            <span style={{ width: 7, height: 7, borderRadius: '50%', background: kitOn ? '#0B7C91' : '#94A3B8' }} />
+                            <span>{kitOn ? 'Kit on' : 'Kit off'}</span>
                         </button>
-                    </section>
+                        <button
+                            type="button"
+                            onClick={() => setBrandKitModalOpen(true)}
+                            style={{
+                                width: 32,
+                                height: 32,
+                                borderRadius: 6,
+                                background: '#FFFFFF',
+                                border: '1px solid #E2E8F0',
+                                color: '#475569',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                            }}
+                            title="Configure Brand Kit"
+                        >
+                            <Palette size={14} />
+                        </button>
+                    </div>
 
-                    {/* The same brief, other surfaces Section */}
-                    <section style={{
-                        border: '1px solid rgba(16, 21, 29, 0.08)',
-                        borderRadius: 16,
-                        background: '#FFFFFF',
-                        padding: 24,
-                        boxShadow: '0 2px 8px rgba(16, 21, 29, 0.03)',
-                    }}>
-                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 4 }}>
-                            <h2 style={{
-                                margin: 0,
-                                fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
-                                fontWeight: 700,
-                                fontSize: 17,
-                                color: '#10151D',
-                            }}>
-                                The same brief, other surfaces
-                            </h2>
-                            <span style={{
-                                fontSize: 13,
-                                color: '#0B7C91',
-                                fontWeight: 600,
-                            }}>
-                                Multi-Format Sync
-                            </span>
-                        </div>
-                        <p style={{ margin: '0 0 16px', fontSize: 13, color: '#5F6876' }}>
-                            One brand kit, one brief, one subject. Each surface gets its own layout rather than the same picture cropped — and each opens in this same editor.
-                        </p>
+                    {/* Assets Drawer Quick Button */}
+                    <button
+                        type="button"
+                        onClick={() => setAssetDrawerOpen(true)}
+                        style={{
+                            height: 32,
+                            padding: '0 10px',
+                            borderRadius: 6,
+                            background: '#FFFFFF',
+                            border: '1px solid #E2E8F0',
+                            color: '#0F172A',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 5,
+                        }}
+                        title="Open Assets & Media Drawer"
+                    >
+                        <FolderOpen size={14} color="#0B7C91" />
+                        <span>Assets</span>
+                    </button>
 
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14 }}>
-                            {[
-                                { id: 'packaging', title: 'Packaging', desc: '250 g bag · 3 label options', bg: 'linear-gradient(170deg, #F4EDE2 0%, #DCD2C2 100%)' },
-                                { id: 'product', title: 'Product design', desc: 'Dripper render · 4 angles', bg: '#1C1109' },
-                                { id: 'ad', title: 'Paid ad', desc: '1:1 and 4:5 · 2 variants', bg: '#C85A17' },
-                                { id: 'print', title: 'Print', desc: 'A4 shelf card · CMYK', bg: '#F5EFEB' },
-                                { id: 'social', title: 'Social graphic', desc: '1080x1080 square format', isAdd: true },
-                            ].map((card, idx) => (
-                                <div
-                                    key={idx}
-                                    onClick={() => setSelectedFormat(card.id)}
-                                    style={{
-                                        border: selectedFormat === card.id ? '1.5px solid #0B7C91' : '1px solid rgba(16, 21, 29, 0.10)',
-                                        borderRadius: 12,
-                                        overflow: 'hidden',
-                                        background: '#FFFFFF',
-                                        cursor: 'pointer',
-                                        transition: 'all 0.15s ease',
-                                    }}
-                                >
-                                    <div style={{
-                                        height: 110,
-                                        background: card.bg || '#F8F9FA',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        color: card.isAdd ? '#0B7C91' : '#FFFFFF',
-                                    }}>
-                                        {card.isAdd && <Plus size={24} />}
-                                    </div>
-                                    <div style={{ padding: '10px 12px' }}>
-                                        <div style={{ fontWeight: 600, fontSize: 13, color: '#10151D' }}>{card.title}</div>
-                                        <div style={{ fontSize: 11, color: '#5F6876', marginTop: 2 }}>{card.desc}</div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </section>
+                    {/* Save to Timeline */}
+                    <button
+                        type="button"
+                        onClick={handleSaveToTimeline}
+                        style={{
+                            height: 32,
+                            padding: '0 12px',
+                            borderRadius: 6,
+                            background: '#0F172A',
+                            color: '#FFFFFF',
+                            border: 'none',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                        }}
+                    >
+                        <Save size={13} />
+                        <span>Save to timeline</span>
+                    </button>
+
+                    {/* Export Sizes */}
+                    <button
+                        type="button"
+                        onClick={handleExportSizes}
+                        style={{
+                            height: 32,
+                            padding: '0 12px',
+                            borderRadius: 6,
+                            background: '#0B7C91',
+                            color: '#FFFFFF',
+                            border: 'none',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                        }}
+                    >
+                        <Download size={13} />
+                        <span>Export 2 sizes</span>
+                    </button>
                 </div>
+            </header>
+
+            {/* Core Studio Workspace: Grid 3-Columns (Height fills remainder of 100vh) */}
+            <div style={{
+                flex: 1,
+                minHeight: 0,
+                display: 'grid',
+                gridTemplateColumns: 'auto 1fr 300px',
+                overflow: 'hidden',
+                background: '#F8FAFC',
+            }}>
+                {/* 1. Left Panel: 2-Tier Slim Rail + Expandable Layers/Assets Drawer */}
+                <LayersAndAssetsPanel
+                    layers={layers}
+                    setLayers={setLayers}
+                    selectedLayerIds={selectedLayerIds}
+                    setSelectedLayerIds={(ids) => {
+                        setSelectedLayerIds(ids);
+                        if (ids.length > 0) setSelectedLayerId(ids[0]);
+                    }}
+                    onInsertComponent={handleInsertComponent}
+                    onApplyTheme={handleApplyTheme}
+                    onApplyTypographyStyle={handleApplyTypographyStyle}
+                />
+
+                {/* 2. Center Stage: Toolbar, Infinite Artboard Canvas, Breadcrumbs, Floating Copilot */}
+                <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    height: '100%',
+                    minHeight: 0,
+                    minWidth: 0,
+                    position: 'relative',
+                    overflow: 'hidden',
+                    borderLeft: '1px solid #E2E8F0',
+                    borderRight: '1px solid #E2E8F0',
+                }}>
+                    {/* Top Canvas Toolbar */}
+                    <CanvasToolbar
+                        activeTool={activeTool}
+                        setActiveTool={setActiveTool}
+                        selectedLayersCount={selectedLayerIds.length}
+                        onExecuteBoolean={handleExecuteBoolean}
+                        onGroupSelected={handleGroupSelected}
+                        onUngroupSelected={handleUngroupSelected}
+                        snapToGrid={snapEnabled}
+                        setSnapToGrid={setSnapEnabled}
+                        showGuides={showGuides}
+                        setShowGuides={setShowGuides}
+                        zoom={zoom}
+                        setZoom={setZoom}
+                        onUploadImageClick={() => cutoutInputRef.current?.click()}
+                    />
+
+                    {/* Interactive Vector Canvas */}
+                    <InteractiveVectorCanvas
+                        layers={layers}
+                        setLayers={setLayers}
+                        selectedLayerIds={selectedLayerIds}
+                        setSelectedLayerIds={(ids) => {
+                            setSelectedLayerIds(ids);
+                            if (ids.length > 0) setSelectedLayerId(ids[0]);
+                        }}
+                        activeTool={activeTool}
+                        setActiveTool={setActiveTool}
+                        canvasWidth={currentFormat.w}
+                        canvasHeight={currentFormat.h}
+                        zoom={zoom}
+                        snapToGrid={snapEnabled}
+                        showGuides={showGuides}
+                        onContextMenu={(ctx) => setContextMenu(ctx)}
+                        onUpdateLayer={handleUpdateLayer}
+                        onAddLayer={handleAddLayer}
+                    />
+
+                    {/* Bottom Breadcrumb Bar (Image 5 Inspiration) */}
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '6px 14px',
+                        background: '#FFFFFF',
+                        borderTop: '1px solid #E2E8F0',
+                        fontSize: '11px',
+                        color: '#64748B',
+                        flexShrink: 0,
+                        zIndex: 20,
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontWeight: 600, color: '#0F172A' }}>Artboard</span>
+                            <span>/</span>
+                            <span>{currentFormat.label}</span>
+                            {selectedLayerId && (
+                                <>
+                                    <span>/</span>
+                                    <span style={{ color: '#0B7C91', fontWeight: 600 }}>
+                                        {selectedLayer.name || selectedLayerId}
+                                    </span>
+                                </>
+                            )}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <span>{currentFormat.w} × {currentFormat.h}</span>
+                            <span>{Math.round(zoom * 100)}%</span>
+                        </div>
+                    </div>
+
+                    {/* Floating Collapsible AI Copilot Drawer (Image 1 Inspiration) */}
+                    <DesignStudioAiDirector
+                        layers={layers}
+                        setLayers={setLayers}
+                        selectedLayerIds={selectedLayerIds}
+                        setSelectedLayerIds={setSelectedLayerIds}
+                        onDirectionApply={applyDirection}
+                    />
+
+                    {/* Slide-Up Creative Directions Variations Tray */}
+                    {showVariationsTray && (
+                        <div style={{
+                            position: 'absolute',
+                            bottom: 31,
+                            left: 0,
+                            right: 0,
+                            height: 146,
+                            background: 'rgba(255, 255, 255, 0.96)',
+                            backdropFilter: 'blur(12px)',
+                            borderTop: '1px solid #CBD5E1',
+                            boxShadow: '0 -8px 24px rgba(15, 23, 42, 0.08)',
+                            padding: '10px 16px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 8,
+                            zIndex: 55,
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <Sparkles size={14} color="#0B7C91" />
+                                    <span style={{ fontWeight: 700, fontSize: 12.5, color: '#0F172A' }}>
+                                        Creative Directions
+                                    </span>
+                                    <span style={{ fontSize: 11, color: '#64748B' }}>
+                                        4 live generated variations · click to apply
+                                    </span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                    <button
+                                        type="button"
+                                        onClick={(e) => handleApplyAiTweak(e, briefText)}
+                                        style={{ background: 'none', border: 'none', color: '#0B7C91', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                                    >
+                                        <RefreshCw size={12} />
+                                        Regenerate
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowVariationsTray(false)}
+                                        style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: 2 }}
+                                    >
+                                        <X size={15} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, flex: 1, minHeight: 0 }}>
+                                {directions.map((dir, idx) => (
+                                    <div
+                                        key={dir.id || idx}
+                                        onClick={() => applyDirection(dir)}
+                                        style={{
+                                            border: '1px solid #E2E8F0',
+                                            borderRadius: 8,
+                                            padding: 8,
+                                            background: '#FFFFFF',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            justifyContent: 'space-between',
+                                            transition: 'border-color 0.15s ease',
+                                        }}
+                                        onMouseEnter={(e) => e.currentTarget.style.borderColor = '#0B7C91'}
+                                        onMouseLeave={(e) => e.currentTarget.style.borderColor = '#E2E8F0'}
+                                    >
+                                        <div style={{
+                                            height: 52,
+                                            borderRadius: 6,
+                                            background: dir.bg || '#1F140E',
+                                            padding: '6px 8px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            color: dir.textFill || '#FFFFFF',
+                                            fontWeight: 700,
+                                            fontSize: 11,
+                                            textAlign: 'center',
+                                            overflow: 'hidden',
+                                        }}>
+                                            {dir.headline || dir.title}
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+                                            <span style={{ fontSize: 11, fontWeight: 600, color: '#0F172A' }}>{dir.title}</span>
+                                            <span style={{ fontSize: 9.5, color: '#64748B' }}>{dir.style}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* 3. Right Panel: Properties Inspector with Tabs (Design, Settings, Surfaces) */}
+                <PropertiesInspector
+                    selectedLayers={layers.filter(l => selectedLayerIds.includes(l.id))}
+                    onUpdateLayer={handleUpdateLayer}
+                    onAlign={handleAlignLayers}
+                    onDistribute={handleDistributeLayers}
+                    onCreateComponent={(layer) => {
+                        showToast();
+                    }}
+                    currentFormat={currentFormat}
+                    selectedFormat={selectedFormat}
+                    setSelectedFormat={setSelectedFormat}
+                    formatPresets={FORMAT_PRESETS}
+                    onExportSizes={handleExportSizes}
+                />
+            </div>
+
 
                 {/* Right-Click Figma-Style Canvas Context Menu */}
                 {contextMenu && (
@@ -3134,7 +2675,6 @@ export default function DesignStudioPage() {
                         }
                     }}
                 />
-            </main>
         </div>
     );
 }

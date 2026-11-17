@@ -86,16 +86,16 @@ export default function DesignStudioAiDirector({
     if (!isExpanded) {
         return (
             <div style={{
-                position: 'fixed',
-                bottom: '24px',
-                right: '24px',
-                zIndex: 90,
+                position: 'absolute',
+                bottom: '44px',
+                right: '16px',
+                zIndex: 60,
             }}>
                 <button
                     type="button"
                     onClick={() => setIsExpanded(true)}
                     style={{
-                        padding: '10px 16px',
+                        padding: '8px 14px',
                         background: '#0B7C91',
                         color: '#FFFFFF',
                         border: 'none',
@@ -106,11 +106,13 @@ export default function DesignStudioAiDirector({
                         alignItems: 'center',
                         gap: '8px',
                         fontWeight: 700,
-                        fontSize: '13px',
+                        fontSize: '12.5px',
+                        transition: 'transform 0.15s ease',
                     }}
                 >
-                    <Sparkles size={16} />
+                    <Sparkles size={15} />
                     <span>AI Copilot</span>
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10B981', display: 'inline-block' }} />
                 </button>
             </div>
         );
@@ -118,14 +120,20 @@ export default function DesignStudioAiDirector({
 
     return (
         <div style={{
+            position: 'absolute',
+            bottom: '44px',
+            right: '16px',
+            width: '360px',
+            maxWidth: 'calc(100% - 32px)',
             background: '#FFFFFF',
             border: '1px solid #E2E8F0',
             borderRadius: '16px',
-            boxShadow: '0 8px 24px rgba(16, 21, 29, 0.08)',
+            boxShadow: '0 16px 40px -8px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(15, 23, 42, 0.08)',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
             userSelect: 'none',
+            zIndex: 60,
         }}>
             {/* Header (Image 1 Inspiration) */}
             <div style={{
