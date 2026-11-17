@@ -499,6 +499,7 @@ class EditorialBrain {
                     throw firstErr;
                 }
             }
+        }
 
             const raw = completion.choices[0]?.message?.content;
             if (!raw) return this.fallbackOutput(input?.rawInput);
