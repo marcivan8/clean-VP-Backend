@@ -266,24 +266,45 @@ function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete, isMobil
                     </div>
                 )}
 
-                {/* Format badge — restores the information the square crop drops.
-                    Bottom-left so it clears the 3-dot menu in the body below. */}
-                <span style={{
+                {/* Format badge & subtle design badge */}
+                <div style={{
                     position: 'absolute', left: 8, bottom: 8,
-                    padding: '2px 6px',
-                    borderRadius: 'var(--r-xs)',
-                    background: 'rgba(0,0,0,0.55)',
-                    backdropFilter: 'blur(6px)',
-                    WebkitBackdropFilter: 'blur(6px)',
-                    border: '0.5px solid rgba(255,255,255,0.14)',
-                    fontFamily: 'var(--f-mono)',
-                    fontSize: 9,
-                    letterSpacing: '0.04em',
-                    color: 'var(--fg-2)',
+                    display: 'flex', alignItems: 'center', gap: 6,
                     pointerEvents: 'none',
                 }}>
-                    {isLandscape ? '16:9' : '9:16'}
-                </span>
+                    <span style={{
+                        padding: '2px 6px',
+                        borderRadius: 'var(--r-xs)',
+                        background: 'rgba(0,0,0,0.55)',
+                        backdropFilter: 'blur(6px)',
+                        WebkitBackdropFilter: 'blur(6px)',
+                        border: '0.5px solid rgba(255,255,255,0.14)',
+                        fontFamily: 'var(--f-mono)',
+                        fontSize: 9,
+                        letterSpacing: '0.04em',
+                        color: 'var(--fg-2)',
+                    }}>
+                        {isLandscape ? '16:9' : '9:16'}
+                    </span>
+                    {project.isDesign && (
+                        <span style={{
+                            padding: '2px 6px',
+                            borderRadius: 'var(--r-xs)',
+                            background: 'rgba(0, 229, 255, 0.14)',
+                            backdropFilter: 'blur(6px)',
+                            WebkitBackdropFilter: 'blur(6px)',
+                            border: '0.5px solid rgba(0, 229, 255, 0.38)',
+                            fontFamily: 'var(--f-mono)',
+                            fontSize: 9,
+                            fontWeight: 700,
+                            letterSpacing: '0.06em',
+                            color: '#00E5FF',
+                            textTransform: 'uppercase',
+                        }}>
+                            design
+                        </span>
+                    )}
+                </div>
             </div>
 
             {/* Card body */}
@@ -663,6 +684,7 @@ export default function DashboardPage() {
     const [renameModal,   setRenameModal]   = useState(null); // { id, name }
     const [deleteModal,   setDeleteModal]   = useState(null); // { id, name }
     const [search,        setSearch]        = useState('');
+    const [projectFilter, setProjectFilter] = useState('all'); // 'all' | 'video' | 'design'
     const [showMobileSearch, setShowMobileSearch] = useState(false);
     // Mobile Home: New video sheet, plan sheet ('plans' from the usage meter).
     const [newVideoOpen,  setNewVideoOpen]  = useState(false);
@@ -692,12 +714,36 @@ export default function DashboardPage() {
         });
     }, [navigate]);
 
-    // ── load projects ─────────────────────────────────────────────────────────
+    // ── load projects (both video and design projects) ─────────────────────────
     const load = useCallback(async () => {
         setLoading(true);
         // Media cookie first: project thumbnails are owner-only.
         const [list] = await Promise.all([listProjects(), ensureMediaSession()]);
-        setProjects(list);
+
+        // Load design projects from localStorage
+        let designList = [];
+        try {
+            const raw = localStorage.getItem('vp_design_projects');
+            if (raw) {
+                designList = JSON.parse(raw);
+            } else {
+                designList = [
+                    {
+                        id: 'design-kettle-drum',
+                        name: 'Kettle Drum Launch · Thumbnail',
+                        isDesign: true,
+                        aspect_ratio: '16:9',
+                        updated_at: new Date(Date.now() - 3600000 * 5).toISOString(),
+                        thumbnail_url: null,
+                    }
+                ];
+                localStorage.setItem('vp_design_projects', JSON.stringify(designList));
+            }
+        } catch (e) {
+            console.warn('[DashboardPage] Failed to parse design projects:', e);
+        }
+
+        setProjects([...(Array.isArray(list) ? list : []), ...designList]);
         setLoading(false);
     }, []);
 
@@ -817,21 +863,73 @@ export default function DashboardPage() {
     }
 
     async function handleOpen(projectId) {
+        const found = projects.find(p => p.id === projectId);
+        if (found?.isDesign) {
+            navigate(`/design?projectId=${projectId}`);
+            return;
+        }
         navigate(`/editor/${projectId}`);
     }
 
     async function handleRename(projectId, newName) {
+        const found = projects.find(p => p.id === projectId);
+        if (found?.isDesign) {
+            try {
+                const raw = localStorage.getItem('vp_design_projects');
+                if (raw) {
+                    const list = JSON.parse(raw).map(p => p.id === projectId ? { ...p, name: newName } : p);
+                    localStorage.setItem('vp_design_projects', JSON.stringify(list));
+                }
+            } catch (e) {
+                console.warn('[DashboardPage] rename design project error:', e);
+            }
+            setProjects(ps => ps.map(p => p.id === projectId ? { ...p, name: newName } : p));
+            return;
+        }
         await renameProject(projectId, newName);
         setProjects(ps => ps.map(p => p.id === projectId ? { ...p, name: newName } : p));
     }
 
     async function handleDuplicate(projectId, projectName) {
         if (atLimit(plan, projects.length)) { setShowLimitModal(true); return; }
+        const found = projects.find(p => p.id === projectId);
+        if (found?.isDesign) {
+            const copy = {
+                ...found,
+                id: `design-${Date.now()}`,
+                name: `${projectName} (Copy)`,
+                updated_at: new Date().toISOString(),
+            };
+            try {
+                const raw = localStorage.getItem('vp_design_projects');
+                const list = raw ? JSON.parse(raw) : [];
+                list.unshift(copy);
+                localStorage.setItem('vp_design_projects', JSON.stringify(list));
+            } catch (e) {
+                console.warn('[DashboardPage] duplicate design project error:', e);
+            }
+            await load();
+            return;
+        }
         await duplicateProject(projectId, `${projectName} (Copy)`);
         await load();
     }
 
     async function handleDelete(projectId) {
+        const found = projects.find(p => p.id === projectId);
+        if (found?.isDesign) {
+            try {
+                const raw = localStorage.getItem('vp_design_projects');
+                if (raw) {
+                    const list = JSON.parse(raw).filter(p => p.id !== projectId);
+                    localStorage.setItem('vp_design_projects', JSON.stringify(list));
+                }
+            } catch (e) {
+                console.warn('[DashboardPage] delete design project error:', e);
+            }
+            setProjects(ps => ps.filter(p => p.id !== projectId));
+            return;
+        }
         await deleteProject(projectId);
         setProjects(ps => ps.filter(p => p.id !== projectId));
     }
@@ -842,9 +940,12 @@ export default function DashboardPage() {
     }
 
     // ── filtered list ─────────────────────────────────────────────────────────
-    const filtered = search.trim()
-        ? projects.filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
-        : projects;
+    const filtered = projects.filter(p => {
+        if (projectFilter === 'video' && p.isDesign) return false;
+        if (projectFilter === 'design' && !p.isDesign) return false;
+        if (search.trim() && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
+        return true;
+    });
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -1067,18 +1168,18 @@ export default function DashboardPage() {
                                     fontFamily: 'var(--f-mono)', fontSize: 10, fontWeight: 700,
                                     letterSpacing: '0.12em', color: '#00E5FF', textTransform: 'uppercase',
                                 }}>PRO</span>
-                                <span style={{ width: 3, height: 3, borderRadius: '50%', background: '#00E5FF', opacity: 0.8 }} />
+                                <span style={{ color: 'rgba(255, 255, 255, 0.35)', fontSize: 11 }}>·</span>
                                 <span style={{
-                                    fontFamily: 'var(--f-mono)', fontSize: 10, letterSpacing: '0.04em',
-                                    color: 'var(--fg-2)', whiteSpace: 'nowrap',
+                                    fontFamily: 'var(--f-mono)', fontSize: 10.5, letterSpacing: '0.04em',
+                                    color: '#FFFFFF', whiteSpace: 'nowrap', fontWeight: 600,
                                 }}>
-                                    Unlimited AI · 4h Max Footage · Unlimited Projects
+                                    {projects.length} {projects.length === 1 ? 'project' : 'projects'}
                                 </span>
                             </div>
                         ) : plan === 'creator' ? (
                             <div style={{
-                                display: 'flex', alignItems: 'center', gap: 6,
-                                padding: '4px 10px', borderRadius: 999,
+                                display: 'flex', alignItems: 'center', gap: 8,
+                                padding: '4px 12px', borderRadius: 999,
                                 background: 'rgba(0, 229, 255, 0.08)',
                                 border: '0.5px solid rgba(0, 229, 255, 0.35)',
                             }}>
@@ -1086,10 +1187,11 @@ export default function DashboardPage() {
                                     fontFamily: 'var(--f-mono)', fontSize: 10, fontWeight: 700,
                                     letterSpacing: '0.10em', color: '#00E5FF', textTransform: 'uppercase',
                                 }}>CREATOR</span>
+                                <span style={{ color: 'rgba(255, 255, 255, 0.35)', fontSize: 11 }}>·</span>
                                 <span style={{
-                                    fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)', whiteSpace: 'nowrap',
+                                    fontFamily: 'var(--f-mono)', fontSize: 10.5, color: '#FFFFFF', whiteSpace: 'nowrap', fontWeight: 600,
                                 }}>
-                                    {projects.length} / ∞ · 100 AI Ops
+                                    {projects.length} {projects.length === 1 ? 'project' : 'projects'}
                                 </span>
                             </div>
                         ) : (
@@ -1271,245 +1373,8 @@ export default function DashboardPage() {
             {/* ── Body ── */}
             <main style={{ maxWidth: 1280, margin: '0 auto', padding: isMobile ? '88px 16px 40px' : '108px 28px 60px' }}>
 
-                {/* Pro Studio Workspace Banner (Landing-page inspired, strictly ZERO purple) */}
-                {plan === 'pro' && (
-                    <div style={{
-                        marginBottom: 36,
-                        padding: isMobile ? '20px 16px' : '26px 28px',
-                        borderRadius: 20,
-                        background: 'rgba(255, 255, 255, 0.02)',
-                        border: '1px solid rgba(255, 255, 255, 0.08)',
-                        boxShadow: '0 24px 60px -12px rgba(0, 0, 0, 0.65)',
-                        display: 'flex', flexDirection: 'column', gap: 20,
-                    }}>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}>
-                            <div>
-                                <div style={{
-                                    fontFamily: 'var(--f-mono)', fontSize: 10.5, fontWeight: 600,
-                                    letterSpacing: '0.14em', color: '#00E5FF', textTransform: 'uppercase',
-                                    marginBottom: 4,
-                                }}>
-                                    PRO STUDIO WORKSPACE
-                                </div>
-                                <h2 style={{
-                                    fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
-                                    margin: 0, fontSize: isMobile ? 19 : 23, fontWeight: 800,
-                                    letterSpacing: '-0.025em', color: '#FFFFFF',
-                                }}>
-                                    High-Performance Video Creation Suite
-                                </h2>
-                            </div>
-                            <div style={{
-                                fontFamily: 'var(--f-mono)', fontSize: 10.5, fontWeight: 600,
-                                padding: '6px 14px', borderRadius: 999,
-                                background: 'rgba(0, 229, 255, 0.08)',
-                                border: '1px solid rgba(0, 229, 255, 0.28)',
-                                color: '#00E5FF',
-                                letterSpacing: '0.08em', textTransform: 'uppercase',
-                            }}>
-                                UNLIMITED AI · 4H FOOTAGE CAP
-                            </div>
-                        </div>
-
-                        <div style={{
-                            display: 'grid',
-                            gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)',
-                            gap: 16,
-                        }}>
-                            {/* Card 1: Studio & Crew Network */}
-                            <div
-                                onClick={() => navigate('/marketplace')}
-                                style={{
-                                    cursor: 'pointer',
-                                    padding: '22px 20px',
-                                    borderRadius: 16,
-                                    background: 'rgba(255, 255, 255, 0.03)',
-                                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                                    display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-                                    minHeight: 160,
-                                    transition: 'transform 0.2s cubic-bezier(0.2, 0.7, 0.3, 1), border-color 0.2s ease, background 0.2s ease',
-                                }}
-                                onMouseEnter={e => {
-                                    e.currentTarget.style.transform = 'translateY(-3px)';
-                                    e.currentTarget.style.borderColor = 'rgba(0, 229, 255, 0.35)';
-                                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.055)';
-                                }}
-                                onMouseLeave={e => {
-                                    e.currentTarget.style.transform = 'translateY(0)';
-                                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-                                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
-                                }}
-                            >
-                                <div>
-                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                                        <div style={{
-                                            width: 36, height: 36, borderRadius: 10,
-                                            background: 'rgba(255, 255, 255, 0.06)',
-                                            border: '1px solid rgba(255, 255, 255, 0.1)',
-                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        }}>
-                                            <Users size={17} color="#00E5FF" strokeWidth={1.8} />
-                                        </div>
-                                        <ArrowUpRight size={16} color="rgba(255, 255, 255, 0.45)" />
-                                    </div>
-                                    <div style={{
-                                        fontFamily: 'var(--f-mono)', fontSize: 9.5, letterSpacing: '0.12em',
-                                        color: 'rgba(255, 255, 255, 0.5)', textTransform: 'uppercase', marginBottom: 4,
-                                    }}>
-                                        PRO NETWORK
-                                    </div>
-                                    <h3 style={{
-                                        fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
-                                        margin: '0 0 6px 0', fontSize: 15.5, fontWeight: 700,
-                                        letterSpacing: '-0.02em', color: '#FFFFFF',
-                                    }}>
-                                        Studio & Crew Network
-                                    </h3>
-                                    <p style={{
-                                        fontFamily: 'var(--f-sans, "Geist", sans-serif)',
-                                        margin: 0, fontSize: 12.5, color: 'rgba(255, 255, 255, 0.65)', lineHeight: 1.55,
-                                    }}>
-                                        Hire verified production studios, camera crews, and colorists with 0% platform fee.
-                                    </p>
-                                </div>
-                                <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'rgba(255, 255, 255, 0.45)' }}>
-                                        0% platform fee · Direct escrow
-                                    </span>
-                                </div>
-                            </div>
-
-                            {/* Card 2: Figma-Class Scene Design */}
-                            <div
-                                onClick={() => navigate('/design')}
-                                style={{
-                                    cursor: 'pointer',
-                                    padding: '22px 20px',
-                                    borderRadius: 16,
-                                    background: 'rgba(255, 255, 255, 0.03)',
-                                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                                    display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-                                    minHeight: 160,
-                                    transition: 'transform 0.2s cubic-bezier(0.2, 0.7, 0.3, 1), border-color 0.2s ease, background 0.2s ease',
-                                }}
-                                onMouseEnter={e => {
-                                    e.currentTarget.style.transform = 'translateY(-3px)';
-                                    e.currentTarget.style.borderColor = 'rgba(0, 229, 255, 0.35)';
-                                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.055)';
-                                }}
-                                onMouseLeave={e => {
-                                    e.currentTarget.style.transform = 'translateY(0)';
-                                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-                                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
-                                }}
-                            >
-                                <div>
-                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                                        <div style={{
-                                            width: 36, height: 36, borderRadius: 10,
-                                            background: 'rgba(255, 255, 255, 0.06)',
-                                            border: '1px solid rgba(255, 255, 255, 0.1)',
-                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        }}>
-                                            <Palette size={17} color="#FFFFFF" strokeWidth={1.8} />
-                                        </div>
-                                        <ArrowUpRight size={16} color="rgba(255, 255, 255, 0.45)" />
-                                    </div>
-                                    <div style={{
-                                        fontFamily: 'var(--f-mono)', fontSize: 9.5, letterSpacing: '0.12em',
-                                        color: 'rgba(255, 255, 255, 0.5)', textTransform: 'uppercase', marginBottom: 4,
-                                    }}>
-                                        FIGMA STUDIO
-                                    </div>
-                                    <h3 style={{
-                                        fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
-                                        margin: '0 0 6px 0', fontSize: 15.5, fontWeight: 700,
-                                        letterSpacing: '-0.02em', color: '#FFFFFF',
-                                    }}>
-                                        Figma-Class Scene Design
-                                    </h3>
-                                    <p style={{
-                                        fontFamily: 'var(--f-sans, "Geist", sans-serif)',
-                                        margin: 0, fontSize: 12.5, color: 'rgba(255, 255, 255, 0.65)', lineHeight: 1.55,
-                                    }}>
-                                        Precise alignment toolbar, curved text paths, layer hierarchy, and alpha VP9 export.
-                                    </p>
-                                </div>
-                                <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'rgba(255, 255, 255, 0.45)' }}>
-                                        Vector canvas · Alpha VP9 export
-                                    </span>
-                                </div>
-                            </div>
-
-                            {/* Card 3: Editorial Brain Profile */}
-                            <div
-                                onClick={() => navigate('/style')}
-                                style={{
-                                    cursor: 'pointer',
-                                    padding: '22px 20px',
-                                    borderRadius: 16,
-                                    background: 'rgba(255, 255, 255, 0.03)',
-                                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                                    display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-                                    minHeight: 160,
-                                    transition: 'transform 0.2s cubic-bezier(0.2, 0.7, 0.3, 1), border-color 0.2s ease, background 0.2s ease',
-                                }}
-                                onMouseEnter={e => {
-                                    e.currentTarget.style.transform = 'translateY(-3px)';
-                                    e.currentTarget.style.borderColor = 'rgba(0, 229, 255, 0.35)';
-                                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.055)';
-                                }}
-                                onMouseLeave={e => {
-                                    e.currentTarget.style.transform = 'translateY(0)';
-                                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-                                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
-                                }}
-                            >
-                                <div>
-                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                                        <div style={{
-                                            width: 36, height: 36, borderRadius: 10,
-                                            background: 'rgba(255, 255, 255, 0.06)',
-                                            border: '1px solid rgba(255, 255, 255, 0.1)',
-                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        }}>
-                                            <Sparkles size={17} color="#9EF4FF" strokeWidth={1.8} />
-                                        </div>
-                                        <ArrowUpRight size={16} color="rgba(255, 255, 255, 0.45)" />
-                                    </div>
-                                    <div style={{
-                                        fontFamily: 'var(--f-mono)', fontSize: 9.5, letterSpacing: '0.12em',
-                                        color: 'rgba(255, 255, 255, 0.5)', textTransform: 'uppercase', marginBottom: 4,
-                                    }}>
-                                        AI BRAIN
-                                    </div>
-                                    <h3 style={{
-                                        fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
-                                        margin: '0 0 6px 0', fontSize: 15.5, fontWeight: 700,
-                                        letterSpacing: '-0.02em', color: '#FFFFFF',
-                                    }}>
-                                        Editorial Brain Profile
-                                    </h3>
-                                    <p style={{
-                                        fontFamily: 'var(--f-sans, "Geist", sans-serif)',
-                                        margin: 0, fontSize: 12.5, color: 'rgba(255, 255, 255, 0.65)', lineHeight: 1.55,
-                                    }}>
-                                        Learned editing rhythm, visual grading preferences, and AI persona direction.
-                                    </p>
-                                </div>
-                                <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'rgba(255, 255, 255, 0.45)' }}>
-                                        Learned rhythm · Style profile
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
                 {/* Page header */}
-                <div style={{ marginBottom: isMobile ? 20 : 36, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ marginBottom: isMobile ? 20 : 36, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14 }}>
                     <div>
                         <h1 style={{
                             margin: '0 0 4px',
@@ -1521,9 +1386,40 @@ export default function DashboardPage() {
                         }}>
                             {t('title', 'Projects')}
                         </h1>
-                        <p className="body" style={{ margin: 0, fontSize: 13 }}>
-                            {loading ? t('loading', 'Loading projects…') : (t('count', { count: projects.length }) || (projects.length === 1 ? '1 project' : `${projects.length} projects`))}
-                        </p>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <p className="body" style={{ margin: 0, fontSize: 13 }}>
+                                {loading ? t('loading', 'Loading projects…') : (t('count', { count: filtered.length }) || (filtered.length === 1 ? '1 project' : `${filtered.length} projects`))}
+                            </p>
+                            {!loading && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 8 }}>
+                                    {[
+                                        { id: 'all', label: `All (${projects.length})` },
+                                        { id: 'video', label: `Video (${projects.filter(p => !p.isDesign).length})` },
+                                        { id: 'design', label: `Design (${projects.filter(p => p.isDesign).length})` },
+                                    ].map(f => (
+                                        <button
+                                            key={f.id}
+                                            type="button"
+                                            onClick={() => setProjectFilter(f.id)}
+                                            style={{
+                                                padding: '3px 10px',
+                                                borderRadius: 999,
+                                                border: projectFilter === f.id ? '1px solid #00E5FF' : '0.5px solid var(--glass-stroke)',
+                                                background: projectFilter === f.id ? 'rgba(0, 229, 255, 0.12)' : 'transparent',
+                                                color: projectFilter === f.id ? '#00E5FF' : 'var(--fg-3)',
+                                                fontFamily: 'var(--f-mono)',
+                                                fontSize: 10.5,
+                                                fontWeight: projectFilter === f.id ? 700 : 500,
+                                                cursor: 'pointer',
+                                                transition: 'all 0.15s ease',
+                                            }}
+                                        >
+                                            {f.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
                     {/* Mobile: plan pill next to title */}
                     {isMobile && !loading && (
@@ -1598,7 +1494,13 @@ export default function DashboardPage() {
                     }}>
                         {/* "New project" quick-add card */}
                         <button
-                            onClick={requestNewProject}
+                            onClick={() => {
+                                if (projectFilter === 'design') {
+                                    navigate('/design');
+                                } else {
+                                    requestNewProject();
+                                }
+                            }}
                             style={{
                                 background: 'var(--glass)',
                                 border: '0.5px dashed var(--glass-stroke)',

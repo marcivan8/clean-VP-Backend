@@ -81,7 +81,7 @@ app.use(helmet({
       // Editor fonts come from Bunny Fonts (EU), not Google Fonts.
       styleSrc:                ["'self'", "'unsafe-inline'", "https://fonts.bunny.net"],
       fontSrc:                 ["'self'", "https://fonts.bunny.net"],
-      imgSrc:                  ["'self'", "data:", "blob:", "https://storage.googleapis.com", "https://*.posthog.com", "https://*.i.posthog.com", ...STOCK_MEDIA_HOSTS],
+      imgSrc:                  ["'self'", "data:", "blob:", "https://storage.googleapis.com", "https://*.basemaps.cartocdn.com", "https://*.tile.openstreetmap.org", "https://tile.openstreetmap.org", "https://*.posthog.com", "https://*.i.posthog.com", ...STOCK_MEDIA_HOSTS],
       // Stock clips are previewed and scrubbed straight from the provider's
       // CDN before anything is imported, so the same hosts have to be allowed
       // for media as for images — a thumbnail that loads over a <video> that
@@ -92,6 +92,9 @@ app.use(helmet({
         "https://*.supabase.co",
         "wss://*.supabase.co",
         "https://storage.googleapis.com",
+        "https://*.basemaps.cartocdn.com",
+        "https://*.tile.openstreetmap.org",
+        "https://tile.openstreetmap.org",
         // Sentry error reporting — both ingest domains (EU + global)
         "https://*.ingest.sentry.io",
         "https://*.ingest.de.sentry.io",

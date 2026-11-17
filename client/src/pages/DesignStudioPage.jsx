@@ -1030,7 +1030,25 @@ export default function DesignStudioPage() {
             addOverlayClip(asset, { kind: 'sticker', duration: 5 });
         }
 
-        showToast('Saved to project timeline as overlay track!');
+        // Also persist as a design project for the Dashboard
+        try {
+            const raw = localStorage.getItem('vp_design_projects');
+            const list = raw ? JSON.parse(raw) : [];
+            const designItem = {
+                id: `design-${Date.now()}`,
+                name: briefText ? `${briefText.slice(0, 36)} · Design` : `${currentFormat.label} Design`,
+                isDesign: true,
+                aspect_ratio: currentFormat.id === 'portrait' ? '9:16' : '16:9',
+                updated_at: new Date().toISOString(),
+                thumbnail_url: dataUrl,
+            };
+            const updated = [designItem, ...list.filter(p => p.id !== designItem.id)];
+            localStorage.setItem('vp_design_projects', JSON.stringify(updated.slice(0, 30)));
+        } catch (e) {
+            console.warn('[DesignStudioPage] Error saving to vp_design_projects:', e);
+        }
+
+        showToast('Saved to project timeline & dashboard library!');
     };
 
     // Export 2 sizes as downloadable PNGs

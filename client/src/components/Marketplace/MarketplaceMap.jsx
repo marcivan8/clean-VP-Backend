@@ -3,21 +3,24 @@
  *
  * Real Interactive Map for VIBED Market Surface A (Studios & Crews in Île-de-France).
  * Features:
- * - Dynamic Leaflet / CartoDB Positron light vector tiles (clean warm grayscale, no API key needed).
- * - Instant fallback vector cartography for Paris & Greater Île-de-France.
+ * - Native bundled Leaflet with CartoDB Positron clean light vector tiles.
+ * - Full mouse wheel zooming, drag-to-pan, double click zoom, and touch gesture support.
  * - Precision GPS coordinates for real verified studios across Île-de-France.
  * - Interactive price pills that highlight and scale on hover.
- * - Elevated Floating Studio Info Card on cursor hover/click with specs, cyc dimensions, address, and quick actions.
+ * - Discrete Match Score display: displays exact score number + "match score" directly on the cards.
+ * - Full-width layout covering the entire container space.
+ * - Floating Studio Info Card on cursor hover/click with specs, cyc dimensions, address, and quick actions.
  * - Smooth zoom controls, location recenter, and radius indicator.
  *
  * Strictly zero emojis.
  */
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import {
-    MapPin, Navigation, Compass, Layers, Plus, Minus,
-    ShieldCheck, CheckCircle2, ArrowRight, Clock, Star,
-    ExternalLink, Zap, ChevronRight, X
+    MapPin, Navigation, Compass, Plus, Minus,
+    Star, ChevronRight, X, Zap, ShieldCheck
 } from 'lucide-react';
 
 export default function MarketplaceMap({
@@ -31,15 +34,15 @@ export default function MarketplaceMap({
 }) {
     const mapContainerRef = useRef(null);
     const mapInstanceRef = useRef(null);
+    const radiusCircleRef = useRef(null);
     const markersRef = useRef({});
-    const [leafletReady, setLeafletReady] = useState(false);
     const [hoveredListing, setHoveredListing] = useState(null);
     const [zoomLevel, setZoomLevel] = useState(11);
     const hoverTimeoutRef = useRef(null);
 
     // Default center: Île-de-France / Paris South-East (Choisy / Ivry / Paris center)
-    const centerLat = 48.8450;
-    const centerLng = 2.3700;
+    const centerLat = 48.8500;
+    const centerLng = 2.3600;
 
     // Currently active listing (hovered takes precedence, then selected)
     const activeCardListing = useMemo(() => {
@@ -50,65 +53,21 @@ export default function MarketplaceMap({
         return null;
     }, [hoveredListing, selectedId, listings]);
 
-    // Dynamically inject Leaflet CSS & JS
+    // Initialize Leaflet Map directly on mount
     useEffect(() => {
-        let isMounted = true;
-
-        if (typeof window === 'undefined') return;
-
-        // Inject Leaflet CSS if missing
-        if (!document.getElementById('leaflet-css-vibed')) {
-            const link = document.createElement('link');
-            link.id = 'leaflet-css-vibed';
-            link.rel = 'stylesheet';
-            link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-            document.head.appendChild(link);
-        }
-
-        // If Leaflet is already loaded
-        if (window.L) {
-            if (isMounted) setLeafletReady(true);
-            return;
-        }
-
-        // Inject Leaflet JS
-        if (!document.getElementById('leaflet-js-vibed')) {
-            const script = document.createElement('script');
-            script.id = 'leaflet-js-vibed';
-            script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-            script.async = true;
-            script.onload = () => {
-                if (isMounted) setLeafletReady(true);
-            };
-            script.onerror = () => {
-                console.warn('[MarketplaceMap] Could not load Leaflet CDN, using precision vector fallback.');
-            };
-            document.head.appendChild(script);
-        } else {
-            const existingScript = document.getElementById('leaflet-js-vibed');
-            existingScript.addEventListener('load', () => {
-                if (isMounted) setLeafletReady(true);
-            });
-        }
-
-        return () => {
-            isMounted = false;
-        };
-    }, []);
-
-    // Initialize Leaflet Map
-    useEffect(() => {
-        if (!leafletReady || !mapContainerRef.current || mapInstanceRef.current || !window.L) {
-            return;
-        }
+        if (!mapContainerRef.current || mapInstanceRef.current) return;
 
         try {
-            const L = window.L;
             const map = L.map(mapContainerRef.current, {
                 center: [centerLat, centerLng],
                 zoom: 11,
                 minZoom: 9,
-                maxZoom: 16,
+                maxZoom: 18,
+                scrollWheelZoom: true,
+                smoothWheelZoom: true,
+                doubleClickZoom: true,
+                touchZoom: true,
+                dragging: true,
                 zoomControl: false,
                 attributionControl: false,
             });
@@ -124,22 +83,23 @@ export default function MarketplaceMap({
                 radius: radiusKm * 1000,
                 color: '#0B7C91',
                 weight: 1.5,
-                dashArray: '5, 5',
+                dashArray: '6, 6',
                 fillColor: '#00E5FF',
                 fillOpacity: 0.04,
             }).addTo(map);
+            radiusCircleRef.current = radiusCircle;
 
             // User Origin Marker (Choisy-le-Roi)
             const userIcon = L.divIcon({
                 className: 'vibed-user-origin-pin',
                 html: `
-                    <div style="position: relative; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">
-                        <div style="position: absolute; width: 22px; height: 22px; border-radius: 50%; background: rgba(11, 124, 145, 0.2); animation: pulse 2s infinite;"></div>
+                    <div style="position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">
+                        <div style="position: absolute; width: 24px; height: 24px; border-radius: 50%; background: rgba(11, 124, 145, 0.22); animation: pulse 2s infinite;"></div>
                         <div style="width: 10px; height: 10px; border-radius: 50%; background: #0B7C91; border: 2px solid #FFFFFF; box-shadow: 0 2px 6px rgba(0,0,0,0.25);"></div>
                     </div>
                 `,
-                iconSize: [22, 22],
-                iconAnchor: [11, 11],
+                iconSize: [24, 24],
+                iconAnchor: [12, 12],
             });
             L.marker([48.7634, 2.4091], { icon: userIcon, interactive: false }).addTo(map);
 
@@ -148,8 +108,13 @@ export default function MarketplaceMap({
             });
 
             mapInstanceRef.current = map;
+
+            // Force recalculation of container size after mounting to prevent partial grey tiles
+            setTimeout(() => {
+                map.invalidateSize();
+            }, 100);
         } catch (err) {
-            console.warn('[MarketplaceMap] Leaflet initialization failed:', err);
+            console.error('[MarketplaceMap] Leaflet initialization error:', err);
         }
 
         return () => {
@@ -159,12 +124,18 @@ export default function MarketplaceMap({
                 markersRef.current = {};
             }
         };
-    }, [leafletReady]);
+    }, []);
+
+    // Update radius circle if radiusKm changes
+    useEffect(() => {
+        if (radiusCircleRef.current) {
+            radiusCircleRef.current.setRadius(radiusKm * 1000);
+        }
+    }, [radiusKm]);
 
     // Update / Render Markers when listings or selectedId change
     useEffect(() => {
-        if (!mapInstanceRef.current || !window.L) return;
-        const L = window.L;
+        if (!mapInstanceRef.current) return;
         const map = mapInstanceRef.current;
 
         // Clear existing markers
@@ -178,26 +149,28 @@ export default function MarketplaceMap({
             const isSelected = selectedId === item.id;
             const isStudio = item.type === 'studio';
             const priceLabel = `€${item.priceHalfDay}`;
-            const shortName = item.name.length > 14 ? item.name.substring(0, 12) + '…' : item.name;
+            const shortName = item.name.length > 15 ? item.name.substring(0, 13) + '…' : item.name;
+            const score = item.scoutScore || 94;
 
             const markerHtml = `
                 <div class="vibed-map-pin" style="
                     display: inline-flex;
                     align-items: center;
                     gap: 6px;
-                    padding: ${isSelected ? '6px 12px' : '4px 10px'};
+                    padding: ${isSelected ? '6px 14px' : '4px 10px'};
                     background: ${isSelected ? '#10151D' : '#FFFFFF'};
                     color: ${isSelected ? '#FFFFFF' : '#10151D'};
                     font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
                     font-size: ${isSelected ? '12.5px' : '11.5px'};
                     font-weight: 700;
                     border-radius: 999px;
-                    border: ${isSelected ? '2px solid #00E5FF' : '1px solid rgba(16, 21, 29, 0.15)'};
-                    box-shadow: ${isSelected ? '0 8px 24px rgba(0, 229, 255, 0.25), 0 4px 12px rgba(16, 21, 29, 0.18)' : '0 2px 10px rgba(16, 21, 29, 0.08)'};
+                    border: ${isSelected ? '2px solid #00E5FF' : '1px solid rgba(16, 21, 29, 0.16)'};
+                    box-shadow: ${isSelected ? '0 8px 24px rgba(0, 229, 255, 0.28), 0 4px 12px rgba(16, 21, 29, 0.2)' : '0 2px 10px rgba(16, 21, 29, 0.08)'};
                     cursor: pointer;
                     white-space: nowrap;
                     transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.15s ease;
-                    transform-origin: center;
+                    transform: ${isSelected ? 'scale(1.06)' : 'scale(1)'};
+                    user-select: none;
                 ">
                     <span style="
                         width: 7px;
@@ -206,17 +179,27 @@ export default function MarketplaceMap({
                         background: ${isStudio ? '#00E5FF' : '#0B7C91'};
                         flex-shrink: 0;
                     "></span>
-                    <span style="font-family: 'JetBrains Mono', monospace; font-weight: 600;">${priceLabel}</span>
-                    <span style="opacity: 0.7; font-weight: 500; font-size: 11px;">·</span>
+                    <span style="font-family: 'JetBrains Mono', monospace; font-weight: 700;">${priceLabel}</span>
+                    <span style="opacity: 0.5;">·</span>
                     <span>${shortName}</span>
+                    <span style="
+                        margin-left: 2px;
+                        background: ${isSelected ? 'rgba(0, 229, 255, 0.2)' : 'rgba(11, 124, 145, 0.1)'};
+                        color: ${isSelected ? '#00E5FF' : '#0B7C91'};
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 10px;
+                        font-weight: 800;
+                        padding: 1px 5px;
+                        border-radius: 999px;
+                    ">${score}</span>
                 </div>
             `;
 
             const icon = L.divIcon({
                 className: `pin-wrapper-${item.id}`,
                 html: markerHtml,
-                iconSize: [120, 28],
-                iconAnchor: [60, 14],
+                iconSize: [140, 30],
+                iconAnchor: [70, 15],
             });
 
             const marker = L.marker([item.lat, item.lng], { icon, riseOnHover: true });
@@ -234,28 +217,24 @@ export default function MarketplaceMap({
             marker.on('mouseout', () => {
                 hoverTimeoutRef.current = setTimeout(() => {
                     setHoveredListing(null);
-                }, 300);
+                }, 350);
             });
 
             marker.addTo(map);
             markersRef.current[item.id] = marker;
         });
-    }, [listings, selectedId, leafletReady]);
+    }, [listings, selectedId]);
 
     // Zoom Handlers
     const handleZoomIn = () => {
         if (mapInstanceRef.current) {
             mapInstanceRef.current.zoomIn();
-        } else {
-            setZoomLevel(z => Math.min(z + 1, 15));
         }
     };
 
     const handleZoomOut = () => {
         if (mapInstanceRef.current) {
             mapInstanceRef.current.zoomOut();
-        } else {
-            setZoomLevel(z => Math.max(z - 1, 9));
         }
     };
 
@@ -269,18 +248,18 @@ export default function MarketplaceMap({
         <div style={{
             position: 'relative',
             width: '100%',
-            height: '100%',
-            minHeight: 620,
+            height: 700,
+            minHeight: 640,
             background: '#F7F6F2',
             borderRadius: 20,
             border: '1px solid rgba(16, 21, 29, 0.08)',
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
-            boxShadow: '0 8px 30px -10px rgba(16, 21, 29, 0.08)',
+            boxShadow: '0 8px 32px -8px rgba(16, 21, 29, 0.08)',
         }}>
             {/* Real Map Canvas Container */}
-            <div style={{ position: 'relative', flex: 1, width: '100%', height: '100%', minHeight: 560 }}>
+            <div style={{ position: 'relative', flex: 1, width: '100%', height: '100%' }}>
                 {/* Leaflet DOM Node */}
                 <div
                     ref={mapContainerRef}
@@ -293,106 +272,6 @@ export default function MarketplaceMap({
                     }}
                 />
 
-                {/* Precision Vector Fallback (displayed if Leaflet is loading or offline) */}
-                {!leafletReady && (
-                    <div style={{
-                        position: 'absolute',
-                        inset: 0,
-                        background: 'linear-gradient(180deg, #F5F7FA 0%, #EBF0F5 100%)',
-                        zIndex: 0,
-                    }}>
-                        <svg
-                            viewBox="0 0 500 500"
-                            preserveAspectRatio="xMidYMid meet"
-                            style={{ width: '100%', height: '100%', display: 'block' }}
-                        >
-                            <defs>
-                                <linearGradient id="fallbackRiver" x1="0%" y1="0%" x2="100%" y2="100%">
-                                    <stop offset="0%" stopColor="#D4E4ED" stopOpacity="0.8" />
-                                    <stop offset="100%" stopColor="#C4D8E2" stopOpacity="0.9" />
-                                </linearGradient>
-                            </defs>
-                            {/* Grid lines */}
-                            <g opacity="0.35">
-                                <line x1="100" y1="0" x2="100" y2="500" stroke="#DFE6ED" strokeWidth="1" strokeDasharray="3 3" />
-                                <line x1="250" y1="0" x2="250" y2="500" stroke="#DFE6ED" strokeWidth="1" strokeDasharray="3 3" />
-                                <line x1="400" y1="0" x2="400" y2="500" stroke="#DFE6ED" strokeWidth="1" strokeDasharray="3 3" />
-                                <line x1="0" y1="150" x2="500" y2="150" stroke="#DFE6ED" strokeWidth="1" strokeDasharray="3 3" />
-                                <line x1="0" y1="300" x2="500" y2="300" stroke="#DFE6ED" strokeWidth="1" strokeDasharray="3 3" />
-                                <line x1="0" y1="420" x2="500" y2="420" stroke="#DFE6ED" strokeWidth="1" strokeDasharray="3 3" />
-                            </g>
-                            {/* Seine River curve */}
-                            <path
-                                d="M -20,230 C 120,210 180,270 280,285 C 380,305 440,240 520,220 L 520,250 C 440,270 380,335 280,315 C 180,295 120,235 -20,255 Z"
-                                fill="url(#fallbackRiver)"
-                            />
-                            {/* User Radius */}
-                            <circle cx="250" cy="280" r="170" fill="rgba(11, 124, 145, 0.04)" stroke="#0B7C91" strokeWidth="1.5" strokeDasharray="4 4" />
-                            <circle cx="250" cy="280" r="5" fill="#0B7C91" />
-                        </svg>
-
-                        {/* Interactive Pins Overlay for Fallback */}
-                        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-                            {listings.map(item => {
-                                const isSelected = selectedId === item.id;
-                                const isHovered = hoveredListing?.id === item.id;
-                                const pin = item.mapPin || { x: 50, y: 50, label: `€${item.priceHalfDay}` };
-
-                                return (
-                                    <div
-                                        key={item.id}
-                                        onClick={() => onSelectListing(item.id)}
-                                        onMouseEnter={() => {
-                                            if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-                                            setHoveredListing(item);
-                                        }}
-                                        onMouseLeave={() => {
-                                            hoverTimeoutRef.current = setTimeout(() => setHoveredListing(null), 300);
-                                        }}
-                                        style={{
-                                            position: 'absolute',
-                                            left: `${pin.x}%`,
-                                            top: `${pin.y}%`,
-                                            transform: 'translate(-50%, -50%)',
-                                            pointerEvents: 'auto',
-                                            cursor: 'pointer',
-                                            zIndex: isSelected ? 30 : isHovered ? 25 : 10,
-                                        }}
-                                    >
-                                        <div style={{
-                                            display: 'inline-flex',
-                                            alignItems: 'center',
-                                            gap: 6,
-                                            padding: isSelected ? '6px 12px' : '4px 10px',
-                                            background: isSelected ? '#10151D' : isHovered ? '#10151D' : '#FFFFFF',
-                                            color: (isSelected || isHovered) ? '#FFFFFF' : '#10151D',
-                                            fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
-                                            fontSize: 12,
-                                            fontWeight: 700,
-                                            borderRadius: 999,
-                                            border: isSelected ? '2px solid #00E5FF' : '1px solid rgba(16, 21, 29, 0.15)',
-                                            boxShadow: isSelected
-                                                ? '0 6px 18px rgba(0, 229, 255, 0.25)'
-                                                : '0 2px 8px rgba(0,0,0,0.08)',
-                                            whiteSpace: 'nowrap',
-                                        }}>
-                                            <span style={{
-                                                width: 6,
-                                                height: 6,
-                                                borderRadius: '50%',
-                                                background: '#00E5FF',
-                                            }} />
-                                            <span>€{item.priceHalfDay}</span>
-                                            <span style={{ opacity: 0.6 }}>·</span>
-                                            <span>{item.name}</span>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                )}
-
                 {/* Floating Studio Info Card on Hover/Selection */}
                 {activeCardListing && (
                     <div
@@ -404,61 +283,49 @@ export default function MarketplaceMap({
                         }}
                         style={{
                             position: 'absolute',
-                            top: 16,
-                            left: 16,
-                            width: 320,
-                            maxWidth: 'calc(100% - 32px)',
+                            top: 20,
+                            left: 20,
+                            width: 340,
+                            maxWidth: 'calc(100% - 40px)',
                             background: 'rgba(255, 255, 255, 0.98)',
-                            backdropFilter: 'blur(16px)',
-                            WebkitBackdropFilter: 'blur(16px)',
-                            borderRadius: 16,
+                            backdropFilter: 'blur(20px)',
+                            WebkitBackdropFilter: 'blur(20px)',
+                            borderRadius: 18,
                             border: '1px solid rgba(16, 21, 29, 0.12)',
-                            boxShadow: '0 16px 40px -10px rgba(16, 21, 29, 0.18), 0 4px 12px rgba(16, 21, 29, 0.05)',
-                            padding: 16,
+                            boxShadow: '0 20px 48px -12px rgba(16, 21, 29, 0.2), 0 4px 12px rgba(16, 21, 29, 0.05)',
+                            padding: 18,
                             zIndex: 40,
                             animation: 'fadeInCard 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
                             pointerEvents: 'auto',
                         }}
                     >
-                        {/* Card Header: Studio Name & Close button */}
-                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 6 }}>
-                            <div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                                    <h4 style={{
-                                        margin: 0,
-                                        fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
-                                        fontSize: 16,
-                                        fontWeight: 800,
-                                        color: '#10151D',
-                                        letterSpacing: '-0.02em',
-                                    }}>
-                                        {activeCardListing.name}
-                                    </h4>
-                                    <span style={{
-                                        background: '#E6F8F9',
-                                        color: '#0B7C91',
-                                        fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                                        fontSize: 10,
-                                        fontWeight: 700,
-                                        padding: '2px 6px',
-                                        borderRadius: 999,
-                                    }}>
-                                        PRO
-                                    </span>
-                                </div>
-                                <div style={{
-                                    fontFamily: 'var(--f-sans, "Geist", sans-serif)',
-                                    fontSize: 12,
-                                    color: '#5F6876',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: 6,
+                        {/* Top: Discrete Match Score Badge */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                            <div style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                padding: '3px 9px',
+                                borderRadius: 6,
+                                background: '#F0F9FB',
+                                border: '1px solid #D4EFF6',
+                            }}>
+                                <span style={{
+                                    fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
+                                    fontSize: 12.5,
+                                    fontWeight: 700,
+                                    color: '#0B7C91',
                                 }}>
-                                    <MapPin size={12} color="#0B7C91" />
-                                    <span>{activeCardListing.location || activeCardListing.address}</span>
-                                    <span>·</span>
-                                    <span style={{ fontWeight: 600, color: '#10151D' }}>{activeCardListing.distanceKm} km</span>
-                                </div>
+                                    {activeCardListing.scoutScore || 94}
+                                </span>
+                                <span style={{
+                                    fontFamily: 'var(--f-sans, "Geist", sans-serif)',
+                                    fontSize: 11,
+                                    color: '#5F6876',
+                                    fontWeight: 500,
+                                }}>
+                                    match score
+                                </span>
                             </div>
 
                             <button
@@ -479,14 +346,54 @@ export default function MarketplaceMap({
                             </button>
                         </div>
 
-                        {/* Full Address details */}
+                        {/* Card Title & Location */}
+                        <div style={{ marginBottom: 6 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                                <h4 style={{
+                                    margin: 0,
+                                    fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
+                                    fontSize: 17,
+                                    fontWeight: 800,
+                                    color: '#10151D',
+                                    letterSpacing: '-0.02em',
+                                }}>
+                                    {activeCardListing.name}
+                                </h4>
+                                <span style={{
+                                    background: '#E6F8F9',
+                                    color: '#0B7C91',
+                                    fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    padding: '2px 6px',
+                                    borderRadius: 999,
+                                }}>
+                                    PRO
+                                </span>
+                            </div>
+                            <div style={{
+                                fontFamily: 'var(--f-sans, "Geist", sans-serif)',
+                                fontSize: 12,
+                                color: '#5F6876',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                            }}>
+                                <MapPin size={12} color="#0B7C91" />
+                                <span>{activeCardListing.location}</span>
+                                <span>·</span>
+                                <span style={{ fontWeight: 600, color: '#10151D' }}>{activeCardListing.distanceKm} km from you</span>
+                            </div>
+                        </div>
+
+                        {/* Full Street Address */}
                         {activeCardListing.address && (
                             <div style={{
-                                fontSize: 11,
+                                fontSize: 11.5,
                                 color: '#7E8695',
                                 fontFamily: 'var(--f-sans, "Geist", sans-serif)',
                                 marginBottom: 10,
-                                lineHeight: 1.3,
+                                lineHeight: 1.35,
                             }}>
                                 {activeCardListing.address}
                             </div>
@@ -530,7 +437,7 @@ export default function MarketplaceMap({
                                 <span style={{ fontWeight: 700, color: '#10151D' }}>
                                     {typeof activeCardListing.rating === 'number' ? activeCardListing.rating.toFixed(2) : activeCardListing.rating}
                                 </span>
-                                <span style={{ color: '#7E8695' }}>({activeCardListing.jobsCount || 20} shoots)</span>
+                                <span style={{ color: '#7E8695' }}>({activeCardListing.jobsCount || 40} shoots)</span>
                             </div>
                             <div style={{
                                 fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
@@ -547,7 +454,7 @@ export default function MarketplaceMap({
                             <div>
                                 <div style={{
                                     fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                                    fontSize: 18,
+                                    fontSize: 19,
                                     fontWeight: 700,
                                     color: '#10151D',
                                     lineHeight: 1,
@@ -566,7 +473,7 @@ export default function MarketplaceMap({
                                     display: 'inline-flex',
                                     alignItems: 'center',
                                     gap: 6,
-                                    padding: '8px 14px',
+                                    padding: '8px 16px',
                                     borderRadius: 999,
                                     background: '#10151D',
                                     color: '#FFFFFF',
@@ -601,8 +508,8 @@ export default function MarketplaceMap({
                         onClick={handleResetCenter}
                         title="Recenter Map"
                         style={{
-                            width: 34,
-                            height: 34,
+                            width: 36,
+                            height: 36,
                             borderRadius: 10,
                             background: '#FFFFFF',
                             border: '1px solid rgba(16, 21, 29, 0.12)',
@@ -615,15 +522,15 @@ export default function MarketplaceMap({
                             transition: 'all 0.15s ease',
                         }}
                     >
-                        <Compass size={16} color="#0B7C91" />
+                        <Compass size={17} color="#0B7C91" />
                     </button>
                     <button
                         type="button"
                         onClick={handleZoomIn}
-                        title="Zoom In"
+                        title="Zoom In (or use mouse wheel)"
                         style={{
-                            width: 34,
-                            height: 34,
+                            width: 36,
+                            height: 36,
                             borderRadius: 10,
                             background: '#FFFFFF',
                             border: '1px solid rgba(16, 21, 29, 0.12)',
@@ -636,15 +543,15 @@ export default function MarketplaceMap({
                             transition: 'all 0.15s ease',
                         }}
                     >
-                        <Plus size={16} />
+                        <Plus size={17} />
                     </button>
                     <button
                         type="button"
                         onClick={handleZoomOut}
-                        title="Zoom Out"
+                        title="Zoom Out (or use mouse wheel)"
                         style={{
-                            width: 34,
-                            height: 34,
+                            width: 36,
+                            height: 36,
                             borderRadius: 10,
                             background: '#FFFFFF',
                             border: '1px solid rgba(16, 21, 29, 0.12)',
@@ -657,14 +564,14 @@ export default function MarketplaceMap({
                             transition: 'all 0.15s ease',
                         }}
                     >
-                        <Minus size={16} />
+                        <Minus size={17} />
                     </button>
                 </div>
             </div>
 
             {/* Bottom Bar: Postcode & Radius info banner */}
             <div style={{
-                padding: '12px 18px',
+                padding: '12px 20px',
                 background: '#FFFFFF',
                 borderTop: '1px solid rgba(16, 21, 29, 0.08)',
                 display: 'flex',
@@ -681,14 +588,14 @@ export default function MarketplaceMap({
                         fontSize: 12,
                         color: '#5F6876',
                     }}>
-                        Interactive map calibrated for Île-de-France ({radiusKm} km radius from {userLocation}).
+                        Interactive map calibrated for Île-de-France ({radiusKm} km radius from {userLocation}). Mouse-wheel zoom enabled.
                     </span>
                 </div>
                 <button
                     type="button"
                     onClick={onChangeLocation}
                     style={{
-                        padding: '5px 12px',
+                        padding: '5px 14px',
                         borderRadius: 999,
                         background: '#EDF0F4',
                         border: '1px solid rgba(16, 21, 29, 0.08)',
