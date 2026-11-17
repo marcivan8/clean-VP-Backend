@@ -598,6 +598,7 @@ export class EditPlanner {
                     { step_id: 'step_1', action: 'design_scene', args: { brief }, reason: 'Design the graphics sequence this brief describes' },
                 ]);
             }
+            case 'open_design_studio': return this.planSingleStep(planId, 'open_design_studio', 'Open the Figma-class Design Studio');
             case 'add_motion_component': {
                 const raw = String(intent.originalPrompt || '');
                 const text = raw.toLowerCase();
