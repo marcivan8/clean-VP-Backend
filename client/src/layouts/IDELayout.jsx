@@ -958,13 +958,15 @@ const IDELayout = ({ mode = 'editor' }) => {
 
         // Seamless playback recovery: if playback was active when mounting or remounting
         // (e.g. after aspect ratio change during Auto edit), restore seek position and play state.
-        const initialPlayState = useTimelineStore.getState();
-        if (initialPlayState.isPlaying) {
+        if (useTimelineStore.getState().isPlaying) {
             const fps = revideoPlayer.playback?.fps ?? 30;
             setTimeout(() => {
                 if (playerRef.current === revideoPlayer) {
-                    if (Number.isFinite(initialPlayState.currentTime) && initialPlayState.currentTime >= 0) {
-                        revideoPlayer.requestSeek(Math.round(initialPlayState.currentTime * fps));
+                    // Read the store now, not at ready time, so a seek made
+                    // in between is kept.
+                    const { currentTime } = useTimelineStore.getState();
+                    if (Number.isFinite(currentTime) && currentTime >= 0) {
+                        revideoPlayer.requestSeek(Math.round(currentTime * fps));
                     }
                     revideoPlayer.togglePlayback(true);
                 }
@@ -976,11 +978,12 @@ const IDELayout = ({ mode = 'editor' }) => {
         // Subscribe to onRecalculated and restore position and playback state AFTER prepare() runs.
         if (revideoPlayer.onRecalculated?.subscribe) {
             revideoPlayer.onRecalculated.subscribe(() => {
-                const { isPlaying, currentTime } = useTimelineStore.getState();
+                const { isPlaying } = useTimelineStore.getState();
                 const fps = revideoPlayer.playback?.fps ?? 30;
                 setTimeout(() => {
                     // Guard: don't seek/unpause if the player has been replaced by a remount
                     if (playerRef.current === revideoPlayer) {
+                        const { currentTime } = useTimelineStore.getState();
                         if (Number.isFinite(currentTime) && currentTime >= 0) {
                             revideoPlayer.requestSeek(Math.round(currentTime * fps));
                         }
@@ -989,6 +992,22 @@ const IDELayout = ({ mode = 'editor' }) => {
                         }
                     }
                 }, 0);
+            });
+        }
+
+        // If the player stays paused while the store says "playing" (it can
+        // pause itself during a preview reload), make the store agree. The
+        // delay lets the two recoveries above resume playback first.
+        if (revideoPlayer.onStateChanged?.subscribe) {
+            let resyncTimer = null;
+            revideoPlayer.onStateChanged.subscribe((state) => {
+                clearTimeout(resyncTimer);
+                if (!state?.paused) return;
+                resyncTimer = setTimeout(() => {
+                    if (playerRef.current !== revideoPlayer) return;
+                    if (!revideoPlayer.playerState?.current?.paused) return;
+                    useTimelineStore.getState().syncPlayingFromPlayer(false);
+                }, 1000);
             });
         }
     };
@@ -3039,8 +3058,11 @@ const IDELayout = ({ mode = 'editor' }) => {
                                                 currentTime={useTimelineStore.getState().currentTime}
                                                 onTimeUpdate={(time) => {
                                                     // Only push into store while playing — while paused, user scrub/seek/step
-                                                    // drives currentTime so asynchronous/quantized updates do not snap the playhead
-                                                    if (useTimelineStore.getState().isPlaying) {
+                                                    // drives currentTime so asynchronous/quantized updates do not snap the playhead.
+                                                    // Check the player too: the store can say "playing" while the
+                                                    // player paused itself, and then each report is a stale frame.
+                                                    const corePaused = playerRef.current?.playerState?.current?.paused;
+                                                    if (useTimelineStore.getState().isPlaying && corePaused !== true) {
                                                         useTimelineStore.getState().setPlaybackTime(time);
                                                     }
                                                 }}

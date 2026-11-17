@@ -59,6 +59,13 @@ const isMobileViewport = () =>
 // Module-level debounce timer — lives outside React so it survives re-renders
 let _autosaveTimer = null;
 
+// The last user seek. Revideo draws the seeked frame and emits `timeupdate`
+// BEFORE it updates its own frame counter, so the first report after a seek
+// still carries the old time. setPlaybackTime() drops reports that contradict
+// a seek this recent, or that old time would move the playhead back.
+const SEEK_GUARD_MS = 750;
+let _pendingSeek = null;
+
 // Blob URLs are scoped to the current browser session. Scene templates can
 // contain nested image/video URLs, so sanitize them recursively while keeping
 // durable asset IDs that can resolve again after a project reload.
@@ -425,6 +432,7 @@ const useTimelineStore = create(
             seek: (time) => {
                 const { duration, playerRef } = get();
                 const clamped = Math.max(0, Math.min(time, duration));
+                _pendingSeek = { time: clamped, at: Date.now() };
                 set({ currentTime: clamped });
                 timelineManager.dispatch(
                     TimelineActions.setPlayhead(clamped),
@@ -446,8 +454,21 @@ const useTimelineStore = create(
             setPlaybackTime: (time) => {
                 const value = Number(time);
                 if (!Number.isFinite(value)) return;
+                if (_pendingSeek) {
+                    const elapsed = (Date.now() - _pendingSeek.at) / 1000;
+                    if (elapsed * 1000 < SEEK_GUARD_MS && Math.abs(value - _pendingSeek.time) > 0.1 + elapsed) return;
+                    _pendingSeek = null;
+                }
                 const { duration } = get();
                 set({ currentTime: Math.max(0, Math.min(value, Number(duration) || value)) });
+            },
+
+            // Mirror the Revideo player's real play state without sending a
+            // command back to it. The player can pause itself (a preview
+            // reload, an empty range), and a store that still says "playing"
+            // makes onTimeUpdate overwrite every seek with the paused frame.
+            syncPlayingFromPlayer: (playing) => {
+                if (get().isPlaying !== playing) set({ isPlaying: playing });
             },
 
             // ==============================================================
