@@ -83,9 +83,11 @@ export default function BookingEscrowModal({
                             SURFACE A · BOOK A SHOOT
                         </span>
                         <h2 style={{
-                            fontFamily: 'var(--f-serif, "Instrument Serif", serif)',
-                            fontSize: 26,
-                            margin: '2px 0 0 0',
+                            fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
+                            fontSize: 22,
+                            fontWeight: 800,
+                            letterSpacing: '-0.02em',
+                            margin: '4px 0 0 0',
                             color: '#10151D',
                         }}>
                             Request & Escrow Hold
@@ -129,8 +131,10 @@ export default function BookingEscrowModal({
                                 <CheckCircle2 size={32} />
                             </div>
                             <h3 style={{
-                                fontFamily: 'var(--f-serif, "Instrument Serif", serif)',
-                                fontSize: 28,
+                                fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
+                                fontSize: 24,
+                                fontWeight: 800,
+                                letterSpacing: '-0.02em',
                                 color: '#10151D',
                                 margin: '0 0 8px 0',
                             }}>

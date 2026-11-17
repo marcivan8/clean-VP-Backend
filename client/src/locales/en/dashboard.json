@@ -1,4 +1,8 @@
 {
+  "title": "Projects",
+  "loading": "Loading projects…",
+  "count": "{{count}} project",
+  "count_other": "{{count}} projects",
   "breadcrumb": "Projects",
   "marketplace": "Marketplace",
   "design": "Design",

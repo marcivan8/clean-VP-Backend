@@ -157,12 +157,12 @@ export default function ProfileDetailModal({
                         {/* Title & Badges */}
                         <div style={{ flex: 1 }}>
                             <h1 style={{
-                                fontFamily: 'var(--f-serif, "Instrument Serif", serif)',
-                                fontSize: 38,
-                                fontWeight: 400,
+                                fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
+                                fontSize: 30,
+                                fontWeight: 800,
                                 color: '#10151D',
                                 margin: '0 0 6px 0',
-                                letterSpacing: '-0.02em',
+                                letterSpacing: '-0.025em',
                                 lineHeight: 1.15,
                             }}>
                                 {item.name}
@@ -205,13 +205,13 @@ export default function ProfileDetailModal({
                         gridTemplateColumns: 'repeat(4, 1fr)',
                         gap: 16,
                         padding: '18px 24px',
-                        background: '#F6F7F9',
+                        background: '#F8F9FA',
                         borderRadius: 14,
                         border: '1px solid #EDF0F4',
                         marginBottom: 36,
                     }}>
                         <div>
-                            <div style={{ fontFamily: 'var(--f-serif, "Instrument Serif", serif)', fontSize: 28, color: '#10151D' }}>
+                            <div style={{ fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)', fontSize: 24, fontWeight: 800, letterSpacing: '-0.02em', color: '#10151D' }}>
                                 {item.rating.toFixed(2)}
                             </div>
                             <div style={{ fontFamily: 'var(--f-sans, "Geist", sans-serif)', fontSize: 12, color: '#5F6876' }}>
@@ -219,7 +219,7 @@ export default function ProfileDetailModal({
                             </div>
                         </div>
                         <div>
-                            <div style={{ fontFamily: 'var(--f-serif, "Instrument Serif", serif)', fontSize: 28, color: '#10151D' }}>
+                            <div style={{ fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)', fontSize: 24, fontWeight: 800, letterSpacing: '-0.02em', color: '#10151D' }}>
                                 {item.onTimePct || 100}%
                             </div>
                             <div style={{ fontFamily: 'var(--f-sans, "Geist", sans-serif)', fontSize: 12, color: '#5F6876' }}>
@@ -227,7 +227,7 @@ export default function ProfileDetailModal({
                             </div>
                         </div>
                         <div>
-                            <div style={{ fontFamily: 'var(--f-serif, "Instrument Serif", serif)', fontSize: 28, color: '#10151D' }}>
+                            <div style={{ fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)', fontSize: 24, fontWeight: 800, letterSpacing: '-0.02em', color: '#10151D' }}>
                                 {item.replyTime ? item.replyTime.replace('replies in ', '') : '40 min'}
                             </div>
                             <div style={{ fontFamily: 'var(--f-sans, "Geist", sans-serif)', fontSize: 12, color: '#5F6876' }}>
@@ -235,7 +235,7 @@ export default function ProfileDetailModal({
                             </div>
                         </div>
                         <div>
-                            <div style={{ fontFamily: 'var(--f-serif, "Instrument Serif", serif)', fontSize: 28, color: '#10151D' }}>
+                            <div style={{ fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)', fontSize: 24, fontWeight: 800, letterSpacing: '-0.02em', color: '#10151D' }}>
                                 {item.repeatClients || 11}
                             </div>
                             <div style={{ fontFamily: 'var(--f-sans, "Geist", sans-serif)', fontSize: 12, color: '#5F6876' }}>
@@ -580,8 +580,10 @@ export default function ProfileDetailModal({
                                 <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 16 }}>
                                     <div>
                                         <span style={{
-                                            fontFamily: 'var(--f-serif, "Instrument Serif", serif)',
-                                            fontSize: 42,
+                                            fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
+                                            fontSize: 34,
+                                            fontWeight: 800,
+                                            letterSpacing: '-0.025em',
                                             color: '#10151D',
                                             lineHeight: 1,
                                         }}>

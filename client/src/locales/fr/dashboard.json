@@ -1,4 +1,8 @@
 {
+  "title": "Projets",
+  "loading": "Chargement des projets…",
+  "count": "{{count}} projet",
+  "count_other": "{{count}} projets",
   "breadcrumb": "Projets",
   "marketplace": "Marketplace",
   "design": "Design",

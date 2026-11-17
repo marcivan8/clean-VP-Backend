@@ -134,13 +134,13 @@ export default function MarketplacePage() {
     return (
         <div style={{
             minHeight: '100vh',
-            background: '#F6F7F9',
+            background: '#EDEAE3',
             color: '#10151D',
             fontFamily: 'var(--f-sans, "Geist", -apple-system, sans-serif)',
             position: 'relative',
             overflowX: 'hidden',
         }}>
-            {/* Soft Ambient Aurora Glows (Landing-page inspired, light adapted) */}
+            {/* Soft Ambient Aurora Glows (Landing-page inspired, warm light canvas) */}
             <div style={{
                 position: 'fixed',
                 top: 0,
@@ -158,7 +158,7 @@ export default function MarketplacePage() {
                 right: '10%',
                 width: 600,
                 height: 380,
-                background: 'radial-gradient(ellipse 60% 40% at 50% 100%, rgba(138, 43, 226, 0.035), transparent 70%)',
+                background: 'radial-gradient(ellipse 60% 40% at 50% 100%, rgba(11, 124, 145, 0.04), transparent 70%)',
                 pointerEvents: 'none',
                 zIndex: 0,
             }} />
@@ -183,11 +183,11 @@ export default function MarketplacePage() {
                     height: 52,
                     padding: '0 20px',
                     borderRadius: 999,
-                    background: 'rgba(255, 255, 255, 0.85)',
+                    background: 'rgba(255, 255, 255, 0.88)',
                     backdropFilter: 'blur(20px) saturate(160%)',
                     WebkitBackdropFilter: 'blur(20px) saturate(160%)',
-                    border: '1px solid rgba(16, 21, 29, 0.08)',
-                    boxShadow: '0 12px 36px -6px rgba(16, 21, 29, 0.08), 0 2px 8px -2px rgba(16, 21, 29, 0.04)',
+                    border: '1px solid rgba(16, 21, 29, 0.1)',
+                    boxShadow: '0 12px 36px -6px rgba(16, 21, 29, 0.09), 0 2px 8px -2px rgba(16, 21, 29, 0.04)',
                 }}>
                     {/* Left: Brand Logo & Wordmark */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -197,11 +197,11 @@ export default function MarketplacePage() {
                         >
                             <Logo size={24} />
                             <span style={{
-                                fontFamily: 'var(--f-serif, "Instrument Serif", serif)',
-                                fontSize: 22,
-                                fontWeight: 400,
+                                fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
+                                fontSize: 17,
+                                fontWeight: 800,
                                 color: '#10151D',
-                                letterSpacing: '-0.02em',
+                                letterSpacing: '-0.025em',
                             }}>
                                 VIBED
                             </span>
@@ -389,13 +389,13 @@ export default function MarketplacePage() {
                 {/* Screen 03 Main Header */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20 }}>
                     <h1 style={{
-                        fontFamily: 'var(--f-serif, "Instrument Serif", serif)',
-                        fontSize: 'clamp(32px, 4.5vw, 48px)',
-                        fontWeight: 400,
+                        fontFamily: 'var(--f-display, "Plus Jakarta Sans", -apple-system, sans-serif)',
+                        fontSize: 'clamp(28px, 4vw, 42px)',
+                        fontWeight: 800,
                         color: '#10151D',
                         margin: 0,
-                        letterSpacing: '-0.02em',
-                        lineHeight: 1.15,
+                        letterSpacing: '-0.025em',
+                        lineHeight: 1.12,
                     }}>
                         Studios and crew near {userLocation}
                     </h1>
@@ -642,8 +642,8 @@ export default function MarketplacePage() {
                                 key={match.id}
                                 onClick={() => handleSelectListing(match.id)}
                                 style={{
-                                    background: '#F6F7F9',
-                                    border: '1px solid #EDF0F4',
+                                    background: '#F8F9FA',
+                                    border: '1px solid rgba(16, 21, 29, 0.08)',
                                     borderRadius: 12,
                                     padding: '16px 18px',
                                     cursor: 'pointer',
@@ -651,6 +651,15 @@ export default function MarketplacePage() {
                                     display: 'flex',
                                     flexDirection: 'column',
                                     justifyContent: 'space-between',
+                                    boxShadow: '0 2px 6px rgba(16, 21, 29, 0.02)',
+                                }}
+                                onMouseEnter={e => {
+                                    e.currentTarget.style.borderColor = 'rgba(11, 124, 145, 0.4)';
+                                    e.currentTarget.style.transform = 'translateY(-2px)';
+                                }}
+                                onMouseLeave={e => {
+                                    e.currentTarget.style.borderColor = 'rgba(16, 21, 29, 0.08)';
+                                    e.currentTarget.style.transform = 'translateY(0)';
                                 }}
                             >
                                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -675,7 +684,7 @@ export default function MarketplacePage() {
                                         fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
                                         fontSize: 20,
                                         fontWeight: 600,
-                                        color: match.scoutScore >= 90 ? '#0B7C91' : '#6B21A8',
+                                        color: match.scoutScore >= 90 ? '#0B7C91' : '#10151D',
                                     }}>
                                         {match.scoutScore}
                                     </span>

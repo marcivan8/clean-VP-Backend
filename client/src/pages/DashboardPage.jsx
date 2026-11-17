@@ -14,7 +14,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Logo } from '../components/Logo.jsx';
 import {
-    Lock, Search, Sparkles, Film, Palette, Users, ArrowRight,
+    Lock, Search, Sparkles, Film, Palette, Users, ArrowRight, ArrowUpRight,
     ShieldCheck, Menu, X,
 } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient.js';
@@ -982,18 +982,19 @@ export default function DashboardPage() {
                         <button
                             onClick={() => navigate('/dashboard')}
                             style={{
-                                background: 'var(--glass)',
-                                border: '0.5px solid var(--glass-stroke)',
-                                color: 'var(--accent)',
+                                background: 'rgba(255, 255, 255, 0.09)',
+                                border: '1px solid rgba(255, 255, 255, 0.16)',
+                                color: '#FFFFFF',
                                 fontSize: 13,
                                 fontWeight: 600,
                                 padding: '6px 14px',
                                 borderRadius: 999,
                                 cursor: 'pointer',
-                                display: 'flex', alignItems: 'center', gap: 6,
+                                display: 'flex', alignItems: 'center', gap: 7,
+                                boxShadow: '0 2px 10px rgba(0, 0, 0, 0.25)',
                             }}
                         >
-                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 8px var(--accent)' }} />
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#00E5FF', boxShadow: '0 0 8px rgba(0, 229, 255, 0.6)' }} />
                             Projects
                         </button>
 
@@ -1059,14 +1060,14 @@ export default function DashboardPage() {
                                 display: 'flex', alignItems: 'center', gap: 8,
                                 padding: '4px 12px', borderRadius: 999,
                                 background: 'rgba(0, 229, 255, 0.08)',
-                                border: '0.5px solid rgba(0, 229, 255, 0.4)',
-                                boxShadow: '0 0 14px rgba(0, 229, 255, 0.18)',
+                                border: '0.5px solid rgba(0, 229, 255, 0.35)',
+                                boxShadow: '0 0 14px rgba(0, 229, 255, 0.14)',
                             }}>
                                 <span style={{
                                     fontFamily: 'var(--f-mono)', fontSize: 10, fontWeight: 700,
-                                    letterSpacing: '0.12em', color: 'var(--accent)', textTransform: 'uppercase',
+                                    letterSpacing: '0.12em', color: '#00E5FF', textTransform: 'uppercase',
                                 }}>PRO</span>
-                                <span style={{ width: 3, height: 3, borderRadius: '50%', background: 'var(--accent)', opacity: 0.6 }} />
+                                <span style={{ width: 3, height: 3, borderRadius: '50%', background: '#00E5FF', opacity: 0.8 }} />
                                 <span style={{
                                     fontFamily: 'var(--f-mono)', fontSize: 10, letterSpacing: '0.04em',
                                     color: 'var(--fg-2)', whiteSpace: 'nowrap',
@@ -1078,12 +1079,12 @@ export default function DashboardPage() {
                             <div style={{
                                 display: 'flex', alignItems: 'center', gap: 6,
                                 padding: '4px 10px', borderRadius: 999,
-                                background: 'rgba(138, 43, 226, 0.08)',
-                                border: '0.5px solid rgba(138, 43, 226, 0.35)',
+                                background: 'rgba(0, 229, 255, 0.08)',
+                                border: '0.5px solid rgba(0, 229, 255, 0.35)',
                             }}>
                                 <span style={{
                                     fontFamily: 'var(--f-mono)', fontSize: 10, fontWeight: 700,
-                                    letterSpacing: '0.10em', color: 'var(--violet)', textTransform: 'uppercase',
+                                    letterSpacing: '0.10em', color: '#00E5FF', textTransform: 'uppercase',
                                 }}>CREATOR</span>
                                 <span style={{
                                     fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)', whiteSpace: 'nowrap',
@@ -1225,7 +1226,7 @@ export default function DashboardPage() {
                     borderRadius: 'var(--r-lg)', padding: '16px', display: 'flex', flexDirection: 'column', gap: 10,
                     boxShadow: '0 20px 48px rgba(0,0,0,0.8)',
                 }}>
-                    <button onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'var(--glass)', border: 'none', color: 'var(--accent)', fontSize: 14, fontWeight: 600, borderRadius: 8 }}>Projects</button>
+                    <button onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'rgba(255, 255, 255, 0.08)', border: 'none', color: '#FFFFFF', fontSize: 14, fontWeight: 600, borderRadius: 8 }}>Projects</button>
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/marketplace'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg)', fontSize: 14 }}>Marketplace</button>
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/design'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg)', fontSize: 14 }}>Design Studio</button>
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/style'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg)', fontSize: 14 }}>Style</button>
@@ -1270,92 +1271,238 @@ export default function DashboardPage() {
             {/* ── Body ── */}
             <main style={{ maxWidth: 1280, margin: '0 auto', padding: isMobile ? '88px 16px 40px' : '108px 28px 60px' }}>
 
-                {/* Pro Studio Workspace Banner */}
+                {/* Pro Studio Workspace Banner (Landing-page inspired, strictly ZERO purple) */}
                 {plan === 'pro' && (
                     <div style={{
-                        marginBottom: 32,
-                        padding: isMobile ? '16px' : '22px 26px',
-                        borderRadius: 'var(--r-lg)',
-                        background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.06), rgba(138, 43, 226, 0.06))',
-                        border: '0.5px solid rgba(0, 229, 255, 0.25)',
-                        boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-                        display: 'flex', flexDirection: 'column', gap: 16,
+                        marginBottom: 36,
+                        padding: isMobile ? '20px 16px' : '26px 28px',
+                        borderRadius: 20,
+                        background: 'rgba(255, 255, 255, 0.02)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        boxShadow: '0 24px 60px -12px rgba(0, 0, 0, 0.65)',
+                        display: 'flex', flexDirection: 'column', gap: 20,
                     }}>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}>
                             <div>
-                                <div className="eyebrow" style={{ marginBottom: 4 }}>
+                                <div style={{
+                                    fontFamily: 'var(--f-mono)', fontSize: 10.5, fontWeight: 600,
+                                    letterSpacing: '0.14em', color: '#00E5FF', textTransform: 'uppercase',
+                                    marginBottom: 4,
+                                }}>
                                     PRO STUDIO WORKSPACE
                                 </div>
-                                <h2 style={{ margin: 0, fontSize: isMobile ? 18 : 22, fontWeight: 600, color: 'var(--fg)' }}>
+                                <h2 style={{
+                                    fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
+                                    margin: 0, fontSize: isMobile ? 19 : 23, fontWeight: 800,
+                                    letterSpacing: '-0.025em', color: '#FFFFFF',
+                                }}>
                                     High-Performance Video Creation Suite
                                 </h2>
                             </div>
                             <div style={{
-                                fontFamily: 'var(--f-mono)', fontSize: 11,
-                                padding: '4px 10px', borderRadius: 999,
-                                background: 'rgba(0, 229, 255, 0.12)',
-                                border: '0.5px solid rgba(0, 229, 255, 0.35)',
-                                color: 'var(--accent)', fontWeight: 600,
+                                fontFamily: 'var(--f-mono)', fontSize: 10.5, fontWeight: 600,
+                                padding: '6px 14px', borderRadius: 999,
+                                background: 'rgba(0, 229, 255, 0.08)',
+                                border: '1px solid rgba(0, 229, 255, 0.28)',
+                                color: '#00E5FF',
                                 letterSpacing: '0.08em', textTransform: 'uppercase',
                             }}>
-                                Unlimited AI · 4h Footage Cap
+                                UNLIMITED AI · 4H FOOTAGE CAP
                             </div>
                         </div>
 
                         <div style={{
                             display: 'grid',
                             gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)',
-                            gap: 12,
+                            gap: 16,
                         }}>
+                            {/* Card 1: Studio & Crew Network */}
                             <div
                                 onClick={() => navigate('/marketplace')}
-                                className="card card-pad"
-                                style={{ cursor: 'pointer', padding: 16, display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(255,255,255,0.03)' }}
+                                style={{
+                                    cursor: 'pointer',
+                                    padding: '22px 20px',
+                                    borderRadius: 16,
+                                    background: 'rgba(255, 255, 255, 0.03)',
+                                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                                    display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+                                    minHeight: 160,
+                                    transition: 'transform 0.2s cubic-bezier(0.2, 0.7, 0.3, 1), border-color 0.2s ease, background 0.2s ease',
+                                }}
+                                onMouseEnter={e => {
+                                    e.currentTarget.style.transform = 'translateY(-3px)';
+                                    e.currentTarget.style.borderColor = 'rgba(0, 229, 255, 0.35)';
+                                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.055)';
+                                }}
+                                onMouseLeave={e => {
+                                    e.currentTarget.style.transform = 'translateY(0)';
+                                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+                                }}
                             >
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>
-                                        <Users size={16} style={{ color: 'var(--accent)' }} />
+                                <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                                        <div style={{
+                                            width: 36, height: 36, borderRadius: 10,
+                                            background: 'rgba(255, 255, 255, 0.06)',
+                                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        }}>
+                                            <Users size={17} color="#00E5FF" strokeWidth={1.8} />
+                                        </div>
+                                        <ArrowUpRight size={16} color="rgba(255, 255, 255, 0.45)" />
+                                    </div>
+                                    <div style={{
+                                        fontFamily: 'var(--f-mono)', fontSize: 9.5, letterSpacing: '0.12em',
+                                        color: 'rgba(255, 255, 255, 0.5)', textTransform: 'uppercase', marginBottom: 4,
+                                    }}>
+                                        PRO NETWORK
+                                    </div>
+                                    <h3 style={{
+                                        fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
+                                        margin: '0 0 6px 0', fontSize: 15.5, fontWeight: 700,
+                                        letterSpacing: '-0.02em', color: '#FFFFFF',
+                                    }}>
                                         Studio & Crew Network
-                                    </span>
-                                    <ArrowRight size={14} style={{ color: 'var(--fg-4)' }} />
+                                    </h3>
+                                    <p style={{
+                                        fontFamily: 'var(--f-sans, "Geist", sans-serif)',
+                                        margin: 0, fontSize: 12.5, color: 'rgba(255, 255, 255, 0.65)', lineHeight: 1.55,
+                                    }}>
+                                        Hire verified production studios, camera crews, and colorists with 0% platform fee.
+                                    </p>
                                 </div>
-                                <p style={{ margin: 0, fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.5 }}>
-                                    Hire verified production studios, camera crews, and colorists with 0% platform fee.
-                                </p>
+                                <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'rgba(255, 255, 255, 0.45)' }}>
+                                        0% platform fee · Direct escrow
+                                    </span>
+                                </div>
                             </div>
 
+                            {/* Card 2: Figma-Class Scene Design */}
                             <div
                                 onClick={() => navigate('/design')}
-                                className="card card-pad"
-                                style={{ cursor: 'pointer', padding: 16, display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(255,255,255,0.03)' }}
+                                style={{
+                                    cursor: 'pointer',
+                                    padding: '22px 20px',
+                                    borderRadius: 16,
+                                    background: 'rgba(255, 255, 255, 0.03)',
+                                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                                    display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+                                    minHeight: 160,
+                                    transition: 'transform 0.2s cubic-bezier(0.2, 0.7, 0.3, 1), border-color 0.2s ease, background 0.2s ease',
+                                }}
+                                onMouseEnter={e => {
+                                    e.currentTarget.style.transform = 'translateY(-3px)';
+                                    e.currentTarget.style.borderColor = 'rgba(0, 229, 255, 0.35)';
+                                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.055)';
+                                }}
+                                onMouseLeave={e => {
+                                    e.currentTarget.style.transform = 'translateY(0)';
+                                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+                                }}
                             >
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>
-                                        <Palette size={16} style={{ color: 'var(--violet)' }} />
+                                <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                                        <div style={{
+                                            width: 36, height: 36, borderRadius: 10,
+                                            background: 'rgba(255, 255, 255, 0.06)',
+                                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        }}>
+                                            <Palette size={17} color="#FFFFFF" strokeWidth={1.8} />
+                                        </div>
+                                        <ArrowUpRight size={16} color="rgba(255, 255, 255, 0.45)" />
+                                    </div>
+                                    <div style={{
+                                        fontFamily: 'var(--f-mono)', fontSize: 9.5, letterSpacing: '0.12em',
+                                        color: 'rgba(255, 255, 255, 0.5)', textTransform: 'uppercase', marginBottom: 4,
+                                    }}>
+                                        FIGMA STUDIO
+                                    </div>
+                                    <h3 style={{
+                                        fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
+                                        margin: '0 0 6px 0', fontSize: 15.5, fontWeight: 700,
+                                        letterSpacing: '-0.02em', color: '#FFFFFF',
+                                    }}>
                                         Figma-Class Scene Design
-                                    </span>
-                                    <ArrowRight size={14} style={{ color: 'var(--fg-4)' }} />
+                                    </h3>
+                                    <p style={{
+                                        fontFamily: 'var(--f-sans, "Geist", sans-serif)',
+                                        margin: 0, fontSize: 12.5, color: 'rgba(255, 255, 255, 0.65)', lineHeight: 1.55,
+                                    }}>
+                                        Precise alignment toolbar, curved text paths, layer hierarchy, and alpha VP9 export.
+                                    </p>
                                 </div>
-                                <p style={{ margin: 0, fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.5 }}>
-                                    Precise alignment toolbar, curved text paths, layer hierarchy, and alpha VP9 export.
-                                </p>
+                                <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'rgba(255, 255, 255, 0.45)' }}>
+                                        Vector canvas · Alpha VP9 export
+                                    </span>
+                                </div>
                             </div>
 
+                            {/* Card 3: Editorial Brain Profile */}
                             <div
                                 onClick={() => navigate('/style')}
-                                className="card card-pad"
-                                style={{ cursor: 'pointer', padding: 16, display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(255,255,255,0.03)' }}
+                                style={{
+                                    cursor: 'pointer',
+                                    padding: '22px 20px',
+                                    borderRadius: 16,
+                                    background: 'rgba(255, 255, 255, 0.03)',
+                                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                                    display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+                                    minHeight: 160,
+                                    transition: 'transform 0.2s cubic-bezier(0.2, 0.7, 0.3, 1), border-color 0.2s ease, background 0.2s ease',
+                                }}
+                                onMouseEnter={e => {
+                                    e.currentTarget.style.transform = 'translateY(-3px)';
+                                    e.currentTarget.style.borderColor = 'rgba(0, 229, 255, 0.35)';
+                                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.055)';
+                                }}
+                                onMouseLeave={e => {
+                                    e.currentTarget.style.transform = 'translateY(0)';
+                                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+                                }}
                             >
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>
-                                        <Sparkles size={16} style={{ color: 'var(--coral)' }} />
+                                <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                                        <div style={{
+                                            width: 36, height: 36, borderRadius: 10,
+                                            background: 'rgba(255, 255, 255, 0.06)',
+                                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        }}>
+                                            <Sparkles size={17} color="#9EF4FF" strokeWidth={1.8} />
+                                        </div>
+                                        <ArrowUpRight size={16} color="rgba(255, 255, 255, 0.45)" />
+                                    </div>
+                                    <div style={{
+                                        fontFamily: 'var(--f-mono)', fontSize: 9.5, letterSpacing: '0.12em',
+                                        color: 'rgba(255, 255, 255, 0.5)', textTransform: 'uppercase', marginBottom: 4,
+                                    }}>
+                                        AI BRAIN
+                                    </div>
+                                    <h3 style={{
+                                        fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
+                                        margin: '0 0 6px 0', fontSize: 15.5, fontWeight: 700,
+                                        letterSpacing: '-0.02em', color: '#FFFFFF',
+                                    }}>
                                         Editorial Brain Profile
-                                    </span>
-                                    <ArrowRight size={14} style={{ color: 'var(--fg-4)' }} />
+                                    </h3>
+                                    <p style={{
+                                        fontFamily: 'var(--f-sans, "Geist", sans-serif)',
+                                        margin: 0, fontSize: 12.5, color: 'rgba(255, 255, 255, 0.65)', lineHeight: 1.55,
+                                    }}>
+                                        Learned editing rhythm, visual grading preferences, and AI persona direction.
+                                    </p>
                                 </div>
-                                <p style={{ margin: 0, fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.5 }}>
-                                    Learned editing rhythm, visual grading preferences, and AI persona direction.
-                                </p>
+                                <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'rgba(255, 255, 255, 0.45)' }}>
+                                        Learned rhythm · Style profile
+                                    </span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1364,11 +1511,18 @@ export default function DashboardPage() {
                 {/* Page header */}
                 <div style={{ marginBottom: isMobile ? 20 : 36, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div>
-                        <h1 style={{ margin: '0 0 4px', fontSize: isMobile ? 22 : 28, fontWeight: 700, letterSpacing: '-0.025em', color: 'var(--fg)' }}>
-                            {t('title')}
+                        <h1 style={{
+                            margin: '0 0 4px',
+                            fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)',
+                            fontSize: isMobile ? 22 : 28,
+                            fontWeight: 800,
+                            letterSpacing: '-0.025em',
+                            color: 'var(--fg)',
+                        }}>
+                            {t('title', 'Projects')}
                         </h1>
                         <p className="body" style={{ margin: 0, fontSize: 13 }}>
-                            {loading ? t('loading') : t('count', { count: projects.length })}
+                            {loading ? t('loading', 'Loading projects…') : (t('count', { count: projects.length }) || (projects.length === 1 ? '1 project' : `${projects.length} projects`))}
                         </p>
                     </div>
                     {/* Mobile: plan pill next to title */}
