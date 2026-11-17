@@ -13,6 +13,10 @@ import ReactDOM from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Logo } from '../components/Logo.jsx';
+import {
+    Lock, Search, Sparkles, Film, Palette, Users, ArrowRight,
+    ShieldCheck, Menu, X,
+} from 'lucide-react';
 import { supabase } from '../lib/supabaseClient.js';
 import { captureEvent } from '../lib/posthog.js';
 
@@ -577,9 +581,8 @@ function PlanLimitModal({ plan, onClose, onUpgrade, modalWidth }) {
                     border: '0.5px solid rgba(0,229,255,0.25)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     margin: '0 auto',
-                    fontSize: 22,
                 }}>
-                    🔒
+                    <Lock size={20} color="var(--accent)" />
                 </div>
 
                 {/* Copy */}
@@ -667,6 +670,7 @@ export default function DashboardPage() {
     const [createVideoError, setCreateVideoError] = useState(false);
     const [draftVideoProject, setDraftVideoProject] = useState(null);
     const [plansSheetOpen, setPlansSheetOpen] = useState(false);
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     // ── responsive ────────────────────────────────────────────────────────────
     const [isMobile, setIsMobile] = useState(() => window.innerWidth < 640);
@@ -929,6 +933,8 @@ export default function DashboardPage() {
                     onDuplicate={handleDuplicate}
                     onDelete={(id, name) => setDeleteModal({ id, name })}
                     onStyle={() => navigate('/style')}
+                    onMarketplace={() => navigate('/marketplace')}
+                    onDesign={() => navigate('/design')}
                     onBilling={() => navigate('/account')}
                     onSignOut={handleSignOut}
                     onSeePlans={() => setPlansSheetOpen(true)}
@@ -942,179 +948,296 @@ export default function DashboardPage() {
     return (
         <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)', fontFamily: 'var(--f-sans)' }}>
 
-            {/* ── Nav bar ── */}
-            <header style={{
-                position: 'sticky', top: 0, zIndex: 50,
-                background: 'rgba(14,15,17,0.85)',
-                backdropFilter: 'blur(20px) saturate(160%)',
-                borderBottom: '0.5px solid var(--line)',
-                padding: isMobile ? '0 16px' : '0 28px',
-                display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 16,
-                height: isMobile ? 52 : 56,
+            {/* ── Fixed Floating Liquid Glass Top Navigation Bar ── */}
+            <nav style={{
+                position: 'fixed', top: 16, left: 0, right: 0, zIndex: 100,
+                display: 'flex', justifyContent: 'center', pointerEvents: 'none',
             }}>
-                {/* Logo + wordmark */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                    <Logo size={22} variant="gradient" />
-                    <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: '-0.02em', color: 'var(--fg)' }}>Vibed</span>
-                </div>
+                <div className={`nav-pill${mobileMenuOpen ? ' nav-pill-open' : ''}`} style={{
+                    pointerEvents: 'auto',
+                    display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 16,
+                    padding: isMobile ? '8px 12px' : '8px 18px',
+                    borderRadius: 999,
+                    maxWidth: 'calc(100vw - 24px)',
+                    background: 'var(--glass-2)',
+                    border: '0.5px solid var(--glass-stroke)',
+                    backdropFilter: 'blur(20px) saturate(160%)',
+                    WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+                    boxShadow: '0 12px 36px -6px rgba(0,0,0,0.6)',
+                    transition: 'all 0.3s ease',
+                }}>
+                    {/* Logo & Brand */}
+                    <div
+                        onClick={() => navigate('/dashboard')}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', flexShrink: 0 }}
+                    >
+                        <Logo size={22} variant="gradient" />
+                        <span style={{ fontWeight: 700, fontSize: 14.5, letterSpacing: '-0.02em', color: 'var(--fg)' }}>
+                            Vibed
+                        </span>
+                    </div>
 
-                {/* Breadcrumb — desktop only */}
-                {!isMobile && <>
-                    <span style={{ color: 'var(--line-strong)', fontSize: 18, lineHeight: 1 }}>/</span>
-                    <span className="eyebrow" style={{ fontSize: 10 }}>{t('breadcrumb')}</span>
-                </>}
-
-                {/* Spacer */}
-                <div style={{ flex: 1 }} />
-
-                {/* Search — desktop only (mobile uses in-body search) */}
-                {!isMobile && (
-                    <div style={{ position: 'relative' }}>
-                        <span style={{
-                            position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
-                            color: 'var(--fg-4)', fontSize: 13, pointerEvents: 'none', userSelect: 'none',
-                        }}>⌕</span>
-                        <input
-                            value={search}
-                            onChange={e => setSearch(e.target.value)}
-                            placeholder={t('search')}
+                    {/* Desktop Navigation Links */}
+                    <div className="nav-only-desktop font-medium" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <button
+                            onClick={() => navigate('/dashboard')}
                             style={{
-                                background: 'var(--bg-3)',
+                                background: 'var(--glass)',
                                 border: '0.5px solid var(--glass-stroke)',
-                                borderRadius: 999,
-                                padding: '7px 14px 7px 32px',
-                                color: 'var(--fg)',
-                                fontFamily: 'var(--f-sans)',
+                                color: 'var(--accent)',
                                 fontSize: 13,
-                                width: 220,
-                                outline: 'none',
-                                transition: 'border-color 0.15s, width 0.2s',
+                                fontWeight: 600,
+                                padding: '6px 14px',
+                                borderRadius: 999,
+                                cursor: 'pointer',
+                                display: 'flex', alignItems: 'center', gap: 6,
                             }}
-                            onFocus={e => {
-                                e.currentTarget.style.borderColor = 'var(--accent)';
-                                e.currentTarget.style.width = '280px';
+                        >
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 8px var(--accent)' }} />
+                            Projects
+                        </button>
+
+                        <button
+                            onClick={() => navigate('/marketplace')}
+                            style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: 'var(--fg-3)',
+                                fontSize: 13,
+                                padding: '6px 12px',
+                                borderRadius: 999,
+                                cursor: 'pointer',
+                                transition: 'color 0.15s',
                             }}
-                            onBlur={e => {
-                                e.currentTarget.style.borderColor = 'var(--glass-stroke)';
-                                e.currentTarget.style.width = '220px';
+                            onMouseEnter={e => e.currentTarget.style.color = 'var(--fg)'}
+                            onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-3)'}
+                        >
+                            Marketplace
+                        </button>
+
+                        <button
+                            onClick={() => navigate('/design')}
+                            style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: 'var(--fg-3)',
+                                fontSize: 13,
+                                padding: '6px 12px',
+                                borderRadius: 999,
+                                cursor: 'pointer',
+                                transition: 'color 0.15s',
                             }}
-                        />
+                            onMouseEnter={e => e.currentTarget.style.color = 'var(--fg)'}
+                            onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-3)'}
+                        >
+                            Design
+                        </button>
+
+                        <button
+                            onClick={() => navigate('/style')}
+                            style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: 'var(--fg-3)',
+                                fontSize: 13,
+                                padding: '6px 12px',
+                                borderRadius: 999,
+                                cursor: 'pointer',
+                                transition: 'color 0.15s',
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.color = 'var(--fg)'}
+                            onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-3)'}
+                        >
+                            Style
+                        </button>
                     </div>
-                )}
 
-                {/* Plan usage pill — desktop only */}
-                {!isMobile && !loading && (
-                    <div style={{
-                        fontFamily: 'var(--f-mono)', fontSize: 10,
-                        letterSpacing: '0.10em', textTransform: 'uppercase',
-                        color: atLimit(plan, projects.length) ? 'var(--accent)' : 'var(--fg-3)',
-                        padding: '4px 10px',
-                        borderRadius: 999,
-                        border: `0.5px solid ${atLimit(plan, projects.length) ? 'rgba(0,229,255,0.3)' : 'var(--glass-stroke)'}`,
-                        background: atLimit(plan, projects.length) ? 'rgba(0,229,255,0.06)' : 'transparent',
-                        whiteSpace: 'nowrap',
-                        flexShrink: 0,
-                    }}>
-                        {projects.length} / {getProjectLimit(plan) === Infinity ? '∞' : getProjectLimit(plan)} · {plan}
+                    {/* Pro Status Badge & Quota Stats (Strictly NO EMOJIS) */}
+                    <div className="nav-only-desktop" style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                        {plan === 'pro' ? (
+                            <div style={{
+                                display: 'flex', alignItems: 'center', gap: 8,
+                                padding: '4px 12px', borderRadius: 999,
+                                background: 'rgba(0, 229, 255, 0.08)',
+                                border: '0.5px solid rgba(0, 229, 255, 0.4)',
+                                boxShadow: '0 0 14px rgba(0, 229, 255, 0.18)',
+                            }}>
+                                <span style={{
+                                    fontFamily: 'var(--f-mono)', fontSize: 10, fontWeight: 700,
+                                    letterSpacing: '0.12em', color: 'var(--accent)', textTransform: 'uppercase',
+                                }}>PRO</span>
+                                <span style={{ width: 3, height: 3, borderRadius: '50%', background: 'var(--accent)', opacity: 0.6 }} />
+                                <span style={{
+                                    fontFamily: 'var(--f-mono)', fontSize: 10, letterSpacing: '0.04em',
+                                    color: 'var(--fg-2)', whiteSpace: 'nowrap',
+                                }}>
+                                    Unlimited AI · 4h Max Footage · Unlimited Projects
+                                </span>
+                            </div>
+                        ) : plan === 'creator' ? (
+                            <div style={{
+                                display: 'flex', alignItems: 'center', gap: 6,
+                                padding: '4px 10px', borderRadius: 999,
+                                background: 'rgba(138, 43, 226, 0.08)',
+                                border: '0.5px solid rgba(138, 43, 226, 0.35)',
+                            }}>
+                                <span style={{
+                                    fontFamily: 'var(--f-mono)', fontSize: 10, fontWeight: 700,
+                                    letterSpacing: '0.10em', color: 'var(--violet)', textTransform: 'uppercase',
+                                }}>CREATOR</span>
+                                <span style={{
+                                    fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)', whiteSpace: 'nowrap',
+                                }}>
+                                    {projects.length} / ∞ · 100 AI Ops
+                                </span>
+                            </div>
+                        ) : (
+                            <div style={{
+                                display: 'flex', alignItems: 'center', gap: 6,
+                                padding: '4px 10px', borderRadius: 999,
+                                background: 'var(--glass)',
+                                border: '0.5px solid var(--glass-stroke)',
+                            }}>
+                                <span style={{
+                                    fontFamily: 'var(--f-mono)', fontSize: 10, fontWeight: 600,
+                                    letterSpacing: '0.08em', color: 'var(--fg-3)', textTransform: 'uppercase',
+                                }}>FREE</span>
+                                <span style={{
+                                    fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)',
+                                }}>
+                                    {projects.length} / 2
+                                </span>
+                                <button
+                                    onClick={() => setShowLimitModal(true)}
+                                    style={{
+                                        background: 'none', border: 'none', cursor: 'pointer',
+                                        fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--accent)',
+                                        textDecoration: 'underline', padding: 0,
+                                    }}
+                                >
+                                    Upgrade
+                                </button>
+                            </div>
+                        )}
                     </div>
-                )}
 
-                {/* Mobile: search icon toggle */}
-                {isMobile && (
-                    <button
-                        onClick={() => setShowMobileSearch(v => !v)}
-                        style={{
-                            background: 'none', border: 'none', cursor: 'pointer',
-                            color: showMobileSearch ? 'var(--accent)' : 'var(--fg-3)',
-                            fontSize: 18, padding: '6px', borderRadius: 8,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            flexShrink: 0,
-                        }}
-                        aria-label="Search"
-                    >⌕</button>
-                )}
+                    {/* Search — desktop compact pill */}
+                    {!isMobile && (
+                        <div style={{ position: 'relative', width: 140 }}>
+                            <span style={{
+                                position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
+                                color: 'var(--fg-4)', fontSize: 12, pointerEvents: 'none', userSelect: 'none',
+                            }}>
+                                <Search size={12} />
+                            </span>
+                            <input
+                                value={search}
+                                onChange={e => setSearch(e.target.value)}
+                                placeholder={t('search')}
+                                style={{
+                                    background: 'var(--bg-3)',
+                                    border: '0.5px solid var(--glass-stroke)',
+                                    borderRadius: 999,
+                                    padding: '5px 10px 5px 26px',
+                                    color: 'var(--fg)',
+                                    fontFamily: 'var(--f-sans)',
+                                    fontSize: 12,
+                                    width: '100%',
+                                    boxSizing: 'border-box',
+                                    outline: 'none',
+                                    transition: 'border-color 0.15s, width 0.2s',
+                                }}
+                                onFocus={e => {
+                                    e.currentTarget.style.borderColor = 'var(--accent)';
+                                    e.currentTarget.parentElement.style.width = '200px';
+                                }}
+                                onBlur={e => {
+                                    e.currentTarget.style.borderColor = 'var(--glass-stroke)';
+                                    e.currentTarget.parentElement.style.width = '140px';
+                                }}
+                            />
+                        </div>
+                    )}
 
-                {/* New project */}
-                <button
-                    className="btn btn-primary"
-                    style={{ height: isMobile ? 34 : 36, padding: isMobile ? '0 12px' : '0 16px', fontSize: 13, flexShrink: 0 }}
-                    onClick={requestNewProject}
-                >
-                    {isMobile ? t('newProjectShort') : t('newProject')}
-                </button>
+                    {/* Actions */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto', flexShrink: 0 }}>
+                        {/* New project */}
+                        <button
+                            className="btn btn-primary"
+                            style={{ height: 32, padding: '0 14px', fontSize: 12.5 }}
+                            onClick={requestNewProject}
+                        >
+                            {isMobile ? t('newProjectShort') : t('newProject')}
+                        </button>
 
-                {/* "Your Style" — the learned editing profile (and its GDPR
-                    reset/export controls). The page existed with no route and no
-                    entry point, so nothing could reach it; see CLAUDE.md R37. */}
-                <button
-                    title={t('yourStyle')}
-                    onClick={() => navigate('/style')}
-                    style={{
-                        height: isMobile ? 34 : 36,
-                        padding: isMobile ? '0 10px' : '0 14px',
-                        fontSize: 13,
-                        background: 'none',
-                        border: '0.5px solid var(--glass-stroke)',
-                        borderRadius: 8,
-                        color: 'var(--fg-2)',
-                        cursor: 'pointer',
-                        flexShrink: 0,
-                        whiteSpace: 'nowrap',
-                    }}
-                >
-                    {isMobile ? t('yourStyleShort') : t('yourStyle')}
-                </button>
+                        {/* Billing link */}
+                        <button
+                            title="Billing & subscription"
+                            onClick={() => navigate('/account')}
+                            className="btn btn-ghost nav-only-desktop"
+                            style={{ height: 32, padding: '0 12px', fontSize: 12.5 }}
+                        >
+                            Billing
+                        </button>
 
-                {/* Billing — /account is where every plan-confirmation email already
-                    pointed (`account_url` in polarWebhook.js), but the route did not
-                    exist, so that link 404'd for paying customers. This is its entry
-                    point in the app itself; a route with no way to reach it is only
-                    marginally better than no route (R37). */}
-                <button
-                    title="Billing & subscription"
-                    onClick={() => navigate('/account')}
-                    style={{
-                        height: isMobile ? 34 : 36,
-                        padding: isMobile ? '0 10px' : '0 14px',
-                        fontSize: 13,
-                        borderRadius: 8,
-                        border: '0.5px solid var(--glass-stroke)',
-                        background: 'transparent',
-                        color: 'var(--fg-3)',
-                        cursor: 'pointer',
-                        flexShrink: 0,
-                        whiteSpace: 'nowrap',
-                    }}
-                >
-                    {isMobile ? 'Billing' : 'Billing'}
-                </button>
+                        {/* Avatar / sign out */}
+                        <button
+                            title={t('signout')}
+                            onClick={handleSignOut}
+                            style={{
+                                width: 28, height: 28,
+                                borderRadius: '50%',
+                                background: 'var(--accent-soft)',
+                                border: '0.5px solid var(--glass-stroke)',
+                                cursor: 'pointer',
+                                color: 'var(--fg-2)',
+                                fontFamily: 'var(--f-mono)',
+                                fontSize: 11,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                textTransform: 'uppercase',
+                                flexShrink: 0,
+                            }}
+                        >
+                            {(user?.email?.[0] ?? '?').toUpperCase()}
+                        </button>
 
-                {/* Avatar / sign out */}
-                <button
-                    title={t('signout')}
-                    onClick={handleSignOut}
-                    style={{
-                        width: 30, height: 30,
-                        borderRadius: '50%',
-                        background: 'var(--accent-soft)',
-                        border: '0.5px solid var(--glass-stroke)',
-                        cursor: 'pointer',
-                        color: 'var(--fg-2)',
-                        fontFamily: 'var(--f-mono)',
-                        fontSize: 11,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        textTransform: 'uppercase',
-                        flexShrink: 0,
-                    }}
-                >
-                    {(user?.email?.[0] ?? '?').toUpperCase()}
-                </button>
-            </header>
+                        {/* Mobile: hamburger toggle */}
+                        <button
+                            className="nav-only-mobile"
+                            onClick={() => setMobileMenuOpen(o => !o)}
+                            aria-label="Toggle menu"
+                            style={{
+                                background: 'none', border: 'none', color: 'var(--fg-2)',
+                                cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center',
+                            }}
+                        >
+                            {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
+                        </button>
+                    </div>
+                </div>
+            </nav>
+
+            {/* Mobile Expanded Menu */}
+            {mobileMenuOpen && (
+                <div style={{
+                    position: 'fixed', top: 76, left: 16, right: 16, zIndex: 99,
+                    background: 'var(--bg-2)', border: '0.5px solid var(--glass-stroke)',
+                    borderRadius: 'var(--r-lg)', padding: '16px', display: 'flex', flexDirection: 'column', gap: 10,
+                    boxShadow: '0 20px 48px rgba(0,0,0,0.8)',
+                }}>
+                    <button onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'var(--glass)', border: 'none', color: 'var(--accent)', fontSize: 14, fontWeight: 600, borderRadius: 8 }}>Projects</button>
+                    <button onClick={() => { setMobileMenuOpen(false); navigate('/marketplace'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg)', fontSize: 14 }}>Marketplace</button>
+                    <button onClick={() => { setMobileMenuOpen(false); navigate('/design'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg)', fontSize: 14 }}>Design</button>
+                    <button onClick={() => { setMobileMenuOpen(false); navigate('/style'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg)', fontSize: 14 }}>Style</button>
+                    <button onClick={() => { setMobileMenuOpen(false); navigate('/account'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg-3)', fontSize: 14 }}>Billing</button>
+                </div>
+            )}
 
             {/* ── Mobile search bar (slides in below nav) ── */}
             {isMobile && showMobileSearch && (
                 <div style={{
                     padding: '8px 16px',
+                    marginTop: 76,
                     background: 'rgba(14,15,17,0.95)',
                     borderBottom: '0.5px solid var(--line)',
                 }}>
@@ -1145,7 +1268,98 @@ export default function DashboardPage() {
             )}
 
             {/* ── Body ── */}
-            <main style={{ maxWidth: 1280, margin: '0 auto', padding: isMobile ? '20px 16px' : '40px 28px' }}>
+            <main style={{ maxWidth: 1280, margin: '0 auto', padding: isMobile ? '88px 16px 40px' : '108px 28px 60px' }}>
+
+                {/* Pro Studio Workspace Banner */}
+                {plan === 'pro' && (
+                    <div style={{
+                        marginBottom: 32,
+                        padding: isMobile ? '16px' : '22px 26px',
+                        borderRadius: 'var(--r-lg)',
+                        background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.06), rgba(138, 43, 226, 0.06))',
+                        border: '0.5px solid rgba(0, 229, 255, 0.25)',
+                        boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+                        display: 'flex', flexDirection: 'column', gap: 16,
+                    }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                            <div>
+                                <div className="eyebrow" style={{ marginBottom: 4 }}>
+                                    PRO STUDIO WORKSPACE
+                                </div>
+                                <h2 style={{ margin: 0, fontSize: isMobile ? 18 : 22, fontWeight: 600, color: 'var(--fg)' }}>
+                                    High-Performance Video Creation Suite
+                                </h2>
+                            </div>
+                            <div style={{
+                                fontFamily: 'var(--f-mono)', fontSize: 11,
+                                padding: '4px 10px', borderRadius: 999,
+                                background: 'rgba(0, 229, 255, 0.12)',
+                                border: '0.5px solid rgba(0, 229, 255, 0.35)',
+                                color: 'var(--accent)', fontWeight: 600,
+                                letterSpacing: '0.08em', textTransform: 'uppercase',
+                            }}>
+                                Unlimited AI · 4h Footage Cap
+                            </div>
+                        </div>
+
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)',
+                            gap: 12,
+                        }}>
+                            <div
+                                onClick={() => navigate('/marketplace')}
+                                className="card card-pad"
+                                style={{ cursor: 'pointer', padding: 16, display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(255,255,255,0.03)' }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>
+                                        <Users size={16} style={{ color: 'var(--accent)' }} />
+                                        Studio & Crew Network
+                                    </span>
+                                    <ArrowRight size={14} style={{ color: 'var(--fg-4)' }} />
+                                </div>
+                                <p style={{ margin: 0, fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.5 }}>
+                                    Hire verified production studios, camera crews, and colorists with 0% platform fee.
+                                </p>
+                            </div>
+
+                            <div
+                                onClick={() => navigate('/design')}
+                                className="card card-pad"
+                                style={{ cursor: 'pointer', padding: 16, display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(255,255,255,0.03)' }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>
+                                        <Palette size={16} style={{ color: 'var(--violet)' }} />
+                                        Figma-Class Scene Design
+                                    </span>
+                                    <ArrowRight size={14} style={{ color: 'var(--fg-4)' }} />
+                                </div>
+                                <p style={{ margin: 0, fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.5 }}>
+                                    Precise alignment toolbar, curved text paths, layer hierarchy, and alpha VP9 export.
+                                </p>
+                            </div>
+
+                            <div
+                                onClick={() => navigate('/style')}
+                                className="card card-pad"
+                                style={{ cursor: 'pointer', padding: 16, display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(255,255,255,0.03)' }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>
+                                        <Sparkles size={16} style={{ color: 'var(--coral)' }} />
+                                        Editorial Brain Profile
+                                    </span>
+                                    <ArrowRight size={14} style={{ color: 'var(--fg-4)' }} />
+                                </div>
+                                <p style={{ margin: 0, fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.5 }}>
+                                    Learned editing rhythm, visual grading preferences, and AI persona direction.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Page header */}
                 <div style={{ marginBottom: isMobile ? 20 : 36, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

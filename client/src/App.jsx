@@ -11,6 +11,7 @@ const HomePage = lazy(() => import('./pages/HomePage'));
 const EditorPage = lazy(() => import('./pages/EditorPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const AnalyzerPage = lazy(() => import('./pages/AnalyzerPage'));
+const MarketplacePage = lazy(() => import('./pages/MarketplacePage'));
 const DataPage = lazy(() => import('./pages/DataPage'));
 const GdprPage = lazy(() => import('./pages/GdprPage'));
 const AuthPage = lazy(() => import('./pages/AuthPage'));
@@ -58,7 +59,12 @@ function App() {
                     <Route path="/editor"            element={<EditorPage />} />
                     <Route path="/editor/:projectId" element={<EditorPage />} />
 
-                    <Route path="/analyzer" element={<AnalyzerPage />} />
+                    {/* Studio & Crew Marketplace — Pro & Business member network */}
+                    <Route path="/marketplace"       element={<MarketplacePage />} />
+
+                    {/* Design Studio — Figma-class scene editor, alignment & transparent export */}
+                    <Route path="/design"            element={<AnalyzerPage mode="design" />} />
+                    <Route path="/analyzer"          element={<AnalyzerPage mode="design" />} />
 
                     {/* "Your Style" — what the Editorial Brain has learned about this
                     user, plus the GDPR reset/export controls for that data. The

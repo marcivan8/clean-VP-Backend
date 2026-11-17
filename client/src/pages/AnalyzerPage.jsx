@@ -1,9 +1,9 @@
 import React from 'react';
 import IDELayout from '../layouts/IDELayout';
 
-const AnalyzerPage = () => {
+const AnalyzerPage = ({ mode = 'design' }) => {
     return (
-        <IDELayout mode="analyzer" />
+        <IDELayout mode={mode} />
     );
 };
 
