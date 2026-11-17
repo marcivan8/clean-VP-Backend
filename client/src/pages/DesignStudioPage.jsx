@@ -1388,9 +1388,8 @@ export default function DesignStudioPage() {
                     </div>
                 </div>
 
-                {/* Center: Format Dropdown & Quick AI Prompt */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, justifyContent: 'center', maxWidth: 640 }}>
-                    {/* Format Selector Pill */}
+                {/* Center: Format Dropdown */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <div style={{ position: 'relative' }}>
                         <button
                             type="button"
@@ -1398,32 +1397,34 @@ export default function DesignStudioPage() {
                             style={{
                                 display: 'flex',
                                 alignItems: 'center',
-                                gap: 6,
-                                padding: '5px 10px',
+                                gap: 7,
+                                padding: '6px 14px',
                                 borderRadius: 8,
                                 border: '1px solid #E2E8F0',
                                 background: '#F8FAFC',
                                 color: '#0F172A',
-                                fontSize: 12,
+                                fontSize: 12.5,
                                 fontWeight: 600,
                                 cursor: 'pointer',
+                                transition: 'all 0.15s ease',
                             }}
                         >
-                            <Crop size={13} color="#0B7C91" />
+                            <Crop size={14} color="#0B7C91" />
                             <span>{currentFormat.label}</span>
-                            <span style={{ color: '#64748B', fontFamily: 'var(--f-mono, monospace)', fontSize: 10.5 }}>
+                            <span style={{ color: '#64748B', fontFamily: 'var(--f-mono, monospace)', fontSize: 11 }}>
                                 {currentFormat.res.split('·')[0].trim()}
                             </span>
-                            <ChevronDown size={12} color="#64748B" />
+                            <ChevronDown size={13} color="#64748B" />
                         </button>
 
                         {formatDropdownOpen && (
                             <div style={{
                                 position: 'absolute',
                                 top: 'calc(100% + 6px)',
-                                left: 0,
+                                left: '50%',
+                                transform: 'translateX(-50%)',
                                 zIndex: 120,
-                                width: 240,
+                                width: 250,
                                 background: '#FFFFFF',
                                 borderRadius: 10,
                                 border: '1px solid #E2E8F0',
@@ -1462,69 +1463,10 @@ export default function DesignStudioPage() {
                             </div>
                         )}
                     </div>
-
-                    {/* AI Prompt Input Bar */}
-                    <form
-                        onSubmit={(e) => {
-                            e.preventDefault();
-                            handleApplyAiTweak(e, briefText);
-                        }}
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, maxWidth: 380 }}
-                    >
-                        <div style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 6,
-                            flex: 1,
-                            height: 32,
-                            padding: '0 10px',
-                            borderRadius: 8,
-                            border: '1px solid #E2E8F0',
-                            background: '#F8FAFC',
-                        }}>
-                            <Sparkles size={13} color="#0B7C91" />
-                            <input
-                                type="text"
-                                value={briefText}
-                                onChange={e => setBriefText(e.target.value)}
-                                placeholder="Describe layout changes or generate..."
-                                style={{
-                                    flex: 1,
-                                    border: 'none',
-                                    background: 'transparent',
-                                    outline: 'none',
-                                    fontSize: 12,
-                                    color: '#0F172A',
-                                }}
-                            />
-                        </div>
-                        <button
-                            type="submit"
-                            style={{
-                                height: 32,
-                                padding: '0 10px',
-                                borderRadius: 8,
-                                border: 'none',
-                                background: '#0F172A',
-                                color: '#FFFFFF',
-                                fontSize: 11.5,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 5,
-                                whiteSpace: 'nowrap',
-                            }}
-                        >
-                            <Sparkles size={12} color="#00E5FF" />
-                            Generate
-                        </button>
-                    </form>
                 </div>
 
-                {/* Right: Actions, Undo, Kit, Drawer, Save & Export */}
+                {/* Right: Actions (Undo, Redo, Variations, Save to Timeline, Export) */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {/* Undo / Redo */}
                     <div style={{ display: 'flex', gap: 2 }}>
                         <button
                             type="button"
@@ -1568,13 +1510,12 @@ export default function DesignStudioPage() {
                         </button>
                     </div>
 
-                    {/* Variations Toggle Pill */}
                     <button
                         type="button"
                         onClick={() => setShowVariationsTray(v => !v)}
                         style={{
                             height: 32,
-                            padding: '0 10px',
+                            padding: '0 12px',
                             borderRadius: 6,
                             background: showVariationsTray ? '#F0F9FB' : '#FFFFFF',
                             border: showVariationsTray ? '1px solid #0B7C91' : '1px solid #E2E8F0',
@@ -1584,89 +1525,19 @@ export default function DesignStudioPage() {
                             cursor: 'pointer',
                             display: 'inline-flex',
                             alignItems: 'center',
-                            gap: 5,
+                            gap: 6,
                         }}
                     >
                         <Sparkles size={13} color="#0B7C91" />
                         <span>Variations (4)</span>
                     </button>
 
-                    {/* Brand Kit Quick Toggle */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                        <button
-                            type="button"
-                            onClick={toggleBrandKit}
-                            style={{
-                                height: 32,
-                                padding: '0 10px',
-                                borderRadius: 6,
-                                background: kitOn ? '#F0F9FB' : '#FFFFFF',
-                                border: kitOn ? '1px solid #0B7C91' : '1px solid #E2E8F0',
-                                color: kitOn ? '#0B7C91' : '#475569',
-                                fontSize: 12,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 5,
-                            }}
-                            title="Toggle Brand Kit styling on/off"
-                        >
-                            <span style={{ width: 7, height: 7, borderRadius: '50%', background: kitOn ? '#0B7C91' : '#94A3B8' }} />
-                            <span>{kitOn ? 'Kit on' : 'Kit off'}</span>
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setBrandKitModalOpen(true)}
-                            style={{
-                                width: 32,
-                                height: 32,
-                                borderRadius: 6,
-                                background: '#FFFFFF',
-                                border: '1px solid #E2E8F0',
-                                color: '#475569',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'pointer',
-                            }}
-                            title="Configure Brand Kit"
-                        >
-                            <Palette size={14} />
-                        </button>
-                    </div>
-
-                    {/* Assets Drawer Quick Button */}
-                    <button
-                        type="button"
-                        onClick={() => setAssetDrawerOpen(true)}
-                        style={{
-                            height: 32,
-                            padding: '0 10px',
-                            borderRadius: 6,
-                            background: '#FFFFFF',
-                            border: '1px solid #E2E8F0',
-                            color: '#0F172A',
-                            fontSize: 12,
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 5,
-                        }}
-                        title="Open Assets & Media Drawer"
-                    >
-                        <FolderOpen size={14} color="#0B7C91" />
-                        <span>Assets</span>
-                    </button>
-
-                    {/* Save to Timeline */}
                     <button
                         type="button"
                         onClick={handleSaveToTimeline}
                         style={{
                             height: 32,
-                            padding: '0 12px',
+                            padding: '0 14px',
                             borderRadius: 6,
                             background: '#0F172A',
                             color: '#FFFFFF',
@@ -1683,13 +1554,12 @@ export default function DesignStudioPage() {
                         <span>Save to timeline</span>
                     </button>
 
-                    {/* Export Sizes */}
                     <button
                         type="button"
                         onClick={handleExportSizes}
                         style={{
                             height: 32,
-                            padding: '0 12px',
+                            padding: '0 14px',
                             borderRadius: 6,
                             background: '#0B7C91',
                             color: '#FFFFFF',
@@ -1727,8 +1597,12 @@ export default function DesignStudioPage() {
                         if (ids.length > 0) setSelectedLayerId(ids[0]);
                     }}
                     onInsertComponent={handleInsertComponent}
-                    onApplyTheme={handleApplyTheme}
-                    onApplyTypographyStyle={handleApplyTypographyStyle}
+                    timelineAssets={timelineAssets}
+                    onAddAssetToCanvas={handleAddAssetToCanvas}
+                    brandKit={brandKit}
+                    setBrandKit={setBrandKit}
+                    onApplyBrandKit={handleApplyBrandKit}
+                    onUploadAssetClick={() => assetInputRef.current?.click()}
                 />
 
                 {/* 2. Center Stage: Toolbar, Infinite Artboard Canvas, Breadcrumbs, Floating Copilot */}
@@ -1774,6 +1648,7 @@ export default function DesignStudioPage() {
                         canvasWidth={currentFormat.w}
                         canvasHeight={currentFormat.h}
                         zoom={zoom}
+                        setZoom={setZoom}
                         snapToGrid={snapEnabled}
                         showGuides={showGuides}
                         onContextMenu={(ctx) => setContextMenu(ctx)}

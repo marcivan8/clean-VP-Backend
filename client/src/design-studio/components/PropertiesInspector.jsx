@@ -527,54 +527,7 @@ export default function PropertiesInspector({
                             </div>
                         </div>
 
-                        {/* 3. Spacing Widget (Box Model) */}
-                        <div style={{ borderTop: '1px solid #F1F5F9', paddingTop: '12px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                                <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 600 }}>SPACING (BOX MODEL)</span>
-                                <span style={{ fontSize: '10px', color: '#0B7C91', fontWeight: 600 }}>PADDING</span>
-                            </div>
-
-                            <div style={{
-                                position: 'relative',
-                                background: '#F8FAFC',
-                                border: '1px solid #E2E8F0',
-                                borderRadius: '8px',
-                                padding: '16px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                            }}>
-                                <div style={{ position: 'absolute', top: '4px', left: '50%', transform: 'translateX(-50%)' }}>
-                                    <input type="number" value={autoLayout.paddingTop || 0} onChange={(e) => updatePadding('paddingTop', e.target.value)} style={{ width: '36px', height: '22px', background: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '4px', textAlign: 'center', fontSize: '11px', color: '#0F172A', outline: 'none' }} />
-                                </div>
-                                <div style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)' }}>
-                                    <input type="number" value={autoLayout.paddingRight || 0} onChange={(e) => updatePadding('paddingRight', e.target.value)} style={{ width: '36px', height: '22px', background: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '4px', textAlign: 'center', fontSize: '11px', color: '#0F172A', outline: 'none' }} />
-                                </div>
-                                <div style={{ position: 'absolute', bottom: '4px', left: '50%', transform: 'translateX(-50%)' }}>
-                                    <input type="number" value={autoLayout.paddingBottom || 0} onChange={(e) => updatePadding('paddingBottom', e.target.value)} style={{ width: '36px', height: '22px', background: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '4px', textAlign: 'center', fontSize: '11px', color: '#0F172A', outline: 'none' }} />
-                                </div>
-                                <div style={{ position: 'absolute', left: '6px', top: '50%', transform: 'translateY(-50%)' }}>
-                                    <input type="number" value={autoLayout.paddingLeft || 0} onChange={(e) => updatePadding('paddingLeft', e.target.value)} style={{ width: '36px', height: '22px', background: '#FFFFFF', border: '1px solid #CBD5E1', borderRadius: '4px', textAlign: 'center', fontSize: '11px', color: '#0F172A', outline: 'none' }} />
-                                </div>
-
-                                <div style={{
-                                    width: '74px',
-                                    height: '46px',
-                                    border: '1.5px dashed #0B7C91',
-                                    borderRadius: '6px',
-                                    background: '#F0F9FB',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                }}>
-                                    <span style={{ fontSize: '9px', color: '#0B7C91', fontWeight: 600 }}>GAP</span>
-                                    <input type="number" value={autoLayout.gap || 0} onChange={(e) => updatePadding('gap', e.target.value)} style={{ width: '36px', background: 'transparent', border: 'none', textAlign: 'center', fontSize: '12px', fontWeight: 700, color: '#0B7C91', outline: 'none' }} />
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* 4. Typography (if Text Layer) */}
+                        {/* 3. Typography (if Text Layer) */}
                         {primaryLayer.type === 'text' && (
                             <div style={{ borderTop: '1px solid #F1F5F9', paddingTop: '12px' }}>
                                 <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 600, display: 'block', marginBottom: '8px' }}>TYPOGRAPHY</span>
@@ -628,6 +581,27 @@ export default function PropertiesInspector({
                                     onChange={(e) => handleChange('fill', e.target.value)}
                                     style={{ flex: 1, background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '6px', padding: '6px 8px', color: '#0F172A', fontSize: '12px' }}
                                 />
+                            </div>
+
+                            {/* Quick Swatches */}
+                            <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+                                {['#00E5FF', '#0B7C91', '#C85A17', '#F4EDE2', '#10151D', '#FFFFFF', '#64748B', '#16A34A'].map(swatch => (
+                                    <button
+                                        key={swatch}
+                                        type="button"
+                                        onClick={() => handleChange('fill', swatch)}
+                                        style={{
+                                            width: '20px',
+                                            height: '20px',
+                                            borderRadius: '4px',
+                                            background: swatch,
+                                            border: '1px solid rgba(0,0,0,0.15)',
+                                            cursor: 'pointer',
+                                            padding: 0,
+                                        }}
+                                        title={swatch}
+                                    />
+                                ))}
                             </div>
 
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>

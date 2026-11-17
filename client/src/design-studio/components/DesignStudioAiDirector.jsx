@@ -1,12 +1,12 @@
 /**
  * client/src/design-studio/components/DesignStudioAiDirector.jsx
  *
- * Floating Collapsible AI Copilot Drawer (Directly inspired by Image 1):
- * - Clean light card styling with soft drop shadow
- * - Interactive conversation history of design edits
- * - Contextual quick action pills
- * - Multi-action natural language input bar
- * - Expand / Minimize floating toggle
+ * Premium Glassmorphic AI Copilot Dock:
+ * - Frosted blur with subtle cyan (#00E5FF) accent glow
+ * - Conversation stream with smooth message bubbles
+ * - Contextual quick-action recommendation pills
+ * - Premium command input bar with animated submit button
+ * - Seamless expand / minimize floating capsule
  *
  * Strictly zero emojis.
  */
@@ -21,10 +21,8 @@ import { executeDesignCommand } from '../../agent/DesignStudioCommandRegistry.js
 const QUICK_SUGGESTIONS = [
     'Make headline larger, push left',
     'Set corner radius to 24px',
-    'Apply auto layout with 16px gap',
     'Union selected shapes',
     'Distribute spacing evenly',
-    'Apply dark theme mode',
     'Review design for contrast',
 ];
 
@@ -88,31 +86,39 @@ export default function DesignStudioAiDirector({
             <div style={{
                 position: 'absolute',
                 bottom: '44px',
-                right: '16px',
+                right: '20px',
                 zIndex: 60,
             }}>
                 <button
                     type="button"
                     onClick={() => setIsExpanded(true)}
                     style={{
-                        padding: '8px 14px',
-                        background: '#0B7C91',
+                        padding: '10px 18px',
+                        background: 'rgba(15, 23, 42, 0.92)',
+                        backdropFilter: 'blur(16px)',
                         color: '#FFFFFF',
-                        border: 'none',
+                        border: '1px solid rgba(0, 229, 255, 0.4)',
                         borderRadius: '999px',
-                        boxShadow: '0 8px 24px rgba(11, 124, 145, 0.35)',
+                        boxShadow: '0 10px 30px rgba(0, 229, 255, 0.25), 0 0 20px rgba(0, 229, 255, 0.15)',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '8px',
                         fontWeight: 700,
                         fontSize: '12.5px',
-                        transition: 'transform 0.15s ease',
+                        transition: 'transform 0.15s ease, box-shadow 0.15s ease',
                     }}
                 >
-                    <Sparkles size={15} />
+                    <Sparkles size={15} color="#00E5FF" />
                     <span>AI Copilot</span>
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10B981', display: 'inline-block' }} />
+                    <span style={{
+                        width: '7px',
+                        height: '7px',
+                        borderRadius: '50%',
+                        background: '#10B981',
+                        display: 'inline-block',
+                        boxShadow: '0 0 8px #10B981',
+                    }} />
                 </button>
             </div>
         );
@@ -122,58 +128,68 @@ export default function DesignStudioAiDirector({
         <div style={{
             position: 'absolute',
             bottom: '44px',
-            right: '16px',
-            width: '360px',
-            maxWidth: 'calc(100% - 32px)',
-            background: '#FFFFFF',
-            border: '1px solid #E2E8F0',
-            borderRadius: '16px',
-            boxShadow: '0 16px 40px -8px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(15, 23, 42, 0.08)',
+            right: '20px',
+            width: '380px',
+            maxWidth: 'calc(100% - 40px)',
+            background: 'rgba(255, 255, 255, 0.90)',
+            backdropFilter: 'blur(24px) saturate(190%)',
+            border: '1px solid rgba(0, 229, 255, 0.35)',
+            borderRadius: '20px',
+            boxShadow: '0 24px 50px -10px rgba(15, 23, 42, 0.25), 0 0 28px -4px rgba(0, 229, 255, 0.18)',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
             userSelect: 'none',
             zIndex: 60,
         }}>
-            {/* Header (Image 1 Inspiration) */}
+            {/* Elevated Header */}
             <div style={{
                 padding: '12px 16px',
-                background: '#F8FAFC',
-                borderBottom: '1px solid #F1F5F9',
+                background: 'rgba(248, 250, 252, 0.85)',
+                borderBottom: '1px solid rgba(226, 232, 240, 0.7)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <div style={{
-                        width: '24px',
-                        height: '24px',
-                        borderRadius: '6px',
-                        background: '#F0F9FB',
+                        width: '26px',
+                        height: '26px',
+                        borderRadius: '8px',
+                        background: 'linear-gradient(135deg, #0B7C91 0%, #00E5FF 100%)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        color: '#0B7C91',
+                        color: '#FFFFFF',
+                        boxShadow: '0 2px 8px rgba(0, 229, 255, 0.3)',
                     }}>
                         <Sparkles size={14} />
                     </div>
                     <div>
-                        <div style={{ fontSize: '13px', fontWeight: 700, color: '#0F172A' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 800, color: '#0F172A', letterSpacing: '-0.01em' }}>
                             VIBED AI Copilot
                         </div>
                     </div>
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10B981' }} />
-                        <span style={{ fontSize: '10px', color: '#64748B', fontWeight: 600 }}>Active</span>
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        padding: '3px 8px',
+                        background: 'rgba(240, 249, 251, 0.9)',
+                        borderRadius: '999px',
+                        border: '1px solid rgba(11, 124, 145, 0.2)',
+                    }}>
+                        <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10B981', boxShadow: '0 0 6px #10B981' }} />
+                        <span style={{ fontSize: '10px', color: '#0B7C91', fontWeight: 700, letterSpacing: '0.04em' }}>READY</span>
                     </div>
                     <button
                         type="button"
                         onClick={() => setIsExpanded(false)}
                         title="Minimize"
-                        style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: '2px' }}
+                        style={{ background: 'transparent', border: 'none', color: '#64748B', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center' }}
                     >
                         <ChevronDown size={16} />
                     </button>
@@ -182,14 +198,14 @@ export default function DesignStudioAiDirector({
 
             {/* Message Stream */}
             <div style={{
-                maxHeight: '140px',
+                maxHeight: '160px',
                 overflowY: 'auto',
                 padding: '12px 16px',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '8px',
                 fontSize: '12px',
-                background: '#FFFFFF',
+                background: 'transparent',
             }}>
                 {history.map((msg, i) => (
                     <div
@@ -198,10 +214,12 @@ export default function DesignStudioAiDirector({
                             alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
                             maxWidth: '90%',
                             padding: '8px 12px',
-                            borderRadius: msg.role === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
-                            background: msg.role === 'user' ? '#0B7C91' : '#F1F5F9',
+                            borderRadius: msg.role === 'user' ? '14px 14px 2px 14px' : '14px 14px 14px 2px',
+                            background: msg.role === 'user' ? 'linear-gradient(135deg, #0B7C91 0%, #086374 100%)' : 'rgba(255, 255, 255, 0.95)',
                             color: msg.role === 'user' ? '#FFFFFF' : '#1E293B',
-                            lineHeight: 1.4,
+                            border: msg.role === 'user' ? 'none' : '1px solid #E2E8F0',
+                            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+                            lineHeight: 1.45,
                         }}
                     >
                         {msg.text}
@@ -211,12 +229,12 @@ export default function DesignStudioAiDirector({
 
             {/* Quick Prompt Suggestions */}
             <div style={{
-                padding: '6px 14px',
+                padding: '8px 14px',
                 display: 'flex',
                 gap: '6px',
                 overflowX: 'auto',
-                background: '#FAFAFA',
-                borderTop: '1px solid #F1F5F9',
+                background: 'rgba(248, 250, 252, 0.7)',
+                borderTop: '1px solid rgba(226, 232, 240, 0.6)',
             }}>
                 {QUICK_SUGGESTIONS.map((sug, i) => (
                     <button
@@ -224,14 +242,25 @@ export default function DesignStudioAiDirector({
                         type="button"
                         onClick={() => handleExecute(sug)}
                         style={{
-                            padding: '4px 8px',
+                            padding: '4px 10px',
                             background: '#FFFFFF',
-                            border: '1px solid #E2E8F0',
+                            border: '1px solid rgba(11, 124, 145, 0.25)',
                             borderRadius: '999px',
                             fontSize: '11px',
-                            color: '#64748B',
+                            fontWeight: 500,
+                            color: '#0B7C91',
                             whiteSpace: 'nowrap',
                             cursor: 'pointer',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                            transition: 'all 0.15s ease',
+                        }}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.borderColor = '#00E5FF';
+                            e.currentTarget.style.boxShadow = '0 0 8px rgba(0, 229, 255, 0.3)';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.borderColor = 'rgba(11, 124, 145, 0.25)';
+                            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.02)';
                         }}
                     >
                         {sug}
@@ -239,8 +268,8 @@ export default function DesignStudioAiDirector({
                 ))}
             </div>
 
-            {/* Input Bar (Image 1 Inspiration) */}
-            <div style={{ padding: '10px 14px 12px', background: '#FFFFFF', borderTop: '1px solid #F1F5F9' }}>
+            {/* Premium Command Input Bar */}
+            <div style={{ padding: '10px 14px 12px', background: 'rgba(255, 255, 255, 0.95)', borderTop: '1px solid rgba(226, 232, 240, 0.6)' }}>
                 <form
                     onSubmit={(e) => {
                         e.preventDefault();
@@ -252,15 +281,16 @@ export default function DesignStudioAiDirector({
                         gap: '6px',
                         background: '#F8FAFC',
                         border: '1px solid #E2E8F0',
-                        borderRadius: '10px',
+                        borderRadius: '12px',
                         padding: '4px 6px 4px 12px',
+                        boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.03)',
                     }}
                 >
                     <input
                         type="text"
                         value={promptText}
                         onChange={(e) => setPromptText(e.target.value)}
-                        placeholder="Type / for quick access or describe changes..."
+                        placeholder="Ask AI or describe layout changes..."
                         style={{
                             flex: 1,
                             background: 'transparent',
@@ -273,15 +303,16 @@ export default function DesignStudioAiDirector({
                     <button
                         type="submit"
                         style={{
-                            padding: '6px 10px',
-                            background: '#0B7C91',
+                            padding: '7px 12px',
+                            background: 'linear-gradient(135deg, #0B7C91 0%, #00E5FF 100%)',
                             color: '#FFFFFF',
                             border: 'none',
-                            borderRadius: '6px',
+                            borderRadius: '8px',
                             cursor: 'pointer',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
+                            boxShadow: '0 2px 8px rgba(0, 229, 255, 0.3)',
                         }}
                     >
                         <ArrowUp size={14} />

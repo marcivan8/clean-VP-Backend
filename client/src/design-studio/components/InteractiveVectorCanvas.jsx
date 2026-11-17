@@ -30,6 +30,7 @@ export default function InteractiveVectorCanvas({
     canvasWidth = 1280,
     canvasHeight = 720,
     zoom = 0.75,
+    setZoom,
     snapToGrid = false,
     showGuides = false,
     onContextMenu,
@@ -39,7 +40,54 @@ export default function InteractiveVectorCanvas({
     const containerRef = useRef(null);
     const svgRef = useRef(null);
 
-    // Active interaction states: 'idle' | 'marquee' | 'moving' | 'resizing' | 'rotating' | 'drawing' | 'pen' | 'pencil'
+    // Viewport pan & keyboard space navigation
+    const [pan, setPan] = useState({ x: 0, y: 0 });
+    const [isSpacePressed, setIsSpacePressed] = useState(false);
+
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.code === 'Space' && !['INPUT', 'TEXTAREA'].includes(e.target?.tagName)) {
+                e.preventDefault();
+                setIsSpacePressed(true);
+            }
+        };
+        const handleKeyUp = (e) => {
+            if (e.code === 'Space') {
+                setIsSpacePressed(false);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+        };
+    }, []);
+
+    useEffect(() => {
+        const el = containerRef.current;
+        if (!el) return;
+
+        const handleWheel = (e) => {
+            e.preventDefault();
+            if (e.ctrlKey || e.metaKey) {
+                const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+                if (setZoom) {
+                    setZoom(prev => Math.min(3.0, Math.max(0.15, Number((prev * zoomFactor).toFixed(2)))));
+                }
+            } else {
+                setPan(prev => ({
+                    x: prev.x - e.deltaX,
+                    y: prev.y - e.deltaY,
+                }));
+            }
+        };
+
+        el.addEventListener('wheel', handleWheel, { passive: false });
+        return () => el.removeEventListener('wheel', handleWheel);
+    }, [setZoom]);
+
+    // Active interaction states: 'idle' | 'marquee' | 'moving' | 'resizing' | 'rotating' | 'drawing' | 'pen' | 'pencil' | 'panning'
     const [interaction, setInteraction] = useState('idle');
     const [marquee, setMarquee] = useState(null); // { startX, startY, currentX, currentY }
     const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
@@ -108,6 +156,13 @@ export default function InteractiveVectorCanvas({
 
     const handlePointerDown = (e) => {
         if (e.button === 2) return; // Right-click handled by onContextMenu
+
+        // Hand tool, spacebar drag, or middle mouse drag
+        if (activeTool === 'hand' || isSpacePressed || e.button === 1) {
+            setInteraction('panning');
+            setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+            return;
+        }
 
         const pt = getCanvasPoint(e);
         const isShift = e.shiftKey || e.metaKey || e.ctrlKey;
@@ -201,6 +256,13 @@ export default function InteractiveVectorCanvas({
     // ── Mouse Move Handler ────────────────────────────────────────────────────
 
     const handlePointerMove = (e) => {
+        if (interaction === 'panning') {
+            setPan({
+                x: e.clientX - dragStart.x,
+                y: e.clientY - dragStart.y,
+            });
+            return;
+        }
         const pt = getCanvasPoint(e);
 
         if (interaction === 'marquee' && marquee) {
@@ -314,6 +376,10 @@ export default function InteractiveVectorCanvas({
     // ── Mouse Up Handler ──────────────────────────────────────────────────────
 
     const handlePointerUp = () => {
+        if (interaction === 'panning') {
+            setInteraction('idle');
+            return;
+        }
         if (interaction === 'marquee') {
             setMarquee(null);
         }
@@ -464,6 +530,10 @@ export default function InteractiveVectorCanvas({
         }));
     };
 
+    const dotSpacing = Math.max(12, Math.round(24 * zoom));
+    const dotOffsetX = Math.round(pan.x % dotSpacing);
+    const dotOffsetY = Math.round(pan.y % dotSpacing);
+
     return (
         <div
             ref={containerRef}
@@ -475,13 +545,14 @@ export default function InteractiveVectorCanvas({
                 minHeight: 0,
                 background: '#F8FAFC',
                 backgroundImage: 'radial-gradient(#CBD5E1 1.2px, transparent 1.2px)',
-                backgroundSize: '24px 24px',
+                backgroundSize: `${dotSpacing}px ${dotSpacing}px`,
+                backgroundPosition: `${dotOffsetX}px ${dotOffsetY}px`,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                overflow: 'auto',
-                cursor: activeTool === 'hand'
-                    ? (interaction === 'moving' ? 'grabbing' : 'grab')
+                overflow: 'hidden',
+                cursor: (activeTool === 'hand' || isSpacePressed)
+                    ? (interaction === 'panning' ? 'grabbing' : 'grab')
                     : (activeTool === 'pen' || activeTool === 'pencil' ? 'crosshair' : 'default'),
                 userSelect: 'none',
             }}
@@ -489,6 +560,14 @@ export default function InteractiveVectorCanvas({
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
         >
+            {/* Transformed Artboard Stage */}
+            <div style={{
+                transform: `translate(${pan.x}px, ${pan.y}px)`,
+                transition: interaction === 'panning' ? 'none' : 'transform 0.04s ease-out',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+            }}>
             {/* SVG Canvas Board */}
             <svg
                 ref={svgRef}
@@ -880,6 +959,7 @@ export default function InteractiveVectorCanvas({
                     </g>
                 )}
             </svg>
+            </div>
 
             {/* Floating Bottom Canvas Controls (Images 1 & 3 Inspiration) */}
             <div style={{
@@ -914,7 +994,28 @@ export default function InteractiveVectorCanvas({
                     Pan
                 </button>
                 <div style={{ width: '1px', height: '14px', background: '#E2E8F0' }} />
-                <span style={{ fontSize: '11px', fontWeight: 600, color: '#1E293B', minWidth: '40px', textAlign: 'center' }}>
+                <button
+                    type="button"
+                    onClick={() => {
+                        setPan({ x: 0, y: 0 });
+                        if (setZoom) setZoom(0.75);
+                    }}
+                    title="Reset canvas pan and zoom"
+                    style={{
+                        padding: '4px 8px',
+                        background: 'transparent',
+                        color: '#64748B',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: '11px',
+                        fontWeight: 500,
+                    }}
+                >
+                    Reset View
+                </button>
+                <div style={{ width: '1px', height: '14px', background: '#E2E8F0' }} />
+                <span style={{ fontSize: '11px', fontWeight: 600, color: '#1E293B', minWidth: '36px', textAlign: 'center' }}>
                     {Math.round(zoom * 100)}%
                 </span>
             </div>

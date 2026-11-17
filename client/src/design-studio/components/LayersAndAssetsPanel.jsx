@@ -1,24 +1,25 @@
 /**
  * client/src/design-studio/components/LayersAndAssetsPanel.jsx
  *
- * Modern 2-Tier Studio Sidebar (Inspired by Images 4 & 5):
- * - Slim Left Icon Rail (48px) with active indicator
+ * Professional 2-Tier Studio Sidebar:
+ * - Slim Left Icon Rail (48px) with 4 primary tabs:
+ *   1. Layers (hierarchical tree, search, visibility, lock, delete)
+ *   2. Assets & Media (upload local file + project media bin with 1-click insert)
+ *   3. Brand Kit (color palette, brand presets, typography, apply to canvas)
+ *   4. Components (reusable UI & vector starter components)
  * - Expandable Content Drawer (240px)
- * - Hierarchical Layers Tree with disclosure carets, type icons, inline visibility & lock
- * - Components & Assets Library
- * - Theme Tokens & Variables
  *
  * Strictly zero emojis. Light studio aesthetic.
  */
 
 import React, { useState } from 'react';
 import {
-    Layers, Eye, EyeOff, Lock, Unlock, Trash2, ArrowUp, ArrowDown,
-    Component, Palette, Type, Square, Circle, Image as ImageIcon,
-    Star, Minus, Frame, Folder, ChevronDown, ChevronRight,
-    Search, Plus, Check, PanelLeftClose, PanelLeftOpen
+    Layers, FolderOpen, Palette, Component, Eye, EyeOff, Lock, Unlock,
+    Trash2, Type, Square, Circle, Image as ImageIcon, Star, Minus,
+    Frame, Search, Plus, Check, PanelLeftClose, PanelLeftOpen,
+    UploadCloud, Film, ArrowUpRight
 } from 'lucide-react';
-import { STARTER_COMPONENTS, THEME_MODES, TYPOGRAPHY_STYLES } from '../designSystem.js';
+import { STARTER_COMPONENTS } from '../designSystem.js';
 
 export default function LayersAndAssetsPanel({
     layers = [],
@@ -26,15 +27,27 @@ export default function LayersAndAssetsPanel({
     selectedLayerIds = [],
     setSelectedLayerIds,
     onInsertComponent,
-    onApplyTheme,
-    onApplyTypographyStyle,
+    timelineAssets = [],
+    onAddAssetToCanvas,
+    brandKit = {
+        name: 'VIBED Studio Kit',
+        accent: '#00E5FF',
+        accent2: '#C85A17',
+        surface: '#1F140E',
+        text: '#F4EDE2',
+        display: 'Plus Jakarta Sans',
+        body: 'Geist',
+        mono: 'JetBrains Mono',
+    },
+    setBrandKit,
+    onApplyBrandKit,
+    onUploadAssetClick,
 }) {
-    const [activeTab, setActiveTab] = useState('layers'); // 'layers' | 'components' | 'tokens'
+    const [activeTab, setActiveTab] = useState('layers'); // 'layers' | 'assets' | 'brandkit' | 'components'
     const [drawerExpanded, setDrawerExpanded] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
-    const [selectedTheme, setSelectedTheme] = useState('light');
 
-    // Get icon for layer type
+    // Layer type icon helper
     const getLayerIcon = (type) => {
         switch (type) {
             case 'text': return Type;
@@ -61,24 +74,6 @@ export default function LayersAndAssetsPanel({
         setLayers(prev => prev.map(l => l.id === layerId ? { ...l, locked: !l.locked } : l));
     };
 
-    // Layer reordering
-    const handleMoveLayer = (layerId, direction, e) => {
-        e.stopPropagation();
-        setLayers(prev => {
-            const idx = prev.findIndex(l => l.id === layerId);
-            if (idx === -1) return prev;
-            const updated = [...prev];
-            const [item] = updated.splice(idx, 1);
-
-            if (direction === 'up') updated.splice(Math.min(updated.length, idx + 1), 0, item);
-            else if (direction === 'down') updated.splice(Math.max(0, idx - 1), 0, item);
-            else if (direction === 'front') updated.push(item);
-            else if (direction === 'back') updated.unshift(item);
-
-            return updated;
-        });
-    };
-
     // Delete layer
     const handleDeleteLayer = (layerId, e) => {
         e.stopPropagation();
@@ -90,14 +85,26 @@ export default function LayersAndAssetsPanel({
         !searchQuery || (l.name || l.id).toLowerCase().includes(searchQuery.toLowerCase())
     );
 
+    const TABS = [
+        { id: 'layers', label: 'Layers', icon: Layers },
+        { id: 'assets', label: 'Assets & Media', icon: FolderOpen },
+        { id: 'brandkit', label: 'Brand Kit', icon: Palette },
+        { id: 'components', label: 'Components', icon: Component },
+    ];
+
+    const BRAND_PRESETS = [
+        { name: 'Minimalist Studio', accent: '#C85A17', accent2: '#1F140E', surface: '#1F140E', text: '#F4EDE2', display: 'Plus Jakarta Sans' },
+        { name: 'Electric Cyber', accent: '#00E5FF', accent2: '#0B7C91', surface: '#0A0E17', text: '#00E5FF', display: 'Plus Jakarta Sans' },
+        { name: 'Warm Editorial', accent: '#C85A17', accent2: '#10151D', surface: '#F4EDE2', text: '#10151D', display: 'Instrument Serif' },
+        { name: 'Monochrome Pro', accent: '#10151D', accent2: '#5F6876', surface: '#10151D', text: '#FFFFFF', display: 'Geist' },
+    ];
+
     return (
         <div style={{
             display: 'flex',
             height: '100%',
-            minHeight: '620px',
             background: '#FFFFFF',
             borderRight: '1px solid #E2E8F0',
-            borderRadius: '12px 0 0 12px',
             overflow: 'hidden',
             userSelect: 'none',
         }}>
@@ -111,12 +118,9 @@ export default function LayersAndAssetsPanel({
                 alignItems: 'center',
                 padding: '12px 0',
                 gap: '8px',
+                flexShrink: 0,
             }}>
-                {[
-                    { id: 'layers', label: 'Layers', icon: Layers },
-                    { id: 'components', label: 'Components', icon: Component },
-                    { id: 'tokens', label: 'Styles', icon: Palette },
-                ].map(tab => {
+                {TABS.map(tab => {
                     const isActive = activeTab === tab.id;
                     const IconComp = tab.icon;
                     return (
@@ -191,83 +195,80 @@ export default function LayersAndAssetsPanel({
             {/* 2. Expandable Content Drawer (240px) */}
             {drawerExpanded && (
                 <div style={{
-                    width: '230px',
+                    width: '240px',
                     display: 'flex',
                     flexDirection: 'column',
                     background: '#FFFFFF',
                     fontSize: '12px',
                     color: '#0F172A',
+                    overflow: 'hidden',
                 }}>
-                    {/* Header */}
+                    {/* Drawer Header */}
                     <div style={{
-                        padding: '12px 14px 8px',
+                        padding: '12px 14px',
+                        borderBottom: '1px solid #F1F5F9',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
-                        borderBottom: '1px solid #F1F5F9',
+                        flexShrink: 0,
                     }}>
-                        <span style={{ fontWeight: 700, fontSize: '12.5px', textTransform: 'uppercase', letterSpacing: '0.4px', color: '#1E293B' }}>
-                            {activeTab}
-                        </span>
-                        <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 500 }}>
-                            {activeTab === 'layers' ? `${layers.length} items` : ''}
+                        <span style={{
+                            fontFamily: 'var(--f-mono, monospace)',
+                            fontWeight: 700,
+                            letterSpacing: '0.08em',
+                            textTransform: 'uppercase',
+                            fontSize: '11px',
+                            color: '#475569',
+                        }}>
+                            {activeTab === 'layers' && 'Layers'}
+                            {activeTab === 'assets' && 'Assets & Media'}
+                            {activeTab === 'brandkit' && 'Brand Kit'}
+                            {activeTab === 'components' && 'Components'}
                         </span>
                     </div>
 
-                    {/* Search Bar (for layers or components) */}
-                    {activeTab === 'layers' && (
-                        <div style={{ padding: '8px 12px', borderBottom: '1px solid #F1F5F9' }}>
-                            <div style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                                background: '#F8FAFC',
-                                border: '1px solid #E2E8F0',
-                                borderRadius: '6px',
-                                padding: '4px 8px',
-                            }}>
-                                <Search size={13} color="#94A3B8" />
-                                <input
-                                    type="text"
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    placeholder="Filter layers..."
-                                    style={{
-                                        border: 'none',
-                                        background: 'transparent',
-                                        outline: 'none',
-                                        fontSize: '11.5px',
-                                        color: '#0F172A',
-                                        width: '100%',
-                                    }}
-                                />
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Content List */}
-                    <div style={{ flex: 1, overflowY: 'auto', padding: '6px' }}>
-                        {/* 1. LAYERS TAB (Nested tree style, Image 4 & 5) */}
+                    {/* Drawer Content */}
+                    <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
+                        {/* 1. LAYERS TAB */}
                         {activeTab === 'layers' && (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                {[...filteredLayers].reverse().map(layer => {
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {/* Search Filter */}
+                                <div style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    background: '#F8FAFC',
+                                    border: '1px solid #E2E8F0',
+                                    borderRadius: '6px',
+                                    padding: '5px 8px',
+                                    marginBottom: '4px',
+                                }}>
+                                    <Search size={13} color="#94A3B8" />
+                                    <input
+                                        type="text"
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        placeholder="Filter layers..."
+                                        style={{
+                                            border: 'none',
+                                            background: 'transparent',
+                                            outline: 'none',
+                                            fontSize: '11.5px',
+                                            color: '#0F172A',
+                                            width: '100%',
+                                        }}
+                                    />
+                                </div>
+
+                                {/* Layer Rows */}
+                                {filteredLayers.slice().reverse().map(layer => {
                                     const isSelected = selectedLayerIds.includes(layer.id);
                                     const IconComp = getLayerIcon(layer.type);
-
                                     return (
                                         <div
                                             key={layer.id}
-                                            onClick={(e) => {
-                                                const isShift = e.shiftKey || e.metaKey || e.ctrlKey;
-                                                if (isShift) {
-                                                    setSelectedLayerIds(prev =>
-                                                        prev.includes(layer.id)
-                                                            ? prev.filter(id => id !== layer.id)
-                                                            : [...prev, layer.id]
-                                                    );
-                                                } else {
-                                                    setSelectedLayerIds([layer.id]);
-                                                }
+                                            onClick={() => {
+                                                setSelectedLayerIds([layer.id]);
                                             }}
                                             style={{
                                                 display: 'flex',
@@ -278,25 +279,18 @@ export default function LayersAndAssetsPanel({
                                                 background: isSelected ? '#F0F9FB' : 'transparent',
                                                 border: isSelected ? '1px solid #0B7C91' : '1px solid transparent',
                                                 cursor: 'pointer',
-                                                opacity: layer.visible ? 1 : 0.45,
-                                                transition: 'all 0.12s ease',
+                                                transition: 'background 0.12s ease',
                                             }}
                                         >
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
-                                                {layer.type === 'frame' ? (
-                                                    <ChevronDown size={13} color="#64748B" />
-                                                ) : (
-                                                    <div style={{ width: '13px' }} />
-                                                )}
-                                                <IconComp size={14} color={isSelected ? '#0B7C91' : '#64748B'} />
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
+                                                <IconComp size={13} color={isSelected ? '#0B7C91' : '#64748B'} />
                                                 <span style={{
-                                                    fontSize: '12px',
+                                                    overflow: 'hidden',
+                                                    textOverflow: 'ellipsis',
+                                                    whiteSpace: 'nowrap',
+                                                    fontSize: '11.5px',
                                                     fontWeight: isSelected ? 600 : 400,
                                                     color: isSelected ? '#0B7C91' : '#1E293B',
-                                                    whiteSpace: 'nowrap',
-                                                    textOverflow: 'ellipsis',
-                                                    overflow: 'hidden',
-                                                    maxWidth: '110px',
                                                 }}>
                                                     {layer.name || layer.id}
                                                 </span>
@@ -335,7 +329,225 @@ export default function LayersAndAssetsPanel({
                             </div>
                         )}
 
-                        {/* 2. COMPONENTS TAB */}
+                        {/* 2. ASSETS & MEDIA TAB */}
+                        {activeTab === 'assets' && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                {/* Upload Local File Trigger */}
+                                <div
+                                    onClick={() => onUploadAssetClick && onUploadAssetClick()}
+                                    style={{
+                                        border: '1.5px dashed #CBD5E1',
+                                        borderRadius: '8px',
+                                        padding: '16px 12px',
+                                        background: '#F8FAFC',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        cursor: 'pointer',
+                                        textAlign: 'center',
+                                        gap: '6px',
+                                    }}
+                                >
+                                    <UploadCloud size={24} color="#0B7C91" />
+                                    <span style={{ fontSize: '11.5px', fontWeight: 600, color: '#0F172A' }}>
+                                        Upload Image or Asset
+                                    </span>
+                                    <span style={{ fontSize: '10px', color: '#64748B' }}>
+                                        PNG, JPG, SVG, WebP
+                                    </span>
+                                </div>
+
+                                {/* Project Media Bin */}
+                                <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                        <span style={{ fontSize: '11px', fontWeight: 600, color: '#475569' }}>
+                                            PROJECT MEDIA ({timelineAssets.length})
+                                        </span>
+                                    </div>
+
+                                    {timelineAssets.length === 0 ? (
+                                        <div style={{ padding: '16px 8px', textAlign: 'center', color: '#94A3B8', fontSize: '11px', lineHeight: 1.4 }}>
+                                            No media in active project yet. Upload video or images in the Editor to use them here.
+                                        </div>
+                                    ) : (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                            {timelineAssets.map((asset, i) => (
+                                                <div
+                                                    key={asset.id || i}
+                                                    style={{
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '8px',
+                                                        padding: '6px',
+                                                        borderRadius: '6px',
+                                                        background: '#F8FAFC',
+                                                        border: '1px solid #E2E8F0',
+                                                    }}
+                                                >
+                                                    <div style={{
+                                                        width: '36px',
+                                                        height: '36px',
+                                                        borderRadius: '4px',
+                                                        background: '#0F172A',
+                                                        overflow: 'hidden',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        flexShrink: 0,
+                                                    }}>
+                                                        {asset.thumbnailUrl || asset.url ? (
+                                                            <img src={asset.thumbnailUrl || asset.url} alt={asset.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                        ) : (
+                                                            <Film size={14} color="#FFFFFF" />
+                                                        )}
+                                                    </div>
+                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                        <div style={{ fontSize: '11.5px', fontWeight: 600, color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                            {asset.name || 'Project Asset'}
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => onAddAssetToCanvas && onAddAssetToCanvas(asset, asset.name)}
+                                                            style={{
+                                                                marginTop: '2px',
+                                                                padding: '2px 6px',
+                                                                background: '#F0F9FB',
+                                                                color: '#0B7C91',
+                                                                border: '1px solid #0B7C91',
+                                                                borderRadius: '4px',
+                                                                fontSize: '10px',
+                                                                fontWeight: 600,
+                                                                cursor: 'pointer',
+                                                            }}
+                                                        >
+                                                            Add to Canvas
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 3. BRAND KIT TAB */}
+                        {activeTab === 'brandkit' && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                                {/* Brand Presets */}
+                                <div>
+                                    <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+                                        PRESETS
+                                    </span>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                                        {BRAND_PRESETS.map(preset => (
+                                            <button
+                                                key={preset.name}
+                                                type="button"
+                                                onClick={() => setBrandKit && setBrandKit(prev => ({ ...prev, ...preset }))}
+                                                style={{
+                                                    padding: '6px 8px',
+                                                    borderRadius: '6px',
+                                                    border: '1px solid #E2E8F0',
+                                                    background: '#F8FAFC',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '6px',
+                                                    cursor: 'pointer',
+                                                    textAlign: 'left',
+                                                }}
+                                            >
+                                                <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: preset.accent, flexShrink: 0 }} />
+                                                <span style={{ fontSize: '10.5px', fontWeight: 500, color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                    {preset.name}
+                                                </span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Color Palette */}
+                                <div>
+                                    <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+                                        COLOR PALETTE
+                                    </span>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                        {[
+                                            { key: 'accent', label: 'Primary Accent' },
+                                            { key: 'accent2', label: 'Secondary Accent' },
+                                            { key: 'surface', label: 'Surface Background' },
+                                            { key: 'text', label: 'Text Color' },
+                                        ].map(item => (
+                                            <div key={item.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 6px', background: '#F8FAFC', borderRadius: '6px', border: '1px solid #E2E8F0' }}>
+                                                <span style={{ fontSize: '11px', color: '#64748B' }}>{item.label}</span>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                    <input
+                                                        type="color"
+                                                        value={brandKit[item.key] || '#00E5FF'}
+                                                        onChange={(e) => setBrandKit && setBrandKit(b => ({ ...b, [item.key]: e.target.value }))}
+                                                        style={{ width: '22px', height: '22px', border: 'none', background: 'transparent', cursor: 'pointer' }}
+                                                    />
+                                                    <span style={{ fontSize: '10px', fontFamily: 'var(--f-mono, monospace)', color: '#0F172A' }}>
+                                                        {brandKit[item.key]}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Brand Typography */}
+                                <div>
+                                    <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+                                        TYPOGRAPHY
+                                    </span>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                        <div>
+                                            <span style={{ fontSize: '10px', color: '#64748B', display: 'block', marginBottom: '2px' }}>Headline Font</span>
+                                            <select
+                                                value={brandKit.display || 'Plus Jakarta Sans'}
+                                                onChange={(e) => setBrandKit && setBrandKit(b => ({ ...b, display: e.target.value }))}
+                                                style={{ width: '100%', padding: '5px', borderRadius: '5px', border: '1px solid #E2E8F0', fontSize: '11px', background: '#F8FAFC' }}
+                                            >
+                                                <option value="Plus Jakarta Sans">Plus Jakarta Sans</option>
+                                                <option value="Instrument Serif">Instrument Serif</option>
+                                                <option value="Geist">Geist</option>
+                                                <option value="JetBrains Mono">JetBrains Mono</option>
+                                                <option value="Inter">Inter</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Apply Action */}
+                                <button
+                                    type="button"
+                                    onClick={() => onApplyBrandKit && onApplyBrandKit()}
+                                    style={{
+                                        width: '100%',
+                                        padding: '8px',
+                                        background: '#0B7C91',
+                                        color: '#FFFFFF',
+                                        border: 'none',
+                                        borderRadius: '6px',
+                                        fontWeight: 600,
+                                        fontSize: '11.5px',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '6px',
+                                        boxShadow: '0 2px 6px rgba(11, 124, 145, 0.25)',
+                                    }}
+                                >
+                                    <Check size={13} />
+                                    <span>Apply Kit to Canvas</span>
+                                </button>
+                            </div>
+                        )}
+
+                        {/* 4. COMPONENTS TAB */}
                         {activeTab === 'components' && (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                 {STARTER_COMPONENTS.map(cmp => (
@@ -352,10 +564,10 @@ export default function LayersAndAssetsPanel({
                                         }}
                                     >
                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                            <span style={{ fontWeight: 600, color: '#0F172A', fontSize: '12px' }}>{cmp.name}</span>
-                                            <span style={{ fontSize: '10px', color: '#0B7C91', fontWeight: 600 }}>{cmp.category}</span>
+                                            <span style={{ fontWeight: 600, color: '#0F172A', fontSize: '11.5px' }}>{cmp.name}</span>
+                                            <span style={{ fontSize: '9.5px', color: '#0B7C91', fontWeight: 600 }}>{cmp.category}</span>
                                         </div>
-                                        <span style={{ fontSize: '11px', color: '#64748B' }}>
+                                        <span style={{ fontSize: '10.5px', color: '#64748B' }}>
                                             {cmp.w} x {cmp.h} px · {cmp.layers.length} layers
                                         </span>
                                         <button
@@ -382,76 +594,6 @@ export default function LayersAndAssetsPanel({
                                         </button>
                                     </div>
                                 ))}
-                            </div>
-                        )}
-
-                        {/* 3. TOKENS & STYLES TAB */}
-                        {activeTab === 'tokens' && (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '4px' }}>
-                                <div>
-                                    <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
-                                        THEME MODE
-                                    </span>
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
-                                        {Object.values(THEME_MODES).map(tm => (
-                                            <button
-                                                key={tm.id}
-                                                type="button"
-                                                onClick={() => {
-                                                    setSelectedTheme(tm.id);
-                                                    onApplyTheme(tm);
-                                                }}
-                                                style={{
-                                                    padding: '6px 4px',
-                                                    background: selectedTheme === tm.id ? '#0B7C91' : '#F1F5F9',
-                                                    color: selectedTheme === tm.id ? '#FFFFFF' : '#1E293B',
-                                                    border: '1px solid #E2E8F0',
-                                                    borderRadius: '4px',
-                                                    cursor: 'pointer',
-                                                    fontSize: '10px',
-                                                    fontWeight: 600,
-                                                }}
-                                            >
-                                                {tm.label}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
-                                        TYPOGRAPHY TOKENS
-                                    </span>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                        {Object.values(TYPOGRAPHY_STYLES).map(style => (
-                                            <button
-                                                key={style.id}
-                                                type="button"
-                                                onClick={() => onApplyTypographyStyle(style)}
-                                                style={{
-                                                    padding: '6px 8px',
-                                                    background: '#F8FAFC',
-                                                    border: '1px solid #E2E8F0',
-                                                    borderRadius: '4px',
-                                                    cursor: 'pointer',
-                                                    textAlign: 'left',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'space-between',
-                                                    color: '#0F172A',
-                                                }}
-                                            >
-                                                <div>
-                                                    <div style={{ fontWeight: 600, fontSize: '11px' }}>{style.name}</div>
-                                                    <div style={{ fontSize: '10px', color: '#64748B' }}>
-                                                        {style.fontFamily} · {style.fontSize}px
-                                                    </div>
-                                                </div>
-                                                <span style={{ fontSize: '10px', color: '#0B7C91', fontWeight: 600 }}>Apply</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
                             </div>
                         )}
                     </div>
