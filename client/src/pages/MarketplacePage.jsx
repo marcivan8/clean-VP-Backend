@@ -36,11 +36,21 @@ import {
 import MarketplaceMap from '../components/Marketplace/MarketplaceMap.jsx';
 import ProfileDetailModal from '../components/Marketplace/ProfileDetailModal.jsx';
 import BookingEscrowModal from '../components/Marketplace/BookingEscrowModal.jsx';
+import useMarketplaceStore from '../store/useMarketplaceStore.js';
+import MarketplaceBookings from '../components/Marketplace/MarketplaceBookings.jsx';
+import MarketplaceCallSheet from '../components/Marketplace/MarketplaceCallSheet.jsx';
+import MarketplaceThread from '../components/Marketplace/MarketplaceThread.jsx';
+import MarketplaceAssetRoom from '../components/Marketplace/MarketplaceAssetRoom.jsx';
+import MarketplaceLedgerModal from '../components/Marketplace/MarketplaceLedgerModal.jsx';
 
 export default function MarketplacePage() {
     const navigate = useNavigate();
     const { t } = useTranslation('dashboard');
     const { plan, isPro } = useUserPlan();
+
+    // Central marketplace store
+    const { activeTab, setActiveTab, metrics, setActiveThreadId } = useMarketplaceStore();
+    const [ledgerOpen, setLedgerOpen] = useState(false);
 
     // Active project metadata from useTimelineStore (or fallback)
     const { projectName, projectId } = useTimelineStore();
@@ -369,8 +379,98 @@ export default function MarketplacePage() {
                 position: 'relative',
                 zIndex: 1,
             }}>
-                {/* Surface Switcher Pills (Surface A: Book a shoot) */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                {/* Marketplace Sub-Navigation Hub */}
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: 12,
+                    marginBottom: 28,
+                    borderBottom: '1px solid rgba(26, 28, 34, 0.08)',
+                    paddingBottom: 14,
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        {[
+                            { id: 'discover', label: 'Discover' },
+                            { id: 'bookings', label: 'Bookings', badge: metrics.needsYou > 0 ? metrics.needsYou : null },
+                            { id: 'callsheet', label: 'Call Sheet' },
+                            { id: 'messages', label: 'Messages', badge: '3' },
+                            { id: 'assetroom', label: 'Asset Room' },
+                        ].map(tab => {
+                            const isSel = activeTab === tab.id;
+                            return (
+                                <button
+                                    key={tab.id}
+                                    type="button"
+                                    onClick={() => setActiveTab(tab.id)}
+                                    style={{
+                                        background: isSel ? '#1A1C22' : '#FFFFFF',
+                                        color: isSel ? '#FFFFFF' : '#1A1C22',
+                                        border: isSel ? '1px solid #1A1C22' : '1px solid rgba(26, 28, 34, 0.12)',
+                                        padding: '7px 16px',
+                                        borderRadius: 999,
+                                        fontSize: 13,
+                                        fontWeight: isSel ? 700 : 500,
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 6,
+                                        transition: 'all 0.15s',
+                                        boxShadow: isSel ? '0 2px 8px rgba(0,0,0,0.15)' : 'none',
+                                    }}
+                                >
+                                    <span>{tab.label}</span>
+                                    {tab.badge && (
+                                        <span style={{
+                                            background: isSel ? '#00E5FF' : 'rgba(11, 124, 145, 0.12)',
+                                            color: isSel ? '#1A1C22' : '#0B7C91',
+                                            fontSize: 10,
+                                            fontWeight: 800,
+                                            padding: '1px 6px',
+                                            borderRadius: 999,
+                                        }}>
+                                            {tab.badge}
+                                        </span>
+                                    )}
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {/* Right action: Escrow & Ledger modal trigger */}
+                    <button
+                        type="button"
+                        onClick={() => setLedgerOpen(true)}
+                        style={{
+                            background: '#FAF9F6',
+                            border: '1px solid rgba(26, 28, 34, 0.14)',
+                            color: '#1A1C22',
+                            padding: '7px 16px',
+                            borderRadius: 999,
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                        }}
+                    >
+                        <ShieldCheck size={14} color="#0B7C91" />
+                        Escrow & Ledger
+                    </button>
+                </div>
+
+                {/* Sub-view switcher */}
+                {activeTab === 'bookings' && <MarketplaceBookings />}
+                {activeTab === 'callsheet' && <MarketplaceCallSheet />}
+                {activeTab === 'messages' && <MarketplaceThread />}
+                {activeTab === 'assetroom' && <MarketplaceAssetRoom />}
+
+                {activeTab === 'discover' && (
+                    <>
+                        {/* Surface Switcher Pills (Surface A: Book a shoot) */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
                     <div style={{
                         padding: '6px 16px',
                         borderRadius: 999,
@@ -919,6 +1019,8 @@ export default function MarketplacePage() {
                         />
                     </div>
                 </div>
+                </>
+            )}
             </main>
 
             {/* Profile Detail Drawer / Modal (Screen 04) */}
@@ -931,7 +1033,9 @@ export default function MarketplacePage() {
                         setBookingItemData(bookingData);
                     }}
                     onMessage={(item) => {
-                        alert(`Opening secure thread with ${item.name}. (Evidence-logged thread)`);
+                        setActiveDetailItem(null);
+                        setActiveThreadId('thread-nour');
+                        setActiveTab('messages');
                     }}
                 />
             )}
@@ -947,6 +1051,12 @@ export default function MarketplacePage() {
                     }}
                 />
             )}
+
+            {/* Financial Ledger & Escrow Modal (Screen 15) */}
+            <MarketplaceLedgerModal
+                isOpen={ledgerOpen}
+                onClose={() => setLedgerOpen(false)}
+            />
         </div>
     );
 }
