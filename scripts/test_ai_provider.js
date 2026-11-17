@@ -42,7 +42,7 @@ function section(t) { console.log(`\n${t}`); }
 
 const provider = require(path.resolve(__dirname, '../services/AIProvider.js'));
 const {
-    getAIClient, getAIFor, effectiveProvider, isAIConfigured, resolveProvider, resolveModel,
+    getAIClient, getAIFor, getBrainAIClient, effectiveProvider, isAIConfigured, resolveProvider, resolveModel,
     mockBodyFor, VALID_PROVIDERS, REAL_ONLY_CAPABILITIES,
     PRODUCTION_REFUSED_PROVIDERS, CAPABILITY_PROVIDERS, _resetForTests,
 } = provider;
@@ -640,6 +640,32 @@ async function main() {
                 remote.length === 0,
                 remote.length ? `remote url in: ${remote.join(' | ')}` : '');
         }
+    }
+
+    // ── Editorial Brain Custom Provider ─────────────────────────────────
+    section('Editorial Brain Custom Model');
+    {
+        withEnv({ BRAIN_AI_BASE_URL: 'http://custom-brain:8080/v1', BRAIN_AI_API_KEY: 'test-key' }, () => {
+            const brain = getBrainAIClient();
+            check('getBrainAIClient returns custom when BRAIN_AI_BASE_URL is set',
+                brain.isCustom === true && brain.provider === 'custom');
+            check('custom client baseURL matches BRAIN_AI_BASE_URL',
+                brain.client?.baseURL === 'http://custom-brain:8080/v1');
+            check('custom model defaults to editorial-brain-3b',
+                brain.model === 'editorial-brain-3b');
+        });
+
+        withEnv({ AI_BRAIN_PROVIDER: 'custom', BRAIN_AI_MODEL: 'custom-qwen' }, () => {
+            const brain = getBrainAIClient();
+            check('getBrainAIClient returns custom when AI_BRAIN_PROVIDER is set',
+                brain.isCustom === true && brain.model === 'custom-qwen');
+        });
+
+        withEnv({ BRAIN_AI_BASE_URL: undefined, AI_BRAIN_PROVIDER: undefined, AI_PROVIDER: 'groq', GROQ_API_KEY: 'mock-groq-key' }, () => {
+            const brain = getBrainAIClient();
+            check('getBrainAIClient falls back to chat provider when custom is unset',
+                brain.isCustom === false && brain.provider === 'groq');
+        });
     }
 
     console.log(`\n${'─'.repeat(60)}`);
