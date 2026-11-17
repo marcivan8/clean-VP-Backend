@@ -12,6 +12,7 @@ const EditorPage = lazy(() => import('./pages/EditorPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const AnalyzerPage = lazy(() => import('./pages/AnalyzerPage'));
 const MarketplacePage = lazy(() => import('./pages/MarketplacePage'));
+const DesignStudioPage = lazy(() => import('./pages/DesignStudioPage'));
 const DataPage = lazy(() => import('./pages/DataPage'));
 const GdprPage = lazy(() => import('./pages/GdprPage'));
 const AuthPage = lazy(() => import('./pages/AuthPage'));
@@ -62,8 +63,8 @@ function App() {
                     {/* Studio & Crew Marketplace — Pro & Business member network */}
                     <Route path="/marketplace"       element={<MarketplacePage />} />
 
-                    {/* Design Studio — Figma-class scene editor, alignment & transparent export */}
-                    <Route path="/design"            element={<AnalyzerPage mode="design" />} />
+                    {/* Design Studio — Figma-class AI & manual workspace */}
+                    <Route path="/design"            element={<DesignStudioPage />} />
                     <Route path="/analyzer"          element={<AnalyzerPage mode="design" />} />
 
                     {/* "Your Style" — what the Editorial Brain has learned about this

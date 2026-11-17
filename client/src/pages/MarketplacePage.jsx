@@ -259,7 +259,7 @@ export default function MarketplacePage() {
                                 transition: 'all 0.15s ease',
                             }}
                         >
-                            Design
+                            Design Studio
                         </button>
                         <button
                             type="button"
@@ -355,7 +355,7 @@ export default function MarketplacePage() {
                 }}>
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: '#10151D', fontSize: 14 }}>Projects</button>
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/marketplace'); }} style={{ textAlign: 'left', padding: '10px 14px', background: '#F6F7F9', border: 'none', color: '#0B7C91', fontSize: 14, fontWeight: 600, borderRadius: 8 }}>Market</button>
-                    <button onClick={() => { setMobileMenuOpen(false); navigate('/design'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: '#10151D', fontSize: 14 }}>Design</button>
+                    <button onClick={() => { setMobileMenuOpen(false); navigate('/design'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: '#10151D', fontSize: 14 }}>Design Studio</button>
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/style'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: '#10151D', fontSize: 14 }}>Style</button>
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/account'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: '#10151D', fontSize: 14 }}>Billing</button>
                 </div>

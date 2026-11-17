@@ -1030,7 +1030,7 @@ export default function DashboardPage() {
                             onMouseEnter={e => e.currentTarget.style.color = 'var(--fg)'}
                             onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-3)'}
                         >
-                            Design
+                            Design Studio
                         </button>
 
                         <button
@@ -1227,7 +1227,7 @@ export default function DashboardPage() {
                 }}>
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'var(--glass)', border: 'none', color: 'var(--accent)', fontSize: 14, fontWeight: 600, borderRadius: 8 }}>Projects</button>
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/marketplace'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg)', fontSize: 14 }}>Marketplace</button>
-                    <button onClick={() => { setMobileMenuOpen(false); navigate('/design'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg)', fontSize: 14 }}>Design</button>
+                    <button onClick={() => { setMobileMenuOpen(false); navigate('/design'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg)', fontSize: 14 }}>Design Studio</button>
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/style'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg)', fontSize: 14 }}>Style</button>
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/account'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg-3)', fontSize: 14 }}>Billing</button>
                 </div>
