@@ -6,7 +6,7 @@
  * (screens 00, 01, 02, 03, 04, 05, 06).
  *
  * Light-first architecture with landing-page inspired aesthetic (liquid glass top nav,
- * subtle aurora ambient glow, Instrument Serif display typography, Geist UI, JetBrains Mono data).
+ * subtle aurora ambient glow, Plus Jakarta Sans display typography, Geist UI, JetBrains Mono data).
  *
  * Strictly zero emojis.
  */
