@@ -34,9 +34,11 @@ globalThis.innerWidth = 1200;
 const { StoryIntelligence } = await import('../server/brain/StoryIntelligence.js');
 const { fallbackShortScenePlan, polishShort, POLISH_LOOK } = await import('../client/src/agent/shortPolish.js');
 const { finishShort } = await import('../client/src/agent/shortFinisher.js');
-const { buildCompositionPlan, validateCompositionPlan } = await import('../client/src/motion/Compositor.js');
+const { buildCompositionPlan, validateCompositionPlan, resolveCompositionAt } = await import('../client/src/motion/Compositor.js');
 const { resolveMotionAt } = await import('../client/src/motion/MotionResolver.js');
-const { clipToMotionLayer } = await import('../client/src/motion/ClipAdapter.js');
+const { clipToMotionLayer, applyPresetToClip } = await import('../client/src/motion/ClipAdapter.js');
+const { evaluateMotionExpression, validateMotionExpression } = await import('../client/src/motion/MotionExpression.js');
+const { buildComponent } = await import('../client/src/motion/ComponentLibrary.js');
 
 console.log('================================================================');
 console.log('  SIMULATING TIMELINE EDIT & MOTION ENGINE (LOCAL E2E TEST)     ');
@@ -270,6 +272,51 @@ console.log(`  ✓ Composition plan verified:`);
 console.log(`      Base track: ${compPlan.base.trackId}`);
 console.log(`      Active overlays: ${compPlan.overlays.length}`);
 console.log(`      Geometry samples validated: 100% finite, normalized, and in bounds`);
+
+// ---------------------------------------------------------------------------
+// 6. AFTER EFFECTS MOTION EXPRESSIONS & COMPONENT PIPELINE
+// ---------------------------------------------------------------------------
+console.log('\nStep 6: Verifying After Effects Motion Expressions & Compound Components...');
+
+// Test 6a: AE Expressions (wiggle, spring physics, audio reactivity, loopOut)
+const exprWiggle = evaluateMotionExpression("wiggle(3, 15)", { time: 0.5, value: 50 });
+assert.ok(Number.isFinite(exprWiggle), 'Wiggle must return finite value');
+
+const exprSpring = evaluateMotionExpression("spring(t, 220, 18, 1)", { t: 0.35, value: 0 });
+assert.ok(Number.isFinite(exprSpring) && exprSpring >= 0, 'Spring physics must resolve correctly');
+
+const exprAudio = evaluateMotionExpression("1 + audioAmp('bass') * 0.3", { time: 0.2, audio: { bass: 0.8 } });
+assert.ok(Number.isFinite(exprAudio) && exprAudio > 1.0, 'Audio reactive expression must evaluate');
+console.log(`  ✓ After Effects Expressions evaluated:`);
+console.log(`      wiggle(3, 15) @ 0.5s = ${exprWiggle.toFixed(2)}`);
+console.log(`      spring(t, 220, 18) @ 0.35s = ${exprSpring.toFixed(3)}`);
+console.log(`      1 + audioAmp('bass') * 0.3 = ${exprAudio.toFixed(2)}`);
+
+// Test 6b: AE Motion Graphics Compound Components (StatCallout + KineticTitle)
+const statComp = buildComponent('StatCallout', 'growth', {
+    value: '+350% GROWTH',
+    title: 'RETENTION SPIKE',
+    kicker: 'KEY METRIC',
+});
+assert.ok(statComp.placements.length >= 2, 'StatCallout must generate multi-layer placement');
+const statGroupId = statComp.placements[0].clip.groupId;
+assert.ok(statGroupId, 'StatCallout layers must share unified compound groupId');
+for (const p of statComp.placements) {
+    assert.equal(p.clip.groupId, statGroupId, 'All layers in component must share compound groupId');
+}
+console.log(`  ✓ After Effects StatCallout component built: ${statComp.placements.length} layers grouped under ${statGroupId}`);
+
+// Test 6c: Temporal Motion Sampling at output timepoints
+const resolvedAt1s = resolveCompositionAt(compPlan, 1.0);
+assert.ok(Array.isArray(resolvedAt1s), 'resolveCompositionAt must return active overlays');
+for (const ov of resolvedAt1s) {
+    const geom = ov.geometry;
+    assert.ok(geom, 'Resolved overlay must have interpolated geometry');
+    assert.ok(Number.isFinite(geom.x) && Number.isFinite(geom.y), 'Resolved overlay position must be finite');
+    assert.ok(Number.isFinite(geom.w) && Number.isFinite(geom.h), 'Resolved overlay bounds must be finite');
+    assert.ok(Number.isFinite(geom.opacity), 'Resolved overlay opacity must be finite');
+}
+console.log(`  ✓ Output frame sampled at t=1.0s: ${resolvedAt1s.length} active layers rendered simultaneously`);
 
 console.log('\n================================================================');
 console.log('  ALL SIMULATION CHECKS PASSED PERFECTLY (0 ERRORS)            ');
