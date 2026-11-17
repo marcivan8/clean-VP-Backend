@@ -17,14 +17,15 @@ export default function BookingEscrowModal({
     onConfirmSuccess,
     userProjects = [],
 }) {
-    if (!bookingData) return null;
-
-    const { item, totalPrice, selectedDuration, addOns } = bookingData;
     const [selectedProject, setSelectedProject] = useState(userProjects[0]?.id || 'noma-interview');
     const [shootAddress, setShootAddress] = useState('Atelier Rive Sud, 14 rue Galilée, 94200 Ivry-sur-Seine');
     const [notes, setNotes] = useState('Two-camera interview with SaaS founder. 4K ProRes delivery preferred.');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isConfirmed, setIsConfirmed] = useState(false);
+
+    if (!bookingData) return null;
+
+    const { item, totalPrice, selectedDuration, addOns } = bookingData;
 
     const handleConfirm = () => {
         setIsSubmitting(true);

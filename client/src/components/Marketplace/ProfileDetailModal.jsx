@@ -19,8 +19,6 @@ export default function ProfileDetailModal({
     onRequestBooking,
     onMessage,
 }) {
-    if (!item) return null;
-
     const [proofTab, setProofTab] = useState('verified'); // 'verified' | 'uploaded'
     const [selectedDuration, setSelectedDuration] = useState('half'); // 'half' | 'full'
     const [selectedDate, setSelectedDate] = useState('19'); // Nov 19
@@ -29,6 +27,8 @@ export default function ProfileDetailModal({
         extraHour: false,
         editInVibed: false,
     });
+
+    if (!item) return null;
 
     const isStudio = item.type === 'studio';
     const proofs = item.proofs || [];
