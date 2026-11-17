@@ -1,5 +1,5 @@
 const OpenAI = require('openai');
-const { getAIClient, isAIConfigured, resolveModel, resolveProvider } = require('../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../services/AIProvider');
 const { analyzeStructure } = require('../viralEngine/structure.js');
 
 // R91 — editing styles accepted in ProjectContext.editingStyle (client: agent/EditingStyles.js).
@@ -64,14 +64,39 @@ Keep responses concise. If the command is unclear, return an empty actions array
         const userPrompt = `Context: ${JSON.stringify(context || {})}
 User Command: "${command}"`;
 
-        const completion = await openai.chat.completions.create({
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: userPrompt }
-            ],
-            model: resolveModel('gpt-4o', 'chat'),
-            response_format: { type: "json_object" }
-        });
+        let completion;
+        try {
+            completion = await openai.chat.completions.create({
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userPrompt }
+                ],
+                model: resolveModel('gpt-4o', 'chat'),
+                response_format: { type: "json_object" },
+                max_tokens: 1500,
+            });
+        } catch (callErr) {
+            if (isAIConfigured({ provider: 'gemini' })) {
+                try {
+                    const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                    if (geminiAi) {
+                        console.warn('[aiAgentController] chatAgent primary call failed; failing over to Gemini...');
+                        completion = await createGeminiChatCompletionWithFailover(geminiAi, {
+                            messages: [
+                                { role: "system", content: systemPrompt },
+                                { role: "user", content: userPrompt }
+                            ],
+                            model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+                            response_format: { type: "json_object" },
+                            max_tokens: 1500,
+                        });
+                    }
+                } catch (gErr) {
+                    console.warn('[aiAgentController] chatAgent Gemini failover failed:', gErr.message);
+                }
+            }
+            if (!completion) throw callErr;
+        }
 
         const result = JSON.parse(completion.choices[0].message.content);
 
@@ -602,17 +627,46 @@ USER REQUEST:
             ? { type: "function", function: { name: "execute_video_edit" } }
             : 'auto';
 
-        const completion = await openai.chat.completions.create({
-            messages: [
-                { role: "system", content: systemPrompt + (matchUserLanguage === true ? LANGUAGE_RULE : '') },
-                ...safeHistory,
-                { role: "user", content: userMessage }
-            ],
-            model: resolveModel('gpt-4o', 'chat'),
-            tools: tools,
-            tool_choice: toolChoice,
-            temperature: 0.15
-        }, { timeout: 15000 }); // 15s strict timeout to trigger fallback fast on network errors
+        let completion;
+        try {
+            completion = await openai.chat.completions.create({
+                messages: [
+                    { role: "system", content: systemPrompt + (matchUserLanguage === true ? LANGUAGE_RULE : '') },
+                    ...safeHistory,
+                    { role: "user", content: userMessage }
+                ],
+                model: resolveModel('gpt-4o', 'chat'),
+                tools: tools,
+                tool_choice: toolChoice,
+                temperature: 0.15,
+                max_tokens: activeProvider === 'groq' ? 1200 : 2000,
+            }, { timeout: 15000 }); // 15s strict timeout to trigger fallback fast on network errors
+        } catch (callErr) {
+            const isQuotaOrLimit = callErr.status === 429 || callErr.status === 413 || /quota|rate limit|tokens per minute|tpm/i.test(callErr.message || '');
+            if (isQuotaOrLimit && isAIConfigured({ provider: 'gemini' })) {
+                try {
+                    const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                    if (geminiAi) {
+                        console.warn('[CRL] Groq/primary limit reached - attempting Gemini failover for intent parsing');
+                        completion = await createGeminiChatCompletionWithFailover(geminiAi, {
+                            messages: [
+                                { role: "system", content: systemPrompt + (matchUserLanguage === true ? LANGUAGE_RULE : '') },
+                                ...safeHistory,
+                                { role: "user", content: userMessage }
+                            ],
+                            model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+                            tools: tools,
+                            tool_choice: 'auto',
+                            temperature: 0.15,
+                            max_tokens: 2000,
+                        });
+                    }
+                } catch (geminiErr) {
+                    console.warn('[CRL] Gemini failover failed:', geminiErr.message);
+                }
+            }
+            if (!completion) throw callErr;
+        }
 
         const choice = completion.choices?.[0];
         const message = choice?.message;
@@ -722,11 +776,12 @@ USER REQUEST:
             });
         }
 
-        // For 429 / quota errors: don't surface a 500 - try the local parser first,
+        // For 429 / 413 / quota / rate limit errors: don't surface a 500 - try the local parser first,
         // then return a safe CLEAN_EDIT intent so the client can still proceed.
         const isQuotaError = error?.status === 429 ||
+                             error?.status === 413 ||
                              error?.code === 'insufficient_quota' ||
-                             (error?.message || '').includes('quota');
+                             /quota|rate limit|tokens per minute|tpm/i.test(error?.message || '');
 
         try {
             const localResult = localParseIntent(prompt, req.body.context);
@@ -1512,23 +1567,60 @@ OUTPUT FORMAT:
 
 Keep steps atomic and ordered. Include all necessary parameters. Use only tools in context.toolCapabilities and assets in context.mediaBin. Treat context.assetManifest as the complete inventory; it may be large. Never turn a reference asset into timeline footage. Explicit user instructions override the selected style's defaults; style guidance fills only unspecified choices. When the user asks to match an attached reference, use context.referenceStyle only as bounded design guidance for supported choices; do not copy its subject or treat it as footage. If context.referenceAnalysisStatus is pending, unavailable, or not_attached, do not claim that reference details were extracted. If required analysis is incomplete or a requested target is ambiguous, add an unresolved question instead of guessing.`;
 
-        const completion = await openai.chat.completions.create({
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: JSON.stringify({ intent, context }) }
-            ],
-            // FIX: was a hardcoded "gpt-3.5-turbo-1106" — the one literal
-            // model string in this file that skipped resolveModel(), so a
-            // team running AI_PROVIDER=groq/gemini to use the free tier
-            // would have this specific endpoint fail with "model not
-            // found" (Groq/Gemini don't serve that name) while every other
-            // AI route correctly re-routed. resolveModel() returns the
-            // requested string unchanged for the real openai provider, so
-            // this is a no-op behavior change there — same model as before.
-            model: resolveModel('gpt-3.5-turbo-1106', 'chat'),
-            response_format: { type: "json_object" },
-            temperature: 0.1
-        });
+        const activeProvider = resolveProvider({ capability: 'chat' });
+        const planMaxTokens = activeProvider === 'groq' ? 1800 : 2500;
+
+        let completion;
+        try {
+            completion = await openai.chat.completions.create({
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: JSON.stringify({ intent, context }) }
+                ],
+                // FIX: was a hardcoded "gpt-3.5-turbo-1106" — the one literal
+                // model string in this file that skipped resolveModel(), so a
+                // team running AI_PROVIDER=groq/gemini to use the free tier
+                // would have this specific endpoint fail with "model not
+                // found" (Groq/Gemini don't serve that name) while every other
+                // AI route correctly re-routed. resolveModel() returns the
+                // requested string unchanged for the real openai provider, so
+                // this is a no-op behavior change there — same model as before.
+                model: resolveModel('gpt-3.5-turbo-1106', 'chat'),
+                response_format: { type: "json_object" },
+                temperature: 0.1,
+                max_tokens: planMaxTokens,
+            });
+        } catch (callErr) {
+            const isQuotaOrLimit = callErr.status === 429 || callErr.status === 413 || /quota|rate limit|tokens per minute|tpm/i.test(callErr.message || '');
+            if (isQuotaOrLimit && isAIConfigured({ provider: 'gemini' })) {
+                try {
+                    const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                    if (geminiAi) {
+                        console.warn('[aiAgentController] generatePlan: failing over to Gemini...');
+                        completion = await createGeminiChatCompletionWithFailover(geminiAi, {
+                            messages: [
+                                { role: "system", content: systemPrompt },
+                                { role: "user", content: JSON.stringify({ intent, context }) }
+                            ],
+                            model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+                            response_format: { type: "json_object" },
+                            temperature: 0.1,
+                            max_tokens: 2500,
+                        });
+                    }
+                } catch (gErr) {
+                    console.warn('[aiAgentController] generatePlan: Gemini failover failed:', gErr.message);
+                }
+            }
+            if (!completion) {
+                const localPlan = generateLocalPlan(intent, context, planId);
+                if (localPlan) {
+                    console.warn("⚠️ [aiAgentController] Model failed; recovered with local plan for:", intent?.operation);
+                    return res.json({ success: true, plan: localPlan });
+                }
+                throw callErr;
+            }
+        }
 
         const result = JSON.parse(completion.choices[0].message.content);
         result.plan_id = planId; // Ensure plan_id is set
@@ -1538,6 +1630,11 @@ Keep steps atomic and ordered. Include all necessary parameters. Use only tools 
 
     } catch (error) {
         console.error("❌ Generate Plan Error:", error);
+        const localPlan = generateLocalPlan(intent, context, planId);
+        if (localPlan) {
+            console.warn("⚠️ [aiAgentController] Recovered with local plan after error");
+            return res.json({ success: true, plan: localPlan });
+        }
         res.status(500).json({ success: false, error: error.message });
     }
 };
@@ -1916,19 +2013,49 @@ ${JSON.stringify(plannerContext)}
 USER PROMPT:
 "${prompt}"`;
 
-        const completion = await openai.chat.completions.create({
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: userMsg }
-            ],
-            // Same fix as generatePlanHandler above — was hardcoded to
-            // "gpt-3.5-turbo-1106", bypassing resolveModel(), which broke
-            // this endpoint specifically whenever AI_PROVIDER was set to
-            // groq/gemini. No-op for the default openai provider.
-            model: resolveModel('gpt-3.5-turbo-1106', 'chat'),
-            response_format: { type: "json_object" },
-            temperature: 0.2 // Low temperature for precision
-        }, { timeout: 15000 });
+        const activeProvider = resolveProvider({ capability: 'chat' });
+        const planMaxTokens = activeProvider === 'groq' ? 1500 : 2500;
+
+        let completion;
+        try {
+            completion = await openai.chat.completions.create({
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userMsg }
+                ],
+                // Same fix as generatePlanHandler above — was hardcoded to
+                // "gpt-3.5-turbo-1106", bypassing resolveModel(), which broke
+                // this endpoint specifically whenever AI_PROVIDER was set to
+                // groq/gemini. No-op for the default openai provider.
+                model: resolveModel('gpt-3.5-turbo-1106', 'chat'),
+                response_format: { type: "json_object" },
+                temperature: 0.2, // Low temperature for precision
+                max_tokens: planMaxTokens,
+            }, { timeout: 15000 });
+        } catch (callErr) {
+            const isQuotaOrLimit = callErr.status === 429 || callErr.status === 413 || /quota|rate limit|tokens per minute|tpm/i.test(callErr.message || '');
+            if (isQuotaOrLimit && isAIConfigured({ provider: 'gemini' })) {
+                try {
+                    const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                    if (geminiAi) {
+                        console.warn('[aiAgentController] agentPlan: primary call failed, failing over to Gemini...');
+                        completion = await createGeminiChatCompletionWithFailover(geminiAi, {
+                            messages: [
+                                { role: "system", content: systemPrompt },
+                                { role: "user", content: userMsg }
+                            ],
+                            model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+                            response_format: { type: "json_object" },
+                            temperature: 0.2,
+                            max_tokens: 2500,
+                        });
+                    }
+                } catch (gErr) {
+                    console.warn('[aiAgentController] agentPlan: Gemini failover failed:', gErr.message);
+                }
+            }
+            if (!completion) throw callErr;
+        }
 
         const result = JSON.parse(completion.choices[0].message.content);
 
@@ -2109,15 +2236,41 @@ Respond with this exact JSON structure:
 }`;
 
     try {
-        const completion = await openai.chat.completions.create({
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: userMessage }
-            ],
-            model: resolveModel('gpt-4o', 'chat'),
-            response_format: { type: 'json_object' },
-            temperature: 0.2
-        }, { timeout: 30000 });
+        let completion;
+        try {
+            completion = await openai.chat.completions.create({
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userMessage }
+                ],
+                model: resolveModel('gpt-4o', 'chat'),
+                response_format: { type: 'json_object' },
+                temperature: 0.2,
+                max_tokens: 2000,
+            }, { timeout: 30000 });
+        } catch (callErr) {
+            if (isAIConfigured({ provider: 'gemini' })) {
+                try {
+                    const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                    if (geminiAi) {
+                        console.warn('⚠️ [GPT] Content analysis primary failed, failing over to Gemini...');
+                        completion = await createGeminiChatCompletionWithFailover(geminiAi, {
+                            messages: [
+                                { role: 'system', content: systemPrompt },
+                                { role: 'user', content: userMessage }
+                            ],
+                            model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+                            response_format: { type: 'json_object' },
+                            temperature: 0.2,
+                            max_tokens: 2500,
+                        });
+                    }
+                } catch (gErr) {
+                    console.warn('⚠️ [GPT] Gemini failover failed:', gErr.message);
+                }
+            }
+            if (!completion) throw callErr;
+        }
 
         const result = JSON.parse(completion.choices[0].message.content);
         console.log(`🤖 [GPT] Segments: ${result.segments?.length}, Sections: ${result.structure?.sections?.length}`);
@@ -2241,12 +2394,35 @@ ${clipsText}
 Respond ONLY with valid JSON:
 {"removeIndices": [array of integer indices to remove], "reasoning": "one sentence summary of what was removed"}`;
 
-        const completion = await openai.chat.completions.create({
-            model: resolveModel('gpt-4o', 'chat'),
-            messages: [{ role: 'user', content: prompt }],
-            response_format: { type: 'json_object' },
-            temperature: 0.1,
-        });
+        let completion;
+        try {
+            completion = await openai.chat.completions.create({
+                model: resolveModel('gpt-4o', 'chat'),
+                messages: [{ role: 'user', content: prompt }],
+                response_format: { type: 'json_object' },
+                temperature: 0.1,
+                max_tokens: 1000,
+            });
+        } catch (callErr) {
+            if (isAIConfigured({ provider: 'gemini' })) {
+                try {
+                    const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                    if (geminiAi) {
+                        console.warn('[aiAgentController] smartCleanup primary call failed, failing over to Gemini...');
+                        completion = await createGeminiChatCompletionWithFailover(geminiAi, {
+                            model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+                            messages: [{ role: 'user', content: prompt }],
+                            response_format: { type: 'json_object' },
+                            temperature: 0.1,
+                            max_tokens: 1000,
+                        });
+                    }
+                } catch (gErr) {
+                    console.warn('[aiAgentController] smartCleanup Gemini failover failed:', gErr.message);
+                }
+            }
+            if (!completion) throw callErr;
+        }
 
         const parsed = JSON.parse(completion.choices[0].message.content);
         const removeIndices = (parsed.removeIndices || [])
@@ -2297,15 +2473,41 @@ Rules:
 
 Respond ONLY with valid JSON: {"newOrder": ["id1","id2",...], "reasoning": "one sentence"}`;
 
-        const completion = await openai.chat.completions.create({
-            model: resolveModel('gpt-4o', 'chat'),
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: `User instruction: "${userPrompt}"\n\nClips (${clips.length} total):\n${clipsText}` },
-            ],
-            response_format: { type: 'json_object' },
-            temperature: 0.2,
-        });
+        let completion;
+        try {
+            completion = await openai.chat.completions.create({
+                model: resolveModel('gpt-4o', 'chat'),
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: `User instruction: "${userPrompt}"\n\nClips (${clips.length} total):\n${clipsText}` },
+                ],
+                response_format: { type: 'json_object' },
+                temperature: 0.2,
+                max_tokens: 1200,
+            });
+        } catch (callErr) {
+            if (isAIConfigured({ provider: 'gemini' })) {
+                try {
+                    const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                    if (geminiAi) {
+                        console.warn('[aiAgentController] reorderClips primary call failed, failing over to Gemini...');
+                        completion = await createGeminiChatCompletionWithFailover(geminiAi, {
+                            model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+                            messages: [
+                                { role: 'system', content: systemPrompt },
+                                { role: 'user', content: `User instruction: "${userPrompt}"\n\nClips (${clips.length} total):\n${clipsText}` },
+                            ],
+                            response_format: { type: 'json_object' },
+                            temperature: 0.2,
+                            max_tokens: 1500,
+                        });
+                    }
+                } catch (gErr) {
+                    console.warn('[aiAgentController] reorderClips Gemini failover failed:', gErr.message);
+                }
+            }
+            if (!completion) throw callErr;
+        }
 
         const parsed = JSON.parse(completion.choices[0].message.content);
         const allIds = new Set(clips.map(c => c.id));
@@ -2420,15 +2622,40 @@ const detectRepeatedTakesHandler = async (req, res) => {
     }
     try {
         const { detectRetakes } = require('../services/retakeDetector');
+        const activeProvider = resolveProvider({ capability: 'chat' });
+        const retakeMaxTokens = activeProvider === 'groq' ? 1800 : 3000;
         const complete = openai
             ? async (prompt) => {
-                const out = await openai.chat.completions.create({
-                    model: resolveModel('gpt-4o', 'chat'),
-                    messages: [{ role: 'user', content: prompt }],
-                    response_format: { type: 'json_object' },
-                    temperature: 0.1,
-                    max_tokens: 3000,
-                }, { timeout: 60_000 });
+                let out;
+                try {
+                    out = await openai.chat.completions.create({
+                        model: resolveModel('gpt-4o', 'chat'),
+                        messages: [{ role: 'user', content: prompt }],
+                        response_format: { type: 'json_object' },
+                        temperature: 0.1,
+                        max_tokens: retakeMaxTokens,
+                    }, { timeout: 60_000 });
+                } catch (callErr) {
+                    const isLimit = callErr.status === 429 || callErr.status === 413 || /quota|rate limit|tokens per minute|tpm/i.test(callErr.message || '');
+                    if (isLimit && isAIConfigured({ provider: 'gemini' })) {
+                        try {
+                            const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                            if (geminiAi) {
+                                console.warn('[detectRepeatedTakes] Primary model failed, failing over to Gemini...');
+                                out = await createGeminiChatCompletionWithFailover(geminiAi, {
+                                    model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+                                    messages: [{ role: 'user', content: prompt }],
+                                    response_format: { type: 'json_object' },
+                                    temperature: 0.1,
+                                    max_tokens: 3000,
+                                });
+                            }
+                        } catch (gErr) {
+                            console.warn('[detectRepeatedTakes] Gemini failover failed:', gErr.message);
+                        }
+                    }
+                    if (!out) throw callErr;
+                }
                 return out.choices?.[0]?.message?.content || '';
             }
             : null;

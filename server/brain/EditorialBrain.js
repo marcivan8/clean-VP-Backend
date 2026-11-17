@@ -27,7 +27,7 @@ const { brainStyleSection, styleFocusSection, ledgerSection } = require('./editi
 // list that had drifted to 14 entries against 61 registered commands, so 47
 // real capabilities were invisible to the Brain and could never be suggested.
 const { commandsPromptSection } = require('./capabilityCatalog');
-const { getAIClient, isAIConfigured, resolveModel, resolveProvider } = require('../../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../../services/AIProvider');
 const { repairAndParseJSON } = require('../../services/motionProvider');
 const { ContextEngine } = require('./ContextEngine');
 const { UserProfileEngine } = require('./UserProfileEngine');
@@ -440,7 +440,7 @@ class EditorialBrain {
                                         response_format: BRAIN_OUTPUT_SCHEMA,
                                         messages: callPayload.messages,
                                     };
-                                    return await geminiAi.chat.completions.create(geminiPayload);
+                                    return await createGeminiChatCompletionWithFailover(geminiAi, geminiPayload);
                                 }
                             } catch (geminiErr) {
                                 console.warn('[EditorialBrain] Gemini failover error:', geminiErr.message);

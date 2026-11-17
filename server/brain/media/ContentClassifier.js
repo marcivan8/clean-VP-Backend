@@ -10,7 +10,7 @@
 
 'use strict';
 
-const { getAIClient, resolveModel } = require('../../../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../../../services/AIProvider');
 const CLASSIFICATION_BATCH_SIZE = 40;
 const SUMMARY_BATCH_SIZE = 20;
 const CLASSIFICATION_CONCURRENCY = 3;
@@ -115,18 +115,50 @@ Return ONLY valid JSON matching this exact schema:
             // pool avoids serial latency on large bins without flooding the
             // provider. Each batch recovers independently and results are
             // collected in original batch order.
-            const batches = chunks(assetSummaries, CLASSIFICATION_BATCH_SIZE);
-            const batchResults = await mapWithConcurrency(batches, CLASSIFICATION_CONCURRENCY, async (batch, batchIndex) => {
+            const activeProvider = resolveProvider({ capability: 'chat' });
+            const isGroq = activeProvider === 'groq';
+            const effectiveBatchSize = isGroq ? 20 : CLASSIFICATION_BATCH_SIZE;
+            const effectiveConcurrency = isGroq ? 1 : CLASSIFICATION_CONCURRENCY;
+            const batches = chunks(assetSummaries, effectiveBatchSize);
+            const batchResults = await mapWithConcurrency(batches, effectiveConcurrency, async (batch, batchIndex) => {
                 try {
-                    const response = await this.openai.chat.completions.create({
-                        model: resolveModel('gpt-4o', 'chat'),
-                        max_tokens: Math.min(6000, 500 + batch.length * 120),
-                        response_format: { type: 'json_object' },
-                        messages: [
-                            { role: 'system', content: systemPrompt },
-                            { role: 'user', content: `Classify every asset in this batch. Return one result for every supplied id.\nMedia bin assets:\n${JSON.stringify(batch)}` },
-                        ],
-                    });
+                    let response;
+                    const maxTokens = isGroq
+                        ? Math.min(1800, 300 + batch.length * 60)
+                        : Math.min(6000, 500 + batch.length * 120);
+                    try {
+                        response = await this.openai.chat.completions.create({
+                            model: resolveModel('gpt-4o', 'chat'),
+                            max_tokens: maxTokens,
+                            response_format: { type: 'json_object' },
+                            messages: [
+                                { role: 'system', content: systemPrompt },
+                                { role: 'user', content: `Classify every asset in this batch. Return one result for every supplied id.\nMedia bin assets:\n${JSON.stringify(batch)}` },
+                            ],
+                        });
+                    } catch (callErr) {
+                        const isLimit = callErr.status === 429 || callErr.status === 413 || /quota|rate limit|tokens per minute|tpm/i.test(callErr.message || '');
+                        if (isLimit && isAIConfigured({ provider: 'gemini' })) {
+                            try {
+                                const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                                if (geminiAi) {
+                                    console.warn(`[ContentClassifier] batch ${batchIndex + 1} primary failed (${callErr.message}), failing over to Gemini...`);
+                                    response = await createGeminiChatCompletionWithFailover(geminiAi, {
+                                        model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+                                        max_tokens: 3000,
+                                        response_format: { type: 'json_object' },
+                                        messages: [
+                                            { role: 'system', content: systemPrompt },
+                                            { role: 'user', content: `Classify every asset in this batch. Return one result for every supplied id.\nMedia bin assets:\n${JSON.stringify(batch)}` },
+                                        ],
+                                    });
+                                }
+                            } catch (gErr) {
+                                console.warn('[ContentClassifier] Gemini failover failed:', gErr.message);
+                            }
+                        }
+                        if (!response) throw callErr;
+                    }
                     const raw = response.choices[0]?.message?.content;
                     if (!raw) throw new Error('Model returned an empty classification');
                     const parsed = JSON.parse(raw);
@@ -232,15 +264,38 @@ Return ONLY valid JSON matching this exact schema:
     }
 
     async _synthesizeProjectSummary(summaries) {
-        const response = await this.openai.chat.completions.create({
-            model: resolveModel('gpt-4o', 'chat'),
-            max_tokens: 1200,
-            response_format: { type: 'json_object' },
-            messages: [
-                { role: 'system', content: 'Synthesize project type and editing structure from all supplied media-bin batch summaries. Do not assign or omit individual assets. Return JSON with projectType, projectDescription, suggestedStructure, and warnings.' },
-                { role: 'user', content: JSON.stringify(summaries) },
-            ],
-        });
+        let response;
+        try {
+            response = await this.openai.chat.completions.create({
+                model: resolveModel('gpt-4o', 'chat'),
+                max_tokens: 1200,
+                response_format: { type: 'json_object' },
+                messages: [
+                    { role: 'system', content: 'Synthesize project type and editing structure from all supplied media-bin batch summaries. Do not assign or omit individual assets. Return JSON with projectType, projectDescription, suggestedStructure, and warnings.' },
+                    { role: 'user', content: JSON.stringify(summaries) },
+                ],
+            });
+        } catch (callErr) {
+            if (isAIConfigured({ provider: 'gemini' })) {
+                try {
+                    const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                    if (geminiAi) {
+                        response = await createGeminiChatCompletionWithFailover(geminiAi, {
+                            model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+                            max_tokens: 1500,
+                            response_format: { type: 'json_object' },
+                            messages: [
+                                { role: 'system', content: 'Synthesize project type and editing structure from all supplied media-bin batch summaries. Do not assign or omit individual assets. Return JSON with projectType, projectDescription, suggestedStructure, and warnings.' },
+                                { role: 'user', content: JSON.stringify(summaries) },
+                            ],
+                        });
+                    }
+                } catch (gErr) {
+                    console.warn('[ContentClassifier] summary Gemini failover failed:', gErr.message);
+                }
+            }
+            if (!response) throw callErr;
+        }
         const raw = response.choices[0]?.message?.content;
         if (!raw) throw new Error('Model returned an empty project summary');
         const parsed = JSON.parse(raw);

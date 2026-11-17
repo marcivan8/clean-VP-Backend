@@ -40,7 +40,7 @@ const crypto = require('crypto');
 const { storyMapStyleNote } = require('./editingStyles');
 
 const { supabaseAdmin } = require('../../config/database');
-const { getAIClient, isAIConfigured, resolveModel, resolveProvider } = require('../../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../../services/AIProvider');
 const { repairAndParseJSON } = require('../../services/motionProvider');
 
 /** Beat vocabulary. Closed, because the Brain switches on these. */
@@ -357,7 +357,7 @@ class StoryIntelligence {
             messages:        [{ role: 'user', content: prompt }],
             response_format: STORY_MAP_SCHEMA,
             temperature:     0.2,
-            max_tokens:      isGroq ? 1200 : 3000,
+            max_tokens:      3000,
             // Structured extraction, not open-ended reasoning — cap the
             // model's internal thinking so it spends the token budget on the
             // schema fields, not on deliberating. Groq-only: 'reasoning_effort'
@@ -370,12 +370,13 @@ class StoryIntelligence {
             completion = await openai.chat.completions.create(callPayload);
         } catch (callErr) {
             const isRateLimit = callErr.status === 429 || callErr.status === 413 || /rate limit|tpm|tokens per minute|request too large/i.test(callErr.message);
-            if (isRateLimit && isGroq) {
+            const isTruncated = callErr.status === 400 && /max completion tokens|max_tokens|truncated|missing properties/i.test(callErr.message);
+            if ((isRateLimit || isTruncated) && isGroq) {
                 const groqFallbacks = ['openai/gpt-oss-20b', 'llama-3.1-8b-instant'].filter(m => m !== callPayload.model);
                 for (const fallbackModel of groqFallbacks) {
                     try {
-                        console.warn(`[StoryIntelligence] Primary Groq model rate-limited; trying fallback "${fallbackModel}"...`);
-                        const fallbackPayload = { ...callPayload, model: fallbackModel, max_tokens: 1000 };
+                        console.warn(`[StoryIntelligence] Primary Groq model failed (${callErr.message}); trying fallback "${fallbackModel}"...`);
+                        const fallbackPayload = { ...callPayload, model: fallbackModel, max_tokens: 1500 };
                         delete fallbackPayload.reasoning_effort;
                         completion = await openai.chat.completions.create(fallbackPayload);
                         break;
@@ -389,12 +390,11 @@ class StoryIntelligence {
                     const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
                     if (geminiAi) {
                         console.warn('[StoryIntelligence] Rate limits reached on primary model; failing over to Gemini...');
-                        completion = await geminiAi.chat.completions.create({
-                            model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+                        completion = await createGeminiChatCompletionWithFailover(geminiAi, {
                             messages: [{ role: 'user', content: prompt }],
                             response_format: STORY_MAP_SCHEMA,
                             temperature: 0.2,
-                            max_tokens: 3000,
+                            max_tokens: 3500,
                         });
                     }
                 } catch (geminiErr) {

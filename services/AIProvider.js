@@ -639,6 +639,43 @@ function describeAIError(err) {
     return `[${status ?? '?'}] ${realMessage}`;
 }
 
+/**
+ * Execute a chat completion with Gemini, trying high-capacity fallback models
+ * if the primary model hits 503 (high demand), 404 (model deprecated), or 429 (rate limit).
+ */
+async function createGeminiChatCompletionWithFailover(geminiClient, payload, options = {}) {
+    if (!geminiClient) throw new Error('Gemini client not provided');
+    const primaryModel = payload.model || process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+    const fallbackModels = [
+        primaryModel,
+        'gemini-3.1-flash-lite',
+        'gemini-flash-lite-latest',
+        'gemini-flash-latest',
+        'gemini-3.8-flash',
+    ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
+
+    let lastError = null;
+    for (const model of fallbackModels) {
+        try {
+            return await geminiClient.chat.completions.create({
+                ...payload,
+                model,
+            }, options);
+        } catch (err) {
+            lastError = err;
+            const is503 = err.status === 503 || /high demand|temporarily unavailable|overloaded/i.test(err.message);
+            const is404 = err.status === 404 || /not found|does not exist|no longer available/i.test(err.message);
+            const is429 = err.status === 429 || /rate limit|quota/i.test(err.message);
+            if (is503 || is404 || is429) {
+                console.warn(`[AIProvider] Gemini model "${model}" failed (${err.status || err.message}); trying alternate model...`);
+                continue;
+            }
+            throw err;
+        }
+    }
+    throw lastError || new Error('All Gemini model fallbacks exhausted');
+}
+
 module.exports = {
     getAIClient,
     getAIFor,
@@ -647,6 +684,7 @@ module.exports = {
     effectiveProvider,
     resolveModel,
     describeAIError,
+    createGeminiChatCompletionWithFailover,
     mockBodyFor,
     VALID_PROVIDERS,
     REAL_ONLY_CAPABILITIES,

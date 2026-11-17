@@ -23,7 +23,7 @@
  */
 
 const express        = require('express');
-const { getAIClient, getAIFor, isAIConfigured, resolveModel, resolveProvider } = require('../services/AIProvider');
+const { getAIClient, getAIFor, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../services/AIProvider');
 const { repairAndParseJSON } = require('../services/motionProvider');
 const { sanitizeEditingStyle, rhythmZoomStyle, keepsRecordedOrder } = require('../server/brain/editingStyles');
 const router         = express.Router();
@@ -890,10 +890,50 @@ Clips: ${JSON.stringify(compact)}`,
 
             gptAssignments = JSON.parse(completion.choices[0].message.content).c || [];
         } catch (gptErr) {
-            console.warn(
-                `[interviewRoutes] rhythm-zoom: shot-assignment model call failed — ` +
-                `falling back to the default cycle (${gptErr.message})`
-            );
+            if (isAIConfigured({ provider: 'gemini' })) {
+                try {
+                    const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                    if (geminiAi) {
+                        console.warn('[interviewRoutes] rhythm-zoom: primary model failed, failing over to Gemini...');
+                        const promptText = `You are a short-form social video editor (TikTok/Reels/Shorts retention style) assigning shot types to create a multi-camera zoom rhythm for a talking-head video.
+Each clip is already edited and cut. Assign each a shot type:
+  "wide"   – neutral, low energy, transition, breather
+  "medium" – conversational tone, background explanation
+  "close"  – key statement, emotion, emphasis, surprise, strong assertion
+${mlInstructions}
+${zoomStyle.promptLine ? `STYLE OVERRIDE: ${zoomStyle.promptLine} This takes precedence over the social pacing rules below.
+` : ''}Rhythm rules (always apply):
+- RETENTION HOOK: clip 0 is the hook — assign "medium" or "close", NEVER "wide". Viewers decide to stay in the first 3 seconds.
+- Vary shots aggressively — no more than 2 in a row of the same type
+- Never jump directly wide → close (bridge with medium)
+- Clips with dur < 0.8 s must match the previous clip's type
+- Use "wide" sparingly (breathers only) — social pacing favors medium/close
+
+EMPHASIS: for each clip, also identify "ew" — the single most emphasized word in that clip's text (a number, superlative, emotional word, name, or key claim — the word a great editor would punch in on). It MUST be copied verbatim from the clip text. If nothing stands out, use null. Mark at most ~1 in 3 clips.
+
+Return ONLY valid JSON: {"c":[{"i":N,"type":"wide"|"medium"|"close","ew":"word"|null}]}
+
+Clips: ${JSON.stringify(compact)}`;
+                        const geminiCompletion = await createGeminiChatCompletionWithFailover(geminiAi, {
+                            model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+                            messages: [{ role: 'user', content: promptText }],
+                            response_format: { type: 'json_object' },
+                            temperature: 0.2,
+                            max_tokens: 1024,
+                        });
+                        const parsed = repairAndParseJSON(geminiCompletion?.choices?.[0]?.message?.content || '');
+                        gptAssignments = (parsed?.data?.c || parsed?.c || []);
+                    }
+                } catch (gErr) {
+                    console.warn('[interviewRoutes] rhythm-zoom: Gemini failover failed:', gErr.message);
+                }
+            }
+            if (gptAssignments.length === 0) {
+                console.warn(
+                    `[interviewRoutes] rhythm-zoom: shot-assignment model call failed — ` +
+                    `falling back to the default cycle (${gptErr.message})`
+                );
+            }
         }
 
         const gptMap      = {};
@@ -1861,7 +1901,12 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
             // of serial model round trips and exceed the client's tool timeout.
             // mapWithConcurrency preserves input order; group IDs are still
             // validated against their own source clips before the merge.
-            const groupResults = await mapWithConcurrency(clipGroups, ORGANIZE_ANALYSIS_CONCURRENCY, async group => {
+            const activeChatProvider = resolveProvider({ capability: 'chat' });
+            const isGroq = activeChatProvider === 'groq';
+            const effectiveConcurrency = isGroq ? 1 : ORGANIZE_ANALYSIS_CONCURRENCY;
+            const batchMaxTokens = isGroq ? 1500 : 3000;
+
+            const groupResults = await mapWithConcurrency(clipGroups, effectiveConcurrency, async group => {
                 const hasImages = group.images.length > 0;
                 const batchClient = hasImages ? visionClient : textClient;
                 const batchModel = hasImages ? visionModel : textModel;
@@ -1872,13 +1917,36 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
                     content.push({ type: 'text', text: `\n[frame for clip id: ${frame.id}]` });
                     content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frame.frame}`, detail: 'low' } });
                 }
-                const completion = await batchClient.chat.completions.create({
-                    model: batchModel,
-                    messages: [{ role: 'user', content }],
-                    response_format: { type: 'json_object' },
-                    temperature: 0.15,
-                    max_tokens: 3000,
-                });
+                let completion;
+                try {
+                    completion = await batchClient.chat.completions.create({
+                        model: batchModel,
+                        messages: [{ role: 'user', content }],
+                        response_format: { type: 'json_object' },
+                        temperature: 0.15,
+                        max_tokens: batchMaxTokens,
+                    });
+                } catch (batchErr) {
+                    const isLimit = batchErr.status === 429 || batchErr.status === 413 || /quota|rate limit|tokens per minute|tpm/i.test(batchErr.message || '');
+                    if (isLimit && isAIConfigured({ provider: 'gemini' })) {
+                        try {
+                            const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                            if (geminiAi) {
+                                console.warn(`[interviewRoutes] organize batch ${group.id}: primary failed (${batchErr.message}), failing over to Gemini...`);
+                                completion = await createGeminiChatCompletionWithFailover(geminiAi, {
+                                    model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+                                    messages: [{ role: 'user', content }],
+                                    response_format: { type: 'json_object' },
+                                    temperature: 0.15,
+                                    max_tokens: 3000,
+                                });
+                            }
+                        } catch (gErr) {
+                            console.warn(`[interviewRoutes] organize batch ${group.id}: Gemini failover failed:`, gErr.message);
+                        }
+                    }
+                    if (!completion) throw batchErr;
+                }
                 let parsed;
                 try { parsed = JSON.parse(completion.choices[0].message.content); }
                 catch { throw new Error(`Could not parse organizer batch ${group.id}. No timeline order was applied.`); }
@@ -1896,7 +1964,7 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
             if (!mergeClient) return res.status(503).json({ error: 'No AI provider configured on the server.' });
             const orderGroupLevel = async (groups, level) => {
                 const chunks = chunkItems(groups, 40);
-                const orderedChunks = await mapWithConcurrency(chunks, ORGANIZE_ANALYSIS_CONCURRENCY, async (chunk, index) => {
+                const orderedChunks = await mapWithConcurrency(chunks, effectiveConcurrency, async (chunk, index) => {
                     if (chunk.length === 1) return chunk[0];
                     const groupPrompt = `Order these ${chunk.length} already-organized clip groups into one coherent edit. Each group's internal clip order is fixed. Compare all summaries, respect the overall narrative and story guidance, and return every group ID exactly once.\n${storyGuidanceBlock}\n\nGROUPS:\n${chunk.map(g => `${g.id}: ${g.summary}`).join('\n')}\n\nReturn JSON: {"orderedGroupIds":[...],"rationale":"Briefly explain the story arc across these groups."}`;
                     const merged = await mergeClient.chat.completions.create({
@@ -2669,17 +2737,60 @@ Pauses: ${JSON.stringify(compact)}`,
         } catch (callErr) {
             if (requestParams.response_format && (callErr.status === 400 || /validate json/i.test(callErr.message))) {
                 console.warn('[interviewRoutes] classify-pauses: JSON mode rejected by model, retrying without response_format');
-                delete requestParams.response_format;
-                completion = await openai.chat.completions.create(requestParams);
-            } else {
-                throw callErr;
+                const noFormatParams = { ...requestParams };
+                delete noFormatParams.response_format;
+                try {
+                    completion = await openai.chat.completions.create(noFormatParams);
+                } catch (retryErr) {
+                    console.warn('[interviewRoutes] classify-pauses: retry without response_format failed:', retryErr.message);
+                }
             }
+            if (!completion && isAIConfigured({ provider: 'gemini' })) {
+                try {
+                    const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                    if (geminiAi) {
+                        console.warn('[interviewRoutes] classify-pauses: Groq/primary failed, failing over to Gemini...');
+                        const geminiPayload = {
+                            model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+                            messages: requestParams.messages,
+                            response_format: { type: 'json_object' },
+                            temperature: 0.1,
+                            max_tokens: 1500,
+                        };
+                        completion = await createGeminiChatCompletionWithFailover(geminiAi, geminiPayload);
+                    }
+                } catch (gErr) {
+                    console.warn('[interviewRoutes] classify-pauses: Gemini failover failed:', gErr.message);
+                }
+            }
+            if (!completion) throw callErr;
         }
 
         let decisions = [];
-        const raw = completion?.choices?.[0]?.message?.content || '';
-        const parsed = repairAndParseJSON(raw);
-        const payload = parsed?.data ?? parsed;
+        let raw = completion?.choices?.[0]?.message?.content || '';
+        let parsed = repairAndParseJSON(raw);
+        let payload = parsed?.data ?? parsed;
+        if ((!payload || parsed?.error) && isAIConfigured({ provider: 'gemini' })) {
+            try {
+                const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                if (geminiAi) {
+                    console.warn('[interviewRoutes] classify-pauses: output unparseable, failing over to Gemini...');
+                    const geminiPayload = {
+                        model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+                        messages: requestParams.messages,
+                        response_format: { type: 'json_object' },
+                        temperature: 0.1,
+                        max_tokens: 1500,
+                    };
+                    const geminiCompletion = await createGeminiChatCompletionWithFailover(geminiAi, geminiPayload);
+                    raw = geminiCompletion?.choices?.[0]?.message?.content || '';
+                    parsed = repairAndParseJSON(raw);
+                    payload = parsed?.data ?? parsed;
+                }
+            } catch (gErr) {
+                console.warn('[interviewRoutes] classify-pauses: Gemini parse failover failed:', gErr.message);
+            }
+        }
         if (!payload || parsed?.error) {
             console.warn(`[interviewRoutes] classify-pauses: parse failure — falling back to heuristics`);
             decisions = classifyPausesHeuristically(pauses);
@@ -2823,9 +2934,9 @@ router.post('/refine-cut-frames', ...authOnly, async (req, res) => {
             // file, which makes an -ss seek over a signed HTTP URL slow or outright
             // unsupported (server-side Range support varies). A single-frame grab
             // (extractVideoFrame) tolerates that; a multi-second window read here
-            // doesn't always. Scaling the timeout proportionally with windowDur (up to 60s)
+            // doesn't always. Scaling the timeout proportionally with windowDur (up to 90s)
             // allows 4K multi-minute files to decode cleanly without premature abort.
-            const killTimeoutMs = Math.min(60_000, Math.max(15_000, Math.ceil(windowDur * 350) + 6000));
+            const killTimeoutMs = Math.min(90_000, Math.max(25_000, Math.ceil(windowDur * 600) + 10_000));
             const killTimer = setTimeout(() => {
                 proc.kill('SIGKILL');
                 if (chunks.length > 0) {

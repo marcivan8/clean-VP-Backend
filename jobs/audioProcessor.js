@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { detectBeats } = require('../analysis/beatDetector');
 const { OpenAI } = require('openai');
-const { getAIClient, isAIConfigured, resolveModel, resolveProvider } = require('../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../services/AIProvider');
 const { repairAndParseJSON } = require('../services/motionProvider');
 const storageConfig = require('../config/storage');
 
@@ -195,8 +195,7 @@ Respond ONLY with valid JSON:
                     console.warn('[gptSemanticFiller] Primary chat provider rate-limited, failing over to Gemini...');
                     const geminiClient = getAIClient({ provider: 'gemini', capability: 'chat' });
                     if (geminiClient) {
-                        completion = await geminiClient.chat.completions.create({
-                            model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+                        completion = await createGeminiChatCompletionWithFailover(geminiClient, {
                             messages: [{ role: 'user', content: prompt }],
                             response_format: { type: 'json_object' },
                             temperature: 0.1,
@@ -973,10 +972,50 @@ Return ONLY valid JSON: {"p":[{"i":N,"v":0.0-1.0,"z":"wide"|"medium"|"close"}]}`
                 (parsed.p || []).forEach(s => { gptScores[s.i] = { intensity: s.v ?? 0.5, zoom: s.z || 'medium' }; });
                 console.log(`[Job ${job.id}] GPT scored ${Object.keys(gptScores).length} phrases`);
             } catch (err) {
-                if (isQuotaExhausted(err)) {
-                    console.warn(`[Job ${job.id}] GPT quota exhausted — falling back to audio-only scoring`);
-                } else {
-                    console.warn(`[Job ${job.id}] GPT scoring failed, audio-only fallback:`, err.message);
+                if (isAIConfigured({ provider: 'gemini' })) {
+                    try {
+                        const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
+                        if (geminiAi) {
+                            console.warn(`[Job ${job.id}] Primary model failed, failing over to Gemini for zoom rhythm scoring...`);
+                            const compact = sampledPhrases.map((p, i) => ({ i, s: p.start.toFixed(2), t: p.text.slice(0, 80) }));
+                            const geminiPayload = {
+                                model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+                                messages: [{
+                                    role: 'user',
+                                    content: `You are a video editor analyzing a talking-head/interview video for camera zoom rhythm.
+
+Rate each phrase for emotional intensity:
+- 0.0 = pause, transition, quiet, hesitation, low energy sentence
+- 0.5 = normal conversational tone
+- 1.0 = key statement, emotional peak, emphasis, strong assertion, surprising fact
+
+Also assign: "wide" (pull back), "medium" (standard), or "close" (push in)
+
+Transcript phrases (i=index, s=start_time, t=text):
+${JSON.stringify(compact)}
+
+Return ONLY valid JSON: {"p":[{"i":N,"v":0.0-1.0,"z":"wide"|"medium"|"close"}]}`
+                                }],
+                                response_format: { type: 'json_object' },
+                                temperature: 0.2,
+                                max_tokens: 2048,
+                            };
+                            const geminiCompletion = await createGeminiChatCompletionWithFailover(geminiAi, geminiPayload);
+                            const parsed = JSON.parse(geminiCompletion?.choices?.[0]?.message?.content || '{}');
+                            gptScores = {};
+                            (parsed.p || []).forEach(s => { gptScores[s.i] = { intensity: s.v ?? 0.5, zoom: s.z || 'medium' }; });
+                            console.log(`[Job ${job.id}] Gemini scored ${Object.keys(gptScores).length} phrases`);
+                        }
+                    } catch (gErr) {
+                        console.warn(`[Job ${job.id}] Gemini failover failed:`, gErr.message);
+                    }
+                }
+                if (!gptScores) {
+                    if (isQuotaExhausted(err)) {
+                        console.warn(`[Job ${job.id}] GPT quota exhausted — falling back to audio-only scoring`);
+                    } else {
+                        console.warn(`[Job ${job.id}] GPT scoring failed, audio-only fallback:`, err.message);
+                    }
                 }
             }
 

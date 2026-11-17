@@ -39,7 +39,7 @@
 const crypto = require('crypto');
 const { projectMapStyleNote } = require('./editingStyles');
 
-const { getAIClient, isAIConfigured, resolveModel, resolveProvider } = require('../../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../../services/AIProvider');
 const { repairAndParseJSON } = require('../../services/motionProvider');
 const { supabaseAdmin } = require('../../config/database');
 const { ASSET_ANALYSIS_DONE } = require('./media/analysisStatus');
@@ -323,8 +323,7 @@ class ProjectIntelligence {
                     const geminiAi = getAIClient({ provider: 'gemini', capability: 'chat' });
                     if (geminiAi) {
                         console.warn('[ProjectIntelligence] Rate limits reached on primary model; failing over to Gemini...');
-                        completion = await geminiAi.chat.completions.create({
-                            model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+                        completion = await createGeminiChatCompletionWithFailover(geminiAi, {
                             messages: [{ role: 'user', content: prompt }],
                             response_format: { type: 'json_object' },
                             temperature: 0.15,
