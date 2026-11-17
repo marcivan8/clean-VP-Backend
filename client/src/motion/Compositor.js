@@ -1102,7 +1102,8 @@ export function validateCompositionPlan(plan) {
             && (!('w' in vector) || (Number.isFinite(Number(vector.w)) && Number(vector.w) > 0 && Number(vector.w) <= 10000))
             && (!('h' in vector) || (Number.isFinite(Number(vector.h)) && Number(vector.h) > 0 && Number(vector.h) <= 10000))
             && (vector.kind !== 'path' || (typeof vector.pathData === 'string' && vector.pathData.trim().length > 0));
-        if (!ov.source?.url && !ov.source?.assetId && !inlineVector) {
+        const isTemplate = ov.source?.type === 'template' && ov.source?.template && typeof ov.source.template === 'object';
+        if (!ov.source?.url && !ov.source?.assetId && !inlineVector && !isTemplate) {
             errors.push(`overlays[${i}]: has no resolvable media or inline vector source`);
         }
         if (!hasNumericValue(ov.outputStart) || !hasNumericValue(ov.outputEnd)

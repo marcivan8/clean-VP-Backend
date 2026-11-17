@@ -9,7 +9,7 @@ FROM ghcr.io/ggml-org/llama.cpp:server
 # Bind to :: (IPv6 dual-stack) so Railway internal private networking mesh can connect
 ENV LLAMA_ARG_HOST="::"
 ENV LLAMA_ARG_PORT="8080"
-ENV LLAMA_ARG_CTX_SIZE="4096"
+ENV LLAMA_ARG_CTX_SIZE="16384"
 ENV LLAMA_ARG_THREADS="4"
 ENV LLAMA_ARG_N_PREDICT="1200"
 ENV LLAMA_ARG_CONT_BATCHING="true"
@@ -23,4 +23,4 @@ ENV LLAMA_ARG_ALIAS="editorial-brain-3b,qwen2.5-3b-instruct-q4_k_m.gguf"
 # Expose standard Railway HTTP port
 EXPOSE 8080
 
-CMD ["--hf-repo", "Qwen/Qwen2.5-3B-Instruct-GGUF", "--hf-file", "qwen2.5-3b-instruct-q4_k_m.gguf", "--alias", "editorial-brain-3b,qwen2.5-3b-instruct-q4_k_m.gguf"]
+CMD ["--hf-repo", "Qwen/Qwen2.5-3B-Instruct-GGUF", "--hf-file", "qwen2.5-3b-instruct-q4_k_m.gguf", "--alias", "editorial-brain-3b,qwen2.5-3b-instruct-q4_k_m.gguf", "-c", "16384"]

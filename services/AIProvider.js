@@ -410,7 +410,8 @@ function resolveModel(requestedModel, capabilityOrOpts) {
             return process.env.GEMINI_VISION_MODEL || process.env.GEMINI_MODEL || 'gemini-3.8-flash';
         }
         if (capability === 'motion') {
-            return process.env.GEMINI_MOTION_MODEL || process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+            // gemini-3.1-flash-lite avoids gemini-3.8-flash's 18s+ thinking latency on JSON drafting
+            return process.env.GEMINI_MOTION_MODEL || process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
         }
         if (capability === 'judge') {
             return process.env.GEMINI_JUDGE_MODEL || process.env.GEMINI_MODEL || 'gemini-3.8-flash';

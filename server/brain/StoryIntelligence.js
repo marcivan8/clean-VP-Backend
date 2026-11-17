@@ -284,11 +284,11 @@ class StoryIntelligence {
     /** Analyze the complete cut in one or more bounded model requests. */
     async deriveMap({ clips = [], projectMap = null, platform = null, editingStyle = null }) {
         if (!clips.length) return null;
-        if (!isAIConfigured()) {
+        if (!this._openai && !isAIConfigured()) {
             throw new Error('no AI provider configured — cannot derive a story map');
         }
 
-        const openai = getAIClient({ timeout: 60_000 });
+        const openai = this._openai || getAIClient({ timeout: 60_000 });
         if (!openai) throw new Error('AI client unavailable');
 
         if (clips.length > MAX_CLIPS_PER_STORY_BATCH) {
@@ -376,7 +376,7 @@ class StoryIntelligence {
                     ...callPayload,
                     model: brainTarget.model,
                     response_format: { type: 'json_object' },
-                }, { timeout: 25_000 });
+                }, { timeout: 45_000 });
             } catch (customErr) {
                 const errDetail = customErr.cause?.message || customErr.message;
                 console.warn(`[StoryIntelligence] Custom Railway Brain model at ${brainTarget.baseURL || 'internal endpoint'} failed (${errDetail}); failing over to primary...`);
