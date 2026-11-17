@@ -27,7 +27,7 @@ import {
     Check, AlertCircle, Download, Type, Square, Circle, Image as ImageIcon,
     PenTool, AlignLeft, AlignCenter, AlignRight, Maximize2, Move, Crop,
     CheckCircle2, Compass, Layers, Sliders, ChevronDown, Video, FileText,
-    Share2, ExternalLink, RefreshCw, Send, Plus, ArrowUp
+    Share2, ExternalLink, RefreshCw, Send, Plus, ArrowUp, Users
 } from 'lucide-react';
 
 import { Logo } from '../components/Logo.jsx';

@@ -46,7 +46,7 @@ export function useUserPlan() {
         return () => { cancelled = true; };
     }, []);
 
-    return { plan, loading };
+    return { plan, loading, isPro: plan === 'pro' };
 }
 
 /**
