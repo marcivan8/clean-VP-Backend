@@ -378,7 +378,8 @@ class StoryIntelligence {
                     response_format: { type: 'json_object' },
                 }, { timeout: 25_000 });
             } catch (customErr) {
-                console.warn(`[StoryIntelligence] Custom Railway Brain model failed (${customErr.message}); failing over to primary...`);
+                const errDetail = customErr.cause?.message || customErr.message;
+                console.warn(`[StoryIntelligence] Custom Railway Brain model at ${brainTarget.baseURL || 'internal endpoint'} failed (${errDetail}); failing over to primary...`);
             }
         }
 

@@ -6,7 +6,8 @@
 FROM ghcr.io/ggml-org/llama.cpp:server
 
 # Set default configuration via LLAMA_ARG environment variables
-ENV LLAMA_ARG_HOST="0.0.0.0"
+# Bind to :: (IPv6 dual-stack) so Railway internal private networking mesh can connect
+ENV LLAMA_ARG_HOST="::"
 ENV LLAMA_ARG_PORT="8080"
 ENV LLAMA_ARG_CTX_SIZE="4096"
 ENV LLAMA_ARG_THREADS="4"

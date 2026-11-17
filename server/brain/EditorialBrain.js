@@ -386,7 +386,7 @@ class EditorialBrain {
                 ? `User said: "${input.rawInput}"`
                 : `Trigger: ${input?.trigger || 'unknown'}. Analyze the project and provide suggestions.`;
 
-            const maxTokens = isGroq ? 700 : 1200;
+            const maxTokens = isGroq ? 500 : 1200;
             const callPayload = {
                 model: cloudModel,
                 temperature,
@@ -410,7 +410,8 @@ class EditorialBrain {
                         response_format: { type: 'json_object' },
                     }, { timeout: 25_000 });
                 } catch (customErr) {
-                    console.warn(`[EditorialBrain] Custom Railway Brain model failed (${customErr.message}); failing over to cloud providers...`);
+                    const errDetail = customErr.cause?.message || customErr.message;
+                    console.warn(`[EditorialBrain] Custom Railway Brain model at ${brainTarget.baseURL || 'internal endpoint'} failed (${errDetail}); failing over to cloud providers...`);
                 }
             }
 
@@ -554,7 +555,7 @@ class EditorialBrain {
             : '(no captions/transcript yet)';
 
         const inferredContentType = ctx.inferredContentType || 'unknown';
-        const maxAssetChars = isUltraCompact ? 2_000 : (isCompact ? 4_000 : MAX_ASSET_CONTEXT_CHARS);
+        const maxAssetChars = isUltraCompact ? 1_500 : (isCompact ? 2_500 : MAX_ASSET_CONTEXT_CHARS);
         const { text: assetInventoryText } = buildAssetInventoryText(ctx, rawInput, maxAssetChars);
 
         const hiddenNote = permanentlyHidden.length > 0

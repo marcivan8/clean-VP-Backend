@@ -11,6 +11,13 @@ if (process.env.SENTRY_DSN) {
     });
 }
 
+// Railway private networking uses an IPv6 WireGuard mesh (*.railway.internal).
+// Node.js defaults to ipv4first on many OSes, which fails to resolve internal hostnames.
+const dns = require('node:dns');
+if (typeof dns.setDefaultResultOrder === 'function') {
+    dns.setDefaultResultOrder('ipv6first');
+}
+
 const express    = require('express');
 const cors       = require('cors');
 const helmet     = require('helmet');

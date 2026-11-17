@@ -622,11 +622,12 @@ function getBrainAIClient(opts = {}) {
             model: process.env.BRAIN_AI_MODEL || 'editorial-brain-3b',
             provider: 'custom',
             isCustom: true,
+            baseURL,
         };
     }
 
     const { client, model, provider } = getAIFor('chat', 'gpt-4o', opts);
-    return { client, model, provider, isCustom: false };
+    return { client, model, provider, isCustom: false, baseURL: null };
 }
 
 /** Test seam — clears the memoised clients so env changes take effect. */
