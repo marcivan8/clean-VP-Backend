@@ -310,7 +310,7 @@ class ProjectIntelligence {
                     ...callPayload,
                     model: brainTarget.model,
                     response_format: { type: 'json_object' },
-                }, { timeout: 45_000 });
+                }, { timeout: Number(process.env.BRAIN_AI_TIMEOUT_MS) || 240_000 });
             } catch (customErr) {
                 const errDetail = customErr.cause?.message || customErr.message;
                 console.warn(`[ProjectIntelligence] Custom Railway Brain model at ${brainTarget.baseURL || 'internal endpoint'} failed (${errDetail}); failing over to primary...`);

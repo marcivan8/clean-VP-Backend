@@ -370,9 +370,9 @@ class EditorialBrain {
             const isGroq = resolveProvider({ capability: 'chat' }) === 'groq';
 
             // Groq free-tier has a strict 8,000 TPM limit where requested = prompt_tokens + max_tokens.
-            // When running under Groq (or when compact mode is requested), compact the prompt
-            // and clamp max_tokens to 700 to ensure total request never exceeds 8,000 TPM.
-            const isCompact = isGroq || Boolean(input?.context?.isCompactPrompt);
+            // When running under Groq or custom Railway CPU model (or when compact mode is requested),
+            // compact the prompt to keep evaluation latency minimal and ensure fast token generation.
+            const isCompact = isGroq || Boolean(brainTarget.isCustom) || Boolean(input?.context?.isCompactPrompt);
             const systemPrompt = this.buildSystemPrompt(context, profile, platform, session, input?.rawInput, { isCompact });
 
             // Classify intent type for temperature selection
@@ -408,7 +408,7 @@ class EditorialBrain {
                         ...callPayload,
                         model: brainTarget.model,
                         response_format: { type: 'json_object' },
-                    }, { timeout: 25_000 });
+                    }, { timeout: Number(process.env.BRAIN_AI_TIMEOUT_MS) || 240_000 });
                 } catch (customErr) {
                     const errDetail = customErr.cause?.message || customErr.message;
                     console.warn(`[EditorialBrain] Custom Railway Brain model at ${brainTarget.baseURL || 'internal endpoint'} failed (${errDetail}); failing over to cloud providers...`);
@@ -585,7 +585,7 @@ NEVER recommend an edit that "Edits applied" or "Effect coverage" shows is alrea
 MEDIA BIN INVENTORY (prompt-bounded index)
 ═══════════════════════════════════════════════
 ${assetInventoryText}
-Use an asset only when its ID, type, role, and analysis evidence support the request. Unknown or pending analysis is not evidence about content. This prompt index is bounded, while the project manifest and media-bin tools cover the full bin. Never treat omitted assets as irrelevant or claim to have visually reviewed them. For large bins or when a named subject is missing from this prompt index, call search_uploaded_assets with the topic; it searches the complete local asset manifest and returns paginated evidence-backed matches without editing. If the request requires ordering the full bin, use organize_clips; for a transcript-led edit with illustrative cutaways, use place_contextual_broll; for a montage from uploaded visuals, use create_video_from_assets. These tools inspect the full eligible bin and exclude references from timeline footage. Do not ask the user to narrow the bin merely because some rows are outside this prompt. Compact rows identify assets and their status; do not claim knowledge of their visual content unless analysis evidence is present. If relevant assets are still unanalyzed, use the relevant analysis-capable workflow or report which assets could not be inspected; ask the user only when analysis or a required choice is unavailable.
+${isCompact ? 'Rules: Use an asset only when its ID and analysis evidence support it. Never guess unanalyzed content. Use organize_clips, place_contextual_broll, or create_video_from_assets for whole-bin actions.' : `Use an asset only when its ID, type, role, and analysis evidence support the request. Unknown or pending analysis is not evidence about content. This prompt index is bounded, while the project manifest and media-bin tools cover the full bin. Never treat omitted assets as irrelevant or claim to have visually reviewed them. For large bins or when a named subject is missing from this prompt index, call search_uploaded_assets with the topic; it searches the complete local asset manifest and returns paginated evidence-backed matches without editing. If the request requires ordering the full bin, use organize_clips; for a transcript-led edit with illustrative cutaways, use place_contextual_broll; for a montage from uploaded visuals, use create_video_from_assets. These tools inspect the full eligible bin and exclude references from timeline footage. Do not ask the user to narrow the bin merely because some rows are outside this prompt. Compact rows identify assets and their status; do not claim knowledge of their visual content unless analysis evidence is present. If relevant assets are still unanalyzed, use the relevant analysis-capable workflow or report which assets could not be inspected; ask the user only when analysis or a required choice is unavailable.`}
 
 ═══════════════════════════════════════════════
 PROJECT MAP (what this project IS, not what each clip is)
@@ -680,7 +680,9 @@ ${(() => {
     ].filter(l => l !== '').join('\n');
 })()}
 
-WHAT YOU CAN ACTUALLY OFFER TO DO:
+${isCompact ? `WHAT YOU CAN OFFER: Only real commands that exist (silence removal, captions, text overlay, organize clips, transitions, LUTs, SFX). Cite exact seconds when proposing edits.
+THE CUT & MAP: Suggestions must serve the through-line. Missing gaps are coverage gaps, not bad footage. Treat A-roll as the spine.
+VOICE: Direct and expert. Never repeat advice already applied.` : `WHAT YOU CAN ACTUALLY OFFER TO DO:
 The editor can only perform commands that exist. When you propose an action,
 either name something the user can ask for in plain language and have happen,
 or frame it explicitly as an observation ("worth doing by hand", "something to
@@ -742,7 +744,7 @@ must carry everything that matters at this moment:
 - Count the videos in "Media bin" / "FOOTAGE IN THE BIN" before characterising the
   project. Calling a 4-clip bin "a monologue" is wrong unless the footage says so.
 - Speak in one continuous voice with the rest of the conversation: no greetings if
-  you've already spoken, and never repeat advice already given or already applied.
+  you've already spoken, and never repeat advice already given or already applied.`}
 
 Edits run this session:
 ${summary.commandsRun.length ? summary.commandsRun.map(c => `  - ${c}`).join('\n') : '  - (none yet)'}
@@ -799,7 +801,7 @@ Unused assets:  ${unusedAssetsText}
 Bin analyzed:   ${ctx.binReady ? 'yes' : `no — ${ctx.analyzedAssets || 0} of ${ctx.totalAssets || 0} analysed so far`}
 Asset names, IDs, roles, and analysis states are listed once in MEDIA BIN INVENTORY above.
 
-═══════════════════════════════════════════════
+${isCompact ? `ASSET ENGINE COMMANDS: search_sfx "<query>", search_luts "<style>", search_presets "<type>", apply_lut <lutId>, clear_lut, add_sfx <sfxId> at <time>, apply_preset <presetId>, export_audio [format], recommend_sfx, recommend_luts, recommend_presets. Rules: never invent lutId; recommend_* are non-blocking.` : `═══════════════════════════════════════════════
 ASSET ENGINE — available creative tools
 ═══════════════════════════════════════════════
 You can invoke these commands to access the Creative Asset Intelligence System:
@@ -820,13 +822,13 @@ IMPORTANT RULES for asset commands:
 - NEVER suggest apply_lut without a real lutId from a search result
 - NEVER suggest apply_preset with is_full_edit=true without setting requires_approval=true
 - LUT preview is CSS-only in the editor — FFmpeg lut3d is only used at export time
-- recommend_* commands are fire-and-forget and always non-blocking — safe to add to any plan
+- recommend_* commands are fire-and-forget and always non-blocking — safe to add to any plan`}
 
 ${commandsPromptSection(ctx)}
 
-IMPORTANT: "Remove repetition" (remove_repetition) cuts repeated or restated
+${isCompact ? '' : `IMPORTANT: "Remove repetition" (remove_repetition) cuts repeated or restated
 content. It is NOT silence_removal — only propose "Remove silences" when the
-user actually wants dead air or pauses gone.
+user actually wants dead air or pauses gone.`}
 
 ═══════════════════════════════════════════════
 RESPONSE FORMAT — return ONLY valid JSON matching this exact schema:

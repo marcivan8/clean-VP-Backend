@@ -607,7 +607,7 @@ function getBrainAIClient(opts = {}) {
         const OpenAI = require('openai');
         const baseURL = process.env.BRAIN_AI_BASE_URL || process.env.CUSTOM_AI_BASE_URL || 'http://editorial-brain.railway.internal:8080/v1';
         const apiKey = process.env.BRAIN_AI_API_KEY || process.env.CUSTOM_AI_API_KEY || 'custom-key';
-        const timeout = opts.timeout || 25_000;
+        const timeout = opts.timeout || Number(process.env.BRAIN_AI_TIMEOUT_MS) || 240_000;
         const cacheKey = `brain:custom:${baseURL}:${timeout}`;
 
         if (!_clientCache.has(cacheKey)) {

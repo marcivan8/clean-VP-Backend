@@ -57,7 +57,7 @@ class ContextEngine {
         const aspectRatio = state.aspectRatio || state.timeline?.aspectRatio || null;
 
         // ── Caption / transcript analysis ─────────────────────────────────────
-        const captionContext = this._analyzeCaptions(captions);
+        const captionContext = this._analyzeCaptions(captions, state);
 
         // ── Media bin analysis ────────────────────────────────────────────────
         // assetIntelligence (media_assets rows, fetched server-side by
@@ -205,7 +205,7 @@ class ContextEngine {
         }, 0);
     }
 
-    _analyzeCaptions(captions) {
+    _analyzeCaptions(captions, state = {}) {
         if (!captions.length) {
             return {
                 transcriptPreview: null,
@@ -267,12 +267,16 @@ class ContextEngine {
         }
 
         // Speaking pace: words per minute
-        const wordCount = allText.split(/\s+/).filter(Boolean).length;
+        const wordCount = (state && typeof state.totalWordCount === 'number')
+            ? state.totalWordCount
+            : allText.split(/\s+/).filter(Boolean).length;
         const lastCaption = captions[captions.length - 1];
         const totalSeconds = (lastCaption?.end || lastCaption?.endTime || 0);
-        const speakingPace = totalSeconds > 0
-            ? Math.round((wordCount / totalSeconds) * 60)
-            : null;
+        const speakingPace = (state && typeof state.speakingPace === 'number')
+            ? state.speakingPace
+            : (totalSeconds > 0
+                ? Math.round((wordCount / totalSeconds) * 60)
+                : null);
 
         // Top 5 sentences with high confidence
         const sentences = captions

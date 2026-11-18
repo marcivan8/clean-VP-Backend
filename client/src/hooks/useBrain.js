@@ -122,6 +122,17 @@ function buildProjectState() {
         hasColorGrade:    !!state.projectLUTId,
     };
 
+    // Calculate pace and trim captions for wire payload:
+    // Sending thousands of raw word objects inflates payload and server CPU prompt evaluation time.
+    // The server only needs the preview words, speaker labels, total count, and end time.
+    const totalWordCount = captions.length;
+    const lastWord = captions[captions.length - 1];
+    const totalSeconds = (lastWord?.end || 0);
+    const calculatedSpeakingPace = totalSeconds > 0 ? Math.round((totalWordCount / totalSeconds) * 60) : null;
+    const trimmedCaptions = captions.length > 120
+        ? [...captions.slice(0, 100), lastWord].filter(Boolean)
+        : captions;
+
     return {
         projectId:        state.projectId    || null,
         platform:         state.platform     || null,
@@ -138,7 +149,9 @@ function buildProjectState() {
         hasCaptions,
         hasMusicTrack,
         mediaBin,
-        captions,
+        captions:         trimmedCaptions,
+        totalWordCount,
+        speakingPace:     calculatedSpeakingPace,
         editHistory,
         editLedger,
         effects,
