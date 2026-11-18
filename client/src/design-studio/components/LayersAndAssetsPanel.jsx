@@ -42,8 +42,14 @@ export default function LayersAndAssetsPanel({
     setBrandKit,
     onApplyBrandKit,
     onUploadAssetClick,
+    customComponents = [],
+    onDeleteCustomComponent,
+    activeTab: externalActiveTab,
+    setActiveTab: setExternalActiveTab,
 }) {
-    const [activeTab, setActiveTab] = useState('layers'); // 'layers' | 'assets' | 'brandkit' | 'components'
+    const [internalTab, setInternalTab] = useState('layers');
+    const activeTab = externalActiveTab !== undefined ? externalActiveTab : internalTab;
+    const setActiveTab = setExternalActiveTab || setInternalTab;
     const [drawerExpanded, setDrawerExpanded] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
 
@@ -549,51 +555,135 @@ export default function LayersAndAssetsPanel({
 
                         {/* 4. COMPONENTS TAB */}
                         {activeTab === 'components' && (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                {STARTER_COMPONENTS.map(cmp => (
-                                    <div
-                                        key={cmp.id}
-                                        style={{
-                                            background: '#F8FAFC',
-                                            border: '1px solid #E2E8F0',
-                                            borderRadius: '8px',
-                                            padding: '10px',
-                                            display: 'flex',
-                                            flexDirection: 'column',
-                                            gap: '4px',
-                                        }}
-                                    >
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                            <span style={{ fontWeight: 600, color: '#0F172A', fontSize: '11.5px' }}>{cmp.name}</span>
-                                            <span style={{ fontSize: '9.5px', color: '#0B7C91', fontWeight: 600 }}>{cmp.category}</span>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                {/* Custom Components Section */}
+                                {customComponents.length > 0 && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 2px' }}>
+                                            <span style={{ fontSize: '10px', fontFamily: 'var(--f-mono, monospace)', fontWeight: 700, color: '#0B7C91', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                                                Custom Master Components ({customComponents.length})
+                                            </span>
                                         </div>
-                                        <span style={{ fontSize: '10.5px', color: '#64748B' }}>
-                                            {cmp.w} x {cmp.h} px · {cmp.layers.length} layers
-                                        </span>
-                                        <button
-                                            type="button"
-                                            onClick={() => onInsertComponent(cmp)}
+                                        {customComponents.map(cmp => (
+                                            <div
+                                                key={cmp.id}
+                                                style={{
+                                                    background: '#FFFFFF',
+                                                    border: '1px solid #00E5FF44',
+                                                    borderRadius: '8px',
+                                                    padding: '8px 10px',
+                                                    display: 'flex',
+                                                    flexDirection: 'column',
+                                                    gap: '4px',
+                                                    boxShadow: '0 2px 8px rgba(0, 229, 255, 0.08)',
+                                                }}
+                                            >
+                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                                    <span style={{ fontWeight: 600, color: '#0F172A', fontSize: '11.5px' }}>{cmp.name}</span>
+                                                    <span style={{ fontSize: '9px', color: '#16A34A', background: '#DCFCE7', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>MASTER</span>
+                                                </div>
+                                                <span style={{ fontSize: '10.5px', color: '#64748B' }}>
+                                                    {cmp.w} x {cmp.h} px · {(cmp.layers || []).length} layer{(cmp.layers || []).length > 1 ? 's' : ''}
+                                                </span>
+                                                <div style={{ display: 'flex', gap: '4px', marginTop: '3px' }}>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => onInsertComponent(cmp)}
+                                                        style={{
+                                                            flex: 1,
+                                                            padding: '4px 8px',
+                                                            background: '#0B7C91',
+                                                            color: '#FFFFFF',
+                                                            border: 'none',
+                                                            borderRadius: '5px',
+                                                            cursor: 'pointer',
+                                                            fontWeight: 600,
+                                                            fontSize: '11px',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            gap: '4px',
+                                                        }}
+                                                    >
+                                                        <Plus size={12} />
+                                                        <span>Insert Instance</span>
+                                                    </button>
+                                                    {onDeleteCustomComponent && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => onDeleteCustomComponent(cmp.id)}
+                                                            style={{
+                                                                padding: '4px 7px',
+                                                                background: '#FEE2E2',
+                                                                color: '#EF4444',
+                                                                border: 'none',
+                                                                borderRadius: '5px',
+                                                                cursor: 'pointer',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                            }}
+                                                            title="Delete custom component"
+                                                        >
+                                                            <Trash2 size={12} />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* System Starter Components */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                    <span style={{ fontSize: '10px', fontFamily: 'var(--f-mono, monospace)', fontWeight: 700, color: '#64748B', letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 2px' }}>
+                                        Starter Components
+                                    </span>
+                                    {STARTER_COMPONENTS.map(cmp => (
+                                        <div
+                                            key={cmp.id}
                                             style={{
-                                                marginTop: '4px',
-                                                padding: '5px 8px',
-                                                background: '#0B7C91',
-                                                color: '#FFFFFF',
-                                                border: 'none',
-                                                borderRadius: '5px',
-                                                cursor: 'pointer',
-                                                fontWeight: 600,
-                                                fontSize: '11px',
+                                                background: '#F8FAFC',
+                                                border: '1px solid #E2E8F0',
+                                                borderRadius: '8px',
+                                                padding: '10px',
                                                 display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
+                                                flexDirection: 'column',
                                                 gap: '4px',
                                             }}
                                         >
-                                            <Plus size={12} />
-                                            <span>Insert</span>
-                                        </button>
-                                    </div>
-                                ))}
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                                <span style={{ fontWeight: 600, color: '#0F172A', fontSize: '11.5px' }}>{cmp.name}</span>
+                                                <span style={{ fontSize: '9.5px', color: '#0B7C91', fontWeight: 600 }}>{cmp.category}</span>
+                                            </div>
+                                            <span style={{ fontSize: '10.5px', color: '#64748B' }}>
+                                                {cmp.w} x {cmp.h} px · {cmp.layers.length} layers
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => onInsertComponent(cmp)}
+                                                style={{
+                                                    marginTop: '4px',
+                                                    padding: '5px 8px',
+                                                    background: '#0B7C91',
+                                                    color: '#FFFFFF',
+                                                    border: 'none',
+                                                    borderRadius: '5px',
+                                                    cursor: 'pointer',
+                                                    fontWeight: 600,
+                                                    fontSize: '11px',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    gap: '4px',
+                                                }}
+                                            >
+                                                <Plus size={12} />
+                                                <span>Insert</span>
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         )}
                     </div>

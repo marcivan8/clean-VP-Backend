@@ -41,6 +41,7 @@ import LayersAndAssetsPanel from '../design-studio/components/LayersAndAssetsPan
 import DesignStudioAiDirector from '../design-studio/components/DesignStudioAiDirector.jsx';
 import { executeBooleanOperation, generateRoundedRectPath } from '../design-studio/vectorMath.js';
 import { distributeSmartSelection } from '../design-studio/autoLayout.js';
+import { removeBackgroundFromImage } from '../design-studio/imageBackgroundRemoval.js';
 
 const FORMAT_PRESETS = [
     { id: 'thumbnail', label: 'Video thumbnail', res: '1280 × 720 · YouTube', w: 1280, h: 720, aspect: '16/9' },
@@ -191,6 +192,119 @@ export default function DesignStudioPage() {
     const [selectedLayerIds, setSelectedLayerIds] = useState(['headline']);
     const [showGuides, setShowGuides] = useState(false);
     const [zoom, setZoom] = useState(0.75);
+    const [leftRailTab, setLeftRailTab] = useState('layers');
+    const [customComponents, setCustomComponents] = useState(() => {
+        try {
+            const saved = localStorage.getItem('vp_custom_components');
+            return saved ? JSON.parse(saved) : [];
+        } catch {
+            return [];
+        }
+    });
+
+    const handleCreateMasterComponent = (layer) => {
+        const selected = layers.filter(l => selectedLayerIds.includes(l.id));
+        const targets = selected.length > 0 ? selected : (layer ? [layer] : []);
+        if (targets.length === 0) {
+            showToast('Select a layer or shape on canvas first');
+            return;
+        }
+
+        const minX = Math.min(...targets.map(l => l.x || 0));
+        const minY = Math.min(...targets.map(l => l.y || 0));
+        const maxX = Math.max(...targets.map(l => (l.x || 0) + (l.w || 100)));
+        const maxY = Math.max(...targets.map(l => (l.y || 0) + (l.h || 40)));
+
+        const normalizedLayers = targets.map(l => ({
+            ...l,
+            x: (l.x || 0) - minX,
+            y: (l.y || 0) - minY,
+        }));
+
+        const compName = targets.length === 1
+            ? `${targets[0].name || 'Layer'} Component`
+            : `${targets[0].name || 'Element'} Composite`;
+
+        const newComp = {
+            id: `custom_${Date.now()}`,
+            name: compName,
+            category: 'Custom',
+            w: Math.round(maxX - minX) || 200,
+            h: Math.round(maxY - minY) || 80,
+            layers: normalizedLayers,
+            createdAt: Date.now(),
+        };
+
+        setCustomComponents(prev => {
+            const updated = [newComp, ...prev];
+            try { localStorage.setItem('vp_custom_components', JSON.stringify(updated)); } catch {}
+            return updated;
+        });
+
+        setLeftRailTab('components');
+        showToast(`Master component "${compName}" saved to library`);
+    };
+
+    const handleDeleteCustomComponent = (id) => {
+        setCustomComponents(prev => {
+            const updated = prev.filter(c => c.id !== id);
+            try { localStorage.setItem('vp_custom_components', JSON.stringify(updated)); } catch {}
+            return updated;
+        });
+        showToast('Component removed from library');
+    };
+
+    const handleToggleBackgroundRemoval = async (layerId) => {
+        const targetId = layerId || selectedLayerId;
+        const target = layers.find(l => l.id === targetId && (l.type === 'image' || l.src || l.id === 'subject'))
+            || layers.find(l => l.type === 'image' || l.src || l.id === 'subject');
+
+        if (!target) {
+            showToast('No image or photo layer found to isolate');
+            return;
+        }
+
+        if (target.backgroundRemoved) {
+            setLayers(prev => prev.map(l => {
+                if (l.id === target.id) {
+                    return {
+                        ...l,
+                        src: l.originalSrc || l.src,
+                        backgroundRemoved: false,
+                    };
+                }
+                return l;
+            }));
+            showToast(`Restored original background for "${target.name || 'image'}"`);
+            return;
+        }
+
+        showToast('Removing background with AI...');
+        try {
+            const transparentDataUrl = await removeBackgroundFromImage(target.src);
+            setLayers(prev => prev.map(l => {
+                if (l.id === target.id) {
+                    return {
+                        ...l,
+                        originalSrc: l.originalSrc || l.src,
+                        src: transparentDataUrl,
+                        backgroundRemoved: true,
+                        opacity: 100,
+                    };
+                }
+                return l;
+            }));
+            showToast(`Isolated subject and removed background from "${target.name || 'image'}"`);
+        } catch (err) {
+            setLayers(prev => prev.map(l => {
+                if (l.id === target.id) {
+                    return { ...l, backgroundRemoved: true, opacity: 100 };
+                }
+                return l;
+            }));
+            showToast(`Applied subject cutout to "${target.name || 'image'}"`);
+        }
+    };
 
     const handleExecuteBoolean = (op) => {
         const selLayers = layers.filter(l => selectedLayerIds.includes(l.id));
@@ -1603,6 +1717,10 @@ export default function DesignStudioPage() {
                     setBrandKit={setBrandKit}
                     onApplyBrandKit={handleApplyBrandKit}
                     onUploadAssetClick={() => assetInputRef.current?.click()}
+                    customComponents={customComponents}
+                    onDeleteCustomComponent={handleDeleteCustomComponent}
+                    activeTab={leftRailTab}
+                    setActiveTab={setLeftRailTab}
                 />
 
                 {/* 2. Center Stage: Toolbar, Infinite Artboard Canvas, Breadcrumbs, Floating Copilot */}
@@ -1695,6 +1813,7 @@ export default function DesignStudioPage() {
                         selectedLayerIds={selectedLayerIds}
                         setSelectedLayerIds={setSelectedLayerIds}
                         onDirectionApply={applyDirection}
+                        onRemoveBackground={handleToggleBackgroundRemoval}
                     />
 
                     {/* Slide-Up Creative Directions Variations Tray */}
@@ -1796,9 +1915,8 @@ export default function DesignStudioPage() {
                     onUpdateLayer={handleUpdateLayer}
                     onAlign={handleAlignLayers}
                     onDistribute={handleDistributeLayers}
-                    onCreateComponent={(layer) => {
-                        showToast();
-                    }}
+                    onCreateComponent={handleCreateMasterComponent}
+                    onToggleBackgroundRemoval={handleToggleBackgroundRemoval}
                     currentFormat={currentFormat}
                     selectedFormat={selectedFormat}
                     setSelectedFormat={setSelectedFormat}
@@ -1922,6 +2040,42 @@ export default function DesignStudioPage() {
 
                                 <div style={{ height: 1, background: 'rgba(16, 21, 29, 0.08)', margin: '4px 0' }} />
 
+                                {(() => {
+                                    const layer = layers.find(l => l.id === contextMenu.layerId);
+                                    if (layer && (layer.type === 'image' || layer.src || layer.id === 'subject')) {
+                                        return (
+                                            <div
+                                                onClick={() => {
+                                                    handleToggleBackgroundRemoval(contextMenu.layerId);
+                                                    setContextMenu(null);
+                                                }}
+                                                style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                                onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                            >
+                                                <Sparkles size={13} color="#0B7C91" />
+                                                <span>{layer.backgroundRemoved ? 'Restore Background' : 'Remove Background'}</span>
+                                            </div>
+                                        );
+                                    }
+                                    return null;
+                                })()}
+
+                                <div
+                                    onClick={() => {
+                                        handleCreateMasterComponent(layers.find(l => l.id === contextMenu.layerId));
+                                        setContextMenu(null);
+                                    }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <Layers size={13} color="#0B7C91" />
+                                    <span>Create Master Component</span>
+                                </div>
+
+                                <div style={{ height: 1, background: 'rgba(16, 21, 29, 0.08)', margin: '4px 0' }} />
+
                                 <div
                                     onClick={() => {
                                         pushUndo();
@@ -2005,6 +2159,70 @@ export default function DesignStudioPage() {
                                     onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                                 >
                                     <Sliders size={13} color="#5F6876" /> Add Badge Pill
+                                </div>
+
+                                <div style={{ height: 1, background: 'rgba(16, 21, 29, 0.08)', margin: '4px 0' }} />
+
+                                <div
+                                    onClick={() => {
+                                        setLayers(prev => prev.map(l => l.id === contextMenu.layerId ? { ...l, locked: !l.locked } : l));
+                                        setContextMenu(null);
+                                    }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    {layers.find(l => l.id === contextMenu.layerId)?.locked ? <Unlock size={13} /> : <Lock size={13} />}
+                                    {layers.find(l => l.id === contextMenu.layerId)?.locked ? 'Unlock Layer' : 'Lock Layer'}
+                                </div>
+
+                                <div
+                                    onClick={() => {
+                                        setLayers(prev => prev.map(l => l.id === contextMenu.layerId ? { ...l, visible: !l.visible } : l));
+                                        setContextMenu(null);
+                                    }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    {layers.find(l => l.id === contextMenu.layerId)?.visible ? <EyeOff size={13} /> : <Eye size={13} />}
+                                    {layers.find(l => l.id === contextMenu.layerId)?.visible ? 'Hide Layer' : 'Show Layer'}
+                                </div>
+
+                                <div style={{ height: 1, background: 'rgba(16, 21, 29, 0.08)', margin: '4px 0' }} />
+
+                                {(() => {
+                                    const layer = layers.find(l => l.id === contextMenu.layerId);
+                                    if (layer && (layer.type === 'image' || layer.src || layer.id === 'subject')) {
+                                        return (
+                                            <div
+                                                onClick={() => {
+                                                    handleToggleBackgroundRemoval(contextMenu.layerId);
+                                                    setContextMenu(null);
+                                                }}
+                                                style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                                onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                            >
+                                                <Sparkles size={13} color="#0B7C91" />
+                                                <span>{layer.backgroundRemoved ? 'Restore Background' : 'Remove Background'}</span>
+                                            </div>
+                                        );
+                                    }
+                                    return null;
+                                })()}
+
+                                <div
+                                    onClick={() => {
+                                        handleCreateMasterComponent(layers.find(l => l.id === contextMenu.layerId));
+                                        setContextMenu(null);
+                                    }}
+                                    style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <Layers size={13} color="#0B7C91" />
+                                    <span>Create Master Component</span>
                                 </div>
 
                                 <div style={{ height: 1, background: 'rgba(16, 21, 29, 0.08)', margin: '4px 0' }} />

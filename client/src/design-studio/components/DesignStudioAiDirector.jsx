@@ -19,6 +19,7 @@ import {
 import { executeDesignCommand } from '../../agent/DesignStudioCommandRegistry.js';
 
 const QUICK_SUGGESTIONS = [
+    'Remove the background',
     'Make headline larger, push left',
     'Set corner radius to 24px',
     'Union selected shapes',
@@ -32,6 +33,7 @@ export default function DesignStudioAiDirector({
     selectedLayerIds = [],
     setSelectedLayerIds,
     onDirectionApply,
+    onRemoveBackground,
 }) {
     const [isExpanded, setIsExpanded] = useState(true);
     const [promptText, setPromptText] = useState('');
@@ -57,6 +59,7 @@ export default function DesignStudioAiDirector({
             selectedLayerId: selectedLayerIds[0] || null,
             setSelectedLayerIds,
             applyDirection: onDirectionApply,
+            onRemoveBackground,
         };
 
         const result = executeDesignCommand(textToRun, ctx);

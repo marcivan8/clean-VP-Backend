@@ -699,6 +699,7 @@ export const DESIGN_COMMANDS = [
         category: 'hierarchy',
         label: 'Delete layer',
         summary: 'Removes target or selected layer from the canvas.',
+        negative: ['remove background', 'remove the background', 'remove bg', 'isolate subject', 'cutout', 'cut out subject'],
         phrases: [
             'delete', 'remove', 'delete layer', 'remove layer', 'trash layer',
             'delete circle', 'delete rectangle', 'delete star', 'delete badge', 'remove circle'
@@ -955,21 +956,38 @@ export const DESIGN_COMMANDS = [
         label: 'AI Background Removal',
         summary: 'Isolates subject cutout by removing image background.',
         phrases: [
-            'remove background', 'isolate subject', 'cutout subject',
-            'remove bg', 'transparent background'
+            'remove the background', 'remove background', 'remove bg', 'remove image background',
+            'isolate subject', 'isolate the subject', 'cutout subject', 'cut out subject',
+            'transparent background', 'delete photo background', 'cutout', 'take out background'
         ],
         execute: (params, ctx) => {
-            let found = false;
-            ctx.setLayers(prev => prev.map(l => {
-                if (l.type === 'image' || l.id === 'subject') {
-                    found = true;
-                    return { ...l, backgroundRemoved: true, opacity: 100 };
-                }
-                return l;
-            }));
+            const layers = ctx.layers || [];
+            let target = null;
+            if (ctx.selectedLayerId) {
+                target = layers.find(l => l.id === ctx.selectedLayerId && (l.type === 'image' || l.src || l.id === 'subject'));
+            }
+            if (!target) {
+                target = layers.find(l => l.type === 'image' || l.src || l.id === 'subject');
+            }
 
-            if (!found) return { success: false, message: 'No image or subject layer found to isolate.' };
-            return { success: true, message: 'Isolated subject and removed background with AI.' };
+            if (!target) {
+                return { success: false, message: 'No image or photo layer found on canvas to remove background from.' };
+            }
+
+            if (ctx.setLayers) {
+                ctx.setLayers(prev => prev.map(l => {
+                    if (l.id === target.id) {
+                        return { ...l, backgroundRemoved: true, opacity: 100 };
+                    }
+                    return l;
+                }));
+            }
+
+            if (ctx.onRemoveBackground) {
+                Promise.resolve(ctx.onRemoveBackground(target.id)).catch(() => {});
+            }
+
+            return { success: true, message: `Removed background from "${target.name || 'image'}" with AI.` };
         },
     },
 
@@ -1571,8 +1589,13 @@ export function scoreDesignCommand(cmd, text) {
     if (cmd.id === 'ds_set_text' && (/\b(?:change|set|rename|update)\s+(?:text|headline|title)\s+to\b/i.test(s) || (/\b(?:saying|with text saying)\b/i.test(s) && !/thumbnail/i.test(s)))) {
         score = Math.max(score, 88);
     }
-    if (cmd.id === 'ds_delete_layer' && /\b(?:delete|remove|trash)\b/i.test(s)) {
-        score = Math.max(score, 88);
+    if (cmd.id === 'ds_delete_layer') {
+        if (/\b(?:remove|delete|cut\s*out|take\s*out)\s*(?:the\s*)?(?:image\s*|photo\s*)?(?:background|bg)\b/i.test(s)) {
+            return 0; // VETO: background removal is NOT deleting a canvas layer
+        }
+        if (/\b(?:delete|remove|trash)\b/i.test(s)) {
+            score = Math.max(score, 88);
+        }
     }
     if (cmd.id === 'ds_generate_thumbnail' && /\b(?:create|generate|make|build|design)\s+(?:a\s+)?(?:simple\s+)?thumbnail\b/i.test(s)) {
         score = Math.max(score, 95);
@@ -1592,8 +1615,8 @@ export function scoreDesignCommand(cmd, text) {
     if (cmd.id === 'ds_apply_theme_token' && /\b(?:apply\s*theme|dark\s*mode|light\s*mode|editorial\s*mode|theme)\b/i.test(s)) {
         score = Math.max(score, 85);
     }
-    if (cmd.id === 'ds_remove_background' && /\b(?:remove\s*background|remove\s*bg|isolate\s*subject|cutout\s*subject)\b/i.test(s)) {
-        score = Math.max(score, 90);
+    if (cmd.id === 'ds_remove_background' && /\b(?:remove|isolate|cut\s*out|extract|take\s*out)\s*(?:the\s*)?(?:image\s*|photo\s*)?(?:background|bg|subject)\b/i.test(s)) {
+        score = Math.max(score, 98);
     }
     if (cmd.id === 'ds_design_review' && /\b(?:review\s*design|critique\s*design|audit\s*layout|design\s*feedback)\b/i.test(s)) {
         score = Math.max(score, 90);

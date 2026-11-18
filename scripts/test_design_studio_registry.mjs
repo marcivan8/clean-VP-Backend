@@ -148,6 +148,15 @@ const execAdapt = executeDesignCommand('adapt to instagram', mockCtx);
 check('executeDesignCommand adapts format to social',
     execAdapt.success && mockCtx.selectedFormat === 'social');
 
+// Test background removal
+const resBgMatch = resolveDesignCommand('I want to remove the background');
+check('resolveDesignCommand maps "I want to remove the background" to ds_remove_background',
+    resBgMatch.match?.id === 'ds_remove_background' && resBgMatch.score >= 95);
+
+const execBg = executeDesignCommand('I want to remove the background', mockCtx);
+check('executeDesignCommand isolates subject and sets backgroundRemoved true',
+    execBg.success && mockLayers.find(l => l.id === 'subject')?.backgroundRemoved === true);
+
 console.log('\n── 4. Professional Vector & Auto Layout Engines ──');
 const vectorMath = await import('../client/src/design-studio/vectorMath.js');
 const autoLayout = await import('../client/src/design-studio/autoLayout.js');

@@ -44,6 +44,7 @@ export default function PropertiesInspector({
     onAlign,
     onDistribute,
     onCreateComponent,
+    onToggleBackgroundRemoval,
     currentFormat = { id: 'thumbnail', label: 'Video thumbnail', res: '1280 × 720 · YouTube', w: 1280, h: 720, aspect: '16/9' },
     selectedFormat = 'thumbnail',
     setSelectedFormat,
@@ -616,8 +617,49 @@ export default function PropertiesInspector({
                             </div>
                         </div>
 
+                        {/* Image Actions: Background Removal */}
+                        {(primaryLayer.type === 'image' || primaryLayer.src || primaryLayer.id === 'subject') && (
+                            <div style={{ borderTop: '1px solid #F1F5F9', paddingTop: '12px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                    <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 600 }}>IMAGE ACTIONS</span>
+                                    {primaryLayer.backgroundRemoved && (
+                                        <span style={{ fontSize: '10px', color: '#16A34A', fontWeight: 600, background: '#DCFCE7', padding: '1px 6px', borderRadius: '4px' }}>
+                                            Cutout Active
+                                        </span>
+                                    )}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => onToggleBackgroundRemoval && onToggleBackgroundRemoval(primaryLayer.id)}
+                                    style={{
+                                        width: '100%',
+                                        padding: '8px 12px',
+                                        background: primaryLayer.backgroundRemoved ? '#F1F5F9' : '#0F172A',
+                                        color: primaryLayer.backgroundRemoved ? '#0F172A' : '#FFFFFF',
+                                        border: primaryLayer.backgroundRemoved ? '1px solid #CBD5E1' : 'none',
+                                        borderRadius: '6px',
+                                        fontWeight: 600,
+                                        fontSize: '12px',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '7px',
+                                        boxShadow: primaryLayer.backgroundRemoved ? 'none' : '0 2px 8px rgba(15, 23, 42, 0.2)',
+                                        transition: 'all 0.15s ease',
+                                    }}
+                                >
+                                    <Sparkles size={13} color={primaryLayer.backgroundRemoved ? '#0B7C91' : '#00E5FF'} />
+                                    <span>{primaryLayer.backgroundRemoved ? 'Restore Background' : 'Remove Background'}</span>
+                                </button>
+                            </div>
+                        )}
+
                         {/* 6. Component Creation Trigger */}
                         <div style={{ borderTop: '1px solid #F1F5F9', paddingTop: '12px', marginTop: 'auto' }}>
+                            <div style={{ fontSize: '10px', color: '#64748B', marginBottom: '6px', textAlign: 'center' }}>
+                                Reusable across layouts & formats
+                            </div>
                             <button
                                 type="button"
                                 onClick={() => onCreateComponent && onCreateComponent(primaryLayer)}
@@ -635,7 +677,9 @@ export default function PropertiesInspector({
                                     alignItems: 'center',
                                     justifyContent: 'center',
                                     gap: '6px',
+                                    transition: 'all 0.15s ease',
                                 }}
+                                title="Save selected layer or group as reusable component in library"
                             >
                                 <Layers size={14} />
                                 <span>Create Master Component</span>
