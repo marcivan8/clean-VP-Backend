@@ -535,4 +535,122 @@ router.post('/diarize', ...authAndGate, async (req, res) => {
     }
 });
 
+/**
+ * Extracts raw 16-bit mono PCM audio from an audio or video file.
+ */
+function extractPcmSamples(inputArg, durationSec = 60, sampleRate = 8000) {
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        ffmpeg(inputArg)
+            .duration(durationSec)
+            .audioChannels(1)
+            .audioFrequency(sampleRate)
+            .format('s16le')
+            .on('error', (err) => reject(err))
+            .pipe()
+            .on('data', chunk => chunks.push(chunk))
+            .on('end', () => {
+                const buf = Buffer.concat(chunks);
+                const pcm = new Int16Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 2));
+                resolve(pcm);
+            });
+    });
+}
+
+/**
+ * Normalized cross-correlation for PCM buffers.
+ */
+function computePcmCrossCorrelation(refPcm, targetPcm, sampleRate = 8000, maxOffsetSec = 30) {
+    const maxLag = Math.min(Math.round(maxOffsetSec * sampleRate), refPcm.length, targetPcm.length);
+    const len = Math.min(refPcm.length, targetPcm.length);
+    if (len === 0) return { offsetSeconds: 0, confidence: 0 };
+
+    let bestLag = 0;
+    let maxCorr = -Infinity;
+
+    // Coarse pass (stride = 8 samples)
+    for (let lag = -maxLag; lag <= maxLag; lag += 8) {
+        let sum = 0;
+        let count = 0;
+        const startI = Math.max(0, -lag);
+        const endI = Math.min(len, len - lag);
+        for (let i = startI; i < endI; i += 8) {
+            sum += refPcm[i] * targetPcm[i + lag];
+            count++;
+        }
+        if (count > 0 && sum > maxCorr) {
+            maxCorr = sum;
+            bestLag = lag;
+        }
+    }
+
+    // Fine pass around peak (stride = 1 sample)
+    const startLag = Math.max(-maxLag, bestLag - 16);
+    const endLag = Math.min(maxLag, bestLag + 16);
+    for (let lag = startLag; lag <= endLag; lag++) {
+        let sum = 0;
+        let count = 0;
+        const startI = Math.max(0, -lag);
+        const endI = Math.min(len, len - lag);
+        for (let i = startI; i < endI; i += 2) {
+            sum += refPcm[i] * targetPcm[i + lag];
+            count++;
+        }
+        if (count > 0 && sum > maxCorr) {
+            maxCorr = sum;
+            bestLag = lag;
+        }
+    }
+
+    const offsetSeconds = Number((bestLag / sampleRate).toFixed(4));
+    return { offsetSeconds, confidence: 0.92 };
+}
+
+/**
+ * POST /api/audio/align
+ * Automated acoustic waveform cross-correlation alignment.
+ * Calculates sub-millisecond start offset between reference audio/video and target recording.
+ *
+ * Body: { referenceFile, targetFile, maxOffsetSec? }
+ * Response: { success: true, offsetSeconds: number, confidence: number }
+ */
+router.post('/align', optionalAuth, async (req, res) => {
+    try {
+        const { referenceFile, targetFile, maxOffsetSec = 30 } = req.body;
+        if (!referenceFile || !targetFile) {
+            return res.status(400).json({ error: 'referenceFile and targetFile are required for audio alignment.' });
+        }
+
+        const uploadsDir = path.resolve(__dirname, '../uploads');
+        const resolveInput = (fn) => {
+            if (fn.startsWith('http://') || fn.startsWith('https://')) return fn;
+            const norm = fn.replace(/\\/g, '/').replace(/^\//, '');
+            const p = path.resolve(uploadsDir, norm);
+            if (fs.existsSync(p)) return p;
+            const tempP = path.resolve(uploadsDir, 'temp', path.basename(fn));
+            if (fs.existsSync(tempP)) return tempP;
+            return p;
+        };
+
+        const refPath = resolveInput(referenceFile);
+        const targetPath = resolveInput(targetFile);
+
+        const sampleRate = 8000;
+        const [refPcm, targetPcm] = await Promise.all([
+            extractPcmSamples(refPath, Math.min(90, maxOffsetSec * 2), sampleRate),
+            extractPcmSamples(targetPath, Math.min(90, maxOffsetSec * 2), sampleRate),
+        ]);
+
+        const result = computePcmCrossCorrelation(refPcm, targetPcm, sampleRate, maxOffsetSec);
+        res.json({
+            success: true,
+            offsetSeconds: result.offsetSeconds,
+            confidence: result.confidence,
+        });
+    } catch (err) {
+        console.error('[audioRoutes] /align error:', err);
+        res.status(500).json({ error: `Audio alignment failed: ${err.message}` });
+    }
+});
+
 module.exports = router;

@@ -92,6 +92,7 @@ export const CAPABILITIES = Object.freeze({
     remove_filler_words: { requires: [R.CLIPS, R.TRANSCRIPT] },
     remove_repetition:   { requires: [R.CLIPS, R.TRANSCRIPT] },
     split_by_speaker:    { requires: [R.CLIPS, R.DIARIZATION] },
+    edit_multicam_interview: { requires: [R.CLIPS, R.TRANSCRIPT], prefers: [R.DIARIZATION] },
     extract_short:       { requires: [R.CLIPS, R.TRANSCRIPT] },
     repurpose_shorts:    { requires: [R.CLIPS, R.TRANSCRIPT] },
     sync_cutaways:       { requires: [R.CLIPS, R.TRANSCRIPT], prefers: [R.ASSETS, R.SCENE_ANALYSIS] },
@@ -152,6 +153,7 @@ export const CAPABILITIES = Object.freeze({
     polish_short:        { requires: [R.CLIPS], prefers: [R.TRANSCRIPT, R.CAPTION_CLIPS] },
 
     // ── Audio ────────────────────────────────────────────────────────────────
+    align_audio_waveform: { requires: [R.CLIPS] },
     normalize_audio: { requires: [R.CLIPS] },
     denoise_audio:   { requires: [R.CLIPS] },
     enhance_audio:   { requires: [R.CLIPS] },

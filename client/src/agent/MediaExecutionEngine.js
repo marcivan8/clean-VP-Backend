@@ -1201,6 +1201,16 @@ export class MediaExecutionEngine {
                 const result = await new VideoEditorTools().execute({ name: action, args });
                 return { action, ...result };
             }
+            case 'align_audio_waveform': {
+                const { VideoEditorTools } = await import('./VideoEditorTools.js');
+                const result = await new VideoEditorTools().syncAudioTracks(args);
+                return { action, ...result };
+            }
+            case 'edit_multicam_interview': {
+                const { VideoEditorTools } = await import('./VideoEditorTools.js');
+                const result = await new VideoEditorTools().autoCutMulticam(args);
+                return { action, ...result };
+            }
             case 'place_contextual_illustrations': {
                 const { VideoEditorTools } = await import('./VideoEditorTools.js');
                 const result = new VideoEditorTools().placeContextualIllustrations(args);

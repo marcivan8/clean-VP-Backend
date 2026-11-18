@@ -183,8 +183,8 @@
       "execution": "This Brain response is advisory only; do not claim Auto ran or report an edit as complete."
     }
   },
-  "commandCount": 70,
-  "registryDeclaredCount": 68,
+  "commandCount": 72,
+  "registryDeclaredCount": 70,
   "supplementCount": 2,
   "commands": [
     {
@@ -315,6 +315,27 @@
       "macro": null
     },
     {
+      "id": "align_audio_waveform",
+      "executes": "align_audio_waveform",
+      "phrase": "Align audio by waveform",
+      "category": "audio",
+      "registryDeclared": true,
+      "label": "Align audio by waveform",
+      "summary": "Synchronizes separate audio and video tracks using acoustic cross-correlation.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "inputs": [],
+      "effects": "May update timeline or project state.",
+      "cost": "local",
+      "verification": "Require a checked execution result and verify the resulting timeline or asset state before reporting success.",
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
       "id": "denoise_audio",
       "executes": "denoise_audio",
       "phrase": "Reduce noise",
@@ -418,6 +439,30 @@
       "cost": "local",
       "verification": "Require a checked execution result and verify the resulting timeline or asset state before reporting success.",
       "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "edit_multicam_interview",
+      "executes": "edit_multicam_interview",
+      "phrase": "monter l interview multi camera",
+      "category": "edit",
+      "registryDeclared": true,
+      "label": "Edit multi-camera interview",
+      "summary": "Aligns camera angles and automatically cuts between host and guest speakers.",
+      "requires": [
+        "clips",
+        "transcript"
+      ],
+      "prefers": [
+        "diarization"
+      ],
+      "provides": [],
+      "inputs": [],
+      "effects": "Removes or shortens existing material.",
+      "cost": "local",
+      "verification": "Require a checked execution result and verify the resulting timeline or asset state before reporting success.",
+      "destructive": true,
       "readOnly": false,
       "macro": null
     },

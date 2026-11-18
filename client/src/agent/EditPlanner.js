@@ -276,6 +276,16 @@ export class EditPlanner {
             case 'audio_denoise':
             case 'denoise_audio': return this.planAudioDenoise(planId, constraints);
             case 'normalize_audio': return this.planNormalizeAudio(planId, constraints);
+            case 'align_audio_waveform': {
+                return this.buildPlan(planId, 'align_audio_waveform', [
+                    { step_id: 'step_1', action: 'align_audio_waveform', args: constraints || {}, reason: 'Synchronize audio and video tracks by acoustic waveform cross-correlation' },
+                ]);
+            }
+            case 'edit_multicam_interview': {
+                return this.buildPlan(planId, 'edit_multicam_interview', [
+                    { step_id: 'step_1', action: 'edit_multicam_interview', args: constraints || {}, reason: 'Align camera angles and cut automatically between speakers' },
+                ]);
+            }
             case 'auto_captions': return this.planAutoCaptions(planId, constraints);
             case 'locate_visual_targets': return this.planLocateVisualTargets(planId, constraints);
             case 'apply_target_ranges': return this.planApplyTargetRanges(planId, constraints);

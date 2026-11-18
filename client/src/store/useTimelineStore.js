@@ -4390,6 +4390,40 @@ const useTimelineStore = create(
 
                 set({ tracks: timelineManager.toLegacyTracks(), captions: newCaptions });
             },
+
+            /**
+             * alignClipsByAudio — aligns targetClip to refClip using acoustic waveform cross-correlation.
+             * Synchronizes dual-system sound and multi-camera interview angles.
+             * @param {string} refClipId
+             * @param {string} targetClipId
+             * @param {object} [options]
+             * @returns {Promise<{ offsetSeconds: number, confidence: number, method: string }>}
+             */
+            alignClipsByAudio: async (refClipId, targetClipId, options = {}) => {
+                const { tracks, updateClip, _saveHistory } = get();
+                const allClips = [];
+                (tracks || []).forEach(t => (t.clips || []).forEach(c => allClips.push({ ...c, trackId: t.id })));
+
+                const refClip = allClips.find(c => c.id === refClipId);
+                const targetClip = allClips.find(c => c.id === targetClipId);
+
+                if (!refClip || !targetClip) {
+                    throw new Error('Both reference and target clips must exist on timeline for audio alignment.');
+                }
+
+                const { alignAudioClips } = await import('../utils/audioCrossCorrelation.js');
+                const result = await alignAudioClips(refClip, targetClip, options);
+
+                if (result && typeof result.offsetSeconds === 'number') {
+                    if (_saveHistory) _saveHistory();
+                    const newStart = Math.max(0, (refClip.start || 0) + result.offsetSeconds);
+                    const targetTrack = tracks.find(t => (t.clips || []).some(c => c.id === targetClip.id));
+                    const trackId = targetTrack ? targetTrack.id : (targetClip.trackId || tracks[0]?.id);
+                    updateClip(trackId, targetClip.id, { start: Number(newStart.toFixed(4)) });
+                }
+
+                return result;
+            },
         };
     })
 );

@@ -1153,6 +1153,7 @@ const COMMAND_REGISTRY = new Map([
     ['mute_clip', { compiler: compileMuteClip }],
     ['remove_filler_words', { compiler: compileRemoveFillerWords }],
     ['normalize_audio', { compiler: compileNormalizeAudio }],
+    ['align_audio_waveform', { compiler: compileAtomicStore('align_audio_waveform', 'Align audio by acoustic waveform cross-correlation') }],
     ['denoise_audio', { compiler: compileDenoiseAudio }],
     ['audio_denoise', { compiler: compileDenoiseAudio }],  // alias
 
@@ -1162,6 +1163,7 @@ const COMMAND_REGISTRY = new Map([
     ['apply_smart_zoom', { compiler: compileApplySmartZoom }],
 
     // Interview / talking-head / clip organization
+    ['edit_multicam_interview', { compiler: compileAtomicStore('edit_multicam_interview', 'Multi-camera speaker-driven auto-switching') }],
     ['rhythm_zoom',      { compiler: compileRhythmZoom }],
     ['crop_clip',        { compiler: compileCropClip }],
     ['detect_speakers',  { compiler: compileAtomicStore('detect_speakers', 'Detect speakers (analysis only)') }],

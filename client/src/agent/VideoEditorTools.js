@@ -633,6 +633,32 @@ export const TOOL_DEFINITIONS = [
             },
             required: ['preset'],
         },
+    },
+    {
+        name: 'sync_audio_tracks',
+        description: 'Synchronizes separate audio and video tracks or multiple camera recordings using automated acoustic waveform cross-correlation.',
+        parameters: {
+            type: 'object',
+            properties: {
+                refClipId: { type: 'string', description: 'Reference clip ID (e.g. camera audio scratch track)' },
+                targetClipId: { type: 'string', description: 'Target clip ID to align (e.g. high quality lavalier mic or secondary angle)' },
+                maxOffsetSec: { type: 'number', description: 'Maximum search offset window in seconds (default 30)' },
+            },
+            required: [],
+        },
+    },
+    {
+        name: 'auto_cut_multicam',
+        description: 'Synchronizes camera angles and automatically cuts between host, guest, and wide shots based on speaker diarization.',
+        parameters: {
+            type: 'object',
+            properties: {
+                camAId: { type: 'string', description: 'Camera A (Host angle) clip ID' },
+                camBId: { type: 'string', description: 'Camera B (Guest angle) clip ID' },
+                wideId: { type: 'string', description: 'Optional wide 2-shot angle clip ID' },
+            },
+            required: [],
+        },
     }
 ];
 
@@ -1238,6 +1264,10 @@ export class VideoEditorTools {
             case 'denoise_audio': return await performAudioDenoise(getFilename());
             case 'normalize_audio': return await performAudioNormalization(getFilename());
             case 'sync_clips_to_beat': return this.syncClipsToBeats();
+            case 'sync_audio_tracks':
+            case 'align_audio_waveform': return await this.syncAudioTracks(action.args);
+            case 'auto_cut_multicam':
+            case 'edit_multicam_interview': return await this.autoCutMulticam(action.args);
             case 'auto_captions': return await performAutoCaptions(getFilename(), action.args?.language || 'auto');
             case 'apply_zoom':        // alias — server fallback generates this for "zoom in/out"
             case 'apply_smart_zoom': return await this.applySmartZoom(action.args);
@@ -1858,6 +1888,66 @@ export class VideoEditorTools {
     syncClipsToBeats() {
         this.store.syncClipsToBeats();
         return { success: true, message: "Synced clips to extracted beat markers." };
+    }
+
+    async syncAudioTracks(args = {}) {
+        const store = this.store || useTimelineStore.getState();
+        const { tracks } = store;
+        const allClips = [];
+        (tracks || []).forEach(t => (t.clips || []).forEach(c => allClips.push({ ...c, trackId: t.id })));
+
+        let refClip = args.refClipId ? allClips.find(c => c.id === args.refClipId) : null;
+        let targetClip = args.targetClipId ? allClips.find(c => c.id === args.targetClipId) : null;
+
+        if (!refClip || !targetClip) {
+            const videoClips = allClips.filter(c => c.type === 'video');
+            const audioClips = allClips.filter(c => c.type === 'audio');
+
+            if (audioClips.length > 0 && videoClips.length > 0) {
+                refClip = videoClips[0];
+                targetClip = audioClips[0];
+            } else if (videoClips.length >= 2) {
+                refClip = videoClips[0];
+                targetClip = videoClips[1];
+            }
+        }
+
+        if (!refClip || !targetClip) {
+            return {
+                success: false,
+                message: 'Need at least two media clips on the timeline to synchronize audio.',
+            };
+        }
+
+        const result = await store.alignClipsByAudio(refClip.id, targetClip.id, {
+            maxOffsetSec: args.maxOffsetSec || 30,
+        });
+
+        return {
+            success: true,
+            offsetSeconds: result.offsetSeconds,
+            confidence: result.confidence,
+            method: result.method,
+            message: `Synchronized "${targetClip.name || 'target'}" to "${refClip.name || 'reference'}" (offset: ${result.offsetSeconds > 0 ? '+' : ''}${result.offsetSeconds}s, confidence: ${Math.round(result.confidence * 100)}%).`,
+        };
+    }
+
+    async autoCutMulticam(args = {}) {
+        const store = this.store || useTimelineStore.getState();
+        const { executeMultiCamAutoCut } = await import('./MultiCamDirector.js');
+
+        const words = args.words || store.captions || [];
+        const speakers = args.speakers || (store.speakers?.length ? store.speakers : ['SPEAKER_00', 'SPEAKER_01']);
+
+        const result = await executeMultiCamAutoCut(store, {
+            camAId: args.camAId,
+            camBId: args.camBId,
+            wideId: args.wideId,
+            diarizedWords: words,
+            speakers,
+        });
+
+        return result;
     }
 
     setAspectRatio({ ratio }) {

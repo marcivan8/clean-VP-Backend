@@ -679,6 +679,31 @@ export const COMMANDS = [
         destructive: false,
     },
     {
+        id: 'align_audio_waveform',
+        category: 'audio',
+        label: 'Align audio by waveform',
+        summary: 'Synchronizes separate audio and video tracks using acoustic cross-correlation.',
+        phrases: ['sync audio', 'align audio', 'synchronize audio', 'sync audio with video',
+                  'align clips by audio', 'synchronise le son', 'synchroniser l audio',
+                  'aligne l audio', 'sync separate mic', 'align dual sound', 'waveform sync',
+                  'acoustic sync', 'align audio waveform'],
+        negative: ['crop', 'zoom', 'silence', 'filler', 'music', 'broll', 'cutaways'],
+        destructive: false,
+    },
+    {
+        id: 'edit_multicam_interview',
+        category: 'edit',
+        label: 'Edit multi-camera interview',
+        summary: 'Aligns camera angles and automatically cuts between host and guest speakers.',
+        phrases: ['edit multicam interview', 'cut multicam by speaker', 'auto switch camera angles',
+                  'switch camera between speakers', 'edit talking head interview',
+                  'monter l interview multi camera', 'decouper les cameras par intervenant',
+                  'multicam speaker switching', 'auto cut multicam', 'multi cam interview edit'],
+        negative: ['crop', 'zoom', 'silence', 'filler'],
+        destructive: true,
+        requires: ['transcript'],
+    },
+    {
         // R97: icon/emoji insert command. "add a fire emoji" places that
         // glyph; "add a heart icon"/"add a sticker" resolves a keyword
         // against the sticker library; "add 🔥" uses the literal glyph the
