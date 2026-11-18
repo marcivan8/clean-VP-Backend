@@ -13,6 +13,7 @@
  */
 
 import { computeCrossCorrelation } from '../utils/audioCrossCorrelation.js';
+import { computeSpeakerFraming } from './visualSpeakerGrounding.js';
 
 /** Minimum duration in seconds an angle must stay on screen before cutting (prevents strobe cuts) */
 const MIN_SHOT_DURATION_S = 1.8;
@@ -72,6 +73,7 @@ export function planMultiCamCuts({
     wideAngle = null,
     words = [],
     speakers = ['SPEAKER_00', 'SPEAKER_01'],
+    speakerVisualMap = null,
     totalDuration = 60,
 }) {
     const hostSpeaker = speakers[0] || 'SPEAKER_00';
@@ -114,13 +116,27 @@ export function planMultiCamCuts({
                 duration: Number((turn.start - curTime).toFixed(2)),
                 activeAngle: wideAngle ? wideAngle.id : (angleA?.id || 'camA'),
                 speaker: 'pause',
+                framing: { x: 0, y: 0, scale: 1, cx: 0.5, cy: 0.5, offsetX: 0, offsetY: 0 },
                 reason: 'Topic transition or breathing pause',
             });
             curTime = turn.start;
         }
 
-        const isHost = turn.speaker === hostSpeaker;
+        // Correlate with visual speaker map if available
+        const visualInfo = speakerVisualMap?.[turn.speaker];
+        let isHost = turn.speaker === hostSpeaker;
+        if (visualInfo) {
+            if (visualInfo.side === 'left') isHost = true;
+            else if (visualInfo.side === 'right') isHost = false;
+        }
+
         const activeId = isHost ? (angleA?.id || 'camA') : (angleB?.id || 'camB');
+        const framing = visualInfo?.anchor
+            ? computeSpeakerFraming(visualInfo.anchor)
+            : (isHost
+                ? { x: 0, y: 0, scale: 1.3, cx: 0.32, cy: 0.45, offsetX: 18, offsetY: 0 }
+                : { x: 0, y: 0, scale: 1.3, cx: 0.68, cy: 0.45, offsetX: -18, offsetY: 0 }
+            );
 
         const cutStart = curTime;
         let cutEnd = Math.max(turn.end, cutStart + MIN_SHOT_DURATION_S);
@@ -137,6 +153,9 @@ export function planMultiCamCuts({
             duration: Number((cutEnd - cutStart).toFixed(2)),
             activeAngle: activeId,
             speaker: turn.speaker,
+            speakerLabel: visualInfo?.label || (isHost ? 'Host' : 'Guest'),
+            side: visualInfo?.side || (isHost ? 'left' : 'right'),
+            framing,
             reason: isHost ? 'Host speaking' : 'Guest speaking',
         });
 
@@ -175,6 +194,7 @@ export async function executeMultiCamAutoCut(store, {
     wideId = null,
     diarizedWords = [],
     speakers = ['SPEAKER_00', 'SPEAKER_01'],
+    speakerVisualMap = null,
 }) {
     const { tracks, updateClip, addTrack, addClip, _saveHistory } = store;
     if (_saveHistory) _saveHistory();
@@ -224,6 +244,24 @@ export async function executeMultiCamAutoCut(store, {
         ? speakers
         : (store.speakers?.length ? store.speakers : ['SPEAKER_00', 'SPEAKER_01']);
 
+    // 3. Ground speakers visually with video snapshot detection if not already mapped
+    let visualMap = speakerVisualMap || store.speakerVisualMap || null;
+    if (!visualMap && words.length > 0) {
+        try {
+            const { groundSpeakersFromVideo } = await import('./visualSpeakerGrounding.js');
+            visualMap = await groundSpeakersFromVideo({
+                words,
+                speakers: detectedSpeakers,
+                videoSource: clipA.url || clipA.sourceUrl,
+            });
+            if (visualMap && Object.keys(visualMap).length > 0) {
+                store.speakerVisualMap = visualMap;
+            }
+        } catch (visErr) {
+            console.warn('[MultiCamDirector] Visual speaker grounding skipped:', visErr.message);
+        }
+    }
+
     const totalDur = Math.max(
         (clipA.start || 0) + (clipA.duration || 60),
         (clipB.start || 0) + (clipB.duration || 60)
@@ -235,6 +273,7 @@ export async function executeMultiCamAutoCut(store, {
         wideAngle: clipWide,
         words,
         speakers: detectedSpeakers,
+        speakerVisualMap: visualMap,
         totalDuration: totalDur,
     });
 

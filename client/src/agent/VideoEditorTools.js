@@ -1945,6 +1945,7 @@ export class VideoEditorTools {
             wideId: args.wideId,
             diarizedWords: words,
             speakers,
+            speakerVisualMap: args.speakerVisualMap,
         });
 
         return result;

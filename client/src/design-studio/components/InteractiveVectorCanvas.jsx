@@ -569,44 +569,85 @@ export default function InteractiveVectorCanvas({
                 justifyContent: 'center',
             }}>
             {/* SVG Canvas Board */}
-            <svg
-                ref={svgRef}
-                viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
-                style={{
-                    width: `${canvasWidth * zoom}px`,
-                    height: `${canvasHeight * zoom}px`,
-                    background: '#FFFFFF',
-                    boxShadow: '0 20px 48px -12px rgba(16, 21, 29, 0.16), 0 0 0 1px rgba(16, 21, 29, 0.08)',
-                    borderRadius: '8px',
-                    overflow: 'visible',
-                }}
-                onContextMenu={(e) => {
-                    e.preventDefault();
-                    if (onContextMenu) {
-                        onContextMenu({
-                            x: e.clientX,
-                            y: e.clientY,
-                            layerId: selectedLayerIds[0] || null,
-                        });
-                    }
-                }}
-            >
-                {/* SVG Definitions for Gradients, Blur, and Shadows */}
-                <defs>
-                    {/* Turbulence Noise Filter */}
-                    <filter id="noiseFilter" x="0" y="0" width="100%" height="100%">
-                        <feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch" />
-                        <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.15 0" />
-                    </filter>
+            {(() => {
+                const bgLayer = layers.find(l => (l.type === 'bg' || l.id === 'background'));
+                const isBgVisible = bgLayer && bgLayer.visible !== false;
+                const svgBackgroundStyle = isBgVisible
+                    ? { background: bgLayer.fill || '#FFFFFF' }
+                    : {
+                        backgroundColor: '#F8FAFC',
+                        backgroundImage: `
+                            linear-gradient(45deg, #E2E8F0 25%, transparent 25%),
+                            linear-gradient(-45deg, #E2E8F0 25%, transparent 25%),
+                            linear-gradient(45deg, transparent 75%, #E2E8F0 75%),
+                            linear-gradient(-45deg, transparent 75%, #E2E8F0 75%)
+                        `,
+                        backgroundSize: '16px 16px',
+                        backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px',
+                    };
 
-                    {/* Standard Drop Shadow Filter */}
-                    <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="140%">
-                        <feDropShadow dx="0" dy="12" stdDeviation="16" floodColor="#000000" floodOpacity="0.5" />
-                    </filter>
-                    <filter id="cyanGlowShadow" x="-30%" y="-30%" width="160%" height="160%">
-                        <feDropShadow dx="0" dy="0" stdDeviation="12" floodColor="#00E5FF" floodOpacity="0.6" />
-                    </filter>
-                </defs>
+                return (
+                    <svg
+                        ref={svgRef}
+                        viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
+                        style={{
+                            width: `${canvasWidth * zoom}px`,
+                            height: `${canvasHeight * zoom}px`,
+                            ...svgBackgroundStyle,
+                            boxShadow: '0 20px 48px -12px rgba(16, 21, 29, 0.16), 0 0 0 1px rgba(16, 21, 29, 0.08)',
+                            borderRadius: '8px',
+                            overflow: 'visible',
+                        }}
+                        onContextMenu={(e) => {
+                            e.preventDefault();
+                            if (onContextMenu) {
+                                onContextMenu({
+                                    x: e.clientX,
+                                    y: e.clientY,
+                                    layerId: selectedLayerIds[0] || null,
+                                });
+                            }
+                        }}
+                    >
+                        {/* SVG Definitions for Gradients, Blur, and Shadows */}
+                        <defs>
+                            {/* Turbulence Noise Filter */}
+                            <filter id="noiseFilter" x="0" y="0" width="100%" height="100%">
+                                <feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch" />
+                                <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.15 0" />
+                            </filter>
+
+                            {/* Standard Drop Shadow Filter */}
+                            <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="140%">
+                                <feDropShadow dx="0" dy="12" stdDeviation="16" floodColor="#000000" floodOpacity="0.5" />
+                            </filter>
+                            <filter id="cyanGlowShadow" x="-30%" y="-30%" width="160%" height="160%">
+                                <feDropShadow dx="0" dy="0" stdDeviation="12" floodColor="#00E5FF" floodOpacity="0.6" />
+                            </filter>
+                        </defs>
+
+                        {/* Interactive Clickable Background Layer */}
+                        {isBgVisible && (
+                            <rect
+                                x={0}
+                                y={0}
+                                width={canvasWidth}
+                                height={canvasHeight}
+                                fill={bgLayer.fill || '#FFFFFF'}
+                                opacity={(bgLayer.opacity !== undefined ? bgLayer.opacity : 100) / 100}
+                                style={{
+                                    cursor: bgLayer.locked ? 'default' : 'pointer',
+                                    outline: selectedLayerIds.includes(bgLayer.id) ? '2px solid #00E5FF' : 'none',
+                                    outlineOffset: '-2px',
+                                }}
+                                onPointerDown={(e) => {
+                                    if (!bgLayer.locked) {
+                                        e.stopPropagation();
+                                        setSelectedLayerIds([bgLayer.id]);
+                                    }
+                                }}
+                            />
+                        )}
 
                 {/* Optional Layout Grid Overlay */}
                 {showGuides && (
@@ -959,6 +1000,8 @@ export default function InteractiveVectorCanvas({
                     </g>
                 )}
             </svg>
+                );
+            })()}
             </div>
 
             {/* Floating Bottom Canvas Controls (Images 1 & 3 Inspiration) */}

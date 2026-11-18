@@ -36,6 +36,14 @@ export default function DesignStudioAiDirector({
     onDirectionApply,
     onRemoveBackground,
     onSaveAsMotionScene,
+    setDirections,
+    directions,
+    selectedFormat,
+    setSelectedFormat,
+    setShowVariationsTray,
+    setBriefText,
+    showToast,
+    pushUndo,
 }) {
     const [isExpanded, setIsExpanded] = useState(true);
     const [promptText, setPromptText] = useState('');
@@ -51,6 +59,10 @@ export default function DesignStudioAiDirector({
         const textToRun = (customPrompt || promptText).trim();
         if (!textToRun) return;
 
+        if (typeof pushUndo === 'function') {
+            pushUndo();
+        }
+
         // Add user prompt to history
         setHistory(prev => [...prev, { role: 'user', text: textToRun }]);
 
@@ -63,6 +75,13 @@ export default function DesignStudioAiDirector({
             applyDirection: onDirectionApply,
             onRemoveBackground,
             handleSaveAsMotionScene: onSaveAsMotionScene,
+            setDirections,
+            directions,
+            selectedFormat,
+            setSelectedFormat,
+            setShowVariationsTray,
+            setBriefText,
+            showToast,
         };
 
         const result = executeDesignCommand(textToRun, ctx);

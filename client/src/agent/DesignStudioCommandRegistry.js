@@ -711,8 +711,22 @@ export const DESIGN_COMMANDS = [
         ],
         execute: (params, ctx) => {
             const target = params.targetLayer || ctx.selectedLayerId;
-            if (!target || target === 'background') {
-                return { success: false, message: 'Cannot delete canvas background layer.' };
+            if (!target) {
+                return { success: false, message: 'No target layer specified to delete.' };
+            }
+
+            if (target === 'background') {
+                let deleted = false;
+                ctx.setLayers(prev => {
+                    const filtered = prev.filter(l => {
+                        const isBg = l.id === 'background' || l.type === 'bg';
+                        if (isBg) deleted = true;
+                        return !isBg;
+                    });
+                    return filtered;
+                });
+                if (ctx.setSelectedLayerId) ctx.setSelectedLayerId(null);
+                return { success: true, message: 'Deleted background layer. Canvas is now transparent.' };
             }
 
             let deleted = false;
@@ -734,6 +748,79 @@ export const DESIGN_COMMANDS = [
         },
     },
 
+    // ── 17b. Delete Background Layer (Transparent Canvas) ─────────────────────
+    {
+        id: 'ds_delete_canvas_background',
+        category: 'hierarchy',
+        label: 'Delete canvas background layer',
+        summary: 'Deletes the background layer, making the canvas completely transparent.',
+        phrases: [
+            'delete background layer', 'delete canvas background', 'remove background layer',
+            'make canvas transparent', 'transparent canvas', 'remove canvas background layer',
+            'trash background layer', 'delete the background layer'
+        ],
+        execute: (params, ctx) => {
+            let found = false;
+            ctx.setLayers(prev => {
+                const filtered = prev.filter(l => {
+                    const isBg = l.id === 'background' || l.type === 'bg';
+                    if (isBg) found = true;
+                    return !isBg;
+                });
+                return filtered;
+            });
+            if (ctx.setSelectedLayerId) {
+                ctx.setSelectedLayerId(null);
+            }
+            return {
+                success: true,
+                message: found ? 'Deleted background layer. Canvas is now transparent.' : 'Canvas already has no background layer (transparent).'
+            };
+        },
+    },
+
+    // ── 17c. Add Background Layer ─────────────────────────────────────────────
+    {
+        id: 'ds_add_canvas_background',
+        category: 'hierarchy',
+        label: 'Add background layer',
+        summary: 'Adds a solid or gradient background layer to the canvas.',
+        phrases: [
+            'add background', 'add background layer', 'create background layer',
+            'restore background layer', 'white background', 'solid background'
+        ],
+        execute: (params, ctx) => {
+            const newBg = {
+                id: 'background',
+                name: 'Background',
+                type: 'bg',
+                x: 0,
+                y: 0,
+                w: 1280,
+                h: 720,
+                fill: params.fill || '#FFFFFF',
+                opacity: 100,
+                visible: true,
+                locked: false,
+            };
+            let alreadyExists = false;
+            ctx.setLayers(prev => {
+                if (prev.some(l => l.id === 'background' || l.type === 'bg')) {
+                    alreadyExists = true;
+                    return prev;
+                }
+                return [newBg, ...prev];
+            });
+            if (alreadyExists) {
+                return { success: false, message: 'Canvas already has a background layer.' };
+            }
+            if (ctx.setSelectedLayerId) {
+                ctx.setSelectedLayerId('background');
+            }
+            return { success: true, message: 'Added background layer to canvas.' };
+        },
+    },
+
     // ── 18. Generate Thumbnail From Brief ─────────────────────────────────────
     {
         id: 'ds_generate_thumbnail',
@@ -749,15 +836,32 @@ export const DESIGN_COMMANDS = [
             const rawBrief = params.rawText || 'create a simple thumbnail';
             const headline = params.textContent || (params.rawText ? extractHeadlineFromBrief(params.rawText) : 'I\'M READY');
 
-            // Find existing image layer on canvas (e.g. photo to preserve and isolate)
+            // Find existing image layer on canvas (prioritizing actively selected layer, then any image layer with src/url)
             const currentLayers = Array.isArray(ctx.layers) ? ctx.layers : [];
-            const existingImage = currentLayers.find(l => l.type === 'image' && (l.url || l.sourceUrl || l.imageData));
+            let existingImage = null;
+            if (ctx.selectedLayerId) {
+                existingImage = currentLayers.find(l => l.id === ctx.selectedLayerId && (l.type === 'image' || l.src || l.url || l.sourceUrl));
+            }
+            if (!existingImage && Array.isArray(ctx.selectedLayerIds) && ctx.selectedLayerIds.length > 0) {
+                existingImage = currentLayers.find(l => ctx.selectedLayerIds.includes(l.id) && (l.type === 'image' || l.src || l.url || l.sourceUrl));
+            }
+            if (!existingImage) {
+                existingImage = currentLayers.find(l => (l.type === 'image' || l.src || l.url || l.sourceUrl || l.id === 'subject') && (l.src || l.url || l.sourceUrl || l.imageData));
+            }
+
+            // Switch to requested format if supported and specified (e.g. social or thumbnail)
+            if (params.formatId && typeof ctx.setSelectedFormat === 'function') {
+                ctx.setSelectedFormat(params.formatId);
+            }
 
             // Synthesize 4 distinct directions preserving the canvas photo
             const directions = generateThumbnailDirections(headline, rawBrief, existingImage);
 
             if (typeof ctx.setDirections === 'function') {
                 ctx.setDirections(directions);
+            }
+            if (typeof ctx.setShowVariationsTray === 'function') {
+                ctx.setShowVariationsTray(true);
             }
             if (typeof ctx.applyDirection === 'function') {
                 ctx.applyDirection(directions[0]);
@@ -1142,6 +1246,7 @@ export function generateThumbnailDirections(headline, brief, existingImageLayer 
                 locked: false,
             };
         }
+        const imgSrc = existingImageLayer.src || existingImageLayer.url || existingImageLayer.sourceUrl;
         return {
             id: existingImageLayer.id || 'subject',
             name: existingImageLayer.name || 'Subject Cutout',
@@ -1150,9 +1255,10 @@ export function generateThumbnailDirections(headline, brief, existingImageLayer 
             y: defaultProps.y ?? 100,
             w: existingImageLayer.w ? Math.min(540, existingImageLayer.w) : (defaultProps.w || 460),
             h: existingImageLayer.h ? Math.min(640, existingImageLayer.h) : (defaultProps.h || 600),
-            url: existingImageLayer.url || existingImageLayer.sourceUrl,
-            sourceUrl: existingImageLayer.sourceUrl || existingImageLayer.url,
-            originalUrl: existingImageLayer.originalUrl || existingImageLayer.url,
+            src: imgSrc,
+            url: imgSrc,
+            sourceUrl: imgSrc,
+            originalUrl: existingImageLayer.originalUrl || imgSrc,
             backgroundRemoved: existingImageLayer.backgroundRemoved ?? false,
             opacity: 100,
             rotation: 0,
@@ -1633,9 +1739,10 @@ export function scoreDesignCommand(cmd, text) {
     }
     if (cmd.id === 'ds_generate_thumbnail') {
         if (/\b(?:create|generate|make|build|design)\b.*\b(?:thumbnail|cover|social\s*graphic|post\s*graphic)\b/i.test(s) ||
-            /\b(?:thumbnail|cover\s*art)\b.*\b(?:title|saying|headline|from this image|from photo)\b/i.test(s) ||
-            /\b(?:create|generate|make|build|design)\s+(?:me\s+)?(?:a\s+)?(?:[a-z0-9_-]+\s+){0,4}(?:thumbnail|cover|graphic)\b/i.test(s)) {
-            score = Math.max(score, 97);
+            /\b(?:thumbnail|cover\s*art|social\s*graphic)\b.*\b(?:title|saying|headline|from this image|from photo)\b/i.test(s) ||
+            /\b(?:create|generate|make|build|design)\s+(?:me\s+)?(?:a\s+)?(?:[a-z0-9_-]+\s+){0,4}(?:thumbnail|cover|graphic)\b/i.test(s) ||
+            /\b(?:thumbnail|cover|graphic)\s+from\s+(?:this\s+)?(?:image|photo)\b/i.test(s)) {
+            score = Math.max(score, 98);
         }
     }
     if (cmd.id === 'ds_animate_design' && /\b(?:animate|motion\s*scene|animated\s*scene|animer)\b/i.test(s)) {
@@ -1655,6 +1762,15 @@ export function scoreDesignCommand(cmd, text) {
     }
     if (cmd.id === 'ds_apply_theme_token' && /\b(?:apply\s*theme|dark\s*mode|light\s*mode|editorial\s*mode|theme)\b/i.test(s)) {
         score = Math.max(score, 85);
+    }
+    if (cmd.id === 'ds_delete_canvas_background' && /\b(?:delete|remove|trash|clear)\s+(?:the\s+)?(?:canvas\s+)?background\s+layer\b/i.test(s)) {
+        score = Math.max(score, 99);
+    }
+    if (cmd.id === 'ds_delete_canvas_background' && /\b(?:make\s+canvas\s+transparent|transparent\s+canvas)\b/i.test(s)) {
+        score = Math.max(score, 99);
+    }
+    if (cmd.id === 'ds_add_canvas_background' && /\b(?:add|create|restore)\s+(?:a\s+)?(?:canvas\s+)?background(?:\s+layer)?\b/i.test(s)) {
+        score = Math.max(score, 96);
     }
     if (cmd.id === 'ds_remove_background' && /\b(?:remove|isolate|cut\s*out|extract|take\s*out|delete|strip|clear|transparent)\s*(?:the\s*)?(?:image\s*|photo\s*|canvas\s*)?(?:background|bg|subject|person)\b/i.test(s)) {
         score = Math.max(score, 98);

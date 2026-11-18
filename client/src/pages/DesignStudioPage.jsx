@@ -18,7 +18,7 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
     Sparkles, ArrowLeft, ArrowRight, ArrowDown, ChevronsUp, ChevronsDown,
     Undo, Redo, Eye, EyeOff, Lock, Unlock, Check, AlertCircle, Download,
@@ -84,6 +84,8 @@ const DIRECTIONS = [
 
 export default function DesignStudioPage() {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const projectId = searchParams.get('projectId') || useTimelineStore.getState().projectId || 'default_design';
     const { isPro, plan } = useUserPlan();
     const { projectName, addOverlayClip, addAssets, assets: timelineAssets = [] } = useTimelineStore();
 
@@ -96,9 +98,28 @@ export default function DesignStudioPage() {
     const [kitOn, setKitOn] = useState(true);
 
     // Format & Brief
-    const [selectedFormat, setSelectedFormat] = useState('thumbnail');
+    const [selectedFormat, setSelectedFormat] = useState(() => {
+        try {
+            const saved = localStorage.getItem(`vp_design_studio_${projectId}`);
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                if (parsed.selectedFormat) return parsed.selectedFormat;
+            }
+        } catch {}
+        return 'thumbnail';
+    });
     const currentFormat = FORMAT_PRESETS.find(f => f.id === selectedFormat) || FORMAT_PRESETS[0];
-    const [briefText, setBriefText] = useState('Lead with the ratio, keep the hand in frame, must read at 120px wide');
+
+    const [briefText, setBriefText] = useState(() => {
+        try {
+            const saved = localStorage.getItem(`vp_design_studio_${projectId}`);
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                if (parsed.briefText) return parsed.briefText;
+            }
+        } catch {}
+        return 'Lead with the ratio, keep the hand in frame, must read at 120px wide';
+    });
     const [videoFrame, setVideoFrame] = useState('Frame 0:11');
 
     // Creative Directions State
@@ -113,16 +134,25 @@ export default function DesignStudioPage() {
 
     // Visual Brand Kit Panel State
     const [brandKitModalOpen, setBrandKitModalOpen] = useState(false);
-    const [brandKit, setBrandKit] = useState({
-        name: 'VIBED Studio Kit',
-        accent: '#00E5FF',
-        accent2: '#C85A17',
-        surface: '#1F140E',
-        text: '#F4EDE2',
-        display: 'Plus Jakarta Sans',
-        body: 'Geist',
-        mono: 'JetBrains Mono',
-        logoUrl: '',
+    const [brandKit, setBrandKit] = useState(() => {
+        try {
+            const saved = localStorage.getItem(`vp_design_studio_${projectId}`);
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                if (parsed.brandKit) return parsed.brandKit;
+            }
+        } catch {}
+        return {
+            name: 'VIBED Studio Kit',
+            accent: '#00E5FF',
+            accent2: '#C85A17',
+            surface: '#1F140E',
+            text: '#F4EDE2',
+            display: 'Plus Jakarta Sans',
+            body: 'Geist',
+            mono: 'JetBrains Mono',
+            logoUrl: '',
+        };
     });
 
     // File Input Refs
@@ -134,59 +164,70 @@ export default function DesignStudioPage() {
     const logoInputRef = useRef(null);
 
     // Canvas Layers State
-    const [layers, setLayers] = useState([
-        {
-            id: 'headline',
-            name: 'Headline',
-            type: 'text',
-            text: '22 G IN.\nTHREE CIRCLES.',
-            x: 64,
-            y: 392,
-            w: 612,
-            h: 148,
-            fontSize: 72,
-            fontFamily: 'Plus Jakarta Sans',
-            fill: '#F4EDE2',
-            opacity: 100,
-            visible: true,
-            locked: false,
-        },
-        {
-            id: 'duration',
-            name: 'Duration badge',
-            type: 'badge',
-            text: '0:30',
-            x: 48,
-            y: 48,
-            w: 84,
-            h: 32,
-            fill: '#C85A17',
-            opacity: 100,
-            visible: true,
-            locked: false,
-        },
-        {
-            id: 'subject',
-            name: 'Subject cutout',
-            meta: 'Frame 0:11 · masked',
-            type: 'image',
-            x: 740,
-            y: 120,
-            w: 420,
-            h: 560,
-            fill: 'linear-gradient(180deg, #42291A 0%, #1A1109 100%)',
-            visible: true,
-            locked: false,
-        },
-        {
-            id: 'background',
-            name: 'Background',
-            type: 'bg',
-            fill: 'linear-gradient(160deg, #1C1109 0%, #2D1A10 100%)',
-            visible: true,
-            locked: true,
-        },
-    ]);
+    const [layers, setLayers] = useState(() => {
+        try {
+            const saved = localStorage.getItem(`vp_design_studio_${projectId}`);
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                if (Array.isArray(parsed.layers) && parsed.layers.length > 0) {
+                    return parsed.layers;
+                }
+            }
+        } catch {}
+        return [
+            {
+                id: 'headline',
+                name: 'Headline',
+                type: 'text',
+                text: '22 G IN.\nTHREE CIRCLES.',
+                x: 64,
+                y: 392,
+                w: 612,
+                h: 148,
+                fontSize: 72,
+                fontFamily: 'Plus Jakarta Sans',
+                fill: '#F4EDE2',
+                opacity: 100,
+                visible: true,
+                locked: false,
+            },
+            {
+                id: 'duration',
+                name: 'Duration badge',
+                type: 'badge',
+                text: '0:30',
+                x: 48,
+                y: 48,
+                w: 84,
+                h: 32,
+                fill: '#C85A17',
+                opacity: 100,
+                visible: true,
+                locked: false,
+            },
+            {
+                id: 'subject',
+                name: 'Subject cutout',
+                meta: 'Frame 0:11 · masked',
+                type: 'image',
+                x: 740,
+                y: 120,
+                w: 420,
+                h: 560,
+                fill: 'linear-gradient(180deg, #42291A 0%, #1A1109 100%)',
+                visible: true,
+                locked: false,
+            },
+            {
+                id: 'background',
+                name: 'Background',
+                type: 'bg',
+                fill: 'linear-gradient(160deg, #1C1109 0%, #2D1A10 100%)',
+                visible: true,
+                locked: false,
+            },
+        ];
+    });
 
     const [selectedLayerId, setSelectedLayerId] = useState('headline');
     const [selectedLayerIds, setSelectedLayerIds] = useState(['headline']);
@@ -195,12 +236,106 @@ export default function DesignStudioPage() {
     const [leftRailTab, setLeftRailTab] = useState('layers');
     const [customComponents, setCustomComponents] = useState(() => {
         try {
-            const saved = localStorage.getItem('vp_custom_components');
-            return saved ? JSON.parse(saved) : [];
+            const saved = localStorage.getItem(`vp_design_studio_${projectId}`);
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                if (Array.isArray(parsed.customComponents)) return parsed.customComponents;
+            }
+            const fallback = localStorage.getItem('vp_custom_components');
+            return fallback ? JSON.parse(fallback) : [];
         } catch {
             return [];
         }
     });
+
+    // Cloud project sync from Supabase
+    useEffect(() => {
+        if (!projectId || projectId === 'default_design') return;
+        import('../lib/projectsApi.js').then(({ getProject }) => {
+            getProject(projectId).then(proj => {
+                if (proj?.metadata?.design_studio) {
+                    const ds = proj.metadata.design_studio;
+                    if (Array.isArray(ds.layers) && ds.layers.length > 0) {
+                        setLayers(ds.layers);
+                    }
+                    if (ds.selectedFormat) setSelectedFormat(ds.selectedFormat);
+                    if (ds.brandKit) setBrandKit(ds.brandKit);
+                    if (ds.briefText) setBriefText(ds.briefText);
+                    if (Array.isArray(ds.customComponents)) setCustomComponents(ds.customComponents);
+                }
+            }).catch(() => {});
+        }).catch(() => {});
+    }, [projectId]);
+
+    // Debounced autosave (1.5s) to localStorage and project database
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            try {
+                const payload = {
+                    projectId,
+                    layers,
+                    selectedFormat,
+                    brandKit,
+                    briefText,
+                    customComponents,
+                    updatedAt: Date.now(),
+                };
+                localStorage.setItem(`vp_design_studio_${projectId}`, JSON.stringify(payload));
+
+                // Maintain in vp_design_projects index so it reflects in dashboard
+                const projectsRaw = localStorage.getItem('vp_design_projects');
+                let projectList = [];
+                if (projectsRaw) {
+                    try { projectList = JSON.parse(projectsRaw); } catch {}
+                }
+                const existingIdx = projectList.findIndex(p => p.id === projectId);
+                const projectMeta = {
+                    id: projectId,
+                    name: projectName || 'Design Project',
+                    isDesign: true,
+                    aspect_ratio: currentFormat.id === 'thumbnail' ? '16:9' : (currentFormat.id === 'packaging' ? '9:16' : '1:1'),
+                    updated_at: new Date().toISOString(),
+                    thumbnail_url: null,
+                };
+                if (existingIdx !== -1) {
+                    projectList[existingIdx] = { ...projectList[existingIdx], ...projectMeta };
+                } else {
+                    projectList.unshift(projectMeta);
+                }
+                localStorage.setItem('vp_design_projects', JSON.stringify(projectList));
+
+                // Sync to Supabase project record
+                if (projectId && projectId !== 'default_design') {
+                    import('../lib/projectsApi.js').then(({ updateProject }) => {
+                        updateProject(projectId, { metadata: { design_studio: payload } }).catch(() => {});
+                    }).catch(() => {});
+                }
+            } catch (err) {
+                console.warn('[DesignStudioPage] Autosave error:', err);
+            }
+        }, 1500);
+
+        return () => clearTimeout(timer);
+    }, [layers, selectedFormat, brandKit, briefText, customComponents, projectId, projectName, currentFormat]);
+
+    // Network online listener to sync pending edits
+    useEffect(() => {
+        const handleOnline = () => {
+            if (projectId && projectId !== 'default_design') {
+                try {
+                    const saved = localStorage.getItem(`vp_design_studio_${projectId}`);
+                    if (saved) {
+                        const parsed = JSON.parse(saved);
+                        import('../lib/projectsApi.js').then(({ updateProject }) => {
+                            updateProject(projectId, { metadata: { design_studio: parsed } }).catch(() => {});
+                        }).catch(() => {});
+                    }
+                } catch {}
+            }
+        };
+        window.addEventListener('online', handleOnline);
+        return () => window.removeEventListener('online', handleOnline);
+    }, [projectId]);
 
     const handleCreateMasterComponent = (layer) => {
         const selected = layers.filter(l => selectedLayerIds.includes(l.id));
@@ -1002,11 +1137,34 @@ export default function DesignStudioPage() {
     };
 
     const handleDeleteSelectedLayer = () => {
-        if (!selectedLayerId || selectedLayerId === 'background') return;
+        if (!selectedLayerId) return;
         pushUndo();
+        const isBg = selectedLayerId === 'background';
         setLayers(prev => prev.filter(l => l.id !== selectedLayerId));
-        setSelectedLayerId('headline');
-        showToast('Layer deleted');
+        setSelectedLayerId(null);
+        showToast(isBg ? 'Deleted background layer. Canvas is now transparent.' : 'Layer deleted');
+    };
+
+    const handleAddBackground = (fill = '#FFFFFF') => {
+        pushUndo();
+        const hasBg = layers.some(l => l.id === 'background' || l.type === 'bg');
+        if (hasBg) {
+            showToast('Canvas already has a background layer');
+            setSelectedLayerId('background');
+            return;
+        }
+        const newBg = {
+            id: 'background',
+            name: 'Background',
+            type: 'bg',
+            fill: typeof fill === 'string' ? fill : '#FFFFFF',
+            opacity: 100,
+            visible: true,
+            locked: false,
+        };
+        setLayers(prev => [newBg, ...prev]);
+        setSelectedLayerId('background');
+        showToast('Added background layer');
     };
 
     // Canvas Drag and Resize Listeners
@@ -1112,10 +1270,10 @@ export default function DesignStudioPage() {
             const tag = document.activeElement?.tagName?.toLowerCase();
             if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
 
-            if ((e.key === 'Delete' || e.key === 'Backspace') && selectedLayerId && selectedLayerId !== 'background') {
+            if ((e.key === 'Delete' || e.key === 'Backspace') && selectedLayerId) {
                 e.preventDefault();
                 handleDeleteSelectedLayer();
-            } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd' && selectedLayerId && selectedLayerId !== 'background') {
+            } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd' && selectedLayerId) {
                 e.preventDefault();
                 handleDuplicateLayer();
             }
@@ -1169,7 +1327,7 @@ export default function DesignStudioPage() {
         const sy = targetH / currentFormat.h;
 
         // 1. Draw Background
-        const bgLayer = layers.find(l => l.type === 'bg' || l.id === 'background');
+        const bgLayer = layers.find(l => (l.type === 'bg' || l.id === 'background') && l.visible !== false);
         if (bgLayer && bgLayer.fill) {
             if (bgLayer.fill.includes('gradient')) {
                 const grad = ctx.createLinearGradient(0, 0, targetW, targetH);
@@ -1181,8 +1339,8 @@ export default function DesignStudioPage() {
             }
             ctx.fillRect(0, 0, targetW, targetH);
         } else {
-            ctx.fillStyle = '#10151D';
-            ctx.fillRect(0, 0, targetW, targetH);
+            // Truly transparent canvas!
+            ctx.clearRect(0, 0, targetW, targetH);
         }
 
         // 2. Draw all other visible layers in order
@@ -1930,6 +2088,7 @@ export default function DesignStudioPage() {
                     onUploadAssetClick={() => assetInputRef.current?.click()}
                     customComponents={customComponents}
                     onDeleteCustomComponent={handleDeleteCustomComponent}
+                    onAddBackground={handleAddBackground}
                     activeTab={leftRailTab}
                     setActiveTab={setLeftRailTab}
                 />
@@ -2026,6 +2185,14 @@ export default function DesignStudioPage() {
                         onDirectionApply={applyDirection}
                         onRemoveBackground={handleToggleBackgroundRemoval}
                         onSaveAsMotionScene={handleSaveAsMotionScene}
+                        setDirections={setDirections}
+                        directions={directions}
+                        selectedFormat={selectedFormat}
+                        setSelectedFormat={setSelectedFormat}
+                        setShowVariationsTray={setShowVariationsTray}
+                        setBriefText={setBriefText}
+                        showToast={showToast}
+                        pushUndo={pushUndo}
                     />
 
                     {/* Slide-Up Creative Directions Variations Tray */}
@@ -2318,6 +2485,17 @@ export default function DesignStudioPage() {
                                 }}>
                                     Canvas Actions
                                 </div>
+
+                                {!layers.some(l => l.id === 'background' || l.type === 'bg') && (
+                                    <div
+                                        onClick={() => { handleAddBackground(); setContextMenu(null); }}
+                                        style={{ padding: '6px 10px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                        onMouseEnter={(e) => e.currentTarget.style.background = '#F0F4F8'}
+                                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                    >
+                                        <Square size={13} color="#00E5FF" /> Add Background Layer
+                                    </div>
+                                )}
 
                                 <div
                                     onClick={() => { handleAddText(); setContextMenu(null); }}

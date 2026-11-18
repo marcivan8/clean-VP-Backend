@@ -44,6 +44,7 @@ export default function LayersAndAssetsPanel({
     onUploadAssetClick,
     customComponents = [],
     onDeleteCustomComponent,
+    onAddBackground,
     activeTab: externalActiveTab,
     setActiveTab: setExternalActiveTab,
 }) {
@@ -332,6 +333,34 @@ export default function LayersAndAssetsPanel({
                                         </div>
                                     );
                                 })}
+
+                                {!layers.some(l => l.id === 'background' || l.type === 'bg') && onAddBackground && (
+                                    <button
+                                        type="button"
+                                        onClick={onAddBackground}
+                                        style={{
+                                            marginTop: '6px',
+                                            padding: '7px 10px',
+                                            borderRadius: '6px',
+                                            border: '1px dashed #CBD5E1',
+                                            background: '#F8FAFC',
+                                            color: '#0B7C91',
+                                            fontSize: '11.5px',
+                                            fontWeight: 600,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            gap: '6px',
+                                            cursor: 'pointer',
+                                            transition: 'background 0.15s ease',
+                                        }}
+                                        onMouseEnter={(e) => e.currentTarget.style.background = '#F0F9FB'}
+                                        onMouseLeave={(e) => e.currentTarget.style.background = '#F8FAFC'}
+                                    >
+                                        <Plus size={12} />
+                                        <span>Add Background Layer</span>
+                                    </button>
+                                )}
                             </div>
                         )}
 
