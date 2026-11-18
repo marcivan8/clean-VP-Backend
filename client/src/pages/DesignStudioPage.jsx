@@ -85,7 +85,7 @@ const DIRECTIONS = [
 export default function DesignStudioPage() {
     const navigate = useNavigate();
     const { isPro, plan } = useUserPlan();
-    const { projectName, addOverlayClip, assets: timelineAssets = [] } = useTimelineStore();
+    const { projectName, addOverlayClip, addAssets, assets: timelineAssets = [] } = useTimelineStore();
 
     // Format Dropdown & Variations Tray State
     const [formatDropdownOpen, setFormatDropdownOpen] = useState(false);
@@ -1325,6 +1325,10 @@ export default function DesignStudioPage() {
             resolution: `${currentFormat.w}x${currentFormat.h}`,
             duration: 5,
         };
+
+        if (typeof addAssets === 'function') {
+            addAssets([asset]);
+        }
 
         if (typeof addOverlayClip === 'function') {
             addOverlayClip(asset, { kind: 'sticker', duration: 5 });
