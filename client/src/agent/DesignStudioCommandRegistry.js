@@ -830,7 +830,9 @@ export const DESIGN_COMMANDS = [
         phrases: [
             'create a simple thumbnail', 'create a thumbnail', 'create thumbnail',
             'generate thumbnail', 'generate four', 'make a thumbnail', 'design thumbnail',
-            'new thumbnail', 'build thumbnail', 'generate 4'
+            'new thumbnail', 'build thumbnail', 'generate 4',
+            'thumbnail from this image', 'social media thumbnail', 'social graphic',
+            'thumbnail from photo', 'make thumbnail'
         ],
         execute: (params, ctx) => {
             const rawBrief = params.rawText || 'create a simple thumbnail';
@@ -1185,6 +1187,36 @@ export const DESIGN_COMMANDS = [
 // ── Thumbnail Direction Synthesizer ──────────────────────────────────────────
 
 /**
+ * Extracts quoted or titled text from a natural language string.
+ * Accurately handles contractions within quotes (e.g. 'I\'m ready' or "I'm ready").
+ *
+ * @param {string} text
+ * @returns {string|null}
+ */
+export function extractQuotedOrTitledText(text) {
+    if (!text || typeof text !== 'string') return null;
+    const s = text.trim();
+
+    // 1. Explicit double quotes: "I'm ready" or “I'm ready”
+    const dq = s.match(/["“]([^"”]+)["”]/);
+    if (dq && dq[1].trim()) return dq[1].trim();
+
+    // 2. Single quotes: 'I\'m ready' or ‘I'm ready’
+    // Allow internal apostrophes within words (\w'\w) without prematurely terminating the quote
+    const sq = s.match(/(?:^|[\s:=])['‘](.+?)(?:(?<!\w)['’]|['’](?:[\s.,;!]|$))/);
+    if (sq && sq[1].trim()) return sq[1].trim();
+
+    // 3. Explicit title / headline / saying prefix
+    const titleMatch = s.match(/(?:with\s+(?:the\s+)?title|title|saying|with text|text saying|headline saying|say|text to|headline to|words)\s+[:=]?\s*([^\n,;]+?)(?:\s+(?:from|using|on|with|in)\s+(?:this\s+)?(?:image|photo|video)|\s*$)/i);
+    if (titleMatch && titleMatch[1]) {
+        const cleaned = titleMatch[1].replace(/^[\"'“‘]+|[\"'”’]+$/g, '').trim();
+        if (cleaned) return cleaned;
+    }
+
+    return null;
+}
+
+/**
  * Extracts headline text or quoted copy from a natural language brief.
  * Handles apostrophes inside quotes correctly (e.g. "I'm ready").
  *
@@ -1194,26 +1226,13 @@ export const DESIGN_COMMANDS = [
 export function extractHeadlineFromBrief(text) {
     if (!text || typeof text !== 'string') return 'I\'M READY';
 
-    // 1. Explicit quotes: double quotes "I'm ready" (allows apostrophes inside) or single quotes 'ready'
-    const doubleQuoteMatch = text.match(/["“]([^"”]+)["”]/);
-    if (doubleQuoteMatch && doubleQuoteMatch[1].trim()) {
-        return doubleQuoteMatch[1].trim();
-    }
-    const singleQuoteMatch = text.match(/['‘]([^'’]+)['’]/);
-    if (singleQuoteMatch && singleQuoteMatch[1].trim()) {
-        return singleQuoteMatch[1].trim();
-    }
-
-    // 2. Phrases following "with the title", "title", "saying", "with text", "headline"
-    const titleMatch = text.match(/(?:with\s+(?:the\s+)?title|title|saying|with text|text saying|headline saying|say)\s+[:=]?\s*["'“]?([^"'\n]+?)["'”]?$/i)
-        || text.match(/(?:with\s+(?:the\s+)?title|title|saying|with text)\s+[:=]?\s*["'“]?([^"'\n]+?)["'”]?(?:\s+(?:from|using|on|with|in)\b|$)/i);
-    if (titleMatch && titleMatch[1].trim()) {
-        return titleMatch[1].trim();
-    }
+    const quotedOrTitled = extractQuotedOrTitledText(text);
+    if (quotedOrTitled) return quotedOrTitled;
 
     // 3. Clean common brief prefixes
     const cleaned = text
         .replace(/^(?:please\s+)?(?:create|make|generate|design|build)\s+(?:me\s+)?(?:a\s+)?(?:simple\s+)?(?:[a-z0-9_-]+\s+){0,4}(?:thumbnail|graphic|cover)\s*(?:from\s+(?:this\s+)?(?:image|photo)\s*)?(?:with\s+)?/i, '')
+        .replace(/^(?:thumbnail|graphic|cover)\s*(?:from\s+(?:this\s+)?(?:image|photo)\s*)?(?:with\s+)?/i, '')
         .replace(/^(?:text|saying|words|title)\s+/i, '')
         .trim();
     if (cleaned.length > 0 && cleaned.length < 60) return cleaned;
@@ -1511,17 +1530,9 @@ export function extractDesignParams(cmd, text) {
     const params = { rawText: text };
 
     // 0. Extract text content / quoted copy if present (preserves apostrophes in "I'm ready")
-    const doubleQuoteMatch = String(text || '').match(/["“]([^"”]+)["”]/);
-    const singleQuoteMatch = String(text || '').match(/['‘]([^'’]+)['’]/);
-    if (doubleQuoteMatch && doubleQuoteMatch[1].trim()) {
-        params.textContent = doubleQuoteMatch[1].trim();
-    } else if (singleQuoteMatch && singleQuoteMatch[1].trim()) {
-        params.textContent = singleQuoteMatch[1].trim();
-    } else {
-        const sayingMatch = String(text || '').match(/(?:with\s+(?:the\s+)?title|title|saying|with text|text saying|headline saying|say|text to|headline to|words)\s+[:=]?\s*["'“]?([^"'\n]+?)["'”]?$/i);
-        if (sayingMatch && sayingMatch[1].trim()) {
-            params.textContent = sayingMatch[1].trim();
-        }
+    const quotedOrTitled = extractQuotedOrTitledText(text);
+    if (quotedOrTitled) {
+        params.textContent = quotedOrTitled;
     }
 
     // 0b. Shape types for creation / deletion
@@ -1738,7 +1749,8 @@ export function scoreDesignCommand(cmd, text) {
         }
     }
     if (cmd.id === 'ds_generate_thumbnail') {
-        if (/\b(?:create|generate|make|build|design)\b.*\b(?:thumbnail|cover|social\s*graphic|post\s*graphic)\b/i.test(s) ||
+        if (/\b(?:thumbnail|cover\s*art|social\s*(?:media\s*)?(?:thumbnail|graphic|cover))\b/i.test(s) ||
+            /\b(?:create|generate|make|build|design)\b.*\b(?:thumbnail|cover|social\s*graphic|post\s*graphic)\b/i.test(s) ||
             /\b(?:thumbnail|cover\s*art|social\s*graphic)\b.*\b(?:title|saying|headline|from this image|from photo)\b/i.test(s) ||
             /\b(?:create|generate|make|build|design)\s+(?:me\s+)?(?:a\s+)?(?:[a-z0-9_-]+\s+){0,4}(?:thumbnail|cover|graphic)\b/i.test(s) ||
             /\b(?:thumbnail|cover|graphic)\s+from\s+(?:this\s+)?(?:image|photo)\b/i.test(s)) {
@@ -1874,6 +1886,21 @@ export function executeDesignCommand(promptText, ctx) {
                 const p = extractDesignParams(scaleCmd, clause);
                 const res = scaleCmd.execute(p, ctx);
                 results.push({ clause, commandId: scaleCmd.id, ...res });
+            } else if (s.includes('thumbnail') || s.includes('cover') || s.includes('graphic')) {
+                const thumbCmd = DESIGN_COMMANDS.find(c => c.id === 'ds_generate_thumbnail');
+                const p = extractDesignParams(thumbCmd, clause);
+                const res = thumbCmd.execute(p, ctx);
+                results.push({ clause, commandId: thumbCmd.id, ...res });
+            } else if (s.includes('animate') || s.includes('motion')) {
+                const animCmd = DESIGN_COMMANDS.find(c => c.id === 'ds_animate_design');
+                const p = extractDesignParams(animCmd, clause);
+                const res = animCmd.execute(p, ctx);
+                results.push({ clause, commandId: animCmd.id, ...res });
+            } else if (s.includes('background') && (s.includes('remove') || s.includes('cut') || s.includes('isolate') || s.includes('transparent'))) {
+                const bgCmd = DESIGN_COMMANDS.find(c => c.id === 'ds_remove_background');
+                const p = extractDesignParams(bgCmd, clause);
+                const res = bgCmd.execute(p, ctx);
+                results.push({ clause, commandId: bgCmd.id, ...res });
             } else {
                 results.push({
                     clause,

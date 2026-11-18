@@ -79,6 +79,7 @@ class ProjectIntelligence {
         // Injectable so the regression can execute the real derivation logic
         // against a stub instead of reaching the network.
         this._openai = openai;
+        this._inFlight = new Map();
     }
 
     // ── Fingerprint ──────────────────────────────────────────────────────────
@@ -143,42 +144,55 @@ class ProjectIntelligence {
 
         const analysed = (assets || []).filter(a => a && a.analysis_status === ASSET_ANALYSIS_DONE);
         const fingerprint = this.computeFingerprint(assets, clipCount, editingStyle);
-
-        const existing = await this.getMap(projectId, userId);
-        if (existing && existing.fingerprint === fingerprint && existing.status === 'ok') {
-            return existing; // Nothing changed — do not pay for a model call.
+        const inFlightKey = `${projectId}:${fingerprint}`;
+        if (this._inFlight.has(inFlightKey)) {
+            return this._inFlight.get(inFlightKey);
         }
 
-        // Rule 2: no analysed footage ⇒ no map. Guessing here would produce a
-        // confident description of material nobody has looked at.
-        if (analysed.length === 0) {
-            console.log(
-                `[ProjectIntelligence] project ${projectId}: no analysed assets ` +
-                `(${assets.length} in bin) — skipping derivation`
-            );
-            return existing || null;
-        }
+        const taskPromise = (async () => {
+            const existing = await this.getMap(projectId, userId);
+            if (existing && existing.fingerprint === fingerprint && existing.status === 'ok') {
+                return existing; // Nothing changed — do not pay for a model call.
+            }
 
+            // Rule 2: no analysed footage ⇒ no map. Guessing here would produce a
+            // confident description of material nobody has looked at.
+            if (analysed.length === 0) {
+                console.log(
+                    `[ProjectIntelligence] project ${projectId}: no analysed assets ` +
+                    `(${assets.length} in bin) — skipping derivation`
+                );
+                return existing || null;
+            }
+
+            try {
+                const derived = await this.deriveMap({ assets: analysed, clipCount, platform, editingStyle });
+                if (!derived) return existing || null;
+
+                return await this._persist({
+                    projectId, userId, fingerprint,
+                    assetCount: analysed.length,
+                    status: 'ok',
+                    map: derived,
+                });
+            } catch (err) {
+                // Rule 3: record the failure so it's visible.
+                console.error(`[ProjectIntelligence] derivation failed for ${projectId}:`, err.message);
+                await this._persist({
+                    projectId, userId, fingerprint,
+                    assetCount: analysed.length,
+                    status: 'failed',
+                    map: {},
+                }).catch(() => {});
+                return existing || null;
+            }
+        })();
+
+        this._inFlight.set(inFlightKey, taskPromise);
         try {
-            const derived = await this.deriveMap({ assets: analysed, clipCount, platform, editingStyle });
-            if (!derived) return existing || null;
-
-            return await this._persist({
-                projectId, userId, fingerprint,
-                assetCount: analysed.length,
-                status: 'ok',
-                map: derived,
-            });
-        } catch (err) {
-            // Rule 3: record the failure so it's visible.
-            console.error(`[ProjectIntelligence] derivation failed for ${projectId}:`, err.message);
-            await this._persist({
-                projectId, userId, fingerprint,
-                assetCount: analysed.length,
-                status: 'failed',
-                map: {},
-            }).catch(() => {});
-            return existing || null;
+            return await taskPromise;
+        } finally {
+            this._inFlight.delete(inFlightKey);
         }
     }
 
@@ -187,8 +201,9 @@ class ProjectIntelligence {
         if (!assets.length) return null;
 
         const openai = this._resolveOpenAI();
-        if (!openai) {
-            throw new Error('OPENAI_API_KEY not configured — cannot derive a project map');
+        const brainTarget = getBrainAIClient();
+        if (!openai && !brainTarget.isCustom) {
+            throw new Error('No AI provider or custom brain configured — cannot derive a project map');
         }
 
         const prompt = this.buildDerivationPrompt({ assets, clipCount, platform, editingStyle });

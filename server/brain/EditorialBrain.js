@@ -356,11 +356,6 @@ class EditorialBrain {
      */
     async process(input, session) {
         try {
-            if (!this.openai) {
-                console.warn('[EditorialBrain] No OpenAI key — using fallback');
-                return this.fallbackOutput(input?.rawInput);
-            }
-
             const context = input?.context?.builtContext || this.contextEngine.build(input?.context || {});
             const profile = input?.context?.profile || await this.profileEngine.getProfile(input?.userId);
             const platform = input?.context?.platform || null;
@@ -386,7 +381,7 @@ class EditorialBrain {
                 ? `User said: "${input.rawInput}"`
                 : `Trigger: ${input?.trigger || 'unknown'}. Analyze the project and provide suggestions.`;
 
-            const maxTokens = isGroq ? 500 : 1200;
+            const maxTokens = isGroq ? 500 : (brainTarget.isCustom ? 700 : 1200);
             const callPayload = {
                 model: cloudModel,
                 temperature,
@@ -416,8 +411,14 @@ class EditorialBrain {
             }
 
             if (!completion) {
+                const cloudClient = this.openai || getAIClient({ capability: 'chat' });
+                if (!cloudClient) {
+                    console.warn('[EditorialBrain] No cloud AI client available and custom model unavailable — using fallback');
+                    return this.fallbackOutput(input?.rawInput);
+                }
+
                 try {
-                    completion = await this.openai.chat.completions.create(callPayload);
+                    completion = await cloudClient.chat.completions.create(callPayload);
                 } catch (firstErr) {
                     console.warn(`[EditorialBrain] Primary cloud model (${callPayload.model}) failed: ${firstErr.message}`);
                     const isRateLimit = firstErr.status === 429 || /429|rate limit/i.test(firstErr.message);
@@ -462,7 +463,7 @@ class EditorialBrain {
                             delete fallbackPayload.reasoning_effort;
                             try {
                                 console.warn(`[EditorialBrain] Trying Groq fallback model "${fallbackModel}"...`);
-                                return await this.openai.chat.completions.create(fallbackPayload);
+                                return await cloudClient.chat.completions.create(fallbackPayload);
                             } catch (fbErr) {
                                 console.warn(`[EditorialBrain] Groq fallback model "${fallbackModel}" failed:`, fbErr.message);
                             }
@@ -481,7 +482,7 @@ class EditorialBrain {
                         console.warn(`[EditorialBrain] 429 rate limit hit — backing off for ${waitSec.toFixed(1)}s...`);
                         await new Promise(r => setTimeout(r, Math.ceil(waitSec * 1000) + 250));
                         try {
-                            completion = await this.openai.chat.completions.create(callPayload);
+                            completion = await cloudClient.chat.completions.create(callPayload);
                         } catch (retryErr) {
                             console.warn('[EditorialBrain] Retry after rate limit failed; switching to fallback:', retryErr.message);
                             completion = await callGroqFallback();

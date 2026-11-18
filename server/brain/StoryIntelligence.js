@@ -143,6 +143,7 @@ class StoryIntelligence {
         // Injectable so the regression executes the real derivation logic
         // against a stub instead of reaching the network.
         this._openai = openai;
+        this._inFlight = new Map();
     }
 
     // ── Fingerprint ──────────────────────────────────────────────────────────
@@ -216,46 +217,60 @@ class StoryIntelligence {
             .sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
 
         const fingerprint = this.computeCutFingerprint(ordered, editingStyle);
-        const existing    = await this.getMap(projectId, userId);
-
-        if (existing && existing.fingerprint === fingerprint && existing.status === 'ok') {
-            return existing; // The cut hasn't changed — do not pay for a model call.
+        const inFlightKey = `${projectId}:${fingerprint}`;
+        if (this._inFlight.has(inFlightKey)) {
+            return this._inFlight.get(inFlightKey);
         }
 
-        // Rule 2: refuse rather than guess.
-        const reason = this._insufficientReason(ordered);
-        if (reason) {
-            console.log(`[StoryIntelligence] project ${projectId}: ${reason} — not deriving`);
-            return await this._persist({
-                projectId, userId, fingerprint,
-                clipCount: ordered.length,
-                analysedSec: this._totalDuration(ordered),
-                status: 'insufficient_data',
-                map: { through_line_note: reason },
-            }).catch(() => existing || null);
-        }
+        const taskPromise = (async () => {
+            const existing = await this.getMap(projectId, userId);
 
+            if (existing && existing.fingerprint === fingerprint && existing.status === 'ok') {
+                return existing; // The cut hasn't changed — do not pay for a model call.
+            }
+
+            // Rule 2: refuse rather than guess.
+            const reason = this._insufficientReason(ordered);
+            if (reason) {
+                console.log(`[StoryIntelligence] project ${projectId}: ${reason} — not deriving`);
+                return await this._persist({
+                    projectId, userId, fingerprint,
+                    clipCount: ordered.length,
+                    analysedSec: this._totalDuration(ordered),
+                    status: 'insufficient_data',
+                    map: { through_line_note: reason },
+                }).catch(() => existing || null);
+            }
+
+            try {
+                const derived = await this.deriveMap({ clips: ordered, projectMap, platform, editingStyle });
+                if (!derived) return existing || null;
+
+                return await this._persist({
+                    projectId, userId, fingerprint,
+                    clipCount: ordered.length,
+                    analysedSec: this._totalDuration(ordered),
+                    status: 'ok',
+                    map: derived,
+                });
+            } catch (err) {
+                console.error(`[StoryIntelligence] derivation failed for ${projectId}:`, err.message);
+                await this._persist({
+                    projectId, userId, fingerprint,
+                    clipCount: ordered.length,
+                    analysedSec: this._totalDuration(ordered),
+                    status: 'failed',
+                    map: {},
+                }).catch(() => {});
+                return existing || null;
+            }
+        })();
+
+        this._inFlight.set(inFlightKey, taskPromise);
         try {
-            const derived = await this.deriveMap({ clips: ordered, projectMap, platform, editingStyle });
-            if (!derived) return existing || null;
-
-            return await this._persist({
-                projectId, userId, fingerprint,
-                clipCount: ordered.length,
-                analysedSec: this._totalDuration(ordered),
-                status: 'ok',
-                map: derived,
-            });
-        } catch (err) {
-            console.error(`[StoryIntelligence] derivation failed for ${projectId}:`, err.message);
-            await this._persist({
-                projectId, userId, fingerprint,
-                clipCount: ordered.length,
-                analysedSec: this._totalDuration(ordered),
-                status: 'failed',
-                map: {},
-            }).catch(() => {});
-            return existing || null;
+            return await taskPromise;
+        } finally {
+            this._inFlight.delete(inFlightKey);
         }
     }
 
@@ -284,12 +299,14 @@ class StoryIntelligence {
     /** Analyze the complete cut in one or more bounded model requests. */
     async deriveMap({ clips = [], projectMap = null, platform = null, editingStyle = null }) {
         if (!clips.length) return null;
-        if (!this._openai && !isAIConfigured()) {
+
+        const brainTarget = getBrainAIClient();
+        if (!this._openai && !isAIConfigured() && !brainTarget.isCustom) {
             throw new Error('no AI provider configured — cannot derive a story map');
         }
 
         const openai = this._openai || getAIClient({ timeout: 60_000 });
-        if (!openai) throw new Error('AI client unavailable');
+        if (!openai && !brainTarget.isCustom) throw new Error('AI client unavailable');
 
         if (clips.length > MAX_CLIPS_PER_STORY_BATCH) {
             return this._deriveMapInBatches({ clips, projectMap, platform, editingStyle, openai });
@@ -374,6 +391,7 @@ class StoryIntelligence {
                 console.log(`[StoryIntelligence] Routing to custom Railway Brain model (${brainTarget.model})...`);
                 completion = await brainTarget.client.chat.completions.create({
                     ...callPayload,
+                    max_tokens: Math.min(callPayload.max_tokens, 700),
                     model: brainTarget.model,
                     response_format: { type: 'json_object' },
                 }, { timeout: Number(process.env.BRAIN_AI_TIMEOUT_MS) || 240_000 });
@@ -384,6 +402,9 @@ class StoryIntelligence {
         }
 
         if (!completion) {
+            if (!openai) {
+                throw new Error('AI client unavailable and custom model failed');
+            }
             try {
                 completion = await openai.chat.completions.create(callPayload);
             } catch (callErr) {
