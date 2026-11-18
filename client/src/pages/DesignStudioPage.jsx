@@ -1510,6 +1510,17 @@ export default function DesignStudioPage() {
                     start: state.currentTime || 0,
                     asCompound: false,
                 });
+                if (typeof state.addAssets === 'function') {
+                    const assetId = `motion_asset_${Date.now()}`;
+                    state.addAssets([{
+                        id: assetId,
+                        name: `${projectName || 'Design'} Motion Scene`,
+                        type: 'motion',
+                        isMotionScene: true,
+                        scene: rawScene,
+                        createdAt: Date.now(),
+                    }]);
+                }
                 if (res?.success) {
                     showToast('Placed animated motion scene on the video timeline!');
                     return { success: true };

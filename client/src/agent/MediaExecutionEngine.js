@@ -1688,8 +1688,64 @@ export class MediaExecutionEngine {
             // in the browser with a free model the first time, then reused.
             case 'remove_background': {
                 const st = useTimelineStore.getState();
+
+                // Check if an image clip is actively targeted or selected
+                const wantedId = args.clipId || (st.selectedClipIds || [])[0] || st.activeClipId;
+                let imageTarget = null;
+                for (const t of (st.tracks || [])) {
+                    for (const c of (t.clips || [])) {
+                        if ((c.type === 'image' || (!c.type && /\.(png|jpe?g|webp|gif)$/i.test(c.url || ''))) && (!wantedId || c.id === wantedId)) {
+                            imageTarget = { trackId: t.id, clipId: c.id, clip: c };
+                            break;
+                        }
+                    }
+                    if (imageTarget && wantedId) break;
+                }
+
+                // If no specific clipId was passed and no image clip was selected, check playhead position for an image clip
+                if (!imageTarget && !wantedId) {
+                    const ct = Number(st.currentTime) || 0;
+                    for (const t of (st.tracks || [])) {
+                        const under = (t.clips || []).find(c => (c.type === 'image' || (!c.type && /\.(png|jpe?g|webp|gif)$/i.test(c.url || ''))) && ct >= (Number(c.start) || 0) && ct < (Number(c.start) || 0) + (Number(c.duration) || 0));
+                        if (under) {
+                            imageTarget = { trackId: t.id, clipId: under.id, clip: under };
+                            break;
+                        }
+                    }
+                }
+
+                if (imageTarget) {
+                    const { trackId, clipId, clip } = imageTarget;
+                    const asset = clip.assetId ? (st.assets || []).find(a => a.id === clip.assetId) : null;
+                    let src = asset?.proxyUrl || clip?.url || asset?.url || null;
+                    if (src && (src.startsWith('proxies/') || src.startsWith('raw/'))) src = `/api/proxy/gcs-media/${src}`;
+                    if (!src) return { action, success: false, message: 'Image clip has no source to remove background from.' };
+
+                    st._saveHistory?.();
+                    try {
+                        const { removeBackgroundFromImage } = await import('../design-studio/imageBackgroundRemoval.js');
+                        const transparentUrl = await removeBackgroundFromImage(src);
+                        st.updateClip(trackId, clipId, {
+                            originalUrl: clip.originalUrl || clip.url || src,
+                            url: transparentUrl,
+                            backgroundRemoved: true,
+                        });
+                        return {
+                            action,
+                            success: true,
+                            message: `Isolated subject and removed background from image clip "${clip.name || 'image'}" with semantic AI.`,
+                        };
+                    } catch (err) {
+                        return {
+                            action,
+                            success: false,
+                            message: `Could not remove background from image clip: ${err.message}`,
+                        };
+                    }
+                }
+
                 const targets = this._matteTargets(st, args);
-                if (targets.length === 0) return { action, success: false, message: 'There is no video clip to work on. Add a video first.' };
+                if (targets.length === 0) return { action, success: false, message: 'There is no video or image clip to work on. Add a clip first.' };
                 const settings = {};
                 if (args.mode) settings.mode = args.mode;
                 if (args.color) settings.color = args.color;

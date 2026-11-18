@@ -9,7 +9,7 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { ControlRow, TrackSlider } from './ui/PanelControls.jsx';
 import { useTranslation } from 'react-i18next';
-import { Loader2, UserRound, X } from 'lucide-react';
+import { Loader2, UserRound, X, Sparkles } from 'lucide-react';
 
 import useTimelineStore from '../store/useTimelineStore';
 import { MATTE_MODES, MATTE_REVEALS, normalizeMatte } from '../motion/MatteSettings.js';
@@ -81,7 +81,61 @@ export default function BackgroundPanel({ clip, trackId }) {
         useTimelineStore.getState().setLayerTarget(trackId, clip.id, null);
     }, [clip, trackId]);
 
-    if (!clip || clip.type === 'image') return null;
+    if (!clip) return null;
+
+    if (clip.type === 'image') {
+        const isRemoved = !!clip.backgroundRemoved;
+        const handleImageBgToggle = async () => {
+            if (busy) return;
+            setBusy(true);
+            setError(null);
+            try {
+                const st = useTimelineStore.getState();
+                st._saveHistory?.();
+                if (isRemoved) {
+                    st.updateClip(trackId, clip.id, {
+                        url: clip.originalUrl || clip.url,
+                        backgroundRemoved: false,
+                    });
+                } else {
+                    const { removeBackgroundFromImage } = await import('../design-studio/imageBackgroundRemoval.js');
+                    const src = sourceUrlFor(clip, assets);
+                    if (!src) throw new Error('No image source available.');
+                    const transparentUrl = await removeBackgroundFromImage(src);
+                    st.updateClip(trackId, clip.id, {
+                        originalUrl: clip.originalUrl || clip.url,
+                        url: transparentUrl,
+                        backgroundRemoved: true,
+                    });
+                }
+            } catch (err) {
+                setError(err.message || 'Failed to remove image background.');
+            } finally {
+                setBusy(false);
+            }
+        };
+
+        return (
+            <div className="mb-4">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
+                    {t('backgroundPanel.title', 'Background Removal')}
+                </div>
+                <div className="p-2.5 rounded bg-secondary/40 border border-border/50 text-[11px] text-foreground/80 mb-3 leading-relaxed">
+                    Semantic on-device AI isolates the subject or person from the image background with edge antialiasing.
+                </div>
+                <button
+                    type="button"
+                    onClick={handleImageBgToggle}
+                    disabled={busy}
+                    className="w-full px-2 py-1.5 rounded text-[11px] bg-primary/15 border border-primary/40 text-primary disabled:opacity-50 flex items-center justify-center gap-1.5"
+                >
+                    {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3 text-primary" />}
+                    {busy ? 'Processing with AI...' : (isRemoved ? 'Restore Original Background' : 'Remove Background with AI')}
+                </button>
+                {error && <p className="text-[10px] text-amber-400 mt-1">{error}</p>}
+            </div>
+        );
+    }
 
     /**
      * R118 - on the shared panel kit, like every other control panel.
@@ -179,7 +233,7 @@ export default function BackgroundPanel({ clip, trackId }) {
 
                     {/* Sandwich Depth Layer notice */}
                     <div className="p-2 rounded bg-primary/10 border border-primary/25 text-[10px] text-foreground/85 mb-3 leading-relaxed">
-                        <span className="font-semibold text-primary">✨ Sandwich Layer Ready:</span> In the Text or Graphic panel, toggle <span className="font-mono text-[9px] bg-background/50 px-1 py-0.5 rounded">Behind Subject</span> to layer titles and stickers between the background plate and the creator.
+                        <span className="font-semibold text-primary">Sandwich Layer Ready:</span> In the Text or Graphic panel, toggle <span className="font-mono text-[9px] bg-background/50 px-1 py-0.5 rounded">Behind Subject</span> to layer titles and stickers between the background plate and the creator.
                     </div>
                     <div className="flex gap-1.5">
                         <button type="button" onClick={handleRemove} disabled={busy}

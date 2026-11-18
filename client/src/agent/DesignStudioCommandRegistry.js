@@ -699,7 +699,12 @@ export const DESIGN_COMMANDS = [
         category: 'hierarchy',
         label: 'Delete layer',
         summary: 'Removes target or selected layer from the canvas.',
-        negative: ['remove background', 'remove the background', 'remove bg', 'isolate subject', 'cutout', 'cut out subject'],
+        negative: [
+            'remove background', 'remove the background', 'remove bg', 'isolate subject',
+            'cutout', 'cut out subject', 'delete background', 'delete the background',
+            'delete photo background', 'delete image background', 'delete bg',
+            'take out background', 'strip background', 'remove canvas background', 'clear background'
+        ],
         phrases: [
             'delete', 'remove', 'delete layer', 'remove layer', 'trash layer',
             'delete circle', 'delete rectangle', 'delete star', 'delete badge', 'remove circle'
@@ -962,16 +967,23 @@ export const DESIGN_COMMANDS = [
         phrases: [
             'remove the background', 'remove background', 'remove bg', 'remove image background',
             'isolate subject', 'isolate the subject', 'cutout subject', 'cut out subject',
-            'transparent background', 'delete photo background', 'cutout', 'take out background'
+            'transparent background', 'delete photo background', 'cutout', 'take out background',
+            'delete background', 'delete the background', 'delete bg', 'delete image background',
+            'remove canvas background', 'clear background', 'transparent bg', 'isolate person',
+            'cut out person', 'cut out image', 'remove background from image', 'remove background from photo',
+            'remove photo background', 'strip background', 'make background transparent'
         ],
         execute: (params, ctx) => {
             const layers = ctx.layers || [];
             let target = null;
             if (ctx.selectedLayerId) {
-                target = layers.find(l => l.id === ctx.selectedLayerId && (l.type === 'image' || l.src || l.id === 'subject'));
+                target = layers.find(l => l.id === ctx.selectedLayerId && (l.type === 'image' || l.src || l.url || l.sourceUrl || l.id === 'subject'));
+            }
+            if (!target && ctx.selectedLayerIds && ctx.selectedLayerIds.length > 0) {
+                target = layers.find(l => ctx.selectedLayerIds.includes(l.id) && (l.type === 'image' || l.src || l.url || l.sourceUrl || l.id === 'subject'));
             }
             if (!target) {
-                target = layers.find(l => l.type === 'image' || l.src || l.id === 'subject');
+                target = layers.find(l => l.type === 'image' || l.src || l.url || l.sourceUrl || l.id === 'subject' || (l.name && /img|photo|image|picture/i.test(l.name)));
             }
 
             if (!target) {
@@ -1644,7 +1656,7 @@ export function scoreDesignCommand(cmd, text) {
     if (cmd.id === 'ds_apply_theme_token' && /\b(?:apply\s*theme|dark\s*mode|light\s*mode|editorial\s*mode|theme)\b/i.test(s)) {
         score = Math.max(score, 85);
     }
-    if (cmd.id === 'ds_remove_background' && /\b(?:remove|isolate|cut\s*out|extract|take\s*out)\s*(?:the\s*)?(?:image\s*|photo\s*)?(?:background|bg|subject)\b/i.test(s)) {
+    if (cmd.id === 'ds_remove_background' && /\b(?:remove|isolate|cut\s*out|extract|take\s*out|delete|strip|clear|transparent)\s*(?:the\s*)?(?:image\s*|photo\s*|canvas\s*)?(?:background|bg|subject|person)\b/i.test(s)) {
         score = Math.max(score, 98);
     }
     if (cmd.id === 'ds_design_review' && /\b(?:review\s*design|critique\s*design|audit\s*layout|design\s*feedback)\b/i.test(s)) {
