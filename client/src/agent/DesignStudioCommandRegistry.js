@@ -742,10 +742,14 @@ export const DESIGN_COMMANDS = [
         ],
         execute: (params, ctx) => {
             const rawBrief = params.rawText || 'create a simple thumbnail';
-            const headline = params.textContent || (params.rawText ? extractHeadlineFromBrief(params.rawText) : 'GOODBYE');
+            const headline = params.textContent || (params.rawText ? extractHeadlineFromBrief(params.rawText) : 'I\'M READY');
 
-            // Synthesize 4 distinct directions
-            const directions = generateThumbnailDirections(headline, rawBrief);
+            // Find existing image layer on canvas (e.g. photo to preserve and isolate)
+            const currentLayers = Array.isArray(ctx.layers) ? ctx.layers : [];
+            const existingImage = currentLayers.find(l => l.type === 'image' && (l.url || l.sourceUrl || l.imageData));
+
+            // Synthesize 4 distinct directions preserving the canvas photo
+            const directions = generateThumbnailDirections(headline, rawBrief, existingImage);
 
             if (typeof ctx.setDirections === 'function') {
                 ctx.setDirections(directions);
@@ -1040,47 +1044,110 @@ export const DESIGN_COMMANDS = [
             return { success: true, message: `Grouped ${selIds.length} layers into ${groupId}.` };
         },
     },
+
+    // ── 27. Animate Design in After Effects Motion Engine ────────────────────
+    {
+        id: 'ds_animate_design',
+        category: 'motion',
+        label: 'Animate Design in Motion Engine',
+        summary: 'Converts Design Studio layers into a kinetic After Effects motion scene on the video timeline.',
+        phrases: [
+            'animate this design', 'save as animated scene', 'animate in timeline',
+            'make it animated', 'export as motion scene', 'send to timeline as animation',
+            'creer une animation', 'animer ce design', 'animate scene'
+        ],
+        execute: (params, ctx) => {
+            if (typeof ctx.handleSaveAsMotionScene === 'function') {
+                const res = ctx.handleSaveAsMotionScene();
+                return { success: true, message: 'Converted design into an animated motion scene on the video timeline.' };
+            }
+            return { success: true, message: 'Ready to animate. Click "Save as Animated Scene" to place it on the timeline.' };
+        },
+    },
 ];
 
 // ── Thumbnail Direction Synthesizer ──────────────────────────────────────────
 
 /**
  * Extracts headline text or quoted copy from a natural language brief.
- * E.g. 'create a simple thumbnail with text saying "goodbye"' -> "GOODBYE"
+ * Handles apostrophes inside quotes correctly (e.g. "I'm ready").
  *
  * @param {string} text
  * @returns {string}
  */
 export function extractHeadlineFromBrief(text) {
-    if (!text || typeof text !== 'string') return 'GOODBYE';
+    if (!text || typeof text !== 'string') return 'I\'M READY';
 
-    // 1. Explicit quotes: "goodbye" or 'goodbye'
-    const quoteMatch = text.match(/["'“]([^"'”]+)["'”]/);
-    if (quoteMatch && quoteMatch[1].trim()) return quoteMatch[1].trim().toUpperCase();
+    // 1. Explicit quotes: double quotes "I'm ready" (allows apostrophes inside) or single quotes 'ready'
+    const doubleQuoteMatch = text.match(/["“]([^"”]+)["”]/);
+    if (doubleQuoteMatch && doubleQuoteMatch[1].trim()) {
+        return doubleQuoteMatch[1].trim();
+    }
+    const singleQuoteMatch = text.match(/['‘]([^'’]+)['’]/);
+    if (singleQuoteMatch && singleQuoteMatch[1].trim()) {
+        return singleQuoteMatch[1].trim();
+    }
 
-    // 2. Phrases following "saying", "with text", "say", "headline"
-    const sayingMatch = text.match(/(?:saying|with text|text saying|headline saying|say|title)\s+["']?([a-z0-9\s!?,.-]+)["']?$/i);
-    if (sayingMatch && sayingMatch[1].trim()) return sayingMatch[1].trim().toUpperCase();
+    // 2. Phrases following "with the title", "title", "saying", "with text", "headline"
+    const titleMatch = text.match(/(?:with\s+(?:the\s+)?title|title|saying|with text|text saying|headline saying|say)\s+[:=]?\s*["'“]?([^"'\n]+?)["'”]?$/i)
+        || text.match(/(?:with\s+(?:the\s+)?title|title|saying|with text)\s+[:=]?\s*["'“]?([^"'\n]+?)["'”]?(?:\s+(?:from|using|on|with|in)\b|$)/i);
+    if (titleMatch && titleMatch[1].trim()) {
+        return titleMatch[1].trim();
+    }
 
     // 3. Clean common brief prefixes
     const cleaned = text
-        .replace(/^(?:please\s+)?(?:create|make|generate|design|build)\s+(?:a\s+)?(?:simple\s+)?(?:thumbnail|graphic|cover)\s*(?:with\s+)?/i, '')
-        .replace(/^(?:text|saying|words)\s+/i, '')
+        .replace(/^(?:please\s+)?(?:create|make|generate|design|build)\s+(?:me\s+)?(?:a\s+)?(?:simple\s+)?(?:[a-z0-9_-]+\s+){0,4}(?:thumbnail|graphic|cover)\s*(?:from\s+(?:this\s+)?(?:image|photo)\s*)?(?:with\s+)?/i, '')
+        .replace(/^(?:text|saying|words|title)\s+/i, '')
         .trim();
-    if (cleaned.length > 0 && cleaned.length < 50) return cleaned.toUpperCase();
+    if (cleaned.length > 0 && cleaned.length < 60) return cleaned;
 
-    return 'GOODBYE';
+    return 'I\'M READY';
 }
 
 /**
  * Generates 4 production-grade creative directions from natural language brief and headline.
+ * Preserves the user's canvas image layer as the featured subject cutout across all directions.
  *
  * @param {string} headline
  * @param {string} brief
+ * @param {object} [existingImageLayer]
  * @returns {Array<object>}
  */
-export function generateThumbnailDirections(headline, brief) {
-    const text = (headline || 'GOODBYE').trim();
+export function generateThumbnailDirections(headline, brief, existingImageLayer = null) {
+    const text = (headline || 'I\'M READY').trim();
+
+    const buildSubjectLayer = (defaultProps) => {
+        if (!existingImageLayer) {
+            return {
+                id: 'subject',
+                name: 'Subject Cutout',
+                type: 'image',
+                ...defaultProps,
+                opacity: 100,
+                rotation: 0,
+                visible: true,
+                locked: false,
+            };
+        }
+        return {
+            id: existingImageLayer.id || 'subject',
+            name: existingImageLayer.name || 'Subject Cutout',
+            type: 'image',
+            x: defaultProps.x ?? 720,
+            y: defaultProps.y ?? 100,
+            w: existingImageLayer.w ? Math.min(540, existingImageLayer.w) : (defaultProps.w || 460),
+            h: existingImageLayer.h ? Math.min(640, existingImageLayer.h) : (defaultProps.h || 600),
+            url: existingImageLayer.url || existingImageLayer.sourceUrl,
+            sourceUrl: existingImageLayer.sourceUrl || existingImageLayer.url,
+            originalUrl: existingImageLayer.originalUrl || existingImageLayer.url,
+            backgroundRemoved: existingImageLayer.backgroundRemoved ?? false,
+            opacity: 100,
+            rotation: 0,
+            visible: true,
+            locked: false,
+        };
+    };
 
     return [
         {
@@ -1127,19 +1194,7 @@ export function generateThumbnailDirections(headline, brief) {
                     visible: true,
                     locked: false,
                 },
-                {
-                    id: 'subject',
-                    name: 'Subject Cutout',
-                    type: 'image',
-                    x: 740,
-                    y: 120,
-                    w: 440,
-                    h: 580,
-                    opacity: 100,
-                    rotation: 0,
-                    visible: true,
-                    locked: false,
-                },
+                buildSubjectLayer({ x: 740, y: 120, w: 440, h: 580 }),
             ],
         },
         {
@@ -1190,19 +1245,7 @@ export function generateThumbnailDirections(headline, brief) {
                     visible: true,
                     locked: false,
                 },
-                {
-                    id: 'subject',
-                    name: 'Subject Cutout',
-                    type: 'image',
-                    x: 720,
-                    y: 100,
-                    w: 480,
-                    h: 620,
-                    opacity: 100,
-                    rotation: 0,
-                    visible: true,
-                    locked: false,
-                },
+                buildSubjectLayer({ x: 720, y: 100, w: 480, h: 620 }),
             ],
         },
         {
@@ -1267,19 +1310,7 @@ export function generateThumbnailDirections(headline, brief) {
                     visible: true,
                     locked: false,
                 },
-                {
-                    id: 'subject',
-                    name: 'Subject Cutout',
-                    type: 'image',
-                    x: 730,
-                    y: 110,
-                    w: 450,
-                    h: 600,
-                    opacity: 100,
-                    rotation: 0,
-                    visible: true,
-                    locked: false,
-                },
+                buildSubjectLayer({ x: 730, y: 110, w: 450, h: 600 }),
             ],
         },
         {
@@ -1326,19 +1357,7 @@ export function generateThumbnailDirections(headline, brief) {
                     visible: true,
                     locked: false,
                 },
-                {
-                    id: 'subject',
-                    name: 'Subject Cutout',
-                    type: 'image',
-                    x: 740,
-                    y: 120,
-                    w: 430,
-                    h: 570,
-                    opacity: 100,
-                    rotation: 0,
-                    visible: true,
-                    locked: false,
-                },
+                buildSubjectLayer({ x: 740, y: 120, w: 430, h: 570 }),
             ],
         },
     ];
@@ -1373,12 +1392,15 @@ export function extractDesignParams(cmd, text) {
     const s = String(text || '').toLowerCase();
     const params = { rawText: text };
 
-    // 0. Extract text content / quoted copy if present
-    const quoteMatch = s.match(/["'“]([^"'”]+)["'”]/);
-    if (quoteMatch && quoteMatch[1].trim()) {
-        params.textContent = quoteMatch[1].trim();
+    // 0. Extract text content / quoted copy if present (preserves apostrophes in "I'm ready")
+    const doubleQuoteMatch = String(text || '').match(/["“]([^"”]+)["”]/);
+    const singleQuoteMatch = String(text || '').match(/['‘]([^'’]+)['’]/);
+    if (doubleQuoteMatch && doubleQuoteMatch[1].trim()) {
+        params.textContent = doubleQuoteMatch[1].trim();
+    } else if (singleQuoteMatch && singleQuoteMatch[1].trim()) {
+        params.textContent = singleQuoteMatch[1].trim();
     } else {
-        const sayingMatch = s.match(/(?:saying|with text|text saying|headline saying|say|text to|headline to|words)\s+["']?([a-z0-9\s!?,.-]+)["']?$/i);
+        const sayingMatch = String(text || '').match(/(?:with\s+(?:the\s+)?title|title|saying|with text|text saying|headline saying|say|text to|headline to|words)\s+[:=]?\s*["'“]?([^"'\n]+?)["'”]?$/i);
         if (sayingMatch && sayingMatch[1].trim()) {
             params.textContent = sayingMatch[1].trim();
         }
@@ -1597,8 +1619,15 @@ export function scoreDesignCommand(cmd, text) {
             score = Math.max(score, 88);
         }
     }
-    if (cmd.id === 'ds_generate_thumbnail' && /\b(?:create|generate|make|build|design)\s+(?:a\s+)?(?:simple\s+)?thumbnail\b/i.test(s)) {
-        score = Math.max(score, 95);
+    if (cmd.id === 'ds_generate_thumbnail') {
+        if (/\b(?:create|generate|make|build|design)\b.*\b(?:thumbnail|cover|social\s*graphic|post\s*graphic)\b/i.test(s) ||
+            /\b(?:thumbnail|cover\s*art)\b.*\b(?:title|saying|headline|from this image|from photo)\b/i.test(s) ||
+            /\b(?:create|generate|make|build|design)\s+(?:me\s+)?(?:a\s+)?(?:[a-z0-9_-]+\s+){0,4}(?:thumbnail|cover|graphic)\b/i.test(s)) {
+            score = Math.max(score, 97);
+        }
+    }
+    if (cmd.id === 'ds_animate_design' && /\b(?:animate|motion\s*scene|animated\s*scene|animer)\b/i.test(s)) {
+        score = Math.max(score, 94);
     }
     if (cmd.id === 'ds_boolean_operation' && /\b(?:union|subtract|intersect|exclude|combine shapes)\b/i.test(s)) {
         score = Math.max(score, 90);

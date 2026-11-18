@@ -157,6 +157,43 @@ const execBg = executeDesignCommand('I want to remove the background', mockCtx);
 check('executeDesignCommand isolates subject and sets backgroundRemoved true',
     execBg.success && mockLayers.find(l => l.id === 'subject')?.backgroundRemoved === true);
 
+// Test thumbnail creation from brief with quotes containing apostrophes
+const thumbPrompt = 'create me a social media thumbnail from this image with the title "I\'m ready"';
+const resThumb = resolveDesignCommand(thumbPrompt);
+check('resolveDesignCommand maps "create me a social media thumbnail..." to ds_generate_thumbnail',
+    resThumb.match?.id === 'ds_generate_thumbnail' && resThumb.score >= 95);
+
+const { extractHeadlineFromBrief } = clientRegistry;
+const extractedTitle = extractHeadlineFromBrief(thumbPrompt);
+check('extractHeadlineFromBrief preserves apostrophes in "I\'m ready"',
+    extractedTitle === "I'm ready");
+
+let motionSceneTriggered = false;
+let imageMockLayers = [
+    { id: 'background', type: 'bg', fill: '#0F172A' },
+    { id: 'IMG_1126', name: 'IMG_1126', type: 'image', url: 'https://example.com/speaker.jpg', w: 600, h: 800 },
+];
+const mockCtxWithImage = {
+    ...mockCtx,
+    layers: imageMockLayers,
+    setLayers: (l) => { imageMockLayers = typeof l === 'function' ? l(imageMockLayers) : l; },
+    applyDirection: (dir) => { imageMockLayers = dir.layers; },
+    handleSaveAsMotionScene: () => { motionSceneTriggered = true; return { success: true }; },
+};
+
+const execThumb = executeDesignCommand(thumbPrompt, mockCtxWithImage);
+check('executeDesignCommand generates thumbnail preserving existing image layer and headline',
+    execThumb.success && imageMockLayers.some(l => l.type === 'text' && l.text === "I'm ready") && imageMockLayers.some(l => l.type === 'image' && l.url === 'https://example.com/speaker.jpg'));
+
+// Test animate design command
+const resAnimate = resolveDesignCommand('animate this design');
+check('resolveDesignCommand maps "animate this design" to ds_animate_design',
+    resAnimate.match?.id === 'ds_animate_design' && resAnimate.score >= 90);
+
+const execAnimate = executeDesignCommand('animate this design', mockCtxWithImage);
+check('executeDesignCommand dispatches handleSaveAsMotionScene',
+    execAnimate.success && motionSceneTriggered === true);
+
 console.log('\n── 4. Professional Vector & Auto Layout Engines ──');
 const vectorMath = await import('../client/src/design-studio/vectorMath.js');
 const autoLayout = await import('../client/src/design-studio/autoLayout.js');

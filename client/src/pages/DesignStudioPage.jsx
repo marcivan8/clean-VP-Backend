@@ -256,11 +256,17 @@ export default function DesignStudioPage() {
 
     const handleToggleBackgroundRemoval = async (layerId) => {
         const targetId = layerId || selectedLayerId;
-        const target = layers.find(l => l.id === targetId && (l.type === 'image' || l.src || l.id === 'subject'))
-            || layers.find(l => l.type === 'image' || l.src || l.id === 'subject');
+        const target = layers.find(l => l.id === targetId && (l.type === 'image' || l.src || l.url || l.sourceUrl || l.id === 'subject'))
+            || layers.find(l => l.type === 'image' || l.src || l.url || l.sourceUrl || l.id === 'subject');
 
         if (!target) {
             showToast('No image or photo layer found to isolate');
+            return;
+        }
+
+        const imgSrc = target.src || target.url || target.sourceUrl;
+        if (!imgSrc) {
+            showToast('Target layer has no image source');
             return;
         }
 
@@ -269,7 +275,8 @@ export default function DesignStudioPage() {
                 if (l.id === target.id) {
                     return {
                         ...l,
-                        src: l.originalSrc || l.src,
+                        src: l.originalSrc || l.src || l.url,
+                        url: l.originalSrc || l.url || l.src,
                         backgroundRemoved: false,
                     };
                 }
@@ -279,15 +286,17 @@ export default function DesignStudioPage() {
             return;
         }
 
-        showToast('Removing background with AI...');
+        showToast('Removing background with semantic AI...');
         try {
-            const transparentDataUrl = await removeBackgroundFromImage(target.src);
+            const transparentDataUrl = await removeBackgroundFromImage(imgSrc);
             setLayers(prev => prev.map(l => {
                 if (l.id === target.id) {
                     return {
                         ...l,
-                        originalSrc: l.originalSrc || l.src,
+                        originalSrc: l.originalSrc || imgSrc,
                         src: transparentDataUrl,
+                        url: transparentDataUrl,
+                        sourceUrl: transparentDataUrl,
                         backgroundRemoved: true,
                         opacity: 100,
                     };
@@ -1137,6 +1146,8 @@ export default function DesignStudioPage() {
                 directions,
                 setSafeAreasEnabled,
                 handleExport2Sizes: handleExportSizes,
+                handleSaveAsMotionScene,
+                onRemoveBackground: handleToggleBackgroundRemoval,
             });
 
             setAiStatusMessage(res.message || 'Layers updated. Reversible via history.');
@@ -1353,6 +1364,168 @@ export default function DesignStudioPage() {
         }
 
         showToast('Saved to project timeline & dashboard library!');
+    };
+
+    // Save to active project timeline as a live After Effects motion scene
+    const handleSaveAsMotionScene = async () => {
+        try {
+            const { createScene, NODE_TYPES } = await import('../motion/SceneSchema.js');
+            const state = useTimelineStore.getState();
+
+            const frameW = currentFormat.w || 1280;
+            const frameH = currentFormat.h || 720;
+            const isPortrait = currentFormat.id === 'portrait' || currentFormat.aspect === '9/16';
+
+            // Convert Design Studio layers into SceneSchema nodes
+            const visibleLayers = layers.filter(l => l.visible !== false);
+            const nodes = [];
+
+            let staggerDelay = 0;
+            for (const layer of visibleLayers) {
+                // Convert pixel coords to frame percent (0-100)
+                const pctX = Math.round(((layer.x || 0) / frameW) * 100);
+                const pctY = Math.round(((layer.y || 0) / frameH) * 100);
+                const boxW = layer.w || 300;
+                const boxH = layer.h || 100;
+
+                if (layer.type === 'text') {
+                    nodes.push({
+                        id: `scene_text_${layer.id || Math.random().toString(36).substr(2, 7)}`,
+                        name: layer.name || 'Headline',
+                        type: NODE_TYPES.TEXT,
+                        text: layer.text || 'I\'M READY',
+                        x: pctX,
+                        y: pctY,
+                        box: { w: boxW, h: boxH },
+                        style: {
+                            fontSize: layer.fontSize || 72,
+                            fontFamily: layer.fontFamily || 'Plus Jakarta Sans',
+                            fill: layer.fill || '#FFFFFF',
+                            fontWeight: 'bold',
+                        },
+                        animations: [
+                            {
+                                type: 'entrance',
+                                preset: 'kinetic_slide_up',
+                                duration: 0.7,
+                                delay: staggerDelay,
+                                keyframes: [
+                                    { time: 0, properties: { opacity: 0, y: 15 } },
+                                    { time: 0.7, properties: { opacity: 1, y: 0 }, easing: 'easeOutBack' },
+                                ],
+                            },
+                        ],
+                    });
+                    staggerDelay += 0.15;
+                } else if (layer.type === 'badge') {
+                    nodes.push({
+                        id: `scene_badge_${layer.id || Math.random().toString(36).substr(2, 7)}`,
+                        name: layer.name || 'Badge',
+                        type: NODE_TYPES.SHAPE,
+                        shape: 'roundedRect',
+                        x: pctX,
+                        y: pctY,
+                        box: { w: boxW, h: boxH },
+                        text: layer.text || '',
+                        style: {
+                            fill: layer.fill || '#00E5FF',
+                            cornerRadius: 8,
+                        },
+                        animations: [
+                            {
+                                type: 'entrance',
+                                preset: 'pop_in',
+                                duration: 0.45,
+                                delay: staggerDelay + 0.1,
+                                keyframes: [
+                                    { time: 0, properties: { opacity: 0, scale: 0.7 } },
+                                    { time: 0.45, properties: { opacity: 1, scale: 1 }, easing: 'easeOutBack' },
+                                ],
+                            },
+                        ],
+                    });
+                    staggerDelay += 0.1;
+                } else if (layer.type === 'image') {
+                    nodes.push({
+                        id: `scene_img_${layer.id || Math.random().toString(36).substr(2, 7)}`,
+                        name: layer.name || 'Subject Cutout',
+                        type: NODE_TYPES.IMAGE,
+                        url: layer.src || layer.url || layer.sourceUrl,
+                        sourceUrl: layer.sourceUrl || layer.url || layer.src,
+                        x: pctX,
+                        y: pctY,
+                        box: { w: boxW, h: boxH },
+                        animations: [
+                            {
+                                type: 'entrance',
+                                preset: 'scale_reveal',
+                                duration: 0.8,
+                                delay: 0.05,
+                                keyframes: [
+                                    { time: 0, properties: { opacity: 0, scale: 0.92 } },
+                                    { time: 0.8, properties: { opacity: 1, scale: 1 }, easing: 'easeOutCubic' },
+                                ],
+                            },
+                        ],
+                    });
+                } else if (layer.type === 'line' || layer.type === 'shape' || layer.type === 'circle' || layer.type === 'star') {
+                    nodes.push({
+                        id: `scene_shape_${layer.id || Math.random().toString(36).substr(2, 7)}`,
+                        name: layer.name || 'Graphic Shape',
+                        type: NODE_TYPES.SHAPE,
+                        shape: layer.type,
+                        x: pctX,
+                        y: pctY,
+                        box: { w: boxW, h: boxH },
+                        style: {
+                            fill: layer.fill || '#00E5FF',
+                        },
+                        animations: [
+                            {
+                                type: 'entrance',
+                                preset: 'fade_in',
+                                duration: 0.5,
+                                delay: staggerDelay,
+                                keyframes: [
+                                    { time: 0, properties: { opacity: 0 } },
+                                    { time: 0.5, properties: { opacity: 1 } },
+                                ],
+                            },
+                        ],
+                    });
+                }
+            }
+
+            const rawScene = createScene({
+                name: `${projectName || 'Design'} Animated Scene`,
+                aspectRatio: isPortrait ? '9:16' : '16:9',
+                duration: 5.0,
+                frame: { w: frameW, h: frameH, aspectRatio: isPortrait ? '9:16' : '16:9' },
+                nodes,
+            });
+
+            if (typeof state._placeScene === 'function') {
+                const res = state._placeScene(rawScene, {
+                    label: `${projectName || 'Design'} Motion Scene`,
+                    start: state.currentTime || 0,
+                    asCompound: false,
+                });
+                if (res?.success) {
+                    showToast('Placed animated motion scene on the video timeline!');
+                    return { success: true };
+                }
+            }
+
+            // Fallback: place high-res overlay asset with animation
+            handleSaveToTimeline();
+            showToast('Saved design with motion presets to timeline!');
+            return { success: true };
+        } catch (err) {
+            console.error('[DesignStudioPage] handleSaveAsMotionScene error:', err);
+            handleSaveToTimeline();
+            showToast('Saved design to timeline.');
+            return { success: true };
+        }
     };
 
     // Export 2 sizes as downloadable PNGs
@@ -1674,6 +1847,29 @@ export default function DesignStudioPage() {
 
                     <button
                         type="button"
+                        onClick={handleSaveAsMotionScene}
+                        style={{
+                            height: 32,
+                            padding: '0 12px',
+                            borderRadius: 6,
+                            background: '#0F172A',
+                            color: '#00E5FF',
+                            border: '1px solid rgba(0,229,255,0.3)',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                        }}
+                        title="Converts Design Studio layers into live After Effects motion composition with kinetic typography and entrance animations"
+                    >
+                        <Film size={13} color="#00E5FF" />
+                        <span>Save as Animated Scene</span>
+                    </button>
+
+                    <button
+                        type="button"
                         onClick={handleExportSizes}
                         style={{
                             height: 32,
@@ -1818,6 +2014,7 @@ export default function DesignStudioPage() {
                         setSelectedLayerIds={setSelectedLayerIds}
                         onDirectionApply={applyDirection}
                         onRemoveBackground={handleToggleBackgroundRemoval}
+                        onSaveAsMotionScene={handleSaveAsMotionScene}
                     />
 
                     {/* Slide-Up Creative Directions Variations Tray */}
