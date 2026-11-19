@@ -92,6 +92,7 @@ const PRODUCTION_REFUSED_PROVIDERS = ['ollama', 'gemma-local', 'mock'];
  */
 const CAPABILITY_PROVIDERS = {
     chat:       ['openai', 'ollama', 'groq', 'gemini', 'gemma-local'],
+    design:     ['openai', 'ollama', 'groq', 'gemini', 'gemma-local'],
     motion:     ['openai', 'ollama', 'groq', 'gemini', 'gemma-local'],
     vision:     ['openai', 'ollama', 'gemini'],
     audio:      ['openai', 'groq'],
@@ -139,6 +140,9 @@ function resolveProvider(opts = {}) {
     if (capability === 'vision' && env.AI_VISION_PROVIDER) {
         raw = env.AI_VISION_PROVIDER;
         source = 'AI_VISION_PROVIDER';
+    } else if (capability === 'design' && env.AI_DESIGN_PROVIDER) {
+        raw = env.AI_DESIGN_PROVIDER;
+        source = 'AI_DESIGN_PROVIDER';
     } else if (capability === 'motion' && env.AI_MOTION_PROVIDER) {
         raw = env.AI_MOTION_PROVIDER;
         source = 'AI_MOTION_PROVIDER';
@@ -381,6 +385,9 @@ function resolveModel(requestedModel, capabilityOrOpts) {
         if (capability === 'motion') {
             return process.env.GROQ_MOTION_MODEL || process.env.GROQ_CHAT_MODEL || 'openai/gpt-oss-120b';
         }
+        if (capability === 'design') {
+            return process.env.GROQ_DESIGN_MODEL || process.env.GROQ_CHAT_MODEL || 'openai/gpt-oss-120b';
+        }
         // Judging wants the SMALLEST capable model, not the best one: it runs
         // over every candidate on every turn, so latency and cost dominate.
         // Defaults to the chat model so there is one name to keep current if
@@ -412,6 +419,9 @@ function resolveModel(requestedModel, capabilityOrOpts) {
         if (capability === 'motion') {
             // gemini-3.1-flash-lite avoids gemini-3.8-flash's 18s+ thinking latency on JSON drafting
             return process.env.GEMINI_MOTION_MODEL || process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
+        }
+        if (capability === 'design') {
+            return process.env.GEMINI_DESIGN_MODEL || process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
         }
         if (capability === 'judge') {
             return process.env.GEMINI_JUDGE_MODEL || process.env.GEMINI_MODEL || 'gemini-3.8-flash';

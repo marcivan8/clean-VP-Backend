@@ -1,5 +1,6 @@
 const OpenAI = require('openai');
-const { getAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../services/AIProvider');
+const { getAIClient, getBrainAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../services/AIProvider');
+const { repairAndParseJSON } = require('../services/motionProvider');
 const { analyzeStructure } = require('../viralEngine/structure.js');
 
 // R91 — editing styles accepted in ProjectContext.editingStyle (client: agent/EditingStyles.js).
@@ -2686,6 +2687,137 @@ const detectRepeatedTakesHandler = async (req, res) => {
     }
 };
 
+/**
+ * Design Studio AI Copilot Handler
+ * Translates natural language design instructions into canvas operations
+ * using the configured LLM for the 'design' capability (or custom Railway Brain).
+ */
+const designCopilotHandler = async (req, res) => {
+    try {
+        const { prompt, layers = [], selectedLayerId = null, format = { w: 1280, h: 720 } } = req.body;
+        if (!prompt || typeof prompt !== 'string') {
+            return res.status(400).json({ error: 'Prompt is required' });
+        }
+
+        const brainTarget = getBrainAIClient();
+        const cloudClient = getAIClient({ capability: 'design' });
+        const model = resolveModel('gpt-4o', { capability: 'design' });
+        const provider = resolveProvider({ capability: 'design' });
+
+        const layersSummary = (Array.isArray(layers) ? layers : []).map(l => ({
+            id: l.id,
+            name: l.name,
+            type: l.type,
+            x: l.x,
+            y: l.y,
+            w: l.w,
+            h: l.h,
+            fill: l.fill,
+            text: l.text,
+            fontSize: l.fontSize,
+            selected: l.id === selectedLayerId,
+        }));
+
+        const systemPrompt = `You are VIBED Design Studio AI Copilot, an expert visual art director and vector graphics engineer.
+Your task is to translate natural language design instructions into discrete canvas operations.
+
+Active Canvas State:
+- Resolution: ${format.w || 1280}x${format.h || 720}
+- Currently Selected Layer: ${selectedLayerId ? JSON.stringify(selectedLayerId) : 'none'}
+- Existing Canvas Layers:
+${JSON.stringify(layersSummary, null, 2)}
+
+Design Principles:
+- Geometric balance, high contrast, clean typography (Plus Jakarta Sans, Instrument Serif, JetBrains Mono).
+- Default canvas is 1280x720. Safe margins: 48px from borders.
+- Supported layer types: "rect", "circle", "star", "line", "badge", "text".
+- Colors: White (#FFFFFF), Black (#1A1C22), Blue (#3B82F6), Cyan (#00E5FF), Red (#EF4444), Green (#10B981), Orange (#C85A17), Yellow (#FBBF24), Transparent (transparent).
+- When asked to change or update a shape and one is selected, update it via "update_layer" instead of duplicating.
+- When asked to add a new shape or card, generate it via "add_layer".
+
+OUTPUT FORMAT:
+Return a JSON object strictly matching:
+{
+  "message": "Clear 1-sentence confirmation of what was designed or modified.",
+  "operations": [
+    {
+      "op": "add_layer" | "update_layer" | "delete_layer",
+      "layerId": "id of existing layer if updating/deleting",
+      "layer": {
+        "id": "unique string id",
+        "name": "Human-friendly layer name",
+        "type": "rect" | "circle" | "star" | "line" | "badge" | "text",
+        "x": 300,
+        "y": 200,
+        "w": 360,
+        "h": 240,
+        "fill": "#FFFFFF",
+        "borderRadius": 16,
+        "opacity": 100,
+        "rotation": 0,
+        "dropShadow": true,
+        "shadowBlur": 20,
+        "shadowOffsetY": 6,
+        "shadowColor": "rgba(0,0,0,0.25)"
+      },
+      "patch": {
+        "fill": "#FFFFFF",
+        "w": 400
+      }
+    }
+  ]
+}`;
+
+        const callPayload = {
+            model,
+            temperature: 0.2,
+            max_tokens: 800,
+            response_format: { type: 'json_object' },
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: `Design instruction: "${prompt}"` },
+            ],
+        };
+
+        let completion;
+        if (brainTarget.isCustom && brainTarget.client) {
+            try {
+                console.log(`[DesignCopilot] Routing to custom Railway Brain model (${brainTarget.model})...`);
+                completion = await brainTarget.client.chat.completions.create({
+                    ...callPayload,
+                    model: brainTarget.model,
+                }, { timeout: Number(process.env.BRAIN_AI_TIMEOUT_MS) || 240_000 });
+            } catch (customErr) {
+                console.warn('[DesignCopilot] Custom Railway Brain failed; failing over to cloud client:', customErr.message);
+            }
+        }
+
+        if (!completion) {
+            if (!cloudClient) {
+                throw new Error('AI client unavailable for design capability');
+            }
+            completion = await cloudClient.chat.completions.create(callPayload);
+        }
+
+        const raw = completion?.choices?.[0]?.message?.content;
+        const parsed = repairAndParseJSON(raw);
+        if (!parsed.data) {
+            throw new Error(`Failed to parse AI response: ${parsed.error}`);
+        }
+
+        return res.json({
+            success: true,
+            message: parsed.data.message || 'Updated canvas layout.',
+            operations: Array.isArray(parsed.data.operations) ? parsed.data.operations : [],
+            provider: brainTarget.isCustom && completion ? 'custom' : provider,
+            model: brainTarget.isCustom && completion ? brainTarget.model : model,
+        });
+    } catch (err) {
+        console.error('[DesignCopilot] error:', err.message);
+        return res.status(500).json({ error: err.message, success: false });
+    }
+};
+
 module.exports = {
     chatAgentHandler,
     agentPlanHandler,
@@ -2695,4 +2827,5 @@ module.exports = {
     smartCleanupHandler,
     reorderClipsHandler,
     detectRepeatedTakesHandler,
+    designCopilotHandler,
 };

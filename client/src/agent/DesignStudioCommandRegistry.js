@@ -48,8 +48,8 @@ export const LAYER_SEMANTIC_DICTIONARY = {
  * @param {string|null} fallbackLayerId
  * @returns {string}
  */
-export function resolveTargetLayer(text, fallbackLayerId = 'headline') {
-    if (!text || typeof text !== 'string') return fallbackLayerId || 'headline';
+export function resolveTargetLayer(text, fallbackLayerId = null) {
+    if (!text || typeof text !== 'string') return fallbackLayerId;
     const s = text.toLowerCase();
 
     for (const [layerKey, synonyms] of Object.entries(LAYER_SEMANTIC_DICTIONARY)) {
@@ -62,7 +62,7 @@ export function resolveTargetLayer(text, fallbackLayerId = 'headline') {
         }
     }
 
-    return fallbackLayerId || 'headline';
+    return fallbackLayerId;
 }
 
 // ── Registry Commands ────────────────────────────────────────────────────────
@@ -448,11 +448,14 @@ export const DESIGN_COMMANDS = [
             'make blue', 'make cyan', 'change color', 'set fill', 'color white', 'color black'
         ],
         execute: (params, ctx) => {
-            const { targetLayer = ctx.selectedLayerId, color = '#FFFFFF' } = params;
+            const target = params.targetLayer || ctx.selectedLayerId;
+            const color = params.color || '#FFFFFF';
             let updated = false;
 
             ctx.setLayers(prev => prev.map(l => {
-                const isTarget = l.id === targetLayer || (!targetLayer && l.id === ctx.selectedLayerId);
+                const isTarget = (target && l.id === target) ||
+                    (!target && l.id === ctx.selectedLayerId) ||
+                    (ctx.selectedLayerId && l.id === ctx.selectedLayerId);
                 if (isTarget) {
                     updated = true;
                     return { ...l, fill: color };
@@ -460,8 +463,8 @@ export const DESIGN_COMMANDS = [
                 return l;
             }));
 
-            if (!updated) return { success: false, message: `Could not apply color to ${targetLayer}` };
-            return { success: true, message: `Applied fill color ${color} to ${targetLayer}` };
+            if (!updated) return { success: false, message: `Could not apply color to ${target || 'selected layer'}` };
+            return { success: true, message: `Applied fill color ${color} to ${target || 'selected layer'}` };
         },
     },
 
@@ -514,6 +517,7 @@ export const DESIGN_COMMANDS = [
         phrases: [
             'add a circle', 'add circle', 'insert circle', 'new circle', 'draw circle',
             'add a rectangle', 'add rectangle', 'insert rectangle', 'add box', 'add square', 'new rectangle',
+            'add white rectangle', 'white rectangle', 'add white box', 'white box', 'white circle',
             'add a star', 'add star', 'insert star', 'new star',
             'add a line', 'add line', 'insert line', 'add divider',
             'add a badge', 'add badge', 'add pill', 'insert badge'
@@ -524,6 +528,33 @@ export const DESIGN_COMMANDS = [
             const canvasW = 1280;
             const canvasH = 720;
 
+            // If the user said "white rectangle" without a creation verb (add/create/insert/new)
+            // and a shape layer is ALREADY selected, update its fill color/attributes directly!
+            const hasExplicitCreateVerb = /\b(?:add|create|insert|draw|new|make|put|place)\b/i.test(params.rawText || '');
+            if (!hasExplicitCreateVerb && ctx.selectedLayerId && typeof ctx.setLayers === 'function') {
+                const currentLayers = Array.isArray(ctx.layers) ? ctx.layers : [];
+                const active = currentLayers.find(l => l.id === ctx.selectedLayerId);
+                if (active && (active.type === shapeType || active.type === 'rect' || active.type === 'circle' || active.type === 'star')) {
+                    let updated = false;
+                    ctx.setLayers(prev => prev.map(l => {
+                        if (l.id === ctx.selectedLayerId) {
+                            updated = true;
+                            return {
+                                ...l,
+                                ...(params.color ? { fill: params.color } : {}),
+                                ...(params.radius !== undefined ? { borderRadius: params.radius } : {}),
+                                ...(params.w ? { w: params.w } : {}),
+                                ...(params.h ? { h: params.h } : {}),
+                            };
+                        }
+                        return l;
+                    }));
+                    if (updated) {
+                        return { success: true, message: `Updated ${active.name || shapeType} with ${params.color || 'attributes'}.` };
+                    }
+                }
+            }
+
             let newLayer = null;
             if (shapeType === 'circle') {
                 newLayer = {
@@ -532,8 +563,8 @@ export const DESIGN_COMMANDS = [
                     type: 'circle',
                     x: Math.round(canvasW * 0.4),
                     y: Math.round(canvasH * 0.35),
-                    w: 220,
-                    h: 220,
+                    w: params.w || 220,
+                    h: params.h || 220,
                     fill: params.color || '#0B7C91',
                     opacity: params.opacity ?? 100,
                     rotation: 0,
@@ -551,8 +582,8 @@ export const DESIGN_COMMANDS = [
                     type: 'rect',
                     x: Math.round(canvasW * 0.35),
                     y: Math.round(canvasH * 0.3),
-                    w: 360,
-                    h: 240,
+                    w: params.w || 360,
+                    h: params.h || 240,
                     fill: params.color || '#1F140E',
                     borderRadius: params.radius ?? 16,
                     opacity: params.opacity ?? 100,
@@ -571,8 +602,8 @@ export const DESIGN_COMMANDS = [
                     type: 'star',
                     x: Math.round(canvasW * 0.45),
                     y: Math.round(canvasH * 0.4),
-                    w: 160,
-                    h: 160,
+                    w: params.w || 160,
+                    h: params.h || 160,
                     fill: params.color || '#00E5FF',
                     opacity: params.opacity ?? 100,
                     rotation: 0,
@@ -586,8 +617,8 @@ export const DESIGN_COMMANDS = [
                     type: 'line',
                     x: Math.round(canvasW * 0.1),
                     y: Math.round(canvasH * 0.6),
-                    w: 480,
-                    h: 4,
+                    w: params.w || 480,
+                    h: params.h || 4,
                     fill: params.color || '#00E5FF',
                     opacity: params.opacity ?? 100,
                     rotation: 0,
@@ -601,8 +632,8 @@ export const DESIGN_COMMANDS = [
                     type: 'badge',
                     x: Math.round(canvasW * 0.05),
                     y: Math.round(canvasH * 0.08),
-                    w: 80,
-                    h: 36,
+                    w: params.w || 80,
+                    h: params.h || 36,
                     text: params.textContent || 'NEW',
                     fill: params.color || '#C85A17',
                     opacity: params.opacity ?? 100,
@@ -1641,11 +1672,23 @@ export function extractDesignParams(cmd, text) {
     else if (/sans|jakarta/i.test(s)) params.fontFamily = 'Plus Jakarta Sans';
 
     // 13. Color extraction
-    if (/white/i.test(s)) params.color = '#FFFFFF';
-    else if (/black/i.test(s)) params.color = '#1A1C22';
-    else if (/terracotta|orange|accent/i.test(s)) params.color = '#C85A17';
-    else if (/cream|warm/i.test(s)) params.color = '#F4EDE2';
-    else if (/blue|cyan/i.test(s)) params.color = '#00E5FF';
+    if (/\b(?:white|blanc)\b/i.test(s)) params.color = '#FFFFFF';
+    else if (/\b(?:black|noir)\b/i.test(s)) params.color = '#1A1C22';
+    else if (/\b(?:red|rouge)\b/i.test(s)) params.color = '#EF4444';
+    else if (/\b(?:green|vert)\b/i.test(s)) params.color = '#10B981';
+    else if (/\b(?:blue|bleu)\b/i.test(s)) params.color = '#3B82F6';
+    else if (/\b(?:cyan|electric|neon)\b/i.test(s)) params.color = '#00E5FF';
+    else if (/\b(?:yellow|jaune)\b/i.test(s)) params.color = '#FBBF24';
+    else if (/\b(?:orange|terracotta|accent)\b/i.test(s)) params.color = '#C85A17';
+    else if (/\b(?:purple|violet)\b/i.test(s)) params.color = '#8B5CF6';
+    else if (/\b(?:pink|rose)\b/i.test(s)) params.color = '#EC4899';
+    else if (/\b(?:gray|grey|gris)\b/i.test(s)) params.color = '#64748B';
+    else if (/\b(?:cream|warm)\b/i.test(s)) params.color = '#F4EDE2';
+    else if (/\b(?:transparent|clear)\b/i.test(s)) params.color = 'transparent';
+    else {
+        const hexMatch = s.match(/#(?:[0-9a-f]{3}|[0-9a-f]{6})\b/i);
+        if (hexMatch) params.color = hexMatch[0];
+    }
 
     // 14. Direction IDs
     if (/94/i.test(s)) params.directionId = 'dir-b';
@@ -1731,8 +1774,18 @@ export function scoreDesignCommand(cmd, text) {
     if (cmd.id === 'ds_set_font_size' && /(?:font\s*size|text\s*size|type\s*size|\bsize\s*\d+)/i.test(s)) {
         score = Math.max(score, 85);
     }
-    if (cmd.id === 'ds_add_shape' && /\b(?:add|insert|draw|create|new)\s+(?:a\s+)?(?:circle|rectangle|rect|star|line|badge|box|square|pill)\b/i.test(s)) {
-        score = Math.max(score, 90);
+    if (cmd.id === 'ds_add_shape') {
+        if (/\b(?:add|insert|draw|create|new|put|place|make)\s+(?:a\s+|an\s+|the\s+)?(?:[a-z0-9_-]+\s+){0,4}(?:circle|rectangle|rect|star|line|badge|box|square|pill|shape)\b/i.test(s)) {
+            score = Math.max(score, 92);
+        } else if (/\b(?:circle|oval|rectangle|rect|square|box|star|badge|pill)\b/i.test(s) &&
+            !/\b(?:delete|remove|trash|move|nudge|push|shift|scale|align|rotate|font)\b/i.test(s)) {
+            score = Math.max(score, 88);
+        }
+    }
+    if (cmd.id === 'ds_set_layer_color') {
+        if (/\b(?:make\s+it\s+|turn\s+|color\s+|fill\s+|set\s+color\s+|set\s+fill\s+)(?:white|black|red|green|blue|cyan|yellow|orange|purple|pink|gray|grey|terracotta|cream)\b/i.test(s)) {
+            score = Math.max(score, 90);
+        }
     }
     if (cmd.id === 'ds_add_text' && /\b(?:add|insert|write|create|new)\s+(?:a\s+)?(?:text|headline|title|label|caption)\b/i.test(s)) {
         score = Math.max(score, 90);
@@ -1901,6 +1954,11 @@ export function executeDesignCommand(promptText, ctx) {
                 const p = extractDesignParams(bgCmd, clause);
                 const res = bgCmd.execute(p, ctx);
                 results.push({ clause, commandId: bgCmd.id, ...res });
+            } else if (/\b(?:rectangle|rect|circle|box|square|star|badge|pill|line)\b/i.test(s)) {
+                const shapeCmd = DESIGN_COMMANDS.find(c => c.id === 'ds_add_shape');
+                const p = extractDesignParams(shapeCmd, clause);
+                const res = shapeCmd.execute(p, ctx);
+                results.push({ clause, commandId: shapeCmd.id, ...res });
             } else {
                 results.push({
                     clause,

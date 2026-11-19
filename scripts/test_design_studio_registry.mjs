@@ -198,6 +198,33 @@ const execAnimate = executeDesignCommand('animate this design', mockCtxWithImage
 check('executeDesignCommand dispatches handleSaveAsMotionScene',
     execAnimate.success && motionSceneTriggered === true);
 
+// Test shape creation with adjectives, colors, and noun phrases
+const resWhiteRect = resolveDesignCommand('add white rectangle');
+check('resolveDesignCommand maps "add white rectangle" to ds_add_shape with color #FFFFFF',
+    resWhiteRect.match?.id === 'ds_add_shape' && resWhiteRect.score >= 90 && resWhiteRect.params.color === '#FFFFFF');
+
+const resNounWhiteRect = resolveDesignCommand('white rectangle');
+check('resolveDesignCommand maps noun phrase "white rectangle" to ds_add_shape',
+    resNounWhiteRect.match?.id === 'ds_add_shape' && resNounWhiteRect.score >= 85);
+
+let rectMockLayers = [
+    { id: 'rect_test', name: 'Rectangle', type: 'rect', fill: '#1F140E' },
+];
+const mockCtxWithRect = {
+    ...mockCtx,
+    layers: rectMockLayers,
+    selectedLayerId: 'rect_test',
+    setLayers: (updater) => { rectMockLayers = typeof updater === 'function' ? updater(rectMockLayers) : updater; },
+};
+
+const execUpdateRect = executeDesignCommand('white rectangle', mockCtxWithRect);
+check('executeDesignCommand updates selected rectangle fill to #FFFFFF when noun phrase is given',
+    execUpdateRect.success && rectMockLayers.find(l => l.id === 'rect_test')?.fill === '#FFFFFF');
+
+const execAddWhiteRect = executeDesignCommand('add white rectangle', mockCtxWithRect);
+check('executeDesignCommand creates new white rectangle when "add" verb is used',
+    execAddWhiteRect.success && rectMockLayers.some(l => l.id !== 'rect_test' && l.type === 'rect' && l.fill === '#FFFFFF'));
+
 console.log('\n── 4. Professional Vector & Auto Layout Engines ──');
 const vectorMath = await import('../client/src/design-studio/vectorMath.js');
 const autoLayout = await import('../client/src/design-studio/autoLayout.js');

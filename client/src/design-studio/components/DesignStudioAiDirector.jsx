@@ -14,9 +14,10 @@
 import React, { useState } from 'react';
 import {
     Sparkles, ArrowUp, CheckCircle2, AlertCircle,
-    ChevronDown, ChevronUp, Bot, CornerDownLeft, Plus
+    ChevronDown, ChevronUp, Bot, CornerDownLeft, Plus, Loader2
 } from 'lucide-react';
 import { executeDesignCommand } from '../../agent/DesignStudioCommandRegistry.js';
+import { authFetch } from '../../utils/authFetch.js';
 
 const QUICK_SUGGESTIONS = [
     'Remove the background',
@@ -47,6 +48,7 @@ export default function DesignStudioAiDirector({
 }) {
     const [isExpanded, setIsExpanded] = useState(true);
     const [promptText, setPromptText] = useState('');
+    const [isExecuting, setIsExecuting] = useState(false);
     const [history, setHistory] = useState([
         {
             role: 'assistant',
@@ -55,9 +57,9 @@ export default function DesignStudioAiDirector({
     ]);
     const [statusMessage, setStatusMessage] = useState(null);
 
-    const handleExecute = (customPrompt = null) => {
+    const handleExecute = async (customPrompt = null) => {
         const textToRun = (customPrompt || promptText).trim();
-        if (!textToRun) return;
+        if (!textToRun || isExecuting) return;
 
         if (typeof pushUndo === 'function') {
             pushUndo();
@@ -65,6 +67,7 @@ export default function DesignStudioAiDirector({
 
         // Add user prompt to history
         setHistory(prev => [...prev, { role: 'user', text: textToRun }]);
+        setPromptText('');
 
         const ctx = {
             layers,
@@ -84,26 +87,87 @@ export default function DesignStudioAiDirector({
             showToast,
         };
 
-        const result = executeDesignCommand(textToRun, ctx);
+        // Tier 1: Fast local parser execution (0ms)
+        const localResult = executeDesignCommand(textToRun, ctx);
+        const hasUnrecognized = Array.isArray(localResult.results) && localResult.results.some(r => !r.success || /unrecognized/i.test(r.message || ''));
 
-        // Add assistant response to history
-        setHistory(prev => [
-            ...prev,
-            {
-                role: 'assistant',
-                text: result.message,
-                success: result.success,
-            },
-        ]);
-
-        if (result.success) {
-            setStatusMessage({ type: 'success', text: result.message });
-            setPromptText('');
-        } else {
-            setStatusMessage({ type: 'error', text: result.message });
+        if (localResult.success && !hasUnrecognized) {
+            setHistory(prev => [
+                ...prev,
+                {
+                    role: 'assistant',
+                    text: localResult.message,
+                    success: true,
+                },
+            ]);
+            setStatusMessage({ type: 'success', text: localResult.message });
+            setTimeout(() => setStatusMessage(null), 5000);
+            return;
         }
 
-        setTimeout(() => setStatusMessage(null), 5000);
+        // Tier 2: AI / LLM Design Copilot Fallback (supports complex & creative instructions)
+        setIsExecuting(true);
+        setStatusMessage({ type: 'info', text: 'AI is designing...' });
+
+        try {
+            const res = await authFetch('/api/ai/design-copilot', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    prompt: textToRun,
+                    layers: Array.isArray(layers) ? layers : [],
+                    selectedLayerId: selectedLayerIds[0] || null,
+                    format: selectedFormat || { w: 1280, h: 720 },
+                }),
+            });
+
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data?.success) {
+                const fallbackMsg = data?.error || localResult.message || 'Could not understand command.';
+                setHistory(prev => [...prev, { role: 'assistant', text: fallbackMsg, success: false }]);
+                setStatusMessage({ type: 'error', text: fallbackMsg });
+                return;
+            }
+
+            // Apply operations returned by LLM
+            if (Array.isArray(data.operations) && data.operations.length > 0 && typeof setLayers === 'function') {
+                setLayers(prev => {
+                    let updated = [...(Array.isArray(prev) ? prev : [])];
+                    for (const op of data.operations) {
+                        if (op.op === 'add_layer' && op.layer) {
+                            const newId = op.layer.id || `layer_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+                            updated = [...updated, { ...op.layer, id: newId }];
+                            if (typeof setSelectedLayerIds === 'function') {
+                                setSelectedLayerIds([newId]);
+                            }
+                        } else if (op.op === 'update_layer' && (op.layerId || op.layer?.id)) {
+                            const targetId = op.layerId || op.layer?.id;
+                            const patch = op.patch || op.layer || {};
+                            updated = updated.map(l => l.id === targetId ? { ...l, ...patch } : l);
+                        } else if (op.op === 'delete_layer' && (op.layerId || op.layer?.id)) {
+                            const targetId = op.layerId || op.layer?.id;
+                            updated = updated.filter(l => l.id !== targetId);
+                        }
+                    }
+                    return updated;
+                });
+            }
+
+            const replyMessage = data.message || 'Updated canvas layout.';
+            setHistory(prev => [...prev, { role: 'assistant', text: replyMessage, success: true }]);
+            setStatusMessage({ type: 'success', text: replyMessage });
+            if (typeof showToast === 'function') {
+                showToast(replyMessage);
+            }
+        } catch (err) {
+            console.error('[DesignStudioAiDirector] AI fallback error:', err.message);
+            const fallbackMsg = localResult.message || 'Could not execute design instruction.';
+            setHistory(prev => [...prev, { role: 'assistant', text: fallbackMsg, success: false }]);
+            setStatusMessage({ type: 'error', text: fallbackMsg });
+        } finally {
+            setIsExecuting(false);
+            setTimeout(() => setStatusMessage(null), 5000);
+        }
     };
 
     if (!isExpanded) {
@@ -203,12 +267,20 @@ export default function DesignStudioAiDirector({
                         alignItems: 'center',
                         gap: '5px',
                         padding: '3px 8px',
-                        background: 'rgba(240, 249, 251, 0.9)',
+                        background: isExecuting ? 'rgba(0, 229, 255, 0.12)' : 'rgba(240, 249, 251, 0.9)',
                         borderRadius: '999px',
-                        border: '1px solid rgba(11, 124, 145, 0.2)',
+                        border: isExecuting ? '1px solid rgba(0, 229, 255, 0.4)' : '1px solid rgba(11, 124, 145, 0.2)',
                     }}>
-                        <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10B981', boxShadow: '0 0 6px #10B981' }} />
-                        <span style={{ fontSize: '10px', color: '#0B7C91', fontWeight: 700, letterSpacing: '0.04em' }}>READY</span>
+                        <div style={{
+                            width: '6px',
+                            height: '6px',
+                            borderRadius: '50%',
+                            background: isExecuting ? '#00E5FF' : '#10B981',
+                            boxShadow: isExecuting ? '0 0 8px #00E5FF' : '0 0 6px #10B981',
+                        }} />
+                        <span style={{ fontSize: '10px', color: isExecuting ? '#00B4D8' : '#0B7C91', fontWeight: 700, letterSpacing: '0.04em' }}>
+                            {isExecuting ? 'THINKING' : 'READY'}
+                        </span>
                     </div>
                     <button
                         type="button"
@@ -327,20 +399,22 @@ export default function DesignStudioAiDirector({
                     />
                     <button
                         type="submit"
+                        disabled={isExecuting}
                         style={{
                             padding: '7px 12px',
-                            background: 'linear-gradient(135deg, #0B7C91 0%, #00E5FF 100%)',
+                            background: isExecuting ? '#94A3B8' : 'linear-gradient(135deg, #0B7C91 0%, #00E5FF 100%)',
                             color: '#FFFFFF',
                             border: 'none',
                             borderRadius: '8px',
-                            cursor: 'pointer',
+                            cursor: isExecuting ? 'not-allowed' : 'pointer',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            boxShadow: '0 2px 8px rgba(0, 229, 255, 0.3)',
+                            boxShadow: isExecuting ? 'none' : '0 2px 8px rgba(0, 229, 255, 0.3)',
+                            transition: 'all 0.2s ease',
                         }}
                     >
-                        <ArrowUp size={14} />
+                        {isExecuting ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <ArrowUp size={14} />}
                     </button>
                 </form>
             </div>

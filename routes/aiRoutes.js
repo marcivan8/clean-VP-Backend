@@ -9,6 +9,7 @@ const {
     smartCleanupHandler,
     reorderClipsHandler,
     detectRepeatedTakesHandler,
+    designCopilotHandler,
 } = require('../controllers/aiAgentController');
 const { authenticateUser } = require('../middleware/auth');
 const { aiGate } = require('../middleware/usageGate');
@@ -21,6 +22,7 @@ router.post('/analyze-content',    authenticateUser, aiGate, analyzeContentHandl
 router.post('/smart-cleanup',      authenticateUser, aiGate, smartCleanupHandler);
 router.post('/reorder-clips',      authenticateUser, aiGate, reorderClipsHandler);
 router.post('/detect-repeated-takes', authenticateUser, aiGate, detectRepeatedTakesHandler);
+router.post('/design-copilot',     authenticateUser, aiGate, designCopilotHandler);
 
 module.exports = router;
 
