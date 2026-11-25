@@ -15,8 +15,8 @@ This design system encodes that identity: the cinematic dark studio environment,
 
 ## Brand at a glance
 
-- **Typography** — Display: *Instrument Serif* (editorial, mixes roman + italic). Body/UI: *Geist* (geometric sans, `ss01/ss02/cv11` features). Technical/eyebrow: *JetBrains Mono* (uppercase, heavily tracked).
-- **Color** — Pitch-dark grounds (`#0A0A0B`, `#121214`) + crisp off-white text. Primary accent neon **cyan `#00E5FF`**, secondary **violet `#8A2BE2`**. A warm cream theme (`#F4F1EC` / ink `#16181B`) is the alternative.
+- **Typography** — Production display: *Plus Jakarta Sans*. Body/UI: *Geist* (geometric sans, `ss01/ss02/cv11` features). Technical/eyebrow: *JetBrains Mono* (uppercase, tracked). *Instrument Serif* remains available as an editorial accent (`--f-serif`).
+- **Color** — Production dark grounds (`#05070B`, `#090C12`) + crisp off-white text. Primary filled action is **violet `#8A2BE2`**; cyan **`#00E5FF`** is the highlight for strokes, focus, and status. The warm theme (`#F4F1EC` / ink `#16181B`) is an alternative.
 - **Visual language** — Aurora glow grounds, glassmorphic panels (`backdrop-filter: blur(20px) saturate(160%)`), film grain overlay, glowing "traffic dot" indicators, segmented NLE-style tabs, soft lifts on hover.
 
 ---
@@ -56,7 +56,7 @@ The look, answered concretely.
 
 **Color & vibe of imagery.** Footage/thumbnails read cool and filmic — slight teal-shadow, gentle contrast, never oversaturated. Imagery sits inside glass frames with thin strokes. The warm theme inverts to cream paper with deep-ink text for daylight/marketing contexts.
 
-**Backgrounds.** Not flat. The default ground is `#0A0A0B`/`#121214` with an **aurora**: two massive spheres — cyan top-left, violet bottom-right — blurred at `filter: blur(120px)`, ~45–55% opacity, bleeding ambient light into the dark. A **film grain** overlay (`feTurbulence`, ~4.5% opacity, `mix-blend-mode: overlay`) sits over everything to bridge software and cinema. No literal photographic page backgrounds; no repeating illustration patterns.
+**Backgrounds.** Not flat. The live product ground is `#05070B`/`#090C12`; the reusable studio kit also exposes the earlier `#0A0A0B`/`#121214` neutral ramp. A marketing **aurora** uses two large blurred spheres — cyan top-left, violet bottom-right — and a restrained **film grain** overlay. No literal photographic page backgrounds; no repeating illustration patterns.
 
 **Gradients.** Used sparingly and purposefully: the cyan→violet `--grad-accent` for active fills, progress, and key strokes; soft aurora radials for ambient ground. Avoid generic purple SaaS gradients on flat cards — gradients glow, they don't decorate.
 
@@ -109,6 +109,41 @@ See `assets/` — the Waveform V mark in gradient, white, and ink variants (SVG 
 
 ---
 
+## Production token contract
+
+`tokens/` is the canonical source for design foundations. The client imports
+`styles.css` from `client/src/index.css`; production React primitives are
+exported through `client/src/designSystem.js`. Keep product-facing semantic tokens
+in `tokens/colors.css`, `typography.css`, `spacing.css`, and `effects.css`;
+the client’s existing names (`--bg`, `--fg`, `--accent`, `--line`, `--r-*`)
+are compatibility aliases to those tokens. When adding a foundation, define it
+once in the `--ds-*` semantic layer and map legacy names there instead of
+introducing a second literal value. Dark and warm modes share the same token
+roles and override values through `:root` and `[data-theme="warm"]`.
+
+The landing page keeps its cooler marketing treatment through scoped
+`.vibed-landing` aliases; shared values should resolve to semantic tokens.
+Preserve local exceptions only when they are intentional parts of the landing
+art direction.
+
+### Figma handoff and parity
+
+Mirror the semantic token names and modes in Figma Variables:
+
+- `color/bg/*`, `color/surface/*`, `color/text/*`, `color/border/*`,
+  `color/accent/*`, and `color/status/*`
+- `type/family/*`, `type/size/*`, `type/weight/*`, and `type/line-height/*`
+- `space/*`, `radius/*`, `motion/duration/*`, `motion/easing/*`,
+  `effect/shadow/*`, and `effect/blur/*`
+
+Keep component variant names aligned with the exported React props. Each
+published component should show default, hover, focus-visible, pressed,
+disabled, and error states where applicable, plus compact and regular sizes,
+dark and warm modes, and keyboard behavior. Use Auto Layout, component
+properties, and semantic variable bindings instead of detached copies and
+literal styling. This repository has no linked Figma library or file key, so
+these names are the handoff contract; they do not claim a live Figma sync.
+
 ## INDEX — what's in this system
 
 **Root**
@@ -118,7 +153,7 @@ See `assets/` — the Waveform V mark in gradient, white, and ink variants (SVG 
 
 **`tokens/`** — `fonts.css` · `colors.css` · `typography.css` · `spacing.css` · `effects.css` · `base.css` (resets + signature utilities: `.glass-panel`, `.glass-button-pro`, `.aurora`, `.film-grain`, `.eyebrow`, `.traffic-dot`).
 
-**`fonts/`** — self-hosted woff2: Geist (variable), Instrument Serif (roman + italic), JetBrains Mono (variable).
+**`fonts/`** — self-hosted woff2: Geist (variable), Plus Jakarta Sans (500/700/800), Instrument Serif (roman + italic), JetBrains Mono (variable).
 
 **`assets/`** — `logo.png`.
 
@@ -130,4 +165,4 @@ See `assets/` — the Waveform V mark in gradient, white, and ink variants (SVG 
 
 **Design System tab** — 20 `@dsCard`s: Type (4), Colors (4), Spacing (2), Brand (4), Components (5), Studio (1).
 
-> Components are consumed via `window.<Namespace>.<Component>` after loading `_ds_bundle.js`. The current namespace is **`VibedDesignSystem_013733`** (re-run `check_design_system` to confirm). Do not hand-edit `_ds_bundle.js`, `_ds_manifest.json`, `_adherence.oxlintrc.json` — they're generated.
+> Components are consumed via `window.<Namespace>.<Component>` after loading `_ds_bundle.js`. The namespace is **`VibedDesignSystem_013733`**. After changing component sources or token metadata, run `node scripts/build_vibed_design_bundle.mjs` from the repo root to refresh the generated bundle and manifest. Do not hand-edit `_ds_bundle.js` or `_ds_manifest.json`.

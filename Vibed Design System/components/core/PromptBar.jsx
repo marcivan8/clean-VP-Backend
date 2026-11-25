@@ -9,20 +9,24 @@ export function PromptBar({
   onChange,
   onSubmit,
   placeholder = "Describe an edit…",
+  ariaLabel = "Describe an edit",
   busy = false,
   suggestions = [],
   leftAccessory = null,
   style = {},
 }) {
+  const statusId = `ds-prompt-status-${React.useId().replace(/:/g, "")}`;
   const [focus, setFocus] = React.useState(false);
   const submit = () => { if (onSubmit && value.trim() && !busy) onSubmit(value); };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10, ...style }}>
+    <div role="group" aria-busy={busy || undefined} style={{ display: "flex", flexDirection: "column", gap: 10, ...style }}>
       {suggestions.length > 0 && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {suggestions.map((s, i) => (
             <button
+              type="button"
+              className="ds-prompt-suggestion"
               key={i}
               onClick={() => onChange && onChange(s)}
               style={{
@@ -39,7 +43,7 @@ export function PromptBar({
           ))}
         </div>
       )}
-      <div style={{
+      <div className="ds-prompt-shell" style={{
         display: "flex", alignItems: "center", gap: 12,
         padding: "12px 12px 12px 18px",
         borderRadius: "var(--radius-xl)",
@@ -53,15 +57,18 @@ export function PromptBar({
           : "var(--shadow-md), var(--shadow-glass-top)",
         transition: "all var(--dur-base) var(--ease-out)",
       }}>
-        <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+        <span className="ds-prompt-dot" aria-hidden="true" style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
           background: busy ? "var(--violet-500)" : "var(--cyan-500)",
           boxShadow: busy ? "0 0 8px rgba(138,43,226,0.9)" : "var(--glow-dot)",
           animation: busy ? "vibedPulse 1.1s var(--ease-in-out) infinite" : "none" }} />
         {leftAccessory}
         <input
+          className="ds-prompt-input"
+          aria-label={ariaLabel}
+          aria-describedby={busy ? statusId : undefined}
           value={value}
           onChange={(e) => onChange && onChange(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }}
           onFocus={() => setFocus(true)}
           onBlur={() => setFocus(false)}
           placeholder={placeholder}
@@ -72,6 +79,8 @@ export function PromptBar({
           }}
         />
         <button
+          type="button"
+          className="ds-prompt-submit"
           onClick={submit}
           aria-label="Send"
           disabled={busy || !value.trim()}
@@ -86,10 +95,15 @@ export function PromptBar({
             fontFamily: "var(--f-mono)", fontSize: 16, fontWeight: 700,
           }}
         >
-          {busy ? "···" : "↑"}
+          {busy ? <span aria-hidden="true">···</span> : (
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M8 13V3M4 7l4-4 4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
         </button>
       </div>
-      <style>{`@keyframes vibedPulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
+      <span id={statusId} aria-live="polite" style={{ position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0, 0, 0, 0)", whiteSpace: "nowrap", border: 0 }}>{busy ? "Processing edit" : ""}</span>
+      <style>{`@keyframes vibedPulse{0%,100%{opacity:1}50%{opacity:.4}} .ds-prompt-input:focus-visible{outline:none}`}</style>
     </div>
   );
 }

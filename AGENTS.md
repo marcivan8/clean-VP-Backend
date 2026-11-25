@@ -359,6 +359,17 @@ Wired components (all complete):
   AuthPage, AuthPromptModal, SuccessPage, DashboardPage, ExportModal, SettingsPanel
 ```
 
+### 3G · Design Studio
+
+```
+client/src/pages/DesignStudioPage.jsx
+  - Design work and its mediaAssets bin are scoped to vp_design_studio_{projectId}
+    and project metadata.design_studio. The media bin is separate from the
+    editor timeline store; there is intentionally no editor-to-studio media import.
+  - client/src/lib/editorFonts.js is the shared caption/text font catalog and
+    Bunny Fonts loader used by both EditorPage and the Design Studio.
+```
+
 ---
 
 ## NODE 4 · SERVICE DEPENDENCY GRAPH
@@ -1184,6 +1195,7 @@ Regression: new `scripts/test_short_preview.mjs` (7 checks) - the exact main-edi
 **R92 round D - written motion and free background removal (Marc's 9-item list, motion engine first).** Plan and audit: project doc `Codex/r92-plan-9-items.md`.
 - Motion is now WRITTEN, not only picked. `client/src/motion/MotionComposer.js` (pure, shared with the server via import()): 33 verbs in 4 groups (in, emphasis, hold, out: slam-in, whip-in, glitch-in, typewriter, punch, shake, float, push-in, fly-out…) built on real physics easing, plus raw keyframes. Everything an LLM sends is sanitised (verbs, props, ranges, times inside the clip, counts capped, video layers never fade). `planMotionFromBrief` is the no-AI director (named motions, else a mood). Output is the existing Animation[] format, so preview and export render it unchanged.
 - `POST /api/motion/compose` (`server/routes/motionRoutes.js`, aiLimiter): the LLM writes a motion script per layer from the user's words; calm styles get a restraint rule; any failure or no provider → rules (`source: 'rules'`).
+- The rules director in `client/src/motion/MotionComposer.js` is the actual offline recipe library: it parses ordered English/French verbs, infers a mood, selects by layer kind/role, and coordinates stack entrance/exit timing. `planMotionForLayers()` is used by `services/motionProvider.js` for provider-down and per-layer fallbacks; project id seeds only safe deterministic variation. Video fallback verbs are camera-only. Preview the same generated `Animation[]` with `MotionResolver.resolveMotionAt()`. Regression: `node scripts/test_motion_fallback_quality.mjs`.
 - Command `compose_motion` ("animate the title so it slams in", "elegant animation on the captions", "typewriter"). Plain "animate" stays `animate_automatically`. Targets: named layers, else selection, else titles + graphics (`agent/composeMotionTargets.js`); captions go to the LLM as one group. One undo. UI: "Write the motion" box + verb chips per stage in the Motion panel (`MotionDirectorPanel.jsx`).
 - `Easing.js`: real damped springs (`spring` is no longer the elastic alias; springGentle/Wobbly/Stiff/Slow/Snappy, `spring(k,c,m)`), CSS `cubic-bezier()`, `steps(n)`, sine/expo/circ/back-in curves, `isKnownEasing`. Worker copy re-synced.
 - Vector shapes in `TemplateGraphics.js` (same Canvas code in preview and Skia export): highlight-box, underline, circle-callout, arrow, progress-bar, bar-chart, burst. They draw on, hold, fade out. "add a bar chart 20, 45, 80", "add an arrow pointing down". Panel fields added.
@@ -2006,3 +2018,40 @@ Top accent bar: `background: linear-gradient(90deg, var(--accent), var(--violet)
 
 ### "Debug an anonymous session issue"
 `client/src/agent/useSessionStore.js` → `routes/sessionRoutes.js` → in-memory Map → `anonymous_sessions` Supabase table. Remember: in-memory Map is lost on server restart.
+
+---
+
+## NODE 10 · SOCIAL PUBLISHING (YouTube Shorts + Instagram Reels)
+
+```
+client/src/components/ShortsPanel.jsx
+  → SocialPublisher.jsx (copy generation, schedule, reminder UI)
+  → /api/social/publications + /api/social/copy/generate
+  → social_publications (migration 010) + BullMQ social-publishing queue
+  → worker.js / jobs/socialPublicationProcessor.js
+  → YouTube Data API resumable upload OR Instagram Graph API Reels container/publish
+  → daily metric snapshots (migration 011) + accepted recommendations fed into shortFinisher
+```
+
+OAuth credentials stay encrypted in `social_accounts`. Instagram uses Instagram Login
+(`instagram_business_basic`, `instagram_business_content_publish`, and
+`instagram_business_manage_insights`) and exchanges its short-lived token immediately
+for a long-lived token. YouTube requests upload + analytics read scopes. Changed OAuth
+scopes mean existing accounts must reconnect. Daily analytics snapshots are retained
+for 30 days; Instagram insights can lag by 48 hours. AI edit recommendations require
+at least three measured Vibed posts and remain pending until the user accepts them.
+Accepted instructions enter the short headline/keyword and camera-energy planning
+prompt for matching platforms; caption emphasis and camera moves apply them to the
+finished short. For queued uploads, routes accept
+only the authenticated user's finished export path in GCS and mint a signed read URL;
+Instagram cannot read the editor's cookie-protected media proxy. The signed URL expires
+12 hours after the scheduled time, so scheduling is limited to 6.5 days. Failed posts
+become `manual_reminder` instead of being blindly retried (a network timeout could
+otherwise duplicate a post). The Shorts panel surfaces upcoming reminders and failures.
+
+Deployment prerequisites: run `migrations/010_social_publications.sql` and
+`migrations/011_social_analytics.sql`; configure
+`INSTAGRAM_CLIENT_ID`, `INSTAGRAM_CLIENT_SECRET`, `YOUTUBE_CLIENT_ID`,
+`YOUTUBE_CLIENT_SECRET`, `PUBLIC_URL`, and existing `SOCIAL_TOKEN_KEY` (or service role
+key fallback). Meta and Google app review/production publishing access are external
+requirements; without them, automatic posting can fail and the manual fallback appears.

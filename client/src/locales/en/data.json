@@ -28,7 +28,9 @@
       "id": "upload",
       "title": "When you upload a video",
       "blocks": [
-        "The file goes to our private storage in the EU. We create a lighter preview copy, a waveform and a thumbnail so the editor stays fast. All of these belong to your account and are deleted with the project."
+        "The file goes to our private storage in the EU. We create a lighter preview copy, a waveform and a thumbnail so the editor stays fast. All of these belong to your account and are deleted with the project.",
+        "Social features process information about your connected YouTube/Instagram account, scheduled copy, Vibed publication identifiers and their statistics. Metric snapshots are kept for 30 days; details and recipients are in the [Privacy Policy](/privacy).",
+        "Design Studio features store compositions, layers, font settings and media references in a project-specific space separate from the editor's media."
       ]
     },
     {

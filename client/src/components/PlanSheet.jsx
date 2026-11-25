@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import MobileSheet from './MobileSheet.jsx';
 import { startCheckout } from '../lib/checkout.js';
 import {
-    PLAN_LABELS, PLAN_PRICES, nextPlan, nextUsageReset, getProjectLimit, aiOpsMeter,
+    PLAN_LABELS, planPrice, nextPlan, nextUsageReset, getProjectLimit, aiOpsMeter,
     FREE_TRIAL_AUTO_RUNS,
 } from '../lib/planLimits.js';
 
@@ -15,7 +15,7 @@ import {
  *   reason 'plans'    → "See plans" from the dashboard usage meter
  *   reason 'auto_trial' → the free Auto edits are used up (mobile flow, R148)
  * Shows the next plan's price and first features (same copy as the pricing
- * page), Upgrade (Polar checkout) and Not now. Mobile-only callers.
+ * page), Upgrade (Stripe Checkout) and Not now. Mobile-only callers.
  */
 export default function PlanSheet({ open, reason = 'ai_ops', plan = 'free', upgradeTo, used = null, onClose, onBilling }) {
     const { t, i18n } = useTranslation('common');
@@ -81,9 +81,9 @@ export default function PlanSheet({ open, reason = 'ai_ops', plan = 'free', upgr
                             <Zap size={16} style={{ color: 'var(--accent)' }} aria-hidden="true" />
                             {targetLabel}
                         </span>
-                        {PLAN_PRICES[target] && (
+                        {planPrice(target, i18n.language) && (
                             <span style={{ fontFamily: 'var(--f-mono)', fontSize: 13, color: 'var(--fg)' }}>
-                                {t('planSheet.perMonth', { price: PLAN_PRICES[target] })}
+                                {t('planSheet.perMonth', { price: planPrice(target, i18n.language) })}
                             </span>
                         )}
                     </div>

@@ -7,7 +7,8 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
   hint?: string;
   iconLeft?: React.ReactNode;
   /** Error state — red border + red hint. */
-  error?: boolean;
+  error?: boolean | string;
+  hintId?: string;
   containerStyle?: React.CSSProperties;
 }
 

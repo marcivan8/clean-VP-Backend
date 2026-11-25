@@ -10,6 +10,7 @@
 
 const { supabaseAdmin } = require('../../config/database');
 const { encrypt, decrypt } = require('./tokenCrypto');
+const { getProvider } = require('./providers');
 
 const TABLE = 'social_accounts';
 
@@ -22,12 +23,15 @@ function publicAccount(row) {
     const usable = Boolean(decrypt(row.access_token));
     const expired = Boolean(row.expires_at) && new Date(row.expires_at).getTime() <= Date.now();
     const refreshable = Boolean(decrypt(row.refresh_token));
+    const requiredScopes = getProvider(row.provider)?.scopes || [];
+    const grantedScopes = String(row.scopes || '').split(/[\s,]+/).filter(Boolean);
+    const missingScope = requiredScopes.some(scope => !grantedScopes.includes(scope));
     return {
         provider:      row.provider,
         handle:        row.handle || null,
         connectedAt:   row.connected_at || null,
         expiresAt:     row.expires_at || null,
-        needsReconnect: !usable || (expired && !refreshable),
+        needsReconnect: !usable || (expired && !refreshable) || missingScope,
     };
 }
 
@@ -90,7 +94,7 @@ async function disconnect(userId, providerId) {
 }
 
 /**
- * The decrypted access token, for server side publishing only. Returns null if
+ * The decrypted access token, for server side publishing and analytics only. Returns null if
  * there is no connection or the token cannot be recovered. Callers must not
  * put the result in a response, a log, or an error message.
  */
@@ -106,4 +110,20 @@ async function accessTokenFor(userId, providerId) {
     return decrypt(data.access_token);
 }
 
-module.exports = { listAccounts, saveAccount, disconnect, accessTokenFor, publicAccount };
+async function tokenRecordFor(userId, providerId) {
+    const { data, error } = await supabaseAdmin.from(TABLE)
+        .select('external_id, access_token, refresh_token, expires_at, scopes')
+        .eq('user_id', userId).eq('provider', providerId).maybeSingle();
+    if (error || !data) return null;
+    return { ...data, accessToken: decrypt(data.access_token), refreshToken: decrypt(data.refresh_token) };
+}
+
+async function updateAccessToken(userId, providerId, accessToken, expiresAt) {
+    const { error } = await supabaseAdmin.from(TABLE).update({
+        access_token: encrypt(accessToken), expires_at: expiresAt || null, updated_at: new Date().toISOString(),
+    }).eq('user_id', userId).eq('provider', providerId);
+    if (error) console.error(`[social] token refresh(${providerId}) error:`, error.message);
+    return !error;
+}
+
+module.exports = { listAccounts, saveAccount, disconnect, accessTokenFor, tokenRecordFor, updateAccessToken, publicAccount };

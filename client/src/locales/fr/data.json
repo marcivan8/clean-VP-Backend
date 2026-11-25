@@ -28,7 +28,9 @@
       "id": "upload",
       "title": "Lorsque vous importez une vidéo",
       "blocks": [
-        "Le fichier est envoyé dans notre stockage privé, dans l'UE. Nous créons une copie d'aperçu plus légère, une forme d'onde et une miniature pour que l'éditeur reste fluide. Tous ces éléments sont rattachés à votre compte et supprimés avec le projet."
+        "Le fichier est envoyé dans notre stockage privé, dans l'UE. Nous créons une copie d'aperçu plus légère, une forme d'onde et une miniature pour que l'éditeur reste fluide. Tous ces éléments sont rattachés à votre compte et supprimés avec le projet.",
+        "Les fonctions du Design Studio enregistrent des compositions, calques, réglages de polices et références de médias dans un espace par projet, séparé des médias de l'éditeur.",
+        "Les fonctions sociales traitent les informations du compte YouTube/Instagram connecté, les textes programmés, l'identifiant des publications Vibed et leurs statistiques. Les instantanés de statistiques sont conservés 30 jours ; les détails et les destinataires figurent dans la [Politique de confidentialité](/privacy)."
       ]
     },
     {

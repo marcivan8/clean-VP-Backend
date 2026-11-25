@@ -4,6 +4,8 @@ export interface TabItem {
   id: string;
   label: string;
   icon?: React.ReactNode;
+  disabled?: boolean;
+  panelId?: string;
 }
 
 export interface TabsProps {
@@ -11,6 +13,7 @@ export interface TabsProps {
   /** Controlled active tab id. Falls back to first tab. */
   value?: string;
   onChange?: (id: string) => void;
+  /** Horizontal tabs support Left/Right Arrow, Home, and End navigation. */
   size?: "sm" | "md";
   style?: React.CSSProperties;
 }

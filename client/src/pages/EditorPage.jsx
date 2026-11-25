@@ -4,33 +4,9 @@ import IDELayout from '../layouts/IDELayout';
 import useTimelineStore from '../store/useTimelineStore';
 import { getProject } from '../lib/projectsApi.js';
 import { ensureMediaSession } from '../utils/mediaSession.js';
+import { ensureEditorFonts } from '../lib/editorFonts.js';
 
 console.log('[EditorPage] Component Rendered');
-
-// All caption-editor fonts, served by Bunny Fonts (EU, no visitor logging)
-// instead of Google Fonts, so opening the editor does not send the visitor's
-// IP address to Google. Injected on-demand rather than blocking the
-// landing page. Loaded once per session — browser caches the font files so
-// subsequent editor opens have zero latency.
-const EDITOR_FONTS_URL =
-    'https://fonts.bunny.net/css?family=anton:400|bebas-neue:400|montserrat:300,400,500,600,700,800,900|inter:300,400,500,600,700,800|barlow-condensed:600,700|playfair-display:400,700,400i,700i|lora:400,700|merriweather:300,400,700,400i|dm-serif-display:400|cormorant-garamond:400,600,700,400i,600i,700i|dm-sans:400,500,600|unbounded:700,900|nunito:400,600,700,800|poppins:400,500,600,700|quicksand:400,500,700|josefin-sans:400,700|raleway:400,500,700|rajdhani:500,600,700|exo-2:600,700,800|orbitron:700,900|oxanium:600,700|roboto-condensed:400,700|oswald:400,500,600,700|teko:500,600,700|black-han-sans:400|saira-condensed:700,800|cabin:600,700|caveat:400,600,700|pacifico:400|kalam:400,700|satisfy:400|dancing-script:400,700|boogaloo:400|righteous:400|press-start-2p:400|audiowide:400|outfit:300,400,500,600,700,800|roboto:300,400,500,700|lato:300,400,700&display=swap';
-
-function injectEditorFonts() {
-    if (document.getElementById('vibed-editor-fonts')) return; // already injected
-    const pc1 = document.createElement('link');
-    pc1.rel = 'preconnect';
-    pc1.href = 'https://fonts.bunny.net';
-    pc1.crossOrigin = 'anonymous';
-    pc1.id = 'vibed-fonts-pc1';
-
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = EDITOR_FONTS_URL;
-    link.id = 'vibed-editor-fonts';
-
-    document.head.appendChild(pc1);
-    document.head.appendChild(link);
-}
 
 /**
  * EditorPage
@@ -47,10 +23,9 @@ const EditorPage = () => {
     const navigate = useNavigate();
     const { loadProject, setProjectId, setProjectName } = useTimelineStore();
 
-    // Inject caption-editor Google Fonts on first mount.
-    // Fonts are not in index.html because they're not needed on the landing page.
+    // Inject caption-editor fonts on first mount; the catalog is also used by Design Studio.
     useEffect(() => {
-        injectEditorFonts();
+        ensureEditorFonts();
     }, []);
 
     // Show a loading screen while the cloud project hydrates

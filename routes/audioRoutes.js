@@ -202,7 +202,9 @@ router.post('/beat-detect', authenticateUser, async (req, res) => {
         const uniqueJobId = `beat-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
         const job = await audioQueue.add('beat-detect', {
             action: 'beat-detect',
-            filePath: inputPath
+            filePath: inputPath,
+            // Owner, so GET /api/jobs/:id/status will return it (R97).
+            userId: req.user?.id || (process.env.NODE_ENV !== 'production' ? 'dev-user' : null),
         }, {
             jobId: uniqueJobId
         });
@@ -457,7 +459,8 @@ router.post('/filler/detect-upload', authenticateUser, fillerUpload.single('file
         const job = await audioQueue.add('filler-detect', {
             action: 'filler-detect',
             filePath: tmpPath,
-            language
+            language,
+            userId: req.user.id, // owner, for job status reads (R97)
         }, {
             jobId: uniqueJobId
         });

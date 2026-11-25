@@ -4,6 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { Scissors, Merge, Play, Type, Trash2 } from 'lucide-react';
 import useAIStore from '../store/useAIStore';
 import useTimelineStore from '../store/useTimelineStore';
+import { findDeletedWords } from '../motion/captionEdits.js';
 import { CAPTION_STYLES, FONT_STACK, captionPackUpdates } from './Assistant/captionStylePacks.js';
 import { submitRokaPrompt } from '../agent/rokaPromptQueue.js';
 import MobileSheet, { SheetLabel, SheetRow, SheetChip } from './MobileSheet';
@@ -136,7 +137,19 @@ function EditSheet({ placementId, onClose }) {
 
     const st = () => useTimelineStore.getState();
     const dirty = text.replace(/\s+/g, ' ').trim() !== String(clip.content || '').trim();
+    // R105: words taken OUT of the caption were spoken somewhere. Offer to cut
+    // that stretch of the video too; never cut without asking (a correction
+    // that only changes a word's spelling cuts nothing, see findDeletedWords).
+    const removed = dirty ? findDeletedWords(words, clip.content, text) : null;
+    const pendingCut = removed && removed.ranges.length > 0;
+    // Text only. With words removed, blur does not save: the user has a choice
+    // to make first, and closing the sheet means "text only".
     const save = () => { if (dirty) st().editCaptionText(placementId, text); };
+    const saveOnBlur = () => { if (!pendingCut) save(); };
+    const cutToo = () => {
+        const r = st().cutDeletedCaptionWords(placementId, text, { content: clip.content, words });
+        if (r.ok) onClose(); else save();
+    };
 
     return (
         <MobileSheet open title={t('mobileCaptions.editTitle')} onClose={() => { save(); onClose(); }}>
@@ -148,13 +161,31 @@ function EditSheet({ placementId, onClose }) {
                 id="mobile-caption-text"
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                onBlur={save}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); save(); e.currentTarget.blur(); } }}
+                onBlur={saveOnBlur}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveOnBlur(); e.currentTarget.blur(); } }}
                 style={{
                     marginTop: -8, height: 48, boxSizing: 'border-box', padding: '0 14px', borderRadius: 'var(--r-sm)',
                     border: '1px solid var(--accent)', background: 'var(--bg)', color: 'var(--fg)', fontFamily: 'var(--f-sans)', fontSize: 16, outline: 'none',
                 }}
             />
+
+            {pendingCut && (
+                <div role="status" style={{ padding: 12, borderRadius: 'var(--r-sm)', border: '1px solid var(--accent)', background: 'var(--accent-soft)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <span style={{ fontSize: 13.5, color: 'var(--fg)', lineHeight: 1.45 }}>
+                        {t('mobileCaptions.cutPrompt', { count: removed.deleted.length, seconds: removed.seconds.toFixed(1) })}
+                    </span>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                        <button type="button" onClick={cutToo}
+                            style={{ flex: 1, minHeight: 44, borderRadius: 'var(--r-sm)', border: 0, background: 'var(--accent)', color: '#fff', fontFamily: 'var(--f-sans)', fontSize: 14, fontWeight: 600 }}>
+                            <Scissors size={15} style={{ verticalAlign: '-2px', marginRight: 6 }} />{t('mobileCaptions.cutToo')}
+                        </button>
+                        <button type="button" onClick={() => { save(); onClose(); }}
+                            style={{ flex: 1, minHeight: 44, borderRadius: 'var(--r-sm)', border: '1px solid var(--line-strong)', background: 'transparent', color: 'var(--fg)', fontFamily: 'var(--f-sans)', fontSize: 14 }}>
+                            {t('mobileCaptions.textOnly')}
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {words.length > 0 && (
                 <>

@@ -426,7 +426,31 @@ const IDELayout = ({ mode = 'editor' }) => {
 
     // Defer track changes so rapid caption/clip additions coalesce into a
     // single playerVariables update — one playback.reload() instead of N.
-    const deferredTracks = React.useDeferredValue(tracks);
+    const liveDeferredTracks = React.useDeferredValue(tracks);
+
+    // R168: while the AI is working, each step of its edit used to reload the
+    // preview player, and every reload restarts the sound mid-play: the
+    // crackling users heard as the result arrived. The preview now holds the
+    // timeline it had when the job started and reloads ONCE when it ends.
+    // (Stored as state and updated during render: React's pattern for state
+    // derived from a changing value, no effect or ref read needed.)
+    const aiBusy = useAIStore(s => s.isAnalyzing);
+    const [previewHold, setPreviewHold] = React.useState({ busy: false, tracks: null });
+    if (aiBusy !== previewHold.busy) {
+        setPreviewHold({ busy: aiBusy, tracks: aiBusy ? liveDeferredTracks : null });
+    }
+    const deferredTracks = aiBusy && previewHold.tracks ? previewHold.tracks : liveDeferredTracks;
+    const heldTracksRef = useRef(null);
+    useEffect(() => {
+        if (aiBusy) { heldTracksRef.current = previewHold.tracks; return; }
+        // The job just ended. If it changed the timeline, the preview is about
+        // to reload: stop playback first so the reload never runs under sound.
+        const held = heldTracksRef.current;
+        heldTracksRef.current = null;
+        if (held && held !== useTimelineStore.getState().tracks && useTimelineStore.getState().isPlaying) {
+            useTimelineStore.getState().setIsPlaying(false);
+        }
+    }, [aiBusy, previewHold.tracks]);
 
     const hasClips = React.useMemo(
         () => deferredTracks.some(t => t.clips?.length > 0),
@@ -860,6 +884,24 @@ const IDELayout = ({ mode = 'editor' }) => {
     }, [isAnonymous, showAuthPrompt]);
 
     const activeTab    = useAIStore(s => s.activeTab);
+    // R168: opening the sheet on a tab (☰ → Settings opens it on the LAST
+    // tab) left the strip scrolled to the start, so the active tab sat off
+    // screen and the strip read as misplaced. Bring the active tab into view
+    // whenever the sheet opens or the tab changes. The sheet slides in, so wait
+    // one frame for the strip to have its real width.
+    useEffect(() => {
+        if (!isMobile || mobileSheet !== 'media') return undefined;
+        const raf = requestAnimationFrame(() => {
+            const el = tabBarRef.current;
+            const btn = el?.querySelector(`[data-tour="tab-${activeTab}"]`);
+            if (!el || !btn) return;
+            const target = btn.offsetLeft - (el.clientWidth - btn.offsetWidth) / 2;
+            el.scrollTo({ left: Math.max(0, target), behavior: 'smooth' });
+            updateTabScrollState();
+        });
+        return () => cancelAnimationFrame(raf);
+    }, [isMobile, mobileSheet, activeTab, updateTabScrollState]);
+
     const setActiveTab = useAIStore(s => s.setActiveTab);
     const { plan: userPlan } = useUserPlan();
     const isFree = userPlan === 'free';
@@ -1315,10 +1357,10 @@ const IDELayout = ({ mode = 'editor' }) => {
                 }
 
                 if (isVideo) {
-                    // After 5s with no response, assume upload is done and proxy is encoding
-                    const processingTimer = setTimeout(() => {
-                        useTimelineStore.getState().updateAsset(assetId, { uploadPhase: 'processing' });
-                    }, 5000);
+                    // 'processing' is set when the upload has REALLY finished
+                    // (onUploadComplete below). It used to be a fixed 5s timer,
+                    // which also flipped files still waiting for an upload slot
+                    // (proxyService caps simultaneous uploads) to "processing".
 
                     const userId = sessionId || 'anon';
                     // Track whether early transcription already started (via onUploadComplete).
@@ -1337,6 +1379,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                         (gcsPath) => {
                             // ⚡ File landed on GCS — start transcription NOW, in parallel
                             // with proxy encoding. Whisper and FFmpeg proxy run simultaneously.
+                            useTimelineStore.getState().updateAsset(assetId, { uploadPhase: 'processing', uploadProgress: 100 });
                             if (gcsPath) {
                                 earlyTranscriptionPath = gcsPath;
                                 // Record the per-asset storage path. uploadedFilePath is a
@@ -1363,7 +1406,8 @@ const IDELayout = ({ mode = 'editor' }) => {
                                 (async () => {
                                     try {
                                         const { authFetch } = await import('../utils/authFetch.js');
-                                        const resp = await authFetch('/api/brain/analyze-asset', {
+                                        const { fetchWithRateLimitRetry } = await import('../utils/retryOn429.js');
+                                        const resp = await fetchWithRateLimitRetry(() => authFetch('/api/brain/analyze-asset', {
                                             method: 'POST',
                                             body: JSON.stringify({
                                                 assetId,
@@ -1372,7 +1416,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                                                 projectId: useTimelineStore.getState().projectId || null,
                                                 isReference: Boolean(e.referenceMaterial),
                                             }),
-                                        });
+                                        }), { label: 'analyze-asset' });
                                         assetAnalysisQueued = resp.ok;
                                         setVisualAnalysisRequested(resp.ok);
                                         console.log(resp.ok
@@ -1387,7 +1431,6 @@ const IDELayout = ({ mode = 'editor' }) => {
                         },
                     )
                         .then(data => {
-                            clearTimeout(processingTimer);
                             if (!data) {
                                 console.warn('[IDELayout] Proxy job resolved with null result — job may have completed before SSE could read returnvalue');
                                 // Marking the asset "ready" with NO playable URL left the
@@ -1678,7 +1721,6 @@ const IDELayout = ({ mode = 'editor' }) => {
                             }
                         })
                         .catch(err => {
-                            clearTimeout(processingTimer);
                             console.error(`[IDELayout] Proxy generation failed for ${file.name}`, err);
                             // Same reasoning as the null-result branch above: without a
                             // URL the asset renders as a blank dark player. If the raw
@@ -2770,7 +2812,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                         style={{ background: "linear-gradient(180deg, var(--glass), transparent)" }}
                     >
                         <div className="md:hidden px-4 py-2 border-b border-[var(--line-soft)] flex justify-between items-center shrink-0" style={{ background: "var(--glass)" }}>
-                            <span style={{ color: "var(--fg)", fontSize: 16, fontWeight: 650, letterSpacing: '-0.01em' }}>{t('ideLayout.mediaAndAssets')}</span>
+                            <span style={{ color: "var(--fg)", fontSize: 16, fontWeight: 650, letterSpacing: '-0.01em' }}>{activeTab === 'media' ? t('ideLayout.mediaAndAssets') : t(`ideLayout.tabs.${activeTab}`, t('ideLayout.mediaAndAssets'))}</span>
                             <button
                                 onClick={() => setMobileSheet(null)}
                                 aria-label={t('mobileUi.close')}

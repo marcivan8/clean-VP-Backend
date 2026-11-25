@@ -58,6 +58,11 @@
                 "vibed_consent_v1",
                 "Votre choix dans le bandeau cookies",
                 "6 mois"
+              ],
+              [
+                "vp_design_studio_{projectId} (stockage local)",
+                "Enregistre localement la composition, les calques, les réglages et le bac de médias du Design Studio pour le projet actif",
+                "Jusqu'à remplacement, effacement du navigateur ou suppression du projet"
               ]
             ]
           }
@@ -96,7 +101,8 @@
       "id": "third",
       "title": "3. Contenus chargés depuis d'autres services",
       "blocks": [
-        "L'éditeur charge les polices des sous-titres depuis Bunny Fonts, un service européen qui ne dépose pas de cookie et n'enregistre pas l'adresse IP des visiteurs. Les rapports d'erreur (sans relecture) sont envoyés à Sentry pour nous aider à corriger les bugs ; ils n'utilisent pas de cookie."
+        "L'éditeur charge les polices des sous-titres depuis Bunny Fonts, un service européen qui ne dépose pas de cookie et n'enregistre pas l'adresse IP des visiteurs. Les rapports d'erreur (sans relecture) sont envoyés à Sentry pour nous aider à corriger les bugs ; ils n'utilisent pas de cookie.",
+        "La connexion à YouTube ou Instagram ouvre le site de la plateforme concernée. Les cookies utilisés par Google ou Meta sur leurs propres pages relèvent de leurs politiques ; Vibed ne les lit pas."
       ]
     },
     {

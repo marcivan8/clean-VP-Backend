@@ -7,7 +7,11 @@ export function IconButton({
   variant = "glass",
   size = 36,
   active = false,
+  pressed,
   disabled = false,
+  className = "",
+  onMouseEnter: onIconMouseEnter,
+  onMouseLeave: onIconMouseLeave,
   style = {},
   ...rest
 }) {
@@ -37,9 +41,11 @@ export function IconButton({
       type="button"
       aria-label={label}
       title={label}
+      aria-pressed={pressed}
       disabled={disabled}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      className={`ds-icon-button ${className}`.trim()}
+      onMouseEnter={(event) => { setHover(true); onIconMouseEnter?.(event); }}
+      onMouseLeave={(event) => { setHover(false); onIconMouseLeave?.(event); }}
       style={{
         display: "inline-flex",
         alignItems: "center",

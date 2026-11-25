@@ -8,6 +8,8 @@ export interface SliderProps {
   onChange?: (next: number) => void;
   /** Mono-uppercase label above the track. */
   label?: string;
+  ariaLabel?: string;
+  id?: string;
   /** Show the current value at top-right. */
   showValue?: boolean;
   /** Format the displayed value (e.g. timecode). */

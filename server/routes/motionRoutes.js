@@ -100,6 +100,8 @@ function cleanLayers(layers) {
     return layers.slice(0, MAX_LAYERS).map(l => ({
         id: String(l?.id || '').slice(0, 80),
         kind: ['text', 'caption', 'image', 'sticker', 'video', 'shape'].includes(l?.kind) ? l.kind : 'text',
+        role: typeof l?.role === 'string' ? l.role.slice(0, 40) : '',
+        name: typeof l?.name === 'string' ? l.name.slice(0, 80) : '',
         content: String(l?.content || '').slice(0, 120),
         duration: Math.max(0.2, Math.min(600, Number(l?.duration) || 3)),
     })).filter(l => l.id);
@@ -160,6 +162,7 @@ Reply with JSON only: {"layers": {"<layer id>": {"beats": [...], "animations": [
 router.post('/compose', authenticateUser, async (req, res) => {
     // Rate limiter: mounted under aiLimiter in index.js (LLM call).
     const { brief, layers, editingStyle } = req.body || {};
+    const projectSeed = String(req.body?.projectId || '').slice(0, 100);
     try {
         const composer = await loadComposer();
         const style = sanitizeEditingStyle(editingStyle);
@@ -167,6 +170,7 @@ router.post('/compose', authenticateUser, async (req, res) => {
             brief,
             layers,
             editingStyle: style,
+            seed: projectSeed,
             composer,
             buildPrompt: (args) => buildMotionPrompt({ ...args, useVibedStandards: true }),
             cleanLayers,
@@ -191,23 +195,28 @@ router.post('/compose', authenticateUser, async (req, res) => {
  * the first second), the words worth emphasising, and a one-line motion brief
  * for the title. Rules fallback in the client when this fails or no AI is set.
  */
-function buildShortPlanPrompt({ text, platform, duration }) {
+function buildShortPlanPrompt({ text, platform, duration, performanceGuidance = '' }) {
+    const guidance = String(performanceGuidance || '').trim().slice(0, 500);
     return `You are the editor of a top ${platform} account. This is the transcript of a ${Math.round(duration)} s short:
 """${text}"""
+
+${guidance ? `User-approved lessons from prior Vibed posts (apply only when relevant and never invent claims): ${guidance}\n` : ''}
 
 Write:
 - "headline": the on-screen hook for the first second, 3 to 7 words, no emoji, no hashtags, no quotes, in the transcript's language. It must make a viewer stop scrolling and match what is actually said.
 - "keywords": up to 10 single words from the transcript that deserve emphasis in the captions (numbers, results, strong nouns or verbs).
 - "titleBrief": one short sentence describing how the headline should move (for example "slams in, punches on the number, whips out").
+- "cameraEnergy": "low", "standard", or "high" for the camera movement across the short. Follow approved guidance about framing or pacing when it applies; otherwise use "standard".
 
-Reply with JSON only: {"headline": "...", "keywords": ["..."], "titleBrief": "..."}`;
+Reply with JSON only: {"headline": "...", "keywords": ["..."], "titleBrief": "...", "cameraEnergy": "standard"}`;
 }
 
 function cleanShortPlan(raw) {
     const headline = String(raw?.headline || '').replace(/["#\u{1F300}-\u{1FAFF}]/gu, '').trim().split(/\s+/).slice(0, 8).join(' ').slice(0, 70);
     const keywords = (Array.isArray(raw?.keywords) ? raw.keywords : []).map(k => String(k || '').trim().split(/\s+/)[0]).filter(Boolean).slice(0, 10).map(k => k.slice(0, 30));
     const titleBrief = String(raw?.titleBrief || '').slice(0, 160);
-    return headline.split(' ').length >= 2 ? { headline, keywords, titleBrief } : null;
+    const cameraEnergy = ['low', 'standard', 'high'].includes(raw?.cameraEnergy) ? raw.cameraEnergy : 'standard';
+    return headline.split(' ').length >= 2 ? { headline, keywords, titleBrief, cameraEnergy } : null;
 }
 
 /**
@@ -817,6 +826,7 @@ function cleanScenePlan(raw, visualCatalog = {}) {
 router.post('/short-plan', authenticateUser, async (req, res) => {
     // Rate limiter: mounted under aiLimiter in index.js (LLM call).
     const { text, platform, duration } = req.body || {};
+    const performanceGuidance = String(req.body?.performanceGuidance || '').trim().slice(0, 500);
     const cleanText = String(text || '').trim().slice(0, 2000);
     if (!cleanText) return res.status(400).json({ error: 'text is required' });
     const plat = ['tiktok', 'reels', 'shorts'].includes(platform) ? platform : 'tiktok';
@@ -827,7 +837,7 @@ router.post('/short-plan', authenticateUser, async (req, res) => {
         const provider = resolveProvider({ capability: 'chat' });
         const requestParams = {
             model: resolveModel('gpt-4o', 'chat'),
-            messages: [{ role: 'user', content: buildShortPlanPrompt({ text: cleanText, platform: label, duration: Number(duration) || 30 }) }],
+            messages: [{ role: 'user', content: buildShortPlanPrompt({ text: cleanText, platform: label, duration: Number(duration) || 30, performanceGuidance }) }],
             temperature: 0.7,
             max_tokens: 400,
         };

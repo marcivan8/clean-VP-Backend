@@ -10,6 +10,9 @@ export interface IconButtonProps extends React.ButtonHTMLAttributes<HTMLButtonEl
   size?: number;
   /** Active/selected state — cyan icon + lit stroke. */
   active?: boolean;
+  /** Set only when the control is a toggle; controls aria-pressed. */
+  pressed?: boolean;
+  className?: string;
   disabled?: boolean;
 }
 

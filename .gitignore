@@ -4,6 +4,7 @@ uploads
 credentials/
 ML_Dataset/
 *.json
+!Vibed\ Design\ System/_ds_manifest.json
 !package.json
 !package-lock.json
 !client/package.json

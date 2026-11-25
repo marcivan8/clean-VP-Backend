@@ -1,13 +1,15 @@
 /* ============================================================
    Vibed — Typography Tokens
-   Display: Instrument Serif (editorial, italic mixes)
+   Production display: Plus Jakarta Sans
+   Editorial display accent: Instrument Serif
    Body/UI: Geist (with ss01, ss02, cv11 features)
    Technical/eyebrow: JetBrains Mono (uppercase, tracked out)
    ============================================================ */
 
 :root {
   /* ---- Families ---------------------------------------------- */
-  --f-display: "Instrument Serif", "Times New Roman", serif; /* @kind font */
+  --f-display: "Plus Jakarta Sans", "Geist", ui-sans-serif, system-ui, sans-serif; /* @kind font */
+  --f-serif: "Instrument Serif", "Times New Roman", serif; /* @kind font */
   --f-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif; /* @kind font */
   --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; /* @kind font */
 
@@ -47,4 +49,12 @@
   --ls-normal: 0; /* @kind font */
   --ls-eyebrow: 0.18em;    /* heavily tracked mono @kind font */
   --ls-mono-ui: 0.06em; /* @kind font */
+
+  /* Semantic roles consumed by production UI and design tooling. */
+  --ds-font-display: var(--f-display);
+  --ds-font-body: var(--f-sans);
+  --ds-font-mono: var(--f-mono);
+  --ds-type-body: 16px;
+  --ds-type-label: 13px;
+  --ds-type-caption: 12px;
 }

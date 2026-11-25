@@ -33,12 +33,10 @@ export function Icon({
       const el = document.createElement("i");
       el.setAttribute("data-lucide", name);
       ref.current.appendChild(el);
-      try {
-        window.lucide.createIcons({
-          attrs: { width: size, height: size, "stroke-width": strokeWidth },
-          nameAttr: "data-lucide",
-        });
-      } catch (e) { /* lucide not ready */ }
+      window.lucide.createIcons({
+        attrs: { width: size, height: size, "stroke-width": strokeWidth },
+        nameAttr: "data-lucide",
+      });
     }
 
     // Phosphor custom elements register themselves; nothing to do after mount.

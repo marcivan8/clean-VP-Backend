@@ -23,25 +23,23 @@ import {
 import { Logo } from '../components/Logo.jsx';
 import { supabase } from '../lib/supabaseClient.js';
 import { useUserPlan } from '../hooks/useUserPlan.js';
-import { listProjects } from '../lib/projectsApi.js';
-import useTimelineStore from '../store/useTimelineStore.js';
 
-import {
-    MARKET_CATEGORIES,
-    INITIAL_LOCATION,
-    LISTINGS,
-    MOCK_SCOUT_PROJECT
-} from '../data/marketplaceSeedData.js';
+// R102: listings are real (GET /api/market/listings); the seed file is gone from this page.
+import { fetchListings, CATEGORY_FILTERS } from '../market/marketApi.js';
 
 import MarketplaceMap from '../components/Marketplace/MarketplaceMap.jsx';
 import ProfileDetailModal from '../components/Marketplace/ProfileDetailModal.jsx';
-import BookingEscrowModal from '../components/Marketplace/BookingEscrowModal.jsx';
 import useMarketplaceStore from '../store/useMarketplaceStore.js';
 import MarketplaceBookings from '../components/Marketplace/MarketplaceBookings.jsx';
 import MarketplaceCallSheet from '../components/Marketplace/MarketplaceCallSheet.jsx';
 import MarketplaceThread from '../components/Marketplace/MarketplaceThread.jsx';
 import MarketplaceAssetRoom from '../components/Marketplace/MarketplaceAssetRoom.jsx';
 import MarketplaceLedgerModal from '../components/Marketplace/MarketplaceLedgerModal.jsx';
+import ReportProblem from '../market/ReportProblem.jsx';
+
+/** Seed-data buyer views (bookings, call sheet, thread, asset room, ledger, report):
+ *  off until they run on real bookings and payments (R102, phase 3). */
+const SHOW_SEED_VIEWS = false;
 
 export default function MarketplacePage() {
     const navigate = useNavigate();
@@ -52,29 +50,36 @@ export default function MarketplacePage() {
     const { activeTab, setActiveTab, metrics, setActiveThreadId } = useMarketplaceStore();
     const [ledgerOpen, setLedgerOpen] = useState(false);
 
-    // Active project metadata from useTimelineStore (or fallback)
-    const { projectName, projectId } = useTimelineStore();
 
-    // Local user projects for attaching to booking
-    const [userProjects, setUserProjects] = useState([]);
-    useEffect(() => {
-        listProjects().then(res => {
-            const list = res?.projects || res || [];
-            setUserProjects(Array.isArray(list) ? list : []);
-        }).catch(err => console.warn('[MarketplacePage] projects load error:', err.message));
-    }, []);
 
     // Filter states
     const [selectedCategory, setSelectedCategory] = useState('all');
     const [searchQuery, setSearchQuery] = useState('');
-    const [selectedDate, setSelectedDate] = useState('Thu 19 Nov · half-day');
-    const [radiusKm, setRadiusKm] = useState(50);
-    const [maxBudget, setMaxBudget] = useState(1000);
-    const [onlyCertified, setOnlyCertified] = useState(false);
-    const [onlyInstantBook, setOnlyInstantBook] = useState(false);
+    // No availability data yet: a booking request carries the date the buyer picks.
+    const selectedDate = null;
+    const [radiusKm, setRadiusKm] = useState(25);
+    const [maxBudget, setMaxBudget] = useState(2000); // 2000 = any
     const [selectedFeature, setSelectedFeature] = useState('all'); // 'all' | 'cyclorama' | 'daylight' | 'drivein' | 'soundstage' | 'greenkey'
     const [preferencesOpen, setPreferencesOpen] = useState(false);
-    const [userLocation, setUserLocation] = useState(INITIAL_LOCATION.city);
+    // Search centre: Paris until the buyer picks an address (Île-de-France launch area).
+    const [center, setCenter] = useState({ lat: 48.8566, lng: 2.3522, label: 'Paris' });
+    const userLocation = center.label;
+
+    // Real listings, filtered by the server on distance, category and half-day budget.
+    const [listings, setListings] = useState([]);
+    const [listingsState, setListingsState] = useState('loading'); // 'loading' | 'ok' | 'error'
+    const [reloadKey, setReloadKey] = useState(0);
+    useEffect(() => {
+        let cancelled = false;
+        const server = CATEGORY_FILTERS.find((c) => c.id === selectedCategory)?.server || null;
+        fetchListings({ lat: center.lat, lng: center.lng, radiusKm, category: server, maxPrice: maxBudget >= 2000 ? null : maxBudget })
+            .then((r) => {
+                if (cancelled) return;
+                if (r.ok) { setListings(r.listings || []); setListingsState('ok'); }
+                else { setListingsState('error'); }
+            });
+        return () => { cancelled = true; };
+    }, [center.lat, center.lng, radiusKm, selectedCategory, maxBudget, reloadKey]);
 
     // Selected listing for drawer/modal & map synchronization
     const [selectedListingId, setSelectedListingId] = useState(null);
@@ -85,46 +90,17 @@ export default function MarketplacePage() {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     // Filtered listings
+    // Distance, category and budget are applied by the server; text and studio
+    // features are refined here over the listings it returned.
     const filteredListings = useMemo(() => {
-        return LISTINGS.filter(item => {
-            // Category filter
-            if (selectedCategory !== 'all' && item.category !== selectedCategory) {
-                return false;
-            }
-            // Search query filter (matches name, location, address, dimensions, features, kit)
+        return listings.filter(item => {
             if (searchQuery.trim()) {
                 const q = searchQuery.toLowerCase().trim();
-                const matchName = item.name.toLowerCase().includes(q);
-                const matchSubtitle = (item.subtitle || '').toLowerCase().includes(q);
-                const matchLocation = (item.location || '').toLowerCase().includes(q);
-                const matchAddress = (item.address || '').toLowerCase().includes(q);
-                const matchDimensions = (item.dimensions || '').toLowerCase().includes(q);
-                const matchFeatures = (item.features || []).some(f => f.toLowerCase().includes(q));
-                const matchKit = (item.kit || []).some(k => k.toLowerCase().includes(q));
-                const matchBadges = (item.badges || []).some(b => b.toLowerCase().includes(q));
-                if (!matchName && !matchSubtitle && !matchLocation && !matchAddress && !matchDimensions && !matchFeatures && !matchKit && !matchBadges) {
-                    return false;
-                }
+                const blob = `${item.name} ${item.subtitle || ''} ${item.location || ''} ${item.address || ''} ${(item.features || []).join(' ')}`.toLowerCase();
+                if (!blob.includes(q)) return false;
             }
-            // Budget filter
-            if (maxBudget && item.priceHalfDay > maxBudget) {
-                return false;
-            }
-            // Distance / radius filter
-            if (radiusKm && item.distanceKm > radiusKm) {
-                return false;
-            }
-            // Certified filter
-            if (onlyCertified && !(item.badges || []).some(b => b.toLowerCase().includes('certified') || b.toLowerCase().includes('id verified') || b.toLowerCase().includes('verified'))) {
-                return false;
-            }
-            // Instant book filter
-            if (onlyInstantBook && !(item.badges || []).some(b => b.toLowerCase().includes('instant book'))) {
-                return false;
-            }
-            // Specific studio feature filter
             if (selectedFeature !== 'all') {
-                const itemBlob = `${item.dimensions || ''} ${(item.features || []).join(' ')} ${(item.badges || []).join(' ')} ${item.subtitle || ''}`.toLowerCase();
+                const itemBlob = `${(item.features || []).join(' ')} ${item.description || ''}`.toLowerCase();
                 if (selectedFeature === 'cyclorama' && !itemBlob.includes('cyclorama')) return false;
                 if (selectedFeature === 'daylight' && !itemBlob.includes('daylight') && !itemBlob.includes('natural light')) return false;
                 if (selectedFeature === 'drivein' && !itemBlob.includes('drive-in') && !itemBlob.includes('vehicle')) return false;
@@ -133,27 +109,11 @@ export default function MarketplacePage() {
             }
             return true;
         });
-    }, [selectedCategory, searchQuery, maxBudget, radiusKm, onlyCertified, onlyInstantBook, selectedFeature]);
-
-    // Active scout project summary
-    const scoutProject = useMemo(() => {
-        if (projectName && projectName.trim()) {
-            return {
-                name: projectName,
-                tagline: `Active project · ${projectName} · needs a quiet room with controllable light.`,
-            };
-        }
-        return MOCK_SCOUT_PROJECT;
-    }, [projectName]);
-
-    // Top Scout recommendations (sorted by scoutScore)
-    const scoutMatches = useMemo(() => {
-        return [...LISTINGS].sort((a, b) => (b.scoutScore || 0) - (a.scoutScore || 0)).slice(0, 3);
-    }, []);
+    }, [listings, searchQuery, selectedFeature]);
 
     const handleSelectListing = (id) => {
         setSelectedListingId(id);
-        const found = LISTINGS.find(l => l.id === id);
+        const found = listings.find(l => l.id === id);
         if (found) {
             setActiveDetailItem(found);
         }
@@ -262,10 +222,13 @@ export default function MarketplacePage() {
                     <nav className="hidden md:flex" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                         {[
                             { id: 'discover', label: 'Discover' },
-                            { id: 'bookings', label: 'Bookings', badge: metrics.needsYou > 0 ? metrics.needsYou : null },
-                            { id: 'callsheet', label: 'Call Sheet' },
-                            { id: 'messages', label: 'Messages', badge: '3' },
-                            { id: 'assetroom', label: 'Asset Room' },
+                            ...(SHOW_SEED_VIEWS ? [
+                                { id: 'bookings', label: 'Bookings', badge: metrics.needsYou > 0 ? metrics.needsYou : null },
+                                { id: 'callsheet', label: 'Call Sheet' },
+                                { id: 'messages', label: 'Messages', badge: '3' },
+                                { id: 'assetroom', label: 'Asset Room' },
+                                { id: 'report', label: 'Report a problem' },
+                            ] : []),
                         ].map(tab => {
                             const isSel = activeTab === tab.id;
                             return (
@@ -309,7 +272,7 @@ export default function MarketplacePage() {
 
                     {/* Right: Escrow & Ledger + Pro Badge */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <button
+                        {SHOW_SEED_VIEWS && <button
                             type="button"
                             onClick={() => setLedgerOpen(true)}
                             className="hidden sm:flex"
@@ -330,7 +293,7 @@ export default function MarketplacePage() {
                         >
                             <ShieldCheck size={13} color="#0B7C91" />
                             <span>Escrow & Ledger</span>
-                        </button>
+                        </button>}
 
                         <div style={{
                             display: 'flex',
@@ -345,9 +308,8 @@ export default function MarketplacePage() {
                             fontSize: 11,
                             fontWeight: 600,
                         }}>
-                            <span>PRO</span>
-                            <span style={{ color: 'rgba(11, 124, 145, 0.4)' }}>·</span>
-                            <span>Unlimited AI</span>
+                            {/* R102: the real plan, not a hard-coded "PRO · Unlimited AI". */}
+                            <span>{String(plan || 'free').toUpperCase()}</span>
                         </div>
 
                         {/* Mobile hamburger */}
@@ -388,10 +350,13 @@ export default function MarketplacePage() {
                 }}>
                     {[
                         { id: 'discover', label: 'Discover' },
-                        { id: 'bookings', label: 'Bookings' },
-                        { id: 'callsheet', label: 'Call Sheet' },
-                        { id: 'messages', label: 'Messages' },
-                        { id: 'assetroom', label: 'Asset Room' },
+                        ...(SHOW_SEED_VIEWS ? [
+                            { id: 'bookings', label: 'Bookings' },
+                            { id: 'callsheet', label: 'Call Sheet' },
+                            { id: 'messages', label: 'Messages' },
+                            { id: 'assetroom', label: 'Asset Room' },
+                            { id: 'report', label: 'Report a problem' },
+                        ] : []),
                     ].map(tab => (
                         <button
                             key={tab.id}
@@ -411,7 +376,7 @@ export default function MarketplacePage() {
                         </button>
                     ))}
                     <div style={{ height: 1, background: 'rgba(16, 21, 29, 0.08)', margin: '6px 0' }} />
-                    <button onClick={() => { setMobileMenuOpen(false); setLedgerOpen(true); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: '#0B7C91', fontSize: 14, fontWeight: 600 }}>Escrow & Ledger</button>
+                    {SHOW_SEED_VIEWS && <button onClick={() => { setMobileMenuOpen(false); setLedgerOpen(true); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: '#0B7C91', fontSize: 14, fontWeight: 600 }}>Escrow & Ledger</button>}
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: '#5F6876', fontSize: 13 }}>← Back to Projects</button>
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/design'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: '#5F6876', fontSize: 13 }}>Design Studio</button>
                 </div>
@@ -426,12 +391,20 @@ export default function MarketplacePage() {
                 zIndex: 1,
             }}>
                 {/* Sub-view switcher */}
-                {activeTab === 'bookings' && <MarketplaceBookings />}
-                {activeTab === 'callsheet' && <MarketplaceCallSheet />}
-                {activeTab === 'messages' && <MarketplaceThread />}
-                {activeTab === 'assetroom' && <MarketplaceAssetRoom />}
+                {/* Seed-data views stay unreachable until bookings run on real data (R102, phase 3). */}
+                {SHOW_SEED_VIEWS && activeTab === 'bookings' && <MarketplaceBookings />}
+                {SHOW_SEED_VIEWS && activeTab === 'callsheet' && <MarketplaceCallSheet />}
+                {SHOW_SEED_VIEWS && activeTab === 'messages' && <MarketplaceThread />}
+                {SHOW_SEED_VIEWS && activeTab === 'assetroom' && <MarketplaceAssetRoom />}
+                {/* Screen 29 — same screen and clock as the talent side (R100). The
+                    .mk wrapper carries the market-ops tokens ReportProblem's styles use. */}
+                {SHOW_SEED_VIEWS && activeTab === 'report' && (
+                    <div className="mk" style={{ minHeight: 'auto', background: 'transparent' }}>
+                        <ReportProblem side="buyer" onBack={() => setActiveTab('bookings')} onOpenThread={() => setActiveTab('messages')} />
+                    </div>
+                )}
 
-                {activeTab === 'discover' && (
+                {(activeTab === 'discover' || !SHOW_SEED_VIEWS) && (
                     <>
                         {/* Surface Switcher Pills (Surface A: Book a shoot) */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
@@ -469,7 +442,9 @@ export default function MarketplacePage() {
                         color: '#5F6876',
                         margin: 0,
                     }}>
-                        {filteredListings.length} of {LISTINGS.length} listings, filtered by your brief · prices include the 5% service fee and VAT · <span style={{ color: '#0B7C91', cursor: 'pointer', textDecoration: 'underline' }}>edit the brief</span>
+                        {listingsState === 'loading' ? 'Loading live listings…'
+                            : listingsState === 'error' ? <>Could not load listings. <button type="button" onClick={() => { setListingsState('loading'); setReloadKey(k => k + 1); }} style={{ background: 'none', border: 'none', color: '#0B7C91', textDecoration: 'underline', cursor: 'pointer', padding: 0, font: 'inherit' }}>Try again</button></>
+                            : <>{filteredListings.length} live {filteredListings.length === 1 ? 'listing' : 'listings'} within {radiusKm} km · half-day prices set by each talent, before the buyer service fee</>}
                     </p>
                 </div>
 
@@ -566,7 +541,7 @@ export default function MarketplacePage() {
                         >
                             <SlidersHorizontal size={14} color={preferencesOpen ? '#00E5FF' : '#0B7C91'} />
                             <span>Preferences</span>
-                            {(radiusKm !== 50 || maxBudget !== 1000 || onlyCertified || onlyInstantBook || selectedFeature !== 'all') && (
+                            {(radiusKm !== 25 || maxBudget !== 2000 || selectedFeature !== 'all') && (
                                 <span style={{
                                     width: 7,
                                     height: 7,
@@ -576,23 +551,6 @@ export default function MarketplacePage() {
                             )}
                         </button>
 
-                        <button
-                            type="button"
-                            onClick={() => {}}
-                            style={{
-                                padding: '7px 14px',
-                                borderRadius: 999,
-                                background: '#FFFFFF',
-                                border: '1px solid rgba(16, 21, 29, 0.12)',
-                                color: '#10151D',
-                                fontFamily: 'var(--f-sans, "Geist", sans-serif)',
-                                fontSize: 12,
-                                fontWeight: 500,
-                                cursor: 'pointer',
-                            }}
-                        >
-                            {selectedDate}
-                        </button>
                         <button
                             type="button"
                             onClick={() => setRadiusKm(r => r === 25 ? 50 : r === 50 ? 80 : 25)}
@@ -625,24 +583,7 @@ export default function MarketplacePage() {
                                 cursor: 'pointer',
                             }}
                         >
-                            Under €{maxBudget}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setOnlyInstantBook(b => !b)}
-                            style={{
-                                padding: '7px 14px',
-                                borderRadius: 999,
-                                background: onlyInstantBook ? '#0B7C91' : '#FFFFFF',
-                                color: onlyInstantBook ? '#FFFFFF' : '#10151D',
-                                border: '1px solid rgba(16, 21, 29, 0.12)',
-                                fontFamily: 'var(--f-sans, "Geist", sans-serif)',
-                                fontSize: 12,
-                                fontWeight: 500,
-                                cursor: 'pointer',
-                            }}
-                        >
-                            Instant book
+                            {maxBudget >= 2000 ? 'Any budget' : `Under €${maxBudget}`}
                         </button>
                     </div>
 
@@ -773,38 +714,14 @@ export default function MarketplacePage() {
                                 </div>
                             </div>
 
-                            {/* Verification toggles */}
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#10151D', cursor: 'pointer' }}>
-                                    <input
-                                        type="checkbox"
-                                        checked={onlyInstantBook}
-                                        onChange={e => setOnlyInstantBook(e.target.checked)}
-                                        style={{ accentColor: '#0B7C91' }}
-                                    />
-                                    <span>Instant booking only (no waiting for confirmation)</span>
-                                </label>
-                                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#10151D', cursor: 'pointer' }}>
-                                    <input
-                                        type="checkbox"
-                                        checked={onlyCertified}
-                                        onChange={e => setOnlyCertified(e.target.checked)}
-                                        style={{ accentColor: '#0B7C91' }}
-                                    />
-                                    <span>Verified studios & insured operators only</span>
-                                </label>
-                            </div>
-
                             {/* Footer Actions */}
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #EDF0F4', paddingTop: 12, marginTop: 4 }}>
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        setRadiusKm(50);
-                                        setMaxBudget(1000);
+                                        setRadiusKm(25);
+                                        setMaxBudget(2000);
                                         setSelectedFeature('all');
-                                        setOnlyCertified(false);
-                                        setOnlyInstantBook(false);
                                         setSearchQuery('');
                                     }}
                                     style={{
@@ -852,7 +769,7 @@ export default function MarketplacePage() {
                     paddingBottom: 4,
                     marginBottom: 24,
                 }}>
-                    {MARKET_CATEGORIES.map(cat => {
+                    {CATEGORY_FILTERS.map(cat => {
                         const isActive = selectedCategory === cat.id;
                         return (
                             <button
@@ -880,130 +797,8 @@ export default function MarketplacePage() {
                     })}
                 </div>
 
-                {/* SCOUT · MATCHED TO AN OPEN PROJECT STRIP */}
-                <section style={{
-                    background: '#FFFFFF',
-                    border: '1px solid rgba(16, 21, 29, 0.08)',
-                    borderRadius: 16,
-                    padding: '20px 24px',
-                    marginBottom: 32,
-                    boxShadow: '0 4px 16px -4px rgba(16, 21, 29, 0.04)',
-                }}>
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        flexWrap: 'wrap',
-                        gap: 12,
-                        marginBottom: 16,
-                    }}>
-                        <div>
-                            <span style={{
-                                fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                                fontSize: 11,
-                                fontWeight: 600,
-                                letterSpacing: '0.08em',
-                                color: '#0B7C91',
-                                textTransform: 'uppercase',
-                                display: 'block',
-                                marginBottom: 4,
-                            }}>
-                                SCOUT · MATCHED TO AN OPEN PROJECT
-                            </span>
-                            <div style={{ fontFamily: 'var(--f-sans, "Geist", sans-serif)', fontSize: 14, color: '#10151D' }}>
-                                From <strong style={{ fontWeight: 600 }}>"{scoutProject.name}"</strong>: {scoutProject.tagline}
-                            </div>
-                        </div>
-
-                        <button
-                            type="button"
-                            onClick={() => {}}
-                            style={{
-                                background: 'none',
-                                border: 'none',
-                                color: '#5F6876',
-                                fontFamily: 'var(--f-sans, "Geist", sans-serif)',
-                                fontSize: 12,
-                                textDecoration: 'underline',
-                                cursor: 'pointer',
-                                padding: 0,
-                            }}
-                        >
-                            How the score is built
-                        </button>
-                    </div>
-
-                    {/* Three Scout Match Cards */}
-                    <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-                        gap: 16,
-                    }}>
-                        {scoutMatches.map(match => (
-                            <div
-                                key={match.id}
-                                onClick={() => handleSelectListing(match.id)}
-                                style={{
-                                    background: '#F8F9FA',
-                                    border: '1px solid rgba(16, 21, 29, 0.08)',
-                                    borderRadius: 12,
-                                    padding: '16px 18px',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.18s ease',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    justifyContent: 'space-between',
-                                    boxShadow: '0 2px 6px rgba(16, 21, 29, 0.02)',
-                                }}
-                                onMouseEnter={e => {
-                                    e.currentTarget.style.borderColor = 'rgba(11, 124, 145, 0.4)';
-                                    e.currentTarget.style.transform = 'translateY(-2px)';
-                                }}
-                                onMouseLeave={e => {
-                                    e.currentTarget.style.borderColor = 'rgba(16, 21, 29, 0.08)';
-                                    e.currentTarget.style.transform = 'translateY(0)';
-                                }}
-                            >
-                                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
-                                    <div>
-                                        <div style={{
-                                            fontFamily: 'var(--f-sans, "Geist", sans-serif)',
-                                            fontSize: 14,
-                                            fontWeight: 600,
-                                            color: '#10151D',
-                                        }}>
-                                            {match.name}
-                                        </div>
-                                        <div style={{
-                                            fontFamily: 'var(--f-sans, "Geist", sans-serif)',
-                                            fontSize: 12,
-                                            color: '#5F6876',
-                                        }}>
-                                            {match.kind} · {match.location}
-                                        </div>
-                                    </div>
-                                    <span style={{
-                                        fontFamily: 'var(--f-mono, "JetBrains Mono", monospace)',
-                                        fontSize: 20,
-                                        fontWeight: 600,
-                                        color: match.scoutScore >= 90 ? '#0B7C91' : '#10151D',
-                                    }}>
-                                        {match.scoutScore}
-                                    </span>
-                                </div>
-                                <p style={{
-                                    fontFamily: 'var(--f-sans, "Geist", sans-serif)',
-                                    fontSize: 12,
-                                    color: '#5F6876',
-                                    margin: 0,
-                                    lineHeight: 1.45,
-                                }}>
-                                    {match.scoutReason}
-                                </p>
-                            </div>
-                        ))}
-                    </div>
-                </section>
+                {/* R102: the Scout match strip is hidden until scores come from real
+                    matching. It used to rank the seed listings by an invented score. */}
 
                 {/* Full-Width Interactive Map (Covering full width) */}
                 <div style={{ width: '100%', marginBottom: 40 }}>
@@ -1023,7 +818,7 @@ export default function MarketplacePage() {
                             color: '#5F6876',
                             textTransform: 'uppercase',
                         }}>
-                            INTERACTIVE MAP · {filteredListings.length} {filteredListings.length === 1 ? 'STUDIO FOUND' : 'STUDIOS FOUND'}
+                            MAP · {filteredListings.length} {filteredListings.length === 1 ? 'LISTING' : 'LISTINGS'}
                         </span>
                         <div style={{
                             display: 'flex',
@@ -1033,7 +828,7 @@ export default function MarketplacePage() {
                             fontSize: 12,
                             color: '#5F6876',
                         }}>
-                            <span>Scroll or pinch to zoom · Click any studio pin for full specs and match score</span>
+                            <span>Scroll or pinch to zoom · People are shown within about 1 km, studios at their address</span>
                         </div>
                     </div>
 
@@ -1042,18 +837,14 @@ export default function MarketplacePage() {
                         selectedId={selectedListingId}
                         onSelectListing={handleSelectListing}
                         radiusKm={radiusKm}
-                        userLocation={userLocation}
-                        onChangeLocation={() => {
-                            const newLoc = window.prompt('Enter city or postcode (e.g. Montreuil 93100):', userLocation);
-                            if (newLoc && newLoc.trim()) {
-                                setUserLocation(newLoc.trim());
-                            }
-                        }}
+                        center={center}
+                        onChangeLocation={(place) => setCenter({ lat: place.lat, lng: place.lng, label: place.city || place.label })}
                         onQuickBook={(item) => {
                             setBookingItemData({
                                 listing: item,
                                 serviceType: item.type === 'studio' ? 'Studio half-day hire' : 'Half-day operator session',
-                                date: requestedDate,
+                                // was `requestedDate`, which does not exist: quick-book from the map threw a ReferenceError.
+                                date: selectedDate,
                                 timeSlot: 'Morning (09:00 - 13:00)',
                                 totalPrice: item.priceHalfDay,
                             });
@@ -1081,16 +872,22 @@ export default function MarketplacePage() {
                 />
             )}
 
-            {/* Booking & Escrow Hold Modal (Screen 06) */}
+            {/* R102: booking needs real payments (Stripe Connect, phase 3). The old
+                escrow modal simulated a hold on seed data; against REAL listings
+                it would have "booked" a real person with pretend money, so it is
+                replaced by an honest notice until bookings exist. The modal stays
+                in the repo as the design reference for phase 3. */}
             {bookingItemData && (
-                <BookingEscrowModal
-                    bookingData={bookingItemData}
-                    userProjects={userProjects}
-                    onClose={() => setBookingItemData(null)}
-                    onConfirmSuccess={(res) => {
-                        console.log('[MarketplacePage] Booking created successfully:', res);
-                    }}
-                />
+                <div role="dialog" aria-modal="true" aria-labelledby="mk-booking-soon" onClick={() => setBookingItemData(null)}
+                    style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(16,21,29,0.35)', display: 'grid', placeItems: 'center', padding: 20 }}>
+                    <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', borderRadius: 18, padding: '26px 28px', maxWidth: 440, boxShadow: '0 24px 60px rgba(16,21,29,0.25)' }}>
+                        <h2 id="mk-booking-soon" style={{ margin: '0 0 8px', fontSize: 20, color: '#10151D' }}>Booking opens with payments</h2>
+                        <p style={{ margin: 0, color: '#5F6876', lineHeight: 1.55 }}>
+                            {bookingItemData.listing?.name || 'This listing'} is live, but requests can only be sent once escrow payments are switched on. Nothing was requested and nothing was charged.
+                        </p>
+                        <button type="button" onClick={() => setBookingItemData(null)} style={{ marginTop: 18, padding: '9px 18px', borderRadius: 10, border: '1px solid #10151D', background: '#10151D', color: '#fff', cursor: 'pointer' }}>OK</button>
+                    </div>
+                </div>
             )}
 
             {/* Financial Ledger & Escrow Modal (Screen 15) */}

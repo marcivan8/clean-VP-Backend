@@ -5,6 +5,9 @@ import { SHARE_ROW, SHARE_ROW_LABEL, SHARE_ROW_NOTE } from './shareRow.js';
 import {
     fetchDestinations, connectDestination, disconnectDestination, takeConnectOutcome,
 } from '../lib/socialDestinations';
+import { useUserPlan } from '../hooks/useUserPlan.js';
+import { startCheckout } from '../lib/checkout.js';
+import { planPrice } from '../lib/planLimits.js';
 
 /**
  * ShareDestinations — "Publish to" inside the export sheet.
@@ -21,6 +24,11 @@ import {
  */
 export default function ShareDestinations() {
     const { t } = useTranslation('editor');
+    const { t: tc, i18n } = useTranslation('common');
+    // Connecting accounts is Pro only (R104; the server refuses it too).
+    // Disconnecting stays open so someone who left Pro can still clean up.
+    const { plan } = useUserPlan();
+    const canConnect = plan === 'pro';
     const [destinations, setDestinations] = useState(null); // null = loading
     const [busy, setBusy] = useState(null);                 // provider id
     const [notice, setNotice] = useState(null);             // { connected } | { error }
@@ -98,12 +106,13 @@ export default function ShareDestinations() {
                 // A destination with no credentials on the server cannot be
                 // connected, so its row is a statement rather than a button
                 // that would go nowhere.
-                const Tag = d.configured ? 'button' : 'div';
+                const clickable = d.configured && (connected || canConnect);
+                const Tag = clickable ? 'button' : 'div';
                 return (
                     <Tag
                         key={d.id}
-                        {...(d.configured ? { type: 'button', onClick: () => (connected ? onDisconnect(d.id) : onConnect(d.id)) } : {})}
-                        style={{ ...SHARE_ROW, cursor: d.configured ? 'pointer' : 'default', opacity: d.configured ? 1 : 0.6 }}
+                        {...(clickable ? { type: 'button', onClick: () => (connected ? onDisconnect(d.id) : onConnect(d.id)) } : {})}
+                        style={{ ...SHARE_ROW, cursor: clickable ? 'pointer' : 'default', opacity: clickable ? 1 : 0.6 }}
                     >
                         {connected
                             ? <Check size={20} style={{ color: 'var(--accent-2)', flex: 'none' }} />
@@ -112,7 +121,7 @@ export default function ShareDestinations() {
                         {busy === d.id
                             ? <Loader2 size={16} style={{ color: 'var(--fg-3)', flex: 'none' }} />
                             : note && <span style={SHARE_ROW_NOTE}>{note}</span>}
-                        {d.configured && !connected && !busy && (
+                        {clickable && !connected && !busy && (
                             <span style={action}>
                                 {stale ? t('shareDestinations.reconnect', 'Reconnect') : t('shareDestinations.connect', 'Connect')}
                             </span>
@@ -120,6 +129,16 @@ export default function ShareDestinations() {
                     </Tag>
                 );
             })}
+
+            {!canConnect && (
+                <p style={{ margin: '2px 0 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--fg-2)' }}>
+                    {tc('planLock.social.title')}.{' '}
+                    <button type="button" onClick={() => startCheckout('pro')}
+                        style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', font: 'inherit', fontWeight: 600, cursor: 'pointer' }}>
+                        {tc('planLock.cta', { plan: 'Pro', price: planPrice('pro', i18n.language) })}
+                    </button>
+                </p>
+            )}
 
             {/* Said once, under the list. */}
             <p style={{ margin: '2px 0 0', fontSize: 11.5, lineHeight: 1.5, color: 'var(--fg-3)' }}>

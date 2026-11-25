@@ -236,8 +236,43 @@ const stockGate = async (req, res, next) => {
     }
 };
 
+// Feature gate by plan (R104). `requirePlan('pro', { code, feature })` refuses
+// a plan below `minPlan` with the same 402 + upgradeRequired shape aiGate and
+// stockGate use, so the client's QUOTA_EXCEEDED handling shows the upgrade
+// sheet. Mount it BEFORE aiGate: a refused request must not use up an AI
+// operation. An unknown or unreadable plan is 'free' (getUserPlan), so this
+// gate fails CLOSED, unlike the quota checks: a database hiccup must not hand
+// a paid feature to a free account.
+const PLAN_RANK = { free: 0, creator: 1, pro: 2 };
+const PLAN_NAME = { creator: 'Creator', pro: 'Pro' };
+
+function requirePlan(minPlan, { code = 'PLAN_REQUIRED', feature = 'This feature' } = {}) {
+    if (!(minPlan in PLAN_RANK)) throw new Error(`requirePlan: unknown plan "${minPlan}"`);
+    return async (req, res, next) => {
+        if (process.env.BYPASS_USAGE_GATE === 'true') return next();
+        if (!req.user?.id) {
+            return res.status(401).json({ error: 'Authentication required', code: 'AUTH_REQUIRED' });
+        }
+        const plan = await getUserPlan(req.user.id);
+        if (PLAN_RANK[plan] >= PLAN_RANK[minPlan]) {
+            req.userPlan = plan;
+            return next();
+        }
+        const only = minPlan === 'pro' ? 'the Pro plan' : 'the Creator plan and above';
+        return res.status(402).json({
+            error:           code,
+            message:         `${feature} is available on ${only}.`,
+            plan,
+            upgradeRequired: minPlan,
+            planName:        PLAN_NAME[minPlan],
+        });
+    };
+}
+
 module.exports = {
     aiGate,
+    requirePlan,
+    PLAN_RANK,
     stockGate,
     PLAN_LIMITS,
     getUserPlan,

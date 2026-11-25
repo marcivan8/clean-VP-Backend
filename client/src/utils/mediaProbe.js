@@ -39,8 +39,21 @@ export const probeMedia = async (file) => {
 };
 
 const extractVideoMetadata = (url) => {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolveRaw, rejectRaw) => {
         const video = document.createElement('video');
+        // Release the element's decoder and buffered media once we're done.
+        // Without this every probed file kept a live <video> (and its decoder)
+        // around until garbage collection, so importing 25 videos held 25 of
+        // them at once — a real cause of the editor lagging or the tab being
+        // killed during a large import.
+        const release = () => {
+            video.onloadedmetadata = null;
+            video.onseeked = null;
+            video.onerror = null;
+            try { video.removeAttribute('src'); video.load(); } catch { /* already detached */ }
+        };
+        const resolve = (v) => { release(); resolveRaw(v); };
+        const reject = (e) => { release(); rejectRaw(e); };
         video.crossOrigin = 'anonymous';
         video.preload = 'metadata';
         video.muted = true; // Required for unmuted autoplay policies in some browsers

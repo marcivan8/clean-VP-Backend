@@ -94,7 +94,10 @@ check('each asset is registered before its upload runs', () => {
     const registerAt = ide.indexOf('addAssets([assetEntry])');
     assert.ok(pushAt > 0 && registerAt > pushAt,
         'without this, updateAsset(assetId, { uploadProgress }) writes to an asset the store does not have yet');
-    assert.ok(registerAt < ide.indexOf('const processingTimer = setTimeout'),
+    // R96 removed the 5s processingTimer this used to anchor on; the upload
+    // itself starts at uploadAndGenerateProxy.
+    const uploadAt = ide.indexOf('ProxyService.uploadAndGenerateProxy(');
+    assert.ok(uploadAt > 0 && registerAt < uploadAt,
         'registering it after the upload starts would still lose the early progress');
 });
 

@@ -39,6 +39,8 @@ import { TEMPLATE_KINDS, TEMPLATE_WIDTH_FRACTION, TEMPLATE_DEFAULTS, templatePar
 import { applyBrand, normalizeBrand, brandFromProject } from '../motion/BrandKit.js';
 import { normalizeMatte } from '../motion/MatteSettings.js'; // R92
 import { ledgerEntry } from '../agent/EditRecap.js'; // R92 round B
+import useAIStore from './useAIStore.js';
+import { serializeConversation } from '../agent/conversationPersistence.js'; // R105
 import { getPlayerDimensions } from '../utils/playerDimensions.js';
 import { computeRippleDelete, computeGapRipple, remapTimelineWords } from '../timeline/rippleDelete.js';
 import { computeMultiMove } from '../timeline/multiMove.js';
@@ -47,7 +49,7 @@ import { computeCaptionFollow } from '../timeline/captionFollow.js';
 import { computeSpeedChange, remapWordsForSpeed } from '../timeline/speedChange.js';
 import { mapTranscriptToTimeline } from '../timeline/transcriptMap.js';
 import { LEGACY_PACK_MOTION } from '../motion/CaptionModel.js';
-import { retimeWordsForText, splitCaption, mergeCaptions, shiftWords as shiftCaptionWords } from '../motion/captionEdits.js';
+import { retimeWordsForText, splitCaption, mergeCaptions, shiftWords as shiftCaptionWords, findDeletedWords } from '../motion/captionEdits.js';
 import { contentEndOf, visualEndOf } from '../timeline/contentEnd.js';
 import { isReferenceAsset } from '../utils/assetRoles.js';
 
@@ -422,6 +424,13 @@ const useTimelineStore = create(
             },
 
             setIsPlaying: (isPlaying) => {
+                // R169: code may not START playback while the AI is editing.
+                // A user's own tap goes through togglePlay(), not here, so this
+                // only stops automated starts (see _applySegmentsToTimeline).
+                if (isPlaying && useAIStore.getState().isAnalyzing) {
+                    console.warn('[useTimelineStore] ignored a programmatic play while the AI is editing');
+                    return;
+                }
                 set({ isPlaying });
                 const { playerRef } = get();
                 if (playerRef && typeof playerRef.togglePlayback === 'function') {
@@ -1773,6 +1782,43 @@ const useTimelineStore = create(
                 timelineManager.dispatch(TimelineActions.updateClip(p.clipId, updates));
                 set({ tracks: timelineManager.toLegacyTracks() });
                 return true;
+            },
+
+            /**
+             * R105: change a caption's text AND cut the video where the words
+             * the user deleted were spoken. One undo step for both.
+             * `oldText`/`words` are the caption as it was before the edit (the
+             * desktop textarea writes as you type, so the caller keeps them).
+             * @returns {{ ok: boolean, cut?: number, seconds?: number, error?: string }}
+             */
+            cutDeletedCaptionWords: (placementId, newText, before = null) => {
+                const text = String(newText ?? '').replace(/\s+/g, ' ').trim();
+                const st = timelineManager.getState().entities;
+                const p = st.placements[placementId];
+                const legacy = get().tracks.flatMap(t => t.clips || []).find(c => c.id === placementId);
+                if (!p?.clipId || !legacy) return { ok: false, error: 'caption not found' };
+                const oldText = before?.content ?? legacy.content;
+                const words = before?.words ?? legacy.words;
+                const plan = findDeletedWords(words, oldText, text);
+                if (!plan.ranges.length) return { ok: false, error: 'no spoken words were deleted' };
+                get().beginHistoryGroup();
+                try {
+                    const shift = Number(p.wordShift) || 0;
+                    const updates = { content: text || legacy.content, name: text || legacy.name };
+                    // The words left keep their REAL timing (not spread evenly), so
+                    // the cut below moves them exactly with the speech.
+                    if (text) updates.words = shiftCaptionWords(plan.kept, -shift);
+                    timelineManager.dispatch(TimelineActions.updateClip(p.clipId, updates));
+                    set({ tracks: timelineManager.toLegacyTracks() });
+                    const cut = get().cutTimelineRanges(plan.ranges);
+                    if (!cut) return { ok: false, error: 'nothing could be cut there' };
+                    return { ok: true, cut, seconds: plan.seconds };
+                } catch (err) {
+                    console.error('[cutDeletedCaptionWords] failed:', err);
+                    return { ok: false, error: err.message };
+                } finally {
+                    get().endHistoryGroup();
+                }
             },
 
             /** Split a caption into two before word `index`. @returns {boolean} */
@@ -4110,6 +4156,9 @@ const useTimelineStore = create(
                     editHistory:          state.editHistory || [],
                     waveforms:            state.waveforms || {},
                     waveformsByAsset:     state.waveformsByAsset || {},
+                    // R105: the assistant conversation, so a refresh mid-edit
+                    // does not empty the chat. Last 200 items, JSON-safe.
+                    conversation:         serializeConversation(useAIStore.getState()),
                 };
 
                 // ── Tiered write ──────────────────────────────────────────────
@@ -4124,7 +4173,7 @@ const useTimelineStore = create(
                 // the heaviest recomputable fields rather than the edit itself.
                 // Order is cheapest-to-lose first — waveforms regenerate from a
                 // local ffmpeg call, transcripts cost real money.
-                const DROP_ORDER = ['waveforms', 'waveformsByAsset', 'sceneAnalysisByAsset', 'diarizationByAsset', 'transcripts'];
+                const DROP_ORDER = ['waveforms', 'waveformsByAsset', 'conversation', 'sceneAnalysisByAsset', 'diarizationByAsset', 'transcripts'];
                 let payload = projectData;
                 for (let attempt = 0; attempt <= DROP_ORDER.length; attempt++) {
                     try {
@@ -4230,6 +4279,9 @@ const useTimelineStore = create(
                     updates.uploadedFile = sourcePath ? { name: sourcePath } : null;
                 }
                 set(updates);
+                // R105: this project's conversation, or none. Never the
+                // previous project's chat carried into this one.
+                try { useAIStore.getState().restoreConversation(projectData.conversation); } catch (err) { console.error('[loadProject] conversation restore failed:', err); }
                 console.log('📂 Project Loaded');
             },
 
@@ -4427,6 +4479,18 @@ const useTimelineStore = create(
         };
     })
 );
+
+// R105: the conversation comes back with the locally autosaved project (the
+// path a refresh takes), and a new message schedules a save exactly like an
+// edit does. Without the subscription, a chat message alone would never be
+// saved, since only timeline changes trigger the autosave.
+try { if (_preRestoredProject?.conversation) useAIStore.getState().restoreConversation(_preRestoredProject.conversation); }
+catch (err) { console.error('[useTimelineStore] conversation pre-restore failed:', err); }
+useAIStore.subscribe((s, prev) => {
+    if (s.logs === prev.logs && s.suggestions === prev.suggestions) return;
+    clearTimeout(_autosaveTimer);
+    _autosaveTimer = setTimeout(() => { useTimelineStore.getState().saveProject(); }, 1500);
+});
 
 // Expose globally for debugging
 if (typeof window !== 'undefined') {

@@ -4,6 +4,7 @@ import { useTranslation, Trans } from 'react-i18next';
 import { supabase } from '../lib/supabaseClient';
 import useSessionStore from '../store/useSessionStore';
 import { Logo } from '../components/Logo.jsx';
+import { safeNextPath } from '../utils/safeNextPath.js';
 
 const Spinner = () => (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ animation: 'spin 0.75s linear infinite' }}>
@@ -14,6 +15,9 @@ const Spinner = () => (
 
 export default function AuthPage() {
     const navigate = useNavigate();
+    // ?next=/talent/setup brings someone back to where they started (R101).
+    // Relative same-site paths only; anything else falls back to /dashboard.
+    const afterAuth = safeNextPath(typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('next') : null);
     const { t } = useTranslation('auth');
     const { migrateSession, clearSession } = useSessionStore();
 
@@ -59,7 +63,7 @@ export default function AuthPage() {
             });
             if (signInErr) throw signInErr;
             await migrateSession(data.user.id);
-            navigate('/dashboard');
+            navigate(afterAuth);
         } catch (err) {
             if (err.message?.toLowerCase().includes('invalid login credentials')) {
                 setError(t('error.invalidCredentials'));
@@ -127,7 +131,7 @@ export default function AuthPage() {
                     body: JSON.stringify({ email: cleanEmail, fullName: fullName.trim(), role }),
                 });
                 await migrateSession(data.user.id);
-                navigate('/dashboard');
+                navigate(afterAuth);
             } else {
                 setSuccess(t('success.checkEmail'));
             }

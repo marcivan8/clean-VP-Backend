@@ -2816,11 +2816,16 @@ export class MediaExecutionEngine {
                 try {
                     const res = await authFetch('/api/motion/compose', {
                         method: 'POST',
-                        body: JSON.stringify({ brief, layers: layersForPrompt(layers), editingStyle: st.editingStyle ?? null }),
+                        body: JSON.stringify({ brief, layers: layersForPrompt(layers), editingStyle: st.editingStyle ?? null, projectId: st.projectId || null }),
                         signal: job?.signal,
                     });
                     const data = await res.json().catch(() => ({}));
                     if (res.ok && data?.layers) { scripts = data.layers; source = data.source || 'rules'; notes = data.notes || null; }
+                    // R169: say WHY the offline recipe was used. A 429 (the
+                    // motion route allows 15 calls a minute, and Auto mode can
+                    // hit it), a 401 or a 500 used to fall back silently.
+                    else console.warn(`[compose_motion] motion route answered ${res.status}${data?.error ? ` (${data.error})` : ''}; using the offline recipe`);
+                    if (res.ok && data?.source === 'rules' && data?.notes) console.warn('[compose_motion] server used the offline recipe:', data.notes);
                 } catch (mErr) {
                     if (mErr?.name === 'AbortError') throw mErr;
                     console.warn('[compose_motion] motion route unavailable, using rules:', mErr.message);
@@ -2832,9 +2837,24 @@ export class MediaExecutionEngine {
                 for (const l of layers) {
                     const duration = Math.max(0.2, Number(l.clip.duration) || 3);
                     const kind = l.kind === 'shape' ? 'shape' : l.kind;
-                    const script = scriptFor(l, scripts) || planMotionFromBrief(brief, { duration });
+                    const aiScript = scriptFor(l, scripts);
+                    let script = aiScript || planMotionFromBrief(brief, {
+                        duration, kind, role: l.clip.motionRole || l.clip.role || '',
+                        name: l.clip.name || l.clip.template?.kind || l.clip.id,
+                        content: l.clip.content || l.clip.template?.params?.text || '',
+                        editingStyle: st.editingStyle || '',
+                    });
                     let { animations } = composeMotion(script, { duration, kind, source: COMPOSED });
-                    if (animations.length === 0) ({ animations } = composeMotion(planMotionFromBrief(brief, { duration }), { duration, kind, source: COMPOSED }));
+                    if (animations.length === 0 && aiScript) {
+                        const retryPlan = planMotionFromBrief(brief, {
+                            duration, kind, role: l.clip.motionRole || l.clip.role || '',
+                            name: l.clip.name || l.clip.template?.kind || l.clip.id,
+                            content: l.clip.content || l.clip.template?.params?.text || '',
+                            editingStyle: st.editingStyle || '',
+                        });
+                        ({ animations } = composeMotion(retryPlan, { duration, kind, source: COMPOSED }));
+                        script = retryPlan;
+                    }
                     if (animations.length === 0) continue;
                     (script.beats || []).forEach(b => b?.verb && verbs.add(String(b.verb)));
                     useTimelineStore.getState().updateClip(l.trackId, l.clip.id, { animations, animation: 'none' }, { skipHistory: true });
@@ -2842,7 +2862,7 @@ export class MediaExecutionEngine {
                     clipIds.push(l.clip.id);
                 }
                 if (applied === 0) return { action, success: false, message: 'No motion could be built from that description. Try naming a motion, for example "slam in" or "float".' };
-                const by = source === 'llm' ? 'written by the AI' : source === 'mixed' ? 'partly written by the AI' : 'built from the motion library';
+                const by = source === 'llm' ? 'written by the AI' : source === 'mixed' ? 'partly written by the AI' : 'built from an offline motion recipe';
                 const what = verbs.size ? ` (${[...verbs].slice(0, 6).join(', ')})` : '';
                 return { action, success: true, message: `Animated ${applied} layer(s), ${label}${what}, ${by}.${notes ? ` ${notes}` : ''} One undo reverts it.`, details: { applied, clipIds, source, verbs: [...verbs] } };
             }
@@ -5912,12 +5932,15 @@ export class MediaExecutionEngine {
             );
         }
 
-        // Auto-preview the edited section. Do not schedule a delayed pause:
-        // multi-step Auto edits can outlive that timer, which then stops the
-        // preview after the edit has completed (or when the user starts it).
-        const freshStore = useTimelineStore.getState();
-        freshStore.seek(effectiveRangeStart);
-        freshStore.setIsPlaying(true);
+        // R169: show the edited section, but NEVER start playback from here.
+        // This used to press play (setIsPlaying) after every cut. An Auto edit
+        // runs several cuts in a row, so the video started playing mid-edit
+        // and was still playing in the background when the job finished,
+        // before the user pressed play. On a phone that is the worst case:
+        // playback not started by a tap gets its sound blocked (only the SFX
+        // elements were heard), and each later step reloaded the preview under
+        // a running clock, which froze the picture. Playback is the user's call.
+        useTimelineStore.getState().seek(effectiveRangeStart);
         return { applied: inserted > 0, inserted, keptDuration, originalDuration: totalOriginalDuration, reason: inserted > 0 ? null : 'no kept segment overlapped the current clips' };
     }
 

@@ -11,14 +11,14 @@
       "id": "provider",
       "title": "1. Éditeur du service",
       "blocks": [
-        "Vibed est exploité par {{ownerName}}, {{legalForm}}, {{address}} (SIREN : {{siren}}), joignable à l'adresse [{{email}}](mailto:{{email}}). Dans ces conditions, « nous » désigne Vibed et « vous » la personne qui utilise le service."
+        "Le service est fourni par {{ownerName}}, {{legalForm}} immatriculée sous le n° {{rcs}}, dont l'établissement de Paris est situé {{address}} (SIRET : {{siret}}, TVA : {{vatNumber}}), qui porte la marque {{brandName}} sous CAPE. {{capeRelationship}} Joignable à [{{email}}](mailto:{{email}})."
       ]
     },
     {
       "id": "service",
       "title": "2. Le service",
       "blocks": [
-        "Vibed vous permet d'importer des vidéos, de les monter dans le navigateur, de donner des instructions à un assistant IA (suppression des silences, sous-titres, recadrage, animations, etc.) et d'exporter le résultat. Les fonctionnalités évoluent. Nous pouvons en ajouter, en modifier ou en retirer, mais nous ne retirerons pas une fonction essentielle d'une offre payante pendant une période déjà réglée."
+        "Vibed vous permet d'importer des vidéos, de les monter dans le navigateur, de donner des instructions à un assistant IA (suppression des silences, sous-titres, recadrage, animations, etc.) et d'exporter le résultat. Les fonctionnalités évoluent. Nous pouvons en ajouter, en modifier ou en retirer, mais nous ne retirerons pas une fonction essentielle d'une offre payante pendant une période déjà réglée. Le service comprend également le Design Studio, avec des calques et composants modifiables, ainsi qu'un bac de médias propre à chaque projet, distinct des médias de l'éditeur. Les fonctionnalités de publication sociale permettent de connecter YouTube, Instagram et, lorsque disponible, TikTok, de générer des textes, programmer ou publier des vidéos et consulter les résultats disponibles."
       ]
     },
     {
@@ -59,8 +59,8 @@
             ]
           }
         },
+        "Les paiements et la gestion des abonnements sont assurés par Stripe. Le montant TTC, la périodicité, toute réduction et l'identité de l'entité Stripe applicable sont présentés avant confirmation de la commande ; ces informations au checkout prévalent.",
         "Les taxes, dont la TVA, sont calculées lors du paiement selon votre pays, et le total affiché avant validation correspond au montant débité. Les compteurs d'opérations IA sont remis à zéro le premier jour de chaque mois ; les opérations non utilisées ne sont pas reportées.",
-        "Les paiements sont gérés par Polar Software Inc., qui agit en tant que marchand officiel (merchant of record) : Polar vous vend l'abonnement pour notre compte, encaisse le paiement (via Stripe), émet la facture et gère les taxes. Les conditions d'achat de Polar s'appliquent également au paiement.",
         "Les abonnements sont renouvelés automatiquement chaque mois jusqu'à résiliation. Vous pouvez résilier à tout moment depuis le portail de facturation accessible dans votre compte ; l'offre reste active jusqu'à la fin de la période réglée, puis votre compte passe à l'offre Free. Les mois entamés ne sont pas remboursés, sauf obligation légale ou dans le cas prévu à l'article 5.",
         "Nous pouvons faire évoluer nos prix. Un nouveau prix ne s'applique à un abonnement en cours qu'à partir de la période suivant un préavis d'au moins 30 jours par e-mail, et vous pouvez résilier avant son entrée en vigueur."
       ]
@@ -161,8 +161,30 @@
       "title": "15. Droit applicable et litiges",
       "blocks": [
         "Les présentes conditions sont soumises au droit français. Si vous êtes un consommateur, vous conservez en outre la protection des règles impératives du pays où vous résidez.",
-        "En cas de difficulté, contactez-nous d'abord à [{{email}}](mailto:{{email}}) ; la plupart des problèmes se règlent rapidement ainsi. Si vous êtes un consommateur et qu'aucun accord n'est trouvé, vous pouvez recourir gratuitement à un médiateur de la consommation. Notre médiateur : {{mediator}}.",
+        "En cas de difficulté, contactez-nous d'abord à [{{email}}](mailto:{{email}}) ; la plupart des problèmes se règlent rapidement ainsi. Si vous êtes un consommateur et qu'aucun accord n'est trouvé, vous pouvez recourir gratuitement à un médiateur de la consommation.",
+        {
+          "text": "Notre médiateur : {{mediator}}.",
+          "requires": "mediator"
+        },
         "À défaut de solution amiable, les litiges relèvent des tribunaux français compétents, dont, pour les consommateurs, ceux de leur lieu de résidence."
+      ]
+    },
+    {
+      "id": "social",
+      "title": "16. Comptes sociaux, programmation et publication",
+      "blocks": [
+        "Vous pouvez connecter un compte YouTube ou Instagram, préparer une publication et demander sa mise en ligne immédiate ou programmée. Vous autorisez alors Vibed à utiliser les permissions accordées pour transmettre le média et les textes que vous avez validés.",
+        "Vous devez contrôler le média, le titre, la description, la légende, les paramètres et les droits nécessaires avant publication, et respecter les conditions des plateformes. Vous restez responsable de votre compte et du contenu publié.",
+        "Une publication automatique peut échouer en raison d'une connexion expirée, des règles de la plateforme ou d'un incident. Vibed peut alors afficher un rappel pour publication manuelle. Un rappel n'effectue pas la publication ; vous devez la terminer sur la plateforme.",
+        "Vibed peut récupérer les statistiques accessibles des publications réalisées par son intermédiaire. Après plusieurs publications mesurées, le service peut proposer des recommandations de montage. Ces recommandations restent indicatives et ne sont appliquées à de futurs montages qu'après votre validation. Les statistiques dépendent des API et délais des plateformes."
+      ]
+    },
+    {
+      "id": "design",
+      "title": "17. Design Studio et composants",
+      "blocks": [
+        "Le Design Studio permet de créer et modifier des compositions, calques, composants et médias. Les bibliothèques intégrées peuvent contenir des ressources tierces soumises à leurs propres licences, indiquées dans le produit lorsqu'elles s'appliquent.",
+        "Vous gardez les droits sur vos créations et les médias importés. Vous vous engagez à disposer des droits nécessaires pour les utiliser et les exporter."
       ]
     }
   ]

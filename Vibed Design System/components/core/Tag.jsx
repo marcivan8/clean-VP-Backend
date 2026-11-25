@@ -30,14 +30,19 @@ export function Tag({ children, active = false, icon = null, onRemove = null, st
       {children}
       {onRemove && (
         <button
+          type="button"
+          className="ds-tag-remove"
           onClick={onRemove}
-          aria-label="Remove"
+          aria-label={`Remove ${typeof children === "string" ? children : "tag"}`}
           style={{
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
             border: "none", background: "none", cursor: "pointer", padding: 0, marginLeft: 2,
             color: hover ? "var(--text-strong)" : "var(--text-faint)", fontFamily: "var(--f-mono)", fontSize: 12, lineHeight: 1,
           }}
         >
-          ✕
+          <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="m3 3 6 6M9 3 3 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
         </button>
       )}
     </span>

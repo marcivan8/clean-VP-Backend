@@ -1,8 +1,9 @@
 import React from "react";
 
 /** Card — glass fill, hairline stroke, lit top edge, elevation. */
-export function Card({ children, padding = 20, interactive = false, glow = false, style = {}, ...rest }) {
+export function Card({ children, padding = 20, interactive = false, glow = false, className = "", onClick, onKeyDown, onKeyUp, onMouseEnter: onCardMouseEnter, onMouseLeave: onCardMouseLeave, style = {}, ...rest }) {
   const [hover, setHover] = React.useState(false);
+  const actionable = interactive && typeof onClick === "function";
 
   const hoverFx = interactive && hover
     ? {
@@ -14,8 +15,21 @@ export function Card({ children, padding = 20, interactive = false, glow = false
 
   return (
     <div
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      className={`ds-card ${className}`.trim()}
+      role={actionable ? "button" : undefined}
+      tabIndex={actionable ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={(event) => {
+        if (actionable && event.key === "Enter") onClick(event);
+        if (actionable && event.key === " ") event.preventDefault();
+        onKeyDown?.(event);
+      }}
+      onKeyUp={(event) => {
+        if (actionable && event.key === " ") { event.preventDefault(); onClick(event); }
+        onKeyUp?.(event);
+      }}
+      onMouseEnter={(event) => { setHover(true); onCardMouseEnter?.(event); }}
+      onMouseLeave={(event) => { setHover(false); onCardMouseLeave?.(event); }}
       style={{
         position: "relative",
         padding,

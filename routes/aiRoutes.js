@@ -12,7 +12,11 @@ const {
     designCopilotHandler,
 } = require('../controllers/aiAgentController');
 const { authenticateUser } = require('../middleware/auth');
-const { aiGate } = require('../middleware/usageGate');
+const { aiGate, requirePlan } = require('../middleware/usageGate');
+
+// Design Studio is a Pro feature (R104). Checked before aiGate so a refused
+// request does not use up an AI operation.
+const designStudioGate = requirePlan('pro', { code: 'DESIGN_STUDIO_PRO', feature: 'Design Studio' });
 
 router.post('/chat',               authenticateUser, aiGate, chatAgentHandler);
 router.post('/agent-plan',         authenticateUser, aiGate, agentPlanHandler);
@@ -22,7 +26,7 @@ router.post('/analyze-content',    authenticateUser, aiGate, analyzeContentHandl
 router.post('/smart-cleanup',      authenticateUser, aiGate, smartCleanupHandler);
 router.post('/reorder-clips',      authenticateUser, aiGate, reorderClipsHandler);
 router.post('/detect-repeated-takes', authenticateUser, aiGate, detectRepeatedTakesHandler);
-router.post('/design-copilot',     authenticateUser, aiGate, designCopilotHandler);
+router.post('/design-copilot',     authenticateUser, designStudioGate, aiGate, designCopilotHandler);
 
 module.exports = router;
 

@@ -13,20 +13,48 @@
         {
           "defs": [
             {
-              "term": "Nom",
-              "desc": "{{ownerName}}, {{legalForm}}"
+              "term": "Marque exploitée",
+              "desc": "{{brandName}}"
+            },
+            {
+              "term": "Dénomination sociale (RCS)",
+              "desc": "{{ownerName}}"
             },
             {
               "term": "Nom commercial",
-              "desc": "{{tradeName}}"
+              "desc": "{{cijeTradeName}}"
             },
             {
-              "term": "Adresse",
+              "term": "Forme juridique",
+              "desc": "{{companyForm}}",
+              "requires": "companyForm"
+            },
+            {
+              "term": "Capital social",
+              "desc": "{{shareCapital}}",
+              "requires": "shareCapital"
+            },
+            {
+              "term": "Immatriculation (RCS)",
+              "desc": "{{rcs}}",
+              "requires": "rcs"
+            },
+            {
+              "term": "Siège social",
+              "desc": "{{headOffice}}",
+              "requires": "headOffice"
+            },
+            {
+              "term": "Établissement de Paris",
               "desc": "{{address}}"
             },
             {
-              "term": "SIREN",
-              "desc": "{{siren}}"
+              "term": "SIRET",
+              "desc": "{{siret}}"
+            },
+            {
+              "term": "N° de TVA intracommunautaire",
+              "desc": "{{vatNumber}}"
             },
             {
               "term": "E-mail",
@@ -39,7 +67,17 @@
             },
             {
               "term": "Directeur de la publication",
-              "desc": "{{ownerName}}"
+              "desc": "{{publicationDirector}}",
+              "requires": "publicationDirector"
+            },
+            {
+              "term": "CAPE",
+              "desc": "{{capeRelationship}}"
+            },
+            {
+              "term": "Adresse du site",
+              "desc": "{{website}}",
+              "requires": "website"
             }
           ]
         }
@@ -62,6 +100,11 @@
             {
               "term": "Fichiers",
               "desc": "Google Cloud (Google Cloud EMEA Limited), données hébergées dans l'Union européenne, [cloud.google.com](https://cloud.google.com)"
+            },
+            {
+              "term": "Téléphone de l’hébergeur principal",
+              "desc": "{{hostPhone}}",
+              "requires": "hostPhone"
             }
           ]
         }

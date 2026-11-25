@@ -212,15 +212,15 @@ export default function ProfileDetailModal({
                     }}>
                         <div>
                             <div style={{ fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)', fontSize: 24, fontWeight: 800, letterSpacing: '-0.02em', color: '#10151D' }}>
-                                {item.rating.toFixed(2)}
+                                {Number.isFinite(item.rating) ? item.rating.toFixed(2) : 'New'}
                             </div>
                             <div style={{ fontFamily: 'var(--f-sans, "Geist", sans-serif)', fontSize: 12, color: '#5F6876' }}>
-                                {item.jobsCount} jobs rated
+                                {item.jobsCount ? `${item.jobsCount} jobs rated` : 'no rated jobs yet'}
                             </div>
                         </div>
                         <div>
                             <div style={{ fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)', fontSize: 24, fontWeight: 800, letterSpacing: '-0.02em', color: '#10151D' }}>
-                                {item.onTimePct || 100}%
+                                {Number.isFinite(item.onTimePct) ? `${item.onTimePct}%` : '—'}
                             </div>
                             <div style={{ fontFamily: 'var(--f-sans, "Geist", sans-serif)', fontSize: 12, color: '#5F6876' }}>
                                 on time
@@ -228,7 +228,7 @@ export default function ProfileDetailModal({
                         </div>
                         <div>
                             <div style={{ fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)', fontSize: 24, fontWeight: 800, letterSpacing: '-0.02em', color: '#10151D' }}>
-                                {item.replyTime ? item.replyTime.replace('replies in ', '') : '40 min'}
+                                {item.replyTime ? item.replyTime.replace('replies in ', '') : '—'}
                             </div>
                             <div style={{ fontFamily: 'var(--f-sans, "Geist", sans-serif)', fontSize: 12, color: '#5F6876' }}>
                                 median reply
@@ -236,7 +236,7 @@ export default function ProfileDetailModal({
                         </div>
                         <div>
                             <div style={{ fontFamily: 'var(--f-display, "Plus Jakarta Sans", sans-serif)', fontSize: 24, fontWeight: 800, letterSpacing: '-0.02em', color: '#10151D' }}>
-                                {item.repeatClients || 11}
+                                {item.repeatClients || 0}
                             </div>
                             <div style={{ fontFamily: 'var(--f-sans, "Geist", sans-serif)', fontSize: 12, color: '#5F6876' }}>
                                 repeat clients
@@ -420,12 +420,11 @@ export default function ProfileDetailModal({
                                     CERTIFICATIONS
                                 </h3>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                    {(item.certifications || [
-                                        { name: 'Interview & talking head', status: 'PASSED', date: 'Jun 2026' },
-                                        { name: 'Location sound', status: 'PASSED', date: 'Jun 2026' },
-                                        { name: 'Vertical / short form', status: 'IN REVIEW', date: '' },
-                                        { name: 'Multi-cam live', status: 'NOT TAKEN', date: '' },
-                                    ]).map((c, idx) => (
+                                    {/* R102: no invented certifications — real ones only. */}
+                                    {(item.certifications || []).length === 0 && (
+                                        <span style={{ fontSize: 13, color: '#5F6876' }}>None yet</span>
+                                    )}
+                                    {(item.certifications || []).map((c, idx) => (
                                         <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                                             <span style={{ fontFamily: 'var(--f-sans, "Geist", sans-serif)', fontSize: 13, color: '#10151D' }}>
                                                 {c.name}
@@ -836,7 +835,7 @@ export default function ProfileDetailModal({
                                         color: '#0B7C91',
                                         textTransform: 'uppercase',
                                     }}>
-                                        SCOUT · {item.scoutScore || 91} FOR YOUR PROJECT
+                                        {Number.isFinite(item.scoutScore) ? `SCOUT · ${item.scoutScore} FOR YOUR PROJECT` : 'SCOUT · NOT SCORED YET'}
                                     </span>
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12, color: '#10151D', lineHeight: 1.4 }}>

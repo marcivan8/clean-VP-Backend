@@ -470,8 +470,9 @@ export function composeMotion(script, { duration = 3, kind, source = COMPOSED } 
     all = all.slice(0, LIMITS.maxAnimations);
 
     // Final gate: the same validator the rest of the engine trusts.
+    const validationKind = Object.values(LAYER_KINDS).includes(kind) ? kind : LAYER_KINDS.TEXT;
     const animations = all
-        .filter(a => validateMotionLayer({ id: 'probe', kind: LAYER_KINDS.TEXT, startTime: 0, duration: clipDur, animations: [a] }).valid)
+        .filter(a => validateMotionLayer({ id: 'probe', kind: validationKind, startTime: 0, duration: clipDur, animations: [a] }).valid)
         .map(a => ({ ...a, source }));
 
     return { animations, dropped };
@@ -490,23 +491,6 @@ export const MOODS = {
     bold:      ({ d }) => [{ verb: 'drop-in', energy: 0.7 }, { verb: 'follow-through', at: 0.45, energy: 0.7, duration: 0.55 }, { verb: 'pulse', at: Math.min(d * 0.5, 1.6), energy: 0.6, anticipate: true }, { verb: 'sink-out', anticipate: true }],
 };
 
-const ENTRANCE_WORDS = [
-    [/\bslam/, 'slam-in'], [/\bpops? (?:in|up|on)|\bpop\b/, 'pop-in'], [/\bdrops? in|\bfall(?:s|ing)? in/, 'drop-in'],
-    [/\brises?\b|\brising\b/, 'rise-in'], [/\bslides?\b/, 'slide-in'], [/\bwhip(?:s)? in/, 'whip-in'],
-    [/\bswing/, 'swing-in'], [/\bspin/, 'spin-in'], [/\bfocus|\bblur(?:s)? in/, 'blur-in'],
-    [/type ?writer|\btyping\b|\btypes? (?:in|on|out)/, 'typewriter'], [/\bglitch/, 'glitch-in'],
-    [/\bzooms? in/, 'zoom-in'], [/\bfades? in/, 'fade-in'], [/word by word|reveal/, 'word-reveal'],
-];
-const EMPHASIS_WORDS = [
-    [/follow.?through|overshoot|settles?\b|\bcatch(?:es)? up/, 'follow-through'],
-    [/\bpunch/, 'punch'], [/\bpulse|heartbeat/, 'pulse'], [/\bshake|shaking/, 'shake'], [/\bwobble/, 'wobble'],
-    [/\bflash|\bglow/, 'flash'], [/\bjiggle|squash/, 'jiggle'], [/\bbounce/, 'bounce'], [/\bnod\b/, 'nod'],
-];
-const HOLD_WORDS = [[/\bfloat/, 'float'], [/\bbreath/, 'breathe'], [/\bsway/, 'sway'], [/\bdrift|parallax/, 'drift'], [/ken burns|push in|slow zoom/, 'push-in']];
-const EXIT_WORDS = [
-    [/fl(?:y|ies) (?:out|off|away)/, 'fly-out'], [/whip(?:s)? (?:out|off|away)/, 'whip-out'], [/\bshrink/, 'shrink-out'],
-    [/\bsink/, 'sink-out'], [/blur(?:s)? out|defocus/, 'blur-out'], [/fades? (?:out|away)/, 'fade-out'],
-];
 const MOOD_WORDS = [
     [/punchy|energetic|hype|aggressive|impact|dynamic|viral|tiktok/, 'punchy'],
     [/elegant|classy|premium|luxury|smooth|sleek|minimal/, 'elegant'],
@@ -517,52 +501,216 @@ const MOOD_WORDS = [
     [/\bbold|strong|heavy|loud/, 'bold'],
 ];
 
+// Explicit, tested motion recipes are the offline knowledge base. Each recipe
+// contains a small coordinated phrase rather than independent preset picks.
+const RULE_RECIPES = Object.freeze({
+    title: {
+        punchy: [{ verb: 'rise-in', energy: 0.62 }, { verb: 'punch', at: 0.72, energy: 0.5 }],
+        elegant: [{ verb: 'blur-in', energy: 0.34 }, { verb: 'breathe', at: 0.65, energy: 0.22 }],
+        cinematic: [{ verb: 'zoom-in', energy: 0.38 }, { verb: 'push-in', at: 0.72, energy: 0.3 }],
+        playful: [{ verb: 'pop-in', energy: 0.58 }, { verb: 'bounce', at: 0.58, energy: 0.42 }],
+        techy: [{ verb: 'glitch-in', energy: 0.38 }, { verb: 'pulse', at: 0.62, energy: 0.3 }],
+        calm: [{ verb: 'fade-in', energy: 0.2 }, { verb: 'breathe', at: 0.55, energy: 0.18 }],
+        bold: [{ verb: 'drop-in', energy: 0.58 }, { verb: 'follow-through', at: 0.42, energy: 0.45 }],
+    },
+    caption: {
+        punchy: [{ verb: 'rise-in', energy: 0.32 }], elegant: [{ verb: 'fade-in', energy: 0.2 }],
+        cinematic: [{ verb: 'fade-in', energy: 0.24 }], playful: [{ verb: 'pop-in', energy: 0.34 }],
+        techy: [{ verb: 'word-reveal', energy: 0.25 }], calm: [{ verb: 'fade-in', energy: 0.16 }],
+        bold: [{ verb: 'rise-in', energy: 0.38 }],
+    },
+    image: {
+        punchy: [{ verb: 'push-in', energy: 0.48 }], elegant: [{ verb: 'drift', energy: 0.3 }],
+        cinematic: [{ verb: 'push-in', energy: 0.4 }], playful: [{ verb: 'drift', energy: 0.34 }],
+        techy: [{ verb: 'push-in', energy: 0.3 }], calm: [{ verb: 'drift', energy: 0.22 }],
+        bold: [{ verb: 'push-in', energy: 0.54 }],
+    },
+    video: {
+        punchy: [{ verb: 'push-in', energy: 0.45 }], elegant: [{ verb: 'drift', energy: 0.24 }],
+        cinematic: [{ verb: 'push-in', energy: 0.38 }], playful: [{ verb: 'drift', energy: 0.28 }],
+        techy: [{ verb: 'push-in', energy: 0.32 }], calm: [{ verb: 'drift', energy: 0.2 }],
+        bold: [{ verb: 'push-in', energy: 0.52 }],
+    },
+    sticker: {
+        punchy: [{ verb: 'pop-in', energy: 0.52 }, { verb: 'pulse', at: 0.65, energy: 0.35 }],
+        elegant: [{ verb: 'fade-in', energy: 0.25 }], cinematic: [{ verb: 'rise-in', energy: 0.32 }],
+        playful: [{ verb: 'pop-in', energy: 0.62 }, { verb: 'bounce', at: 0.55, energy: 0.42 }],
+        techy: [{ verb: 'pop-in', energy: 0.38 }], calm: [{ verb: 'fade-in', energy: 0.18 }],
+        bold: [{ verb: 'drop-in', energy: 0.52 }, { verb: 'pulse', at: 0.68, energy: 0.32 }],
+    },
+});
+
+const ACTION_PATTERNS = [
+    ['in', /\b(?:slam(?:s|med)?\s*(?:in|on)?|claque(?:r|z)?|surgi(?:t|r)|pop(?:s|ped)?\s*(?:in|up|on)|jailli(?:t|r)|drop(?:s|ped)?\s*in|tombe(?:r)?\s*(?:du|de)\s*(?:haut|dessus)|rise(?:s|n)?\s*(?:in|up)?|monte(?:r)?|slide(?:s|d)?\s*in|glisse(?:r)?|whip(?:s|ped)?\s*in|swing(?:s|ing)?\s*in|spin(?:s|ning)?\s*in|blur(?:s|red)?\s*in|floute(?:r)?\s*(?:en\s*)?apparition|typewriter|typing|type(?:s|d)?\s*(?:in|on)|glitch(?:es|ed)?\s*in|zoom(?:s|ed)?\s*in|fade(?:s|d)?\s*in|fade\s*in|fondu\s*(?:entrant|en\s*entree)|appar(?:ais|ait|aitre|aisse|aissent)|reveal(?:s|ed)?|word\s*by\s*word)\b/gu,
+        { slam: 'slam-in', claque: 'slam-in', surg: 'rise-in', pop: 'pop-in', jaill: 'pop-in', drop: 'drop-in', tomb: 'drop-in', rise: 'rise-in', mont: 'rise-in', slide: 'slide-in', gliss: 'slide-in', whip: 'whip-in', swing: 'swing-in', spin: 'spin-in', blur: 'blur-in', flout: 'blur-in', typewriter: 'typewriter', typing: 'typewriter', type: 'typewriter', glitch: 'glitch-in', zoom: 'zoom-in', fade: 'fade-in', fondu: 'fade-in', appar: 'fade-in', reveal: 'word-reveal' }],
+    ['emphasis', /\b(?:follow\s*through|overshoot|settle(?:s|d)?|catch(?:es)?\s*up|punch(?:es|ed)?|pulse(?:s|d)?|heartbeat|shake(?:s|n)?|shaking|wobble(?:s|d)?|flash(?:es|ed)?|glow(?:s|ed)?|jiggle(?:s|d)?|squash(?:es|ed)?|bounce(?:s|d)?|bounc(?:e|es|ed)|nod(?:s|ded)?|rebondit|rebond|tremble|oscille(?:r)?|pulse|souligne)\b/gu,
+        { follow: 'follow-through', overshoot: 'follow-through', settle: 'follow-through', catch: 'follow-through', punch: 'punch', pulse: 'pulse', heartbeat: 'pulse', shake: 'shake', shaking: 'shake', wobble: 'wobble', flash: 'flash', glow: 'flash', jiggle: 'jiggle', squash: 'jiggle', bounce: 'bounce', bounc: 'bounce', nod: 'nod', rebond: 'bounce', tremble: 'shake', oscill: 'wobble', soulign: 'flash' }],
+    ['hold', /\b(?:float(?:s|ing|ed)?|drift(?:s|ing|ed)?|breath(?:e|es|ing)?|sway(?:s|ing|ed)?|parallax|ken\s*burns|push\s*in|slow\s*zoom|flotte(?:r)?|derive(?:r)?|respire(?:r)?|balance(?:r)?|pan(?:s|ning)?\s*(?:left|right|up|down)|zooms?\s*(?:lentement|slowly))\b/gu,
+        { float: 'float', drift: 'drift', breath: 'breathe', sway: 'sway', parallax: 'drift', ken: 'push-in', push: 'push-in', slow: 'push-in', flotte: 'float', derive: 'drift', respir: 'breathe', balance: 'sway', pan: 'drift', zoom: 'push-in' }],
+    ['out', /\b(?:fly\s*(?:out|off|away)|whip\s*(?:out|off|away)|shrink(?:s|ing)?\s*(?:out|away)?|sink(?:s|ing)?\s*(?:out|away)?|blur\s*(?:out|away)|defocus|fade\s*(?:out|away)|fade\s*out|fondu\s*(?:sortant|de\s*sortie)|disparai(?:t|sse)|sort(?:ir|ie)|s'envole|s'efface)\b/gu,
+        { fly: 'fly-out', whip: 'whip-out', shrink: 'shrink-out', sink: 'sink-out', blur: 'blur-out', defocus: 'blur-out', fade: 'fade-out', fondu: 'fade-out', disparai: 'fade-out', sort: 'fade-out', "s'envole": 'fly-out', "s'efface": 'fade-out' }],
+];
+
+function normalizedBrief(value) {
+    return String(value || '').toLocaleLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[’]/g, "'");
+}
+
+function actionVerb(group, match, map) {
+    const token = match[0].split(/\s+/)[0];
+    const stem = Object.keys(map).find(key => token.startsWith(key));
+    return map[stem || token] || null;
+}
+
+function parsedActions(text) {
+    const found = [];
+    for (const [group, pattern, map] of ACTION_PATTERNS) {
+        for (const match of text.matchAll(pattern)) {
+            const verb = actionVerb(group, match, map);
+            if (verb) found.push({ group, verb, index: match.index, phrase: match[0] });
+        }
+    }
+    found.sort((a, b) => a.index - b.index);
+    return found.slice(0, LIMITS.maxBeats);
+}
+
+function hashSeed(value) {
+    let hash = 2166136261;
+    for (const char of String(value || '')) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+    return hash >>> 0;
+}
+
+function inferLayerRole(layer = {}) {
+    const identity = normalizedBrief(`${layer.role || ''} ${layer.id || ''} ${layer.name || ''}`);
+    if (layer.kind === 'caption' || /caption|subtitle|subtitle|sous.titre/.test(identity)) return 'caption';
+    if (/background|backdrop|plate|panel|fond|arriere.plan/.test(identity)) return 'backdrop';
+    if (/accent|underline|underline|decoration|accent|decoration/.test(identity)) return 'decoration';
+    if (/logo|brand/.test(identity)) return 'logo';
+    if (/cta|button|call.to.action/.test(identity)) return 'cta';
+    if (/title|headline|hook|titre|accroche/.test(identity)) return 'title';
+    return layer.kind === 'video' ? 'video' : layer.kind === 'image' ? 'image' : layer.kind === 'sticker' || layer.kind === 'shape' ? 'sticker' : 'title';
+}
+
+function inferMood(s) {
+    const explicit = MOOD_WORDS.find(([re]) => re.test(s));
+    if (explicit) return explicit[1];
+    if (/\b(?:podcast|interview|talking head|conversation|calm|soft|gentle|chill|relaxed|subtle|doux|calme|entretien|conversation)\b/.test(s)) return 'calm';
+    if (/\b(?:premium|luxury|elegant|elegance|minimal|clean|editorial|raffine|elegant)\b/.test(s)) return 'elegant';
+    if (/\b(?:cinematic|cinema|film|trailer|dramatic|cinematique|dramatique)\b/.test(s)) return 'cinematic';
+    if (/\b(?:playful|fun|cute|cartoon|funny|amusant|ludique|marrant)\b/.test(s)) return 'playful';
+    if (/\b(?:tech|digital|futuristic|cyber|hacker|code|numerique|futuriste)\b/.test(s)) return 'techy';
+    if (/\b(?:bold|strong|heavy|loud|impact|fort|puissant)\b/.test(s)) return 'bold';
+    return null;
+}
+
+function energyFromBrief(s) {
+    if (/\b(?:very|super|really|extremely|huge|massive|crazy|tres|hyper|extremement|enorme|tres fort)\b/.test(s)) return 0.9;
+    if (/\b(?:subtle|slight|slightly|light|little|gentle|soft|discret|leger|doucement|doux|calme)\b/.test(s)) return 0.28;
+    return 0.55;
+}
+
+export const VIDEO_SAFE_VERBS = new Set(['punch', 'pulse', 'shake', 'wobble', 'nod', 'flash', 'jiggle', 'bounce', 'float', 'breathe', 'sway', 'drift', 'push-in']);
+
+function fitRecipeToLayer(beats, kind, role, duration) {
+    const isVideo = kind === 'video';
+    const canRevealText = kind === 'text' || kind === 'caption';
+    let output = beats.filter(beat => !isVideo || VIDEO_SAFE_VERBS.has(beat.verb));
+    if (!canRevealText) output = output.filter(beat => beat.verb !== 'typewriter' && beat.verb !== 'word-reveal');
+    if (role === 'backdrop') output = output.map(beat => ({ ...beat, verb: ['slam-in', 'drop-in', 'whip-in', 'glitch-in'].includes(beat.verb) ? 'fade-in' : beat.verb, energy: Math.min(0.32, beat.energy ?? 0.3) }));
+    if (role === 'decoration' && output.some(beat => ['fade-in', 'rise-in', 'pop-in'].includes(beat.verb))) {
+        output = output.map(beat => ['fade-in', 'rise-in'].includes(beat.verb) ? { ...beat, verb: 'pop-in', at: Math.max(0.12, Number(beat.at) || 0) } : beat);
+    }
+    if (role === 'logo') output = output.map(beat => ({ ...beat, verb: ['slam-in', 'whip-in', 'glitch-in', 'spin-in'].includes(beat.verb) ? 'fade-in' : beat.verb, energy: Math.min(0.35, beat.energy ?? 0.3) }));
+    if (role === 'cta') output = output.map(beat => beat.verb === 'punch' ? { ...beat, verb: 'pulse' } : beat);
+    // Do not spend the whole runtime animating very short layers.
+    const maxAt = Math.max(0.1, duration * 0.78);
+    output = output.map(beat => ({ ...beat, at: beat.at === undefined ? beat.at : Math.min(maxAt, Math.max(0, Number(beat.at) || 0)) }));
+    return output;
+}
+
 /**
  * Turn a plain-language brief ("make the title slam in then shake, fade out")
  * into a motion script. Named motions win; otherwise a mood is used.
  */
-export function planMotionFromBrief(brief, { duration = 3 } = {}) {
-    const s = String(brief || '').toLowerCase();
+export function planMotionFromBrief(brief, {
+    duration = 3, kind = 'text', role = '', name = '', content = '', editingStyle = '',
+    aspectRatio = '16:9', seed = '', layerIndex = 0, layerCount = 1,
+} = {}) {
+    const s = normalizedBrief(brief);
     const d = Math.max(0.3, Number(duration) || 3);
-    const energy = /\b(very|super|really|extremely|huge|massive|crazy)\b/.test(s) ? 0.9
-        : /\b(subtle|slight|slightly|light|little|gentle|soft)\b/.test(s) ? 0.25 : 0.55;
-    // ANTICIPATION asked for in words. It is only ever applied to the beats
-    // that can carry it (emphasis and exit), so asking for it on a brief that
-    // names only an entrance quietly does nothing rather than inventing a
-    // gesture the layer cannot make.
-    const anticipate = /anticipat|wind(?:s|ing)? up|winds? back|pulls? back|crouch|coil|lean(?:s|ing)? back|brace/.test(s);
-    const from = (s.match(/\bfrom (?:the )?(left|right|top|bottom|above|below)\b/) || [])[1];
-    const toward = { left: 'right', right: 'left', top: 'down', above: 'down', bottom: 'up', below: 'up' };
-    const direction = from ? toward[from] : undefined;
-
-    const pick = list => (list.find(([re]) => re.test(s)) || [])[1];
-    const entrance = pick(ENTRANCE_WORDS);
-    const emphasis = pick(EMPHASIS_WORDS);
-    const hold = pick(HOLD_WORDS);
-    const exit = pick(EXIT_WORDS);
-
-    if (entrance || emphasis || hold || exit) {
-        const beats = [];
-        if (entrance) beats.push({ verb: entrance, energy, direction });
-        if (hold) beats.push({ verb: hold, at: entrance ? 0.5 : 0, energy });
-        if (emphasis) {
-            // Follow-through is defined by WHERE it sits: it is the tail of a
-            // move, so it attaches to the end of the entrance rather than
-            // landing mid-clip like a punch or a shake. Placed at the usual
-            // emphasis time it stops being follow-through and becomes a
-            // random wobble halfway through the shot.
-            const at = emphasis === 'follow-through'
-                ? (entrance ? Math.max(0, DEFAULT_DURATION.in - 0.08) : 0)
-                : (entrance ? Math.min(d * 0.5, 1.5) : 0);
-            beats.push({ verb: emphasis, at, energy, ...(anticipate ? { anticipate: true } : {}) });
+    const layer = { kind, role, name, content };
+    const resolvedRole = inferLayerRole(layer);
+    const resolvedKind = kind === 'caption' ? 'caption' : kind === 'video' ? 'video'
+        : kind === 'image' ? 'image' : kind === 'sticker' || kind === 'shape' ? 'sticker' : 'text';
+    const recipeRole = ['caption', 'video', 'image', 'sticker'].includes(resolvedKind) ? resolvedKind
+        : ['backdrop', 'decoration', 'logo', 'cta'].includes(resolvedRole) ? 'sticker' : 'title';
+    let mood = inferMood(s) || (resolvedKind === 'video' || ['caption', 'logo', 'backdrop'].includes(resolvedRole) ? 'calm' : 'punchy');
+    const style = normalizedBrief(editingStyle);
+    if (/podcast|interview|talking.head|entretien/.test(style)) mood = 'calm';
+    const energy = Math.min(energyFromBrief(s), /podcast|interview|talking.head|entretien/.test(style) ? 0.4 : 1);
+    const explicit = parsedActions(s);
+    const anticipated = /anticipat|wind(?:s|ing)? up|winds? back|pulls? back|crouch|coil|lean(?:s|ing)? back|brace|anticipation|prend son elan|recul avant/.test(s);
+    const sourceDirection = (s.match(/\b(?:from|depuis|de)\s+(?:(?:the|la|le|les)\s+)?(left|right|top|bottom|above|below|gauche|droite|haut|bas)\b/) || [])[1];
+    const toward = { left: 'right', right: 'left', top: 'down', above: 'down', bottom: 'up', below: 'up', gauche: 'right', droite: 'left', haut: 'down', bas: 'up' };
+    const layerSeed = hashSeed(`${seed}|${brief}|${resolvedRole}|${resolvedKind}|${layerIndex}`);
+    const recipe = RULE_RECIPES[recipeRole]?.[mood] || RULE_RECIPES.title.punchy;
+    let beats;
+    if (explicit.length) {
+        beats = explicit.map((item, index) => {
+            const progress = explicit.length > 1 ? index / (explicit.length - 1) : 0;
+            const common = { verb: item.verb, energy, ...(anticipated && ['emphasis', 'out'].includes(item.group) ? { anticipate: true } : {}) };
+            if (item.group === 'in') return { ...common, at: Math.min(d * 0.6, d * progress), duration: Math.min(0.65, d * 0.24), ...(sourceDirection ? { direction: toward[sourceDirection] } : {}) };
+            if (item.group === 'out') return { ...common, at: explicit.length === 1 ? 0 : Math.max(0, d * (1 - progress) * 0.18), duration: Math.min(0.38, d * 0.18), ...(sourceDirection ? { direction: toward[sourceDirection] } : {}) };
+            if (item.group === 'hold') return { ...common, at: Math.min(d * 0.55, d * progress), duration: Math.max(0.3, d * (1 - progress - 0.08)), ...(item.verb === 'drift' && (/(?:pan|balanc|drift|derive)/.test(s)) ? { direction: sourceDirection ? toward[sourceDirection] : (layerSeed % 2 ? 'left' : 'right') } : {}) };
+            const semanticAt = d * (explicit.length === 1 ? 0.42 : progress);
+            const at = item.verb === 'follow-through' ? Math.min(d * 0.2, 0.42) : Math.max(0.12, Math.min(d * 0.76, semanticAt));
+            return { ...common, at, duration: Math.min(0.48, d * 0.16) };
+        });
+    } else {
+        const intensityScale = energy / 0.55;
+        beats = recipe.map(beat => ({ ...beat, energy: Math.max(0.14, Math.min(0.9, (beat.energy ?? 0.35) * intensityScale)) }));
+        // A compact fade completes text/graphic sequences; footage stays
+        // continuously visible and uses camera motion only.
+        if (!['video', 'image'].includes(resolvedKind) && d >= 1.25 && recipeRole !== 'caption' && recipeRole !== 'video') {
+            beats.push({ verb: 'fade-out', duration: Math.min(0.28, d * 0.14), energy: 0.2 });
         }
-        if (exit) beats.push({ verb: exit, energy, direction, ...(anticipate ? { anticipate: true } : {}) });
-        return { beats, mood: null };
     }
-    const mood = pick(MOOD_WORDS) || 'punchy';
-    const scale = energy / 0.55;
-    const beats = MOODS[mood]({ d }).map(b => ({ ...b, energy: Math.min(1, (b.energy ?? 0.5) * scale) }));
-    return { beats, mood };
+
+    beats = fitRecipeToLayer(beats, resolvedKind, resolvedRole, d);
+    if (resolvedKind === 'video' && !beats.some(beat => VIDEO_SAFE_VERBS.has(beat.verb))) {
+        beats = [{ verb: 'push-in', at: 0, duration: d, energy: Math.min(0.42, energy) }];
+    }
+    if (layerCount > 1 && ['title', 'caption', 'cta'].includes(resolvedRole)) {
+        const stagger = Math.min(0.16, Math.max(0, d * 0.035)) * Math.max(0, Number(layerIndex) || 0);
+        beats = beats.map(beat => {
+            if (VERBS[beat.verb]?.group === 'in') return { ...beat, at: Math.min(d * 0.24, (Number(beat.at) || 0) + stagger) };
+            // Out beats are anchored to the clip end; higher startTime means
+            // an earlier exit, so later arrivals get the larger offset.
+            if (VERBS[beat.verb]?.group === 'out') return { ...beat, at: Math.min(d * 0.18, stagger) };
+            return beat;
+        });
+    }
+    beats = beats.slice(0, LIMITS.maxBeats);
+    const dropped = beats.filter(beat => !VERBS[beat.verb]);
+    if (dropped.length) beats = beats.filter(beat => VERBS[beat.verb]);
+    return { beats, mood, recipe: `${recipeRole}-${mood}`, seed: layerSeed, aspectRatio };
 }
 
-export default { VERBS, MOODS, LIMITS, COMPOSED, verbCatalog, sanitizeAnimations, composeMotion, planMotionFromBrief };
+/** Coordinate offline motion across a related layer stack with stable variation. */
+export function planMotionForLayers(layers, brief, { editingStyle = '', aspectRatio = '16:9', seed = '' } = {}) {
+    const list = Array.isArray(layers) ? layers.slice(0, LIMITS.maxBeats) : [];
+    const sharedSeed = hashSeed(`${brief}|${editingStyle}|${aspectRatio}|${seed}`);
+    return Object.fromEntries(list.map((layer, index) => [layer.id, planMotionFromBrief(brief, {
+        duration: layer.duration,
+        kind: layer.kind,
+        role: layer.role,
+        name: layer.name || layer.id,
+        content: layer.content,
+        editingStyle,
+        aspectRatio,
+        seed: sharedSeed,
+        layerIndex: index,
+        layerCount: list.length,
+    })]));
+}
+
+export default { VERBS, MOODS, LIMITS, COMPOSED, RULE_RECIPES, verbCatalog, sanitizeAnimations, composeMotion, planMotionFromBrief, planMotionForLayers };

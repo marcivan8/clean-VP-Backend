@@ -36,12 +36,16 @@ const PP = await import('../client/src/agent/PlatformProfiles.js');
 const { resolveMotionAt } = await import('../client/src/motion/MotionResolver.js');
 const { clipToMotionLayer } = await import('../client/src/motion/ClipAdapter.js');
 
-await check('segment auto-preview does not leave a delayed timer that can pause later playback', () => {
+await check('a re-cut seeks to the edit but never starts playback, and leaves no delayed pause timer', () => {
     const engine = read('client/src/agent/MediaExecutionEngine.js');
-    const start = engine.indexOf('_applySegmentsToTimeline(');
+    const start = engine.indexOf('\n    _applySegmentsToTimeline(segments');
     const end = engine.indexOf('async verifyExecution(job)', start);
     const body = engine.slice(start, end);
-    assert.match(body, /freshStore\.setIsPlaying\(true\)/, 'the updated section should preview after a re-cut');
+    // R169: the auto-preview this used to require started the video playing
+    // during Auto edits (no sound on phones, frozen picture). Playback is the user's call.
+    assert.ok(start > 0 && body.length > 1000, 'found the function body');
+    assert.doesNotMatch(body, /setIsPlaying\(true\)/, 'a cut must not press play');
+    assert.match(body, /\.seek\(effectiveRangeStart\)/, 'the playhead still moves to the edited section');
     assert.doesNotMatch(body, /setTimeout\([\s\S]{0,180}setIsPlaying\(false\)/, 'a stale four-second timer can pause playback after Auto finishes');
 });
 

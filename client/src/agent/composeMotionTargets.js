@@ -85,6 +85,8 @@ export function layersForPrompt(layers, max = 12) {
         out.push({
             id: l.clip.id,
             kind: l.kind,
+            role: l.clip.motionRole || l.clip.role || '',
+            name: l.clip.name || l.clip.template?.kind || '',
             content: String(l.clip.content || l.clip.template?.params?.text || l.clip.template?.kind || l.clip.name || '').slice(0, 120),
             duration: Math.max(0.2, Number(l.clip.duration) || 3),
         });

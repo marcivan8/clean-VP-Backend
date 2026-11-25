@@ -5,11 +5,49 @@
    ============================================================ */
 
 :root {
+  /* Canonical semantic palette. The client maps its legacy token names to
+     these values so existing product screens retain their appearance. */
+  --ds-bg: #05070B;
+  --ds-bg-raised: #090C12;
+  --ds-bg-surface: #11161F;
+  --ds-text-strong: #F7F9FC;
+  --ds-text-body: rgba(247, 249, 252, 0.78);
+  --ds-text-muted: rgba(247, 249, 252, 0.56);
+  --ds-text-faint: rgba(247, 249, 252, 0.34);
+  --ds-text-marketing-secondary: #C7D0DA;
+  --ds-text-marketing-tertiary: #A9B4C0;
+  --ds-text-marketing-quaternary: #8B96A5;
+  --ds-border-subtle: rgba(255, 255, 255, 0.05);
+  --ds-border-default: rgba(255, 255, 255, 0.09);
+  --ds-border-strong: rgba(255, 255, 255, 0.18);
+  --ds-surface: rgba(255, 255, 255, 0.04);
+  --ds-surface-raised: rgba(255, 255, 255, 0.06);
+  --ds-surface-marketing: rgba(255, 255, 255, 0.035);
+  --ds-surface-marketing-raised: rgba(255, 255, 255, 0.065);
+  --ds-accent: #8A2BE2;
+  --ds-accent-strong: #6E1FB8;
+  --ds-accent-contrast: #FFFFFF;
+  --ds-accent-highlight: #00E5FF;
+  --ds-accent-soft: color-mix(in oklch, var(--ds-accent) 18%, transparent);
+  --ds-focus: #9EF4FF;
+  --ds-success: #34D399;
+  --ds-warning: #FBBF24;
+  --ds-danger: #FB6A6A;
+  --ds-info: #00E5FF;
+  --ds-shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 24px 60px -24px rgba(0, 0, 0, 0.6),
+    0 4px 14px -6px rgba(0, 0, 0, 0.4);
+  --ds-radius-xs: 6px;
+  --ds-radius-sm: 10px;
+  --ds-radius-md: 14px;
+  --ds-radius-lg: 22px;
+  --ds-radius-xl: 32px;
+
   /* ---- Brand accents ---------------------------------------- */
-  --cyan-500: #00E5FF;            /* primary accent — active, glow, dots */
+  --cyan-500: var(--ds-accent-highlight); /* primary highlight — active strokes, glow, dots */
   --cyan-400: #5CEEFF;
   --cyan-600: #00B8CC;
-  --violet-500: #8A2BE2;          /* secondary accent — gradient partner */
+  --violet-500: var(--ds-accent); /* primary filled action; cyan is the highlight */
   --violet-400: #A857EC;
   --violet-600: #6E1FB8;
 
@@ -18,15 +56,15 @@
   --logo-yellow: #FFC400;
 
   /* ---- Neutral ramp (dark studio, default) ------------------ */
-  --ink-950: #0A0A0B;            /* deepest ground */
-  --ink-900: #121214;            /* panel ground */
-  --ink-850: #18181B;
-  --ink-800: #1F1F23;            /* raised surface */
+  --ink-950: var(--ds-bg);       /* deepest ground */
+  --ink-900: var(--ds-bg-raised); /* panel ground */
+  --ink-850: #111318;
+  --ink-800: #171B23;            /* raised surface */
   --ink-700: #2A2A30;            /* hairline / stroke base */
   --ink-600: #3A3A42;
 
   --paper-0:  #FFFFFF;
-  --paper-50: #FAFAFA;           /* crisp off-white text */
+  --paper-50: var(--ds-text-strong); /* crisp off-white text */
 
   /* ---- Warm theme grounds ----------------------------------- */
   --cream-100: #F4F1EC;
@@ -35,58 +73,81 @@
   --charcoal-900: #16181B;       /* warm-theme ink */
 
   /* ---- Glass fills & strokes -------------------------------- */
-  --glass-fill: rgba(250, 250, 250, 0.04);
-  --glass-fill-strong: rgba(250, 250, 250, 0.07);
-  --glass-stroke: rgba(250, 250, 250, 0.10);
-  --glass-stroke-strong: rgba(250, 250, 250, 0.16);
+  --glass-fill: var(--ds-surface);
+  --glass-fill-strong: var(--ds-surface-raised);
+  --glass-stroke: var(--ds-border-default);
+  --glass-stroke-strong: var(--ds-border-strong);
 
   /* ---- Semantic (dark theme defaults) ----------------------- */
-  --bg: var(--ink-950);
-  --bg-raised: var(--ink-900);
+  --bg: var(--ds-bg);
+  --bg-raised: var(--ds-bg-raised);
   --surface-card: var(--glass-fill);
   --surface-card-strong: var(--glass-fill-strong);
   --border-hairline: var(--glass-stroke);
   --border-strong: var(--glass-stroke-strong);
 
-  --text-strong: var(--paper-50);                  /* headings */
-  --text-body: rgba(250, 250, 250, 0.78);          /* body copy */
-  --text-muted: rgba(250, 250, 250, 0.55);         /* secondary */
-  --text-faint: rgba(250, 250, 250, 0.38);         /* tertiary / disabled */
+  --text-strong: var(--ds-text-strong);            /* headings */
+  --text-body: var(--ds-text-body);                /* body copy */
+  --text-muted: var(--ds-text-muted);              /* secondary */
+  --text-faint: var(--ds-text-faint);              /* tertiary / disabled */
 
-  --accent: var(--cyan-500);
-  --accent-2: var(--violet-500);
-  --accent-contrast: #04161A;                      /* text on cyan fills */
+  --accent: var(--ds-accent);
+  --accent-2: var(--ds-accent-highlight);
+  --accent-contrast: var(--ds-accent-contrast);    /* accessible text on violet fills */
 
   /* ---- Status ----------------------------------------------- */
-  --success: #34D399;
-  --warning: #FBBF24;
-  --danger:  #FB6A6A;
+  --success: var(--ds-success);
+  --warning: var(--ds-warning);
+  --danger:  var(--ds-danger);
   --rec:     #FF3B5C;                               /* record red */
 
   /* ---- Signature gradients ---------------------------------- */
   --grad-aurora: radial-gradient(60% 60% at 30% 20%, rgba(0,229,255,0.45), transparent 70%),
                  radial-gradient(55% 55% at 75% 80%, rgba(138,43,226,0.40), transparent 70%); /* @kind color */
-  --grad-accent: linear-gradient(120deg, var(--cyan-500), var(--violet-500)); /* @kind color */
+  --grad-accent: linear-gradient(120deg, var(--violet-500), var(--cyan-500)); /* @kind color */
   --grad-accent-soft: linear-gradient(120deg, rgba(0,229,255,0.18), rgba(138,43,226,0.18)); /* @kind color */
 }
 
 /* ---- Warm theme scope --------------------------------------- */
-.theme-warm {
-  --bg: var(--cream-100);
-  --bg-raised: var(--cream-200);
-  --surface-card: rgba(22, 24, 27, 0.03);
-  --surface-card-strong: rgba(22, 24, 27, 0.05);
-  --border-hairline: rgba(22, 24, 27, 0.10);
-  --border-strong: rgba(22, 24, 27, 0.18);
+.theme-warm,
+[data-theme="warm"] {
+  --ds-focus: #6E1FB8;
+  --ds-bg: #F4F1EC;
+  --ds-bg-raised: #ECE7DF;
+  --ds-bg-surface: #E2DCD1;
+  --ds-text-strong: #16181B;
+  --ds-text-body: rgba(22, 24, 27, 0.70);
+  --ds-text-muted: rgba(22, 24, 27, 0.50);
+  --ds-text-faint: rgba(22, 24, 27, 0.30);
+  --ds-text-marketing-secondary: rgba(22, 24, 27, 0.70);
+  --ds-text-marketing-tertiary: rgba(22, 24, 27, 0.50);
+  --ds-text-marketing-quaternary: rgba(22, 24, 27, 0.30);
+  --ds-border-subtle: rgba(15, 16, 18, 0.04);
+  --ds-border-default: rgba(15, 16, 18, 0.08);
+  --ds-border-strong: rgba(15, 16, 18, 0.16);
+  --ds-surface: rgba(255, 255, 255, 0.50);
+  --ds-surface-raised: rgba(255, 255, 255, 0.70);
+  --ds-surface-marketing: rgba(22, 24, 27, 0.03);
+  --ds-surface-marketing-raised: rgba(22, 24, 27, 0.05);
+  --ds-shadow-card: 0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 24px 60px -24px rgba(15, 16, 18, 0.18),
+    0 4px 14px -6px rgba(15, 16, 18, 0.08);
+
+  --bg: var(--ds-bg);
+  --bg-raised: var(--ds-bg-raised);
+  --surface-card: var(--ds-surface);
+  --surface-card-strong: var(--ds-surface-raised);
+  --border-hairline: var(--ds-border-default);
+  --border-strong: var(--ds-border-strong);
 
   --text-strong: var(--charcoal-900);
-  --text-body: rgba(22, 24, 27, 0.80);
-  --text-muted: rgba(22, 24, 27, 0.58);
-  --text-faint: rgba(22, 24, 27, 0.40);
+  --text-body: var(--ds-text-body);
+  --text-muted: var(--ds-text-muted);
+  --text-faint: var(--ds-text-faint);
 
-  --glass-fill: rgba(22, 24, 27, 0.03);
-  --glass-fill-strong: rgba(22, 24, 27, 0.05);
-  --glass-stroke: rgba(22, 24, 27, 0.10);
-  --glass-stroke-strong: rgba(22, 24, 27, 0.18);
-  --accent-contrast: #04161A;
+  --glass-fill: var(--ds-surface);
+  --glass-fill-strong: var(--ds-surface-raised);
+  --glass-stroke: var(--ds-border-default);
+  --glass-stroke-strong: var(--ds-border-strong);
+  --accent-contrast: var(--ds-accent-contrast);
 }

@@ -45,6 +45,7 @@ const QUEUES = [
     { name: 'audio-processing',    feature: 'Transcription, silence/filler detection' },
     { name: 'analysis-processing', feature: 'Virality analysis' },
     { name: 'export-processing',   feature: 'Timeline exports' },
+    { name: 'social-publishing',  feature: 'Scheduled YouTube Shorts and Instagram Reels' },
 ];
 
 /** A depth that suggests a backlog rather than normal in-flight work. */
@@ -138,11 +139,11 @@ async function checkQueueHealth() {
     // job handed a GCS key to the analyzers and wrote nothing.
     let worker = null;
     try {
-        const { WORKER_CAPABILITY_VERSION } = require('./buildInfo');
-        const raw = await connection.get('vibed:worker:heartbeat');
+        const { WORKER_CAPABILITY_VERSION, HEARTBEAT_KEY, HEARTBEAT_INSTANCE_PREFIX } = require('./buildInfo');
+        const heartbeats = await readWorkerHeartbeats(connection, HEARTBEAT_KEY, HEARTBEAT_INSTANCE_PREFIX);
 
-        if (!raw) {
-            worker = { running: false, buildId: null, capabilityVersion: null };
+        if (heartbeats.length === 0) {
+            worker = { running: false, buildId: null, capabilityVersion: null, instanceCount: 0, instances: [] };
             // Only a problem if there is work to do — an idle system with no
             // worker is indistinguishable from one that was never started, and
             // shouting about it on every poll is how a probe gets ignored.
@@ -152,26 +153,50 @@ async function checkQueueHealth() {
                 '(or predates the heartbeat and needs a redeploy).'
             );
         } else {
-            const hb = JSON.parse(raw);
-            worker = {
-                running:           true,
+            // R98: with several replicas, ONE stale copy is enough to make some
+            // jobs do the wrong thing, so judge every instance, and report the
+            // worst one at the top level (the shape callers already read).
+            const instances = heartbeats.map(hb => ({
+                instanceId:        hb.instanceId ?? null,
                 buildId:           hb.buildId ?? null,
                 capabilityVersion: hb.capabilityVersion ?? null,
                 startedAt:         hb.startedAt ?? null,
                 lastSeen:          hb.lastSeen ?? null,
+                host:              hb.host ?? null,
+                concurrency:       hb.concurrency ?? null,
+                stale:             (hb.capabilityVersion ?? 0) < WORKER_CAPABILITY_VERSION,
+            }));
+            const staleOnes = instances.filter(i => i.stale);
+            const worst = staleOnes[0] || instances[0];
+            worker = {
+                running:            true,
+                instanceCount:      instances.length,
+                instances,
+                buildId:            worst.buildId,
+                capabilityVersion:  worst.capabilityVersion,
+                startedAt:          worst.startedAt,
+                lastSeen:           worst.lastSeen,
                 expectedCapability: WORKER_CAPABILITY_VERSION,
+                stale:              staleOnes.length > 0,
             };
 
-            if ((hb.capabilityVersion ?? 0) < WORKER_CAPABILITY_VERSION) {
-                worker.stale = true;
+            if (staleOnes.length > 0) {
+                const which = instances.length > 1
+                    ? `${staleOnes.length} of ${instances.length} worker instances are`
+                    : 'Worker is';
                 problems.push(
-                    `Worker is running capability v${hb.capabilityVersion ?? 'unknown'} but the API expects ` +
+                    `${which} running capability v${worst.capabilityVersion ?? 'unknown'} but the API expects ` +
                     `v${WORKER_CAPABILITY_VERSION} — the worker service has NOT been redeployed. ` +
                     'Its jobs will complete successfully while doing the wrong thing. ' +
                     'Redeploy the worker service.'
                 );
-            } else {
-                worker.stale = false;
+            }
+            const builds = new Set(instances.map(i => i.buildId).filter(Boolean));
+            if (builds.size > 1) {
+                warnings.push(
+                    `Worker instances are on different builds (${[...builds].join(', ')}) — expected briefly ` +
+                    'during a rolling deploy, a problem if it persists.'
+                );
             }
         }
     } catch (err) {
@@ -221,6 +246,31 @@ async function checkQueueHealth() {
         status: problems.length > 0 ? 'degraded' : 'ok',
         checkedAt, checks, worker, services, problems, warnings,
     };
+}
+
+/**
+ * Every live worker instance's heartbeat (R98). Reads the per-instance keys
+ * via SCAN; falls back to the single legacy key when none exist (a worker
+ * deployed before R98) or the client has no SCAN.
+ */
+async function readWorkerHeartbeats(conn, legacyKey, instancePrefix) {
+    const parse = (raw) => { try { return JSON.parse(raw); } catch { return null; } };
+    const found = [];
+    if (typeof conn.scan === 'function') {
+        let cursor = '0';
+        let rounds = 0;
+        do {
+            const [next, keys] = await conn.scan(cursor, 'MATCH', `${instancePrefix}*`, 'COUNT', 100);
+            cursor = String(next);
+            for (const key of keys || []) {
+                const hb = parse(await conn.get(key));
+                if (hb) found.push(hb);
+            }
+        } while (cursor !== '0' && ++rounds < 50);
+    }
+    if (found.length > 0) return found;
+    const legacy = parse(await conn.get(legacyKey));
+    return legacy ? [legacy] : [];
 }
 
 module.exports = { checkQueueHealth, QUEUES, BACKLOG_THRESHOLD };

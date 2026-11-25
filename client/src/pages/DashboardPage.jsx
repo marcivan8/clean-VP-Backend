@@ -18,6 +18,7 @@ import {
     ShieldCheck, Menu, X,
 } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient.js';
+import { MARKET_ENABLED } from '../lib/marketFlag.js';
 import { captureEvent } from '../lib/posthog.js';
 
 async function createCheckout(plan) {
@@ -1034,7 +1035,7 @@ export default function DashboardPage() {
                     onDuplicate={handleDuplicate}
                     onDelete={(id, name) => setDeleteModal({ id, name })}
                     onStyle={() => navigate('/style')}
-                    onMarketplace={() => navigate('/marketplace')}
+                    onMarketplace={MARKET_ENABLED ? () => navigate('/marketplace') : undefined}
                     onDesign={() => navigate('/design')}
                     onBilling={() => navigate('/account')}
                     onSignOut={handleSignOut}
@@ -1099,7 +1100,7 @@ export default function DashboardPage() {
                             Projects
                         </button>
 
-                        <button
+                        {MARKET_ENABLED && <button
                             onClick={() => navigate('/marketplace')}
                             style={{
                                 background: 'transparent',
@@ -1115,7 +1116,7 @@ export default function DashboardPage() {
                             onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-3)'}
                         >
                             Marketplace
-                        </button>
+                        </button>}
 
                         <button
                             onClick={() => navigate('/design')}
@@ -1329,7 +1330,7 @@ export default function DashboardPage() {
                     boxShadow: '0 20px 48px rgba(0,0,0,0.8)',
                 }}>
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'rgba(255, 255, 255, 0.08)', border: 'none', color: '#FFFFFF', fontSize: 14, fontWeight: 600, borderRadius: 8 }}>Projects</button>
-                    <button onClick={() => { setMobileMenuOpen(false); navigate('/marketplace'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg)', fontSize: 14 }}>Marketplace</button>
+                    {MARKET_ENABLED && <button onClick={() => { setMobileMenuOpen(false); navigate('/marketplace'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg)', fontSize: 14 }}>Marketplace</button>}
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/design'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg)', fontSize: 14 }}>Design Studio</button>
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/style'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg)', fontSize: 14 }}>Style</button>
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/account'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg-3)', fontSize: 14 }}>Billing</button>

@@ -58,6 +58,11 @@
                 "vibed_consent_v1",
                 "Your choice in the cookie banner",
                 "6 months"
+              ],
+              [
+                "vp_design_studio_{projectId} (local storage)",
+                "Stores the active project's Design Studio composition, layers, settings and media bin locally",
+                "Until replaced, browser storage is cleared or the project is deleted"
               ]
             ]
           }
@@ -96,7 +101,8 @@
       "id": "third",
       "title": "3. Content loaded from other services",
       "blocks": [
-        "The editor loads its caption fonts from Bunny Fonts, a European service that does not set cookies or log visitors' IP addresses. Error reports (without replay) are sent to Sentry to help us fix bugs; they do not use cookies."
+        "The editor loads its caption fonts from Bunny Fonts, a European service that does not set cookies or log visitors' IP addresses. Error reports (without replay) are sent to Sentry to help us fix bugs; they do not use cookies.",
+        "Connecting YouTube or Instagram opens the relevant platform's site. Cookies used by Google or Meta on their own pages are governed by their policies; Vibed does not read them."
       ]
     },
     {

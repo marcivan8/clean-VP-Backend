@@ -12,6 +12,15 @@ export function Button({
   iconRight = null,
   disabled = false,
   full = false,
+  type = "button",
+  className = "",
+  onKeyDown: onButtonKeyDown,
+  onKeyUp: onButtonKeyUp,
+  onBlur: onButtonBlur,
+  onMouseEnter: onButtonMouseEnter,
+  onMouseLeave: onButtonMouseLeave,
+  onMouseDown: onButtonMouseDown,
+  onMouseUp: onButtonMouseUp,
   style = {},
   ...rest
 }) {
@@ -79,13 +88,23 @@ export function Button({
 
   return (
     <button
-      type="button"
+      type={type}
       disabled={disabled}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => { setHover(false); setPress(false); }}
-      onMouseDown={() => setPress(true)}
-      onMouseUp={() => setPress(false)}
-      style={{ ...base, ...variants[variant], ...hoverFx, ...style }}
+      className={`ds-button ${className}`.trim()}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") setPress(true);
+        onButtonKeyDown?.(event);
+      }}
+      onKeyUp={(event) => {
+        if (event.key === "Enter" || event.key === " ") setPress(false);
+        onButtonKeyUp?.(event);
+      }}
+      onBlur={(event) => { setPress(false); onButtonBlur?.(event); }}
+      onMouseEnter={(event) => { setHover(true); onButtonMouseEnter?.(event); }}
+      onMouseLeave={(event) => { setHover(false); setPress(false); onButtonMouseLeave?.(event); }}
+      onMouseDown={(event) => { setPress(true); onButtonMouseDown?.(event); }}
+      onMouseUp={(event) => { setPress(false); onButtonMouseUp?.(event); }}
+      style={{ ...base, ...(variants[variant] || variants.primary), ...hoverFx, ...style }}
       {...rest}
     >
       {iconLeft}

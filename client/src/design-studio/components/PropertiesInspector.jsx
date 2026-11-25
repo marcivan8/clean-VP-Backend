@@ -23,20 +23,17 @@ import {
     Maximize2, Sliders, ChevronDown, Check, Download, Crop, FileText
 } from 'lucide-react';
 import { copyLayerProperties, pasteLayerProperties } from '../designSystem.js';
+import { EDITOR_FONT_FAMILIES } from '../../lib/editorFonts.js';
 
-const AVAILABLE_FONTS = [
+const DESIGN_STUDIO_FONT_FAMILIES = [...new Set([
     'Plus Jakarta Sans',
     'Instrument Serif',
-    'Inter',
     'Geist',
     'JetBrains Mono',
     'Syne',
     'Clash Display',
-    'Oswald',
-    'Anton',
-    'Playfair Display',
-    'Cormorant Garamond',
-];
+    ...EDITOR_FONT_FAMILIES,
+])];
 
 export default function PropertiesInspector({
     selectedLayers = [],
@@ -538,7 +535,7 @@ export default function PropertiesInspector({
                                         onChange={(e) => handleChange('fontFamily', e.target.value)}
                                         style={{ width: '100%', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '6px', padding: '6px 8px', color: '#0F172A', fontSize: '12px', outline: 'none' }}
                                     >
-                                        {AVAILABLE_FONTS.map(f => (
+                                        {DESIGN_STUDIO_FONT_FAMILIES.map(f => (
                                             <option key={f} value={f}>{f}</option>
                                         ))}
                                     </select>

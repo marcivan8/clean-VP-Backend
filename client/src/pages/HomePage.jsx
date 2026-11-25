@@ -6,9 +6,10 @@ import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import Logo from '../components/Logo';
 import { openConsentSettings } from '../lib/consent';
+import { MARKET_ENABLED } from '../lib/marketFlag';
 import './landing/landing.css';
 import LandingHero from './landing/Hero';
-import { HowItWorks, SpeedProof, Repurpose, ScriptFlow } from './landing/Sections';
+import { HowItWorks, SpeedProof, Repurpose, ScriptFlow, DesignStudioShowcase } from './landing/Sections';
 import { MidCta, CraftGrid, TrustBar, PricingV2, Faq, FinalCtaV2 } from './landing/Closing';
 
 // ── Navigation ────────────────────────────────────────────────────────────────
@@ -83,6 +84,8 @@ const Nav = () => {
                     <a href="#how" onClick={() => setMenuOpen(false)}>{t('nav.how')}</a>
                     <a href="#features" onClick={() => setMenuOpen(false)}>{t('nav.features')}</a>
                     <a href="#pricing" onClick={() => setMenuOpen(false)}>{t('nav.pricing')}</a>
+                    {/* R101: talent onboarding, always shown (signed in or out) — once the market is live (R102). */}
+                    {MARKET_ENABLED && <button className="btn btn-ghost" style={{ height: 32, padding: "0 14px", fontSize: 13, flexShrink: 0 }} onClick={() => { setMenuOpen(false); navigate('/talent'); }}>Become talent</button>}
                     {user ? (
                         <span style={{
                             fontSize: 12.5, color: "var(--fg-3)", padding: "0 4px",
@@ -107,6 +110,8 @@ const Nav = () => {
                         the auth action in the expand row). */}
                     <div className="nav-only-desktop" style={{ gap: 8, alignItems: "center" }}>
                         <LanguageSwitcher />
+                        {/* R101: talent onboarding entry, top right, signed in or out — once the market is live (R102). */}
+                        {MARKET_ENABLED && <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/talent')}>Become talent</button>}
                         {user ? (
                             <span style={{
                                 fontSize: 12.5, color: "var(--fg-3)", padding: "0 12px",
@@ -215,6 +220,7 @@ const HomePage = () => {
                 <SpeedProof />
                 <Repurpose />
                 <ScriptFlow />
+                <DesignStudioShowcase />
                 <MidCta />
                 <CraftGrid />
                 <TrustBar />

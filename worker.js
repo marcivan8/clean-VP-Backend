@@ -1,6 +1,11 @@
 require('dotenv').config();
 const { Worker } = require('bullmq');
+const { queue: socialQueue } = require('./services/social/publicationQueue');
 const { connection } = require('./queue/connection');
+// R98: per-worker concurrency comes from env (defaults = the old hard-coded
+// values). See queue/workerConcurrency.js for what is safe to raise.
+const { resolveAllConcurrency } = require('./queue/workerConcurrency');
+const CONCURRENCY = resolveAllConcurrency();
 
 // Import job handlers
 const processVideoJob    = require('./jobs/videoProcessor');
@@ -8,11 +13,12 @@ const processAudioJob    = require('./jobs/audioProcessor');
 const processAnalysisJob = require('./jobs/analysisProcessor');
 const processExportJob   = require('./jobs/exportProcessor');
 const processObjectSegmentationJob = require('./jobs/objectSegmentationProcessor'); // R67
+const processSocialPublication = require('./jobs/socialPublicationProcessor');
 
 console.log('👷 Worker service starting...');
 
 // 1. Video Processing Worker (HLS proxy, waveform)
-// concurrency: 1 (was 2) — libx264 proxy encoding of raw 4K/1080p phone
+// concurrency: default 1 (was 2; WORKER_CONCURRENCY_VIDEO) — libx264 proxy encoding of raw 4K/1080p phone
 // footage is the single heaviest job this process runs, and this worker
 // shares a process/memory ceiling with the Express server (see index.js's
 // inline `require('./worker')` boot) and with asset-analysis below, which
@@ -24,7 +30,7 @@ console.log('👷 Worker service starting...');
 // uploads was in flight. See R24.
 const videoWorker = new Worker('video-processing', processVideoJob, {
     connection,
-    concurrency: 1,
+    concurrency: CONCURRENCY.video, // default 1, see above
     limiter: { max: 10, duration: 60000 }
 });
 
@@ -41,8 +47,9 @@ const audioWorker = new Worker('audio-processing', processAudioJob, {
     // Keep at 1: each filler-detect job downloads a raw MP4 from GCS, runs
     // FFmpeg audio extraction, then calls OpenAI Whisper. Two concurrent jobs
     // on a Railway 512 MB instance reliably causes OOM → 502 on all in-flight
-    // HTTP requests. Running serially keeps memory predictable.
-    concurrency: 1,
+    // HTTP requests. Running serially keeps memory predictable. Default 1;
+    // raise WORKER_CONCURRENCY_AUDIO only on an instance with the memory for it.
+    concurrency: CONCURRENCY.audio,
     // 5-minute lock so BullMQ doesn't consider a still-running Whisper call
     // stalled and retry it (which would double memory usage and cause a crash).
     lockDuration: 5 * 60 * 1000,
@@ -58,7 +65,7 @@ audioWorker.on('failed', (job, err) => {
 // 3. Analysis Processing Worker (Virality)
 const analysisWorker = new Worker('analysis-processing', processAnalysisJob, {
     connection,
-    concurrency: 2,
+    concurrency: CONCURRENCY.analysis,
 });
 
 analysisWorker.on('completed', job => {
@@ -71,7 +78,7 @@ analysisWorker.on('failed', (job, err) => {
 // 4. Export Processing Worker (timeline render)
 const exportWorker = new Worker('export-processing', processExportJob, {
     connection,
-    concurrency: 1, // exports are very CPU/disk intensive — one at a time
+    concurrency: CONCURRENCY.export, // default 1: exports are very CPU/disk intensive
 });
 
 exportWorker.on('completed', job => {
@@ -82,7 +89,7 @@ exportWorker.on('failed', (job, err) => {
 });
 
 // 5. Asset Analysis Worker (Editorial Brain — vision + audio classification)
-// concurrency: 2 — vision calls are I/O bound (OpenAI API), not CPU bound
+// concurrency: default 2 (WORKER_CONCURRENCY_ANALYSIS) — vision calls are I/O bound (OpenAI API), not CPU bound
 //
 // DEPLOYMENT NOTE: requires server/brain/media/MediaIntelligencePipeline.js
 // and its transitive deps (AudioClassifier, VisualAnalyzer, ContentClassifier,
@@ -100,7 +107,7 @@ try {
     console.error('⚠️  [AssetAnalysisQueue] MediaIntelligencePipeline not available — asset analysis jobs will fail gracefully:', err.message);
 }
 
-// concurrency: 1 (was 2) — these jobs now fire the instant a raw upload
+// concurrency: default 1 (was 2; WORKER_CONCURRENCY_ASSET_ANALYSIS) — these jobs now fire the instant a raw upload
 // lands on GCS, running CONCURRENTLY with video-processing's proxy encode
 // for the same asset (and with every other asset in a multi-file upload).
 // Each job downloads the raw file and runs local ffmpeg frame/audio
@@ -127,7 +134,7 @@ const assetAnalysisWorker = new Worker('asset-analysis', async (job) => {
     } else {
         await pipeline.analyzeAsset(assetId, filePath, projectId, userId, name || null, isReference === true);
     }
-}, { connection, concurrency: 1 });
+}, { connection, concurrency: CONCURRENCY.assetAnalysis });
 
 assetAnalysisWorker.on('completed', job => {
     console.log(`✅ [AssetAnalysisQueue] Job ${job.id} completed`);
@@ -137,14 +144,14 @@ assetAnalysisWorker.on('failed', (job, err) => {
 });
 
 // 6. Asset Embedding Worker (Creative Asset Intelligence — vector embeddings)
-// concurrency: 3 — embedding calls are I/O bound (OpenAI text-embedding-3-small)
+// concurrency: default 3 (WORKER_CONCURRENCY_EMBEDDING) — embedding calls are I/O bound (OpenAI text-embedding-3-small)
 //
 // DEPLOYMENT NOTE: requires server/audio-engine/embeddings/EmbeddingWorker.js
 // and its transitive deps. Same server/ directory constraint as worker 5 above.
 let embeddingWorker = null;
 try {
     const { createEmbeddingWorker } = require('./server/audio-engine/embeddings/EmbeddingWorker.js');
-    embeddingWorker = createEmbeddingWorker();
+    embeddingWorker = createEmbeddingWorker({ concurrency: CONCURRENCY.embedding });
     console.log('✅ [EmbeddingQueue] EmbeddingWorker loaded');
 
     embeddingWorker.on('completed', job => {
@@ -158,20 +165,47 @@ try {
 }
 
 // 7. Object Segmentation Worker (R67 — SAM2 speaker/background separation)
-// concurrency: 2 — I/O bound (Replicate API + polling), like analysisWorker,
+// concurrency: default 2 (WORKER_CONCURRENCY_OBJECT_SEGMENTATION) — I/O bound (Replicate API + polling), like analysisWorker,
 // not CPU bound. Each job downloads the source once and the SAM2 output once,
 // so it competes for bandwidth/disk with videoWorker during an upload burst
 // but not for CPU — see R24's reasoning for why that distinction matters on a
 // small Railway instance.
 const objectSegmentationWorker = new Worker('object-segmentation', processObjectSegmentationJob, {
     connection,
-    concurrency: 2,
+    concurrency: CONCURRENCY.objectSegmentation,
     // SAM2 video inference can run several minutes; give BullMQ enough lock
     // duration that a still-running job isn't mistaken for stalled and retried
     // (which would double-pay for the same Replicate call — see audioWorker's
     // identical reasoning for Whisper above).
     lockDuration: 10 * 60 * 1000,
 });
+
+const socialPublicationWorker = new Worker('social-publishing', processSocialPublication, {
+    connection,
+    concurrency: Number(process.env.WORKER_CONCURRENCY_SOCIAL) || 2,
+    lockDuration: 5 * 60 * 1000,
+});
+socialPublicationWorker.on('completed', job => console.log(`✅ [SocialQueue] Job ${job.id} completed`));
+socialPublicationWorker.on('failed', async (job, err) => {
+    console.error(`❌ [SocialQueue] Job ${job?.id} failed:`, err.message);
+    if (!job?.data?.publicationId) return;
+    try {
+        const { supabaseAdmin } = require('./config/database');
+        const { error } = await supabaseAdmin.from('social_publications').update({
+            status: 'manual_reminder', failure_code: 'WORKER_FAILURE',
+            media_url: '', reminder_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        }).eq('id', job.data.publicationId).eq('user_id', job.data.userId).in('status', ['scheduled', 'publishing']);
+        if (error) console.error('[SocialQueue] Could not store manual fallback:', error.message);
+    } catch (updateErr) {
+        console.error('[SocialQueue] Manual fallback update failed:', updateErr.message);
+    }
+});
+socialQueue.add('sync-analytics', {}, {
+    jobId: 'social-analytics-daily-sync',
+    repeat: { every: 24 * 60 * 60 * 1000 },
+    removeOnComplete: { age: 7 * 24 * 3600 },
+    removeOnFail: { age: 30 * 24 * 3600 },
+}).catch(err => console.error('[SocialQueue] Could not schedule daily analytics sync:', err.message));
 
 objectSegmentationWorker.on('completed', job => {
     console.log(`✅ [ObjectSegmentationQueue] Job ${job.id} completed`);
@@ -193,25 +227,33 @@ objectSegmentationWorker.on('failed', (job, err) => {
 // a missing key means "not running", not "never deployed".
 const { getBuildId, WORKER_CAPABILITY_VERSION } = require('./services/buildInfo');
 
-const HEARTBEAT_KEY        = 'vibed:worker:heartbeat';
+// R98: one key PER WORKER INSTANCE, so running several replicas doesn't let a
+// healthy copy hide a stale one (with a single shared key, the last writer
+// won). The legacy shared key is still written so an API deployed before R98
+// keeps seeing a worker — the API and the worker deploy separately (R48).
+const os = require('os');
+const { HEARTBEAT_KEY, HEARTBEAT_INSTANCE_PREFIX, workerInstanceId } = require('./services/buildInfo');
+const INSTANCE_ID          = workerInstanceId();
+const INSTANCE_KEY         = HEARTBEAT_INSTANCE_PREFIX + INSTANCE_ID;
 const HEARTBEAT_TTL_SEC    = 90;
 const HEARTBEAT_PERIOD_MS  = 30_000;
 const WORKER_STARTED_AT    = new Date().toISOString();
 
 async function publishHeartbeat() {
     try {
-        await connection.set(
-            HEARTBEAT_KEY,
-            JSON.stringify({
-                buildId:            getBuildId(),
-                capabilityVersion:  WORKER_CAPABILITY_VERSION,
-                startedAt:          WORKER_STARTED_AT,
-                lastSeen:           new Date().toISOString(),
-                pid:                process.pid,
-                nodeEnv:            process.env.NODE_ENV || null,
-            }),
-            'EX', HEARTBEAT_TTL_SEC
-        );
+        const payload = JSON.stringify({
+            instanceId:         INSTANCE_ID,
+            buildId:            getBuildId(),
+            capabilityVersion:  WORKER_CAPABILITY_VERSION,
+            startedAt:          WORKER_STARTED_AT,
+            lastSeen:           new Date().toISOString(),
+            pid:                process.pid,
+            host:               os.hostname(),
+            nodeEnv:            process.env.NODE_ENV || null,
+            concurrency:        CONCURRENCY,
+        });
+        await connection.set(INSTANCE_KEY, payload, 'EX', HEARTBEAT_TTL_SEC);
+        await connection.set(HEARTBEAT_KEY, payload, 'EX', HEARTBEAT_TTL_SEC);
     } catch (err) {
         // Never fatal — a worker that can't publish its heartbeat should still
         // process jobs.
@@ -225,5 +267,22 @@ _heartbeatTimer.unref?.(); // don't keep the process alive on its own account
 
 console.log(
     `👷 Worker service is running and listening to queues. ` +
-    `build=${getBuildId()} capability=v${WORKER_CAPABILITY_VERSION}`
+    `build=${getBuildId()} capability=v${WORKER_CAPABILITY_VERSION} instance=${INSTANCE_ID}`
 );
+console.log(`👷 Worker concurrency: ${Object.entries(CONCURRENCY).map(([k, v]) => `${k}=${v}`).join(' ')}`);
+if (require.main !== module) {
+    // Loaded by index.js: these slots share the API server's memory (R24).
+    console.log('👷 Worker is running INLINE with the API server — concurrency adds to the API process\'s memory.');
+}
+
+// Remove this instance's heartbeat on a clean shutdown so the health probe
+// stops counting it right away instead of after the 90s TTL. Standalone only:
+// when inline, the API process owns signal handling and must not be cut short.
+if (require.main === module) {
+    for (const sig of ['SIGTERM', 'SIGINT']) {
+        process.once(sig, () => {
+            setTimeout(() => process.exit(0), 2000).unref();
+            connection.del(INSTANCE_KEY).catch(() => {}).finally(() => process.exit(0));
+        });
+    }
+}

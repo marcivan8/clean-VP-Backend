@@ -15,6 +15,13 @@ import { EventBus, EVENT_TYPES } from './EventBus.js';
 import { ContentAnalyzer } from './ContentAnalyzer.js';
 import useTimelineStore from '../store/useTimelineStore.js';
 import { quotaReason } from '../lib/quotaReason.js';
+import { fetchWithRateLimitRetry } from '../utils/retryOn429.js';
+
+// Transcription jobs share a one-at-a-time audio queue (worker.js, R24). The
+// budget below covers time the job is actually RUNNING; time spent waiting in
+// line behind other files does not count (see pollJobResult's countQueueTime).
+const TRANSCRIBE_ACTIVE_BUDGET_MS = 10 * 60 * 1000;
+const QUEUE_AWARE = { countQueueTime: false };
 
 export const TRANSCRIPTION_STATUS = {
     IDLE: 'idle',
@@ -155,16 +162,18 @@ class TranscriptionManagerClass {
         this._setStatus(TRANSCRIPTION_STATUS.TRANSCRIBING, 5);
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 300_000);
+        // Covers starting the job (including waiting out a 429 from the audio
+        // rate limit, see fetchWithRateLimitRetry); polling has its own budget.
+        const timeoutId = setTimeout(() => controller.abort(), 600_000);
         signal.addEventListener('abort', () => controller.abort());
 
         try {
             // Try diarization first, fall back to standard transcription
-            let response = await authFetch('/api/audio/diarize', {
+            let response = await fetchWithRateLimitRetry(() => authFetch('/api/audio/diarize', {
                 method: 'POST',
                 body: JSON.stringify({ filename }),
                 signal: controller.signal,
-            });
+            }), { label: 'diarize', signal: controller.signal });
 
             if (!response.ok) {
                 const errorData = await response.clone().json().catch(() => null);
@@ -204,11 +213,11 @@ class TranscriptionManagerClass {
                     (response.status >= 500 && response.status !== 401 && response.status !== 403);
                 if (shouldFallback) {
                     console.log(`[TranscriptionManager] Diarization unavailable (${response.status}), falling back to standard transcribe`);
-                    response = await authFetch('/api/audio/transcribe', {
+                    response = await fetchWithRateLimitRetry(() => authFetch('/api/audio/transcribe', {
                         method: 'POST',
                         body: JSON.stringify({ filename }),
                         signal: controller.signal,
-                    });
+                    }), { label: 'transcribe', signal: controller.signal });
                 }
             }
 
@@ -228,25 +237,34 @@ class TranscriptionManagerClass {
                 // which buffer or kill long-lived EventSource connections.
                 this._setStatus(TRANSCRIPTION_STATUS.TRANSCRIBING, 10);
                 try {
-                    const result = await pollJobResult(data.jobId, signal);
+                    const result = await pollJobResult(data.jobId, signal, TRANSCRIBE_ACTIVE_BUDGET_MS, null, QUEUE_AWARE);
                     words = result?.words || [];
                 } catch (jobErr) {
+                    // Only a job that really FAILED falls back to plain
+                    // transcription. Running out of patience (POLL_TIMEOUT) or
+                    // being cancelled means the job may still be queued or
+                    // running: queuing a second job for the same file used to
+                    // double the audio backlog on every large upload, and the
+                    // abandoned diarize job still ran anyway.
+                    if (jobErr?.code === 'POLL_TIMEOUT' || signal.aborted || jobErr?.message === 'Polling cancelled') {
+                        throw jobErr;
+                    }
                     // Job failed asynchronously (e.g. DIARIZE_SERVICE_URL set in web
                     // container but missing in the worker container). Fall back to the
                     // standard Whisper transcription endpoint.
                     console.log(`[TranscriptionManager] Diarize job failed (${jobErr.message}) — falling back to standard transcribe`);
-                    const fallbackResp = await authFetch('/api/audio/transcribe', {
+                    const fallbackResp = await fetchWithRateLimitRetry(() => authFetch('/api/audio/transcribe', {
                         method: 'POST',
                         body: JSON.stringify({ filename }),
                         signal: controller.signal,
-                    });
+                    }), { label: 'transcribe', signal: controller.signal });
                     if (!fallbackResp.ok) {
                         const text = await fallbackResp.text().catch(() => fallbackResp.statusText);
                         throw new Error(`Transcription API error ${fallbackResp.status}: ${text}`);
                     }
                     const fallbackData = await fallbackResp.json();
                     if (fallbackData.jobId) {
-                        const fallbackResult = await pollJobResult(fallbackData.jobId, signal);
+                        const fallbackResult = await pollJobResult(fallbackData.jobId, signal, TRANSCRIBE_ACTIVE_BUDGET_MS, null, QUEUE_AWARE);
                         words = fallbackResult?.words || [];
                     } else {
                         words = fallbackData.words || [];

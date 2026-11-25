@@ -12,7 +12,7 @@
       "id": "controller",
       "title": "1. Who is responsible for your data",
       "blocks": [
-        "The data controller is {{ownerName}}, {{legalForm}}, trading as {{tradeName}}.",
+        "The data controller and contracting party for the service is {{ownerName}}, a {{legalForm}}, operating the {{brandName}} brand under a CAPE agreement. {{capeRelationship}}",
         {
           "defs": [
             {
@@ -24,8 +24,17 @@
               "desc": "[{{email}}](mailto:{{email}})"
             },
             {
-              "term": "SIREN",
-              "desc": "{{siren}}"
+              "term": "SIRET",
+              "desc": "{{siret}}"
+            },
+            {
+              "term": "EU VAT number",
+              "desc": "{{vatNumber}}"
+            },
+            {
+              "term": "Phone",
+              "desc": "{{phone}}",
+              "requires": "phone"
             }
           ]
         },
@@ -38,6 +47,9 @@
       "blocks": [
         "**Account.** Your email address, your name if you give it, and your password, which is stored in hashed form by our authentication provider. We never see it in clear text.",
         "**Your content.** The videos, audio files and images you upload, the projects you create (timeline, captions, text, settings), the files you export and the thumbnails we generate.",
+        "**Design Studio.** Designs, layers, custom components, font preferences and media references added to a project-specific Design Studio media bin. That bin is separate from the editor's media library.",
+        "**Social accounts.** When you connect YouTube or Instagram, we process the account identifier and handle, granted permissions and encrypted access tokens stored server-side. We never return these tokens to the browser.",
+        "**Social publications and results.** Titles, descriptions, captions, media links, scheduled times, publication status, platform post identifiers and performance metrics for Shorts/Reels published through Vibed. We also store editing context and generated recommendations, including whether you accepted or dismissed them.",
         "**Analysis of your content.** To power the editing features, we create transcripts, speaker labels (\"Speaker 1\", \"Speaker 2\"), scene descriptions, the position of faces in the frame and similar technical data. These results are stored with your project.",
         "**Instructions to the assistant.** The requests you type to the AI assistant, its answers, and a record of which suggestions you accepted or rejected.",
         "**Style profile.** Editing preferences we infer from how you work, such as preferred pace, fonts, target platforms and the type of content you make. See section 7.",
@@ -93,6 +105,18 @@
               [
                 "Answering requests from authorities and keeping records the law requires",
                 "Legal obligation"
+              ],
+              [
+                "Connect a social account, prepare, publish or schedule a Short or Reel at your request",
+                "Performance of the service you request and management of your connected account"
+              ],
+              [
+                "Retrieve and temporarily store statistics for a Vibed publication to show its results",
+                "Performance of the analytics feature you use"
+              ],
+              [
+                "Compare measured results and suggest editing ideas for future content",
+                "Performance of the analytics feature; no recommendation is applied without your approval"
               ]
             ]
           }
@@ -110,7 +134,8 @@
             "**Understanding your requests:** the text of your request, along with the transcript and the project details the assistant needs, is sent to Groq or OpenAI.",
             "**Visual analysis:** still frames taken from your video are sent to Google (Gemini) or OpenAI, for example to describe scenes or pick b-roll.",
             "**Subject cut-outs:** a temporary private link to the video is sent to Replicate to separate a person from the background.",
-            "**Searching our media library:** your search text is sent to OpenAI to find matching assets."
+            "**Searching our media library:** your search text is sent to OpenAI to find matching assets.",
+            "**Social copy generation:** the title, context and selected platform you provide are sent to the configured conversational AI provider to generate a suggested description or caption."
           ]
         },
         "Only what the feature needs is sent. Providers process it under their business API terms and do not keep it longer than those terms allow. We do not use your content to train AI models.",
@@ -122,7 +147,7 @@
       "id": "recipients",
       "title": "5. Who processes your data",
       "blocks": [
-        "Your data is accessible only to us and to the service providers below, each limited to its task and bound by a data processing agreement. Polar acts on its own account as the seller of your subscription (merchant of record).",
+        "Your data is accessed by CIJE and the providers below only as needed for their roles. Stripe processes payments; social platforms receive only the data needed when you connect an account or request publication or analytics. OAuth tokens are encrypted and used server-side.",
         {
           "table": {
             "head": [
@@ -143,13 +168,8 @@
               ],
               [
                 "Railway",
-                "Application servers",
+                "Application servers, including our own speaker-separation and editing-assistant models",
                 "{{railwayRegion}}"
-              ],
-              [
-                "Fly.io",
-                "Video rendering servers",
-                "Paris, France"
               ],
               [
                 "AssemblyAI",
@@ -173,7 +193,7 @@
               ],
               [
                 "Replicate",
-                "Subject segmentation",
+                "Subject segmentation (older feature, not used by the current background removal, which runs in your browser)",
                 "United States"
               ],
               [
@@ -197,9 +217,34 @@
                 "European Union"
               ],
               [
-                "Polar",
-                "Payments, as merchant of record (with Stripe)",
-                "United States"
+                "Stripe",
+                "Payment and subscription processing",
+                "Stripe Payments Europe, Ltd. (Ireland), with transfers to Stripe, Inc. (United States)"
+              ],
+              [
+                "Google / YouTube",
+                "Account connection, YouTube publishing and analytics",
+                "Under Google's terms and infrastructure"
+              ],
+              [
+                "Meta / Instagram",
+                "Account connection, Reels publishing and analytics",
+                "Under Meta's terms and infrastructure"
+              ],
+              [
+                "TikTok",
+                "Account connection and publishing, if you connect TikTok",
+                "Under TikTok's terms and infrastructure"
+              ],
+              [
+                "Pexels, Vecteezy",
+                "Stock video and image search: they receive search keywords only, never your account or files",
+                "Pexels: Germany; Vecteezy: United States"
+              ],
+              [
+                "jsDelivr, Google (model files)",
+                "Delivering the open-source code and models for in-browser features (background removal, footage analysis). They see your IP address; your video never leaves your device for these features",
+                "Global networks"
               ]
             ]
           }
@@ -211,7 +256,7 @@
       "id": "transfers",
       "title": "6. Transfers outside the European Union",
       "blocks": [
-        "Some providers above are located outside the EU, or are companies that may access data from outside it. Switzerland benefits from an adequacy decision of the European Commission. For the United States and Türkiye, transfers rely on the Standard Contractual Clauses approved by the European Commission, or on the EU-U.S. Data Privacy Framework when the provider is certified under it, together with the provider's security measures.",
+        "Some providers above are located outside the EU, or are companies that may access data from outside it. Switzerland benefits from an adequacy decision of the European Commission. For the United States and Türkiye, transfers rely on the Standard Contractual Clauses approved by the European Commission, or on the EU-U.S. Data Privacy Framework when the provider is certified under it, together with the provider's security measures. Connections to Google/YouTube and Meta/Instagram may also involve transfers described in those platforms' policies; applicable arrangements depend on the account and service used.",
         "You can ask us for a copy of the safeguards that apply to a given provider by writing to [{{email}}](mailto:{{email}})."
       ]
     },
@@ -277,6 +322,18 @@
               [
                 "Your cookie choice",
                 "6 months, then we ask again"
+              ],
+              [
+                "Social account tokens and identifiers",
+                "Until the social account is disconnected or the Vibed account is deleted"
+              ],
+              [
+                "Social publication history and recommendations",
+                "Until the Vibed account is deleted"
+              ],
+              [
+                "Daily social metric snapshots",
+                "Up to 30 days"
               ]
             ]
           }
@@ -302,7 +359,7 @@
             "give instructions on what should happen to your data after your death."
           ]
         },
-        "Several of these are available directly in the app: delete a project from the dashboard, delete your account from the [account page](/account), manage your style profile on [Your style](/style), unsubscribe from the link in any product email, and change your cookie choice from Cookie settings in the footer. For anything else, write to [{{email}}](mailto:{{email}}). We reply within one month. We may ask you to confirm your identity if we have a reasonable doubt about it.",
+        "Several of these are available directly in the app: delete a project from the dashboard, delete your account from the [account page](/account), manage your style profile on [Your style](/style), unsubscribe from the link in any product email, and change your cookie choice from Cookie settings in the footer. For anything else, write to [{{email}}](mailto:{{email}}). We reply within one month. We may ask you to confirm your identity if we have a reasonable doubt about it. You can disconnect YouTube or Instagram from the editor; this deletes stored tokens but does not remove content already published on the platform.",
         "If you think we have not handled your data properly, you can lodge a complaint with the CNIL, the French data protection authority: [www.cnil.fr](https://www.cnil.fr), 3 place de Fontenoy, TSA 80715, 75334 Paris Cedex 07. We would appreciate the chance to sort it out with you first."
       ]
     },

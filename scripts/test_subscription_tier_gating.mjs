@@ -244,7 +244,10 @@ const UNBUILT_CLAIMS = [
       why: 'no queue-priority code in jobs/ or services/' },
     { en: '2 team seats',                               fr: "2 sièges d'équipe",
       why: 'no organizations/organization_members model, no seat billing' },
-    { en: 'Virality scoring + performance analysis',    fr: 'Score de viralité + analyse de performance',
+    // Split in R103: "performance analysis" shipped as the social post metrics and
+    // editing recommendations (R161, now listed as a Creator feature); the virality
+    // SCORE is still unbuilt, so it stays here and stays visible under Pro "soon".
+    { en: 'Virality scoring',                           fr: 'Score de viralité',
       why: 'viralEngine/ has no caller; ViralIntelligencePanel.jsx has no importer' },
 ];
 

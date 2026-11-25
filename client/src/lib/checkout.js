@@ -1,5 +1,5 @@
 /**
- * checkout.js — start a Polar checkout for a plan and redirect to it.
+ * checkout.js — start a Stripe Checkout session for a plan and redirect to it.
  * Same /api/checkout/create flow the pricing page, the dashboard and
  * UpgradeModal use. Resolves false when it could not redirect.
  */

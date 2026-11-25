@@ -22,6 +22,7 @@ export default function CanvasToolbar({
     onExecuteBoolean,
     onGroupSelected,
     onUngroupSelected,
+    canUngroupSelected = false,
     snapToGrid,
     setSnapToGrid,
     showGuides,
@@ -328,11 +329,11 @@ export default function CanvasToolbar({
             {/* Canvas Helpers: Snapping, Guides, Zoom */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 {/* Group / Ungroup */}
-                {selectedLayersCount >= 2 && (
+                {selectedLayersCount >= 2 && !canUngroupSelected && (
                     <button
                         type="button"
                         onClick={onGroupSelected}
-                        title="Group Selected (Cmd+G)"
+                        title="Group selected (⌘/Ctrl+G)"
                         style={{
                             padding: '5px 8px',
                             background: '#F8FAFC',
@@ -349,6 +350,17 @@ export default function CanvasToolbar({
                     >
                         <FolderPlus size={13} />
                         <span>Group</span>
+                    </button>
+                )}
+                {canUngroupSelected && (
+                    <button
+                        type="button"
+                        onClick={onUngroupSelected}
+                        title="Ungroup selected (⌘/Ctrl+G)"
+                        style={{ padding: '5px 8px', background: '#F8FAFC', color: '#1E293B', border: '1px solid #E2E8F0', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 500 }}
+                    >
+                        <FolderPlus size={13} />
+                        <span>Ungroup</span>
                     </button>
                 )}
 

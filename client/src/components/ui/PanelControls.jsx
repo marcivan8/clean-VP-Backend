@@ -1,5 +1,6 @@
 import React, { useId, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Minus, Plus, Upload } from 'lucide-react';
+import { Switch } from '../../designSystem.js';
 import {
     clampTo, percentOf, snapTo, formatValue, normalizeHex, hexLuminance,
     segmentedKeyMove, trackBackground, scrubDelta, DRAG_THRESHOLD_PX,
@@ -525,24 +526,9 @@ export const SelectField = ({ value, options, onChange, ariaLabel, width = '100%
     </div>
 );
 
-/** An on/off switch. */
+/** A compact on/off switch shared with the design-system component library. */
 export const ToggleSwitch = ({ checked, onChange, ariaLabel }) => (
-    <button
-        type="button"
-        role="switch"
-        aria-checked={!!checked}
-        aria-label={ariaLabel}
-        onClick={() => onChange(!checked)}
-        style={{
-            width: 34, height: 20, borderRadius: 999, flexShrink: 0, cursor: 'pointer', padding: 2,
-            border: '0.5px solid var(--line)',
-            background: checked ? 'var(--accent)' : 'var(--glass-2)',
-            display: 'flex', justifyContent: checked ? 'flex-end' : 'flex-start',
-            transition: 'background 0.15s',
-        }}
-    >
-        <span style={{ width: 15, height: 15, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,0.3)' }} />
-    </button>
+    <Switch checked={!!checked} onChange={onChange} aria-label={ariaLabel} size="sm" />
 );
 
 /** A grid of labelled previews (the Filters row in the reference). */

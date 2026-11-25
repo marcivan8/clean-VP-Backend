@@ -46,7 +46,7 @@ export default function DesignStudioAiDirector({
     showToast,
     pushUndo,
 }) {
-    const [isExpanded, setIsExpanded] = useState(true);
+    const [isExpanded, setIsExpanded] = useState(false);
     const [promptText, setPromptText] = useState('');
     const [isExecuting, setIsExecuting] = useState(false);
     const [history, setHistory] = useState([

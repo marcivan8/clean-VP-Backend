@@ -4,16 +4,16 @@
  * Billing & subscription management.
  *
  * This page exists at /account because every plan-confirmation email already
- * links there (`account_url` in routes/polarWebhook.js) — the route was never
+ * links there (`account_url` in routes/stripeWebhook.js) — the route was never
  * built, so that link 404'd for every paying customer. Same shape as the LUT
  * import (R33) and the "Your Style" page (R37): a missing entry point is
  * indistinguishable from a missing feature from the outside.
  *
  * Data sources:
- *   GET  /api/polar/subscription  — live state, read from Polar not the DB
- *   POST /api/polar/cancel        — schedules cancellation at period end
- *   POST /api/polar/reactivate    — undoes a scheduled cancellation
- *   POST /api/polar/portal        — hosted Polar portal (invoices, card)
+ *   GET  /api/stripe/subscription  — live state, read from Stripe not the DB
+ *   POST /api/stripe/cancel        — schedules cancellation at period end
+ *   POST /api/stripe/reactivate    — undoes a scheduled cancellation
+ *   POST /api/stripe/portal        — hosted Stripe portal (invoices, card)
  *
  * The cancellation is at PERIOD END by design: the customer keeps the tier they
  * have already paid for until it lapses. The UI must never imply access is lost
@@ -137,7 +137,8 @@ const S = {
     },
 };
 
-// Polar's fixed enum. Anything not in this list is dropped server-side.
+// Stripe's cancellation_details.feedback enum. Anything not in this list is
+// dropped server-side.
 const REASONS = [
     ['',                  'Prefer not to say'],
     ['too_expensive',     'Too expensive'],
@@ -171,7 +172,7 @@ export default function AccountPage() {
         setLoading(true);
         setError(null);
         try {
-            const res  = await authFetch('/api/polar/subscription');
+            const res  = await authFetch('/api/stripe/subscription');
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Could not load your subscription.');
             setSub(data);
@@ -188,12 +189,12 @@ export default function AccountPage() {
         setBusy(true);
         setError(null);
         try {
-            const res  = await authFetch('/api/polar/cancel', {
+            const res  = await authFetch('/api/stripe/cancel', {
                 method: 'POST',
                 body:   JSON.stringify({ reason: reason || undefined, comment: comment || undefined }),
             });
             const data = await res.json();
-            // Trust the server's own verdict — it verifies with Polar that the
+            // Trust the server's own verdict — it verifies with Stripe that the
             // cancellation actually took effect before reporting success.
             if (!res.ok || !data.canceled) {
                 throw new Error(data.error || 'The subscription was not changed.');
@@ -212,7 +213,7 @@ export default function AccountPage() {
         setBusy(true);
         setError(null);
         try {
-            const res  = await authFetch('/api/polar/reactivate', { method: 'POST' });
+            const res  = await authFetch('/api/stripe/reactivate', { method: 'POST' });
             const data = await res.json();
             if (!res.ok || !data.reactivated) {
                 throw new Error(data.error || 'The subscription was not changed.');
@@ -230,7 +231,7 @@ export default function AccountPage() {
         setBusy(true);
         setError(null);
         try {
-            const res  = await authFetch('/api/polar/portal', { method: 'POST' });
+            const res  = await authFetch('/api/stripe/portal', { method: 'POST' });
             const data = await res.json();
             if (!res.ok || !data.url) throw new Error(data.error || 'Could not open the billing portal.');
             window.open(data.url, '_blank', 'noopener,noreferrer');

@@ -37,6 +37,19 @@ globalThis.fetch = async (url, init = {}) => {
         const body = JSON.parse(init.body || '{}');
         return new Response(JSON.stringify({ jobId: `target-job-${body.assetId}` }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
+    if (url === '/api/jobs/status-batch') {
+        // R96: pollJobResult asks about all pending jobs in one batch request.
+        polled = true;
+        const ids = JSON.parse(init.body || '{}').ids || [];
+        const jobs = {};
+        for (const id of ids) {
+            const assetId = id.endsWith('asset-b') ? 'asset-b' : 'asset-a';
+            jobs[id] = { state: 'completed', result: {
+                ranges: [{ id: 'hit', kind: 'visual', sourceStart: assetId === 'asset-a' ? 4 : 8, sourceEnd: assetId === 'asset-a' ? 6 : 10, confidence: 0.9, evidence: 'red car in frame' }],
+            } };
+        }
+        return new Response(JSON.stringify({ jobs }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
     if (url.startsWith('/api/jobs/target-job-')) {
         polled = true;
         const assetId = url.endsWith('asset-b/status') ? 'asset-b' : 'asset-a';
@@ -79,6 +92,11 @@ globalThis.fetch = async (url, init = {}) => {
         await Promise.resolve();
         activeSearches--;
         return new Response(JSON.stringify({ jobId: `target-job-${assetId}` }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url === '/api/jobs/status-batch') {
+        const ids = JSON.parse(init.body || '{}').ids || [];
+        const jobs = Object.fromEntries(ids.map(id => [id, { state: 'completed', result: { ranges: [] } }]));
+        return new Response(JSON.stringify({ jobs }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     if (url.startsWith('/api/jobs/target-job-')) {
         return new Response(JSON.stringify({ state: 'completed', result: { ranges: [] } }), { status: 200, headers: { 'content-type': 'application/json' } });

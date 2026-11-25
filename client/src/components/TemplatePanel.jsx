@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../store/useTimelineStore';
@@ -84,16 +84,40 @@ const VectorEditor = ({ trackId, clip }) => {
     </div>;
 };
 
+// R105: each swatch used to be its own live <canvas> (120 of them), and the
+// whole list was rebuilt every time a clip got selected. iOS Safari caps the
+// memory canvases may hold and RELOADS THE TAB when it runs out: tapping an
+// illustration (which selects the new clip) refreshed the page. Now one shared
+// canvas draws each preview once into an image that is cached for the session.
+const swatchCache = new Map();
+let swatchCanvas = null;
+function swatchUrl(illustration) {
+    const key = illustration.id || `${illustration.icon}-${illustration.treatment}-${illustration.background}`;
+    if (swatchCache.has(key)) return swatchCache.get(key);
+    let url = '';
+    try {
+        if (typeof document !== 'undefined') {
+            swatchCanvas = swatchCanvas || document.createElement('canvas');
+            swatchCanvas.width = 48; swatchCanvas.height = 48;
+            const ctx = swatchCanvas.getContext('2d');
+            if (ctx) {
+                ctx.clearRect(0, 0, 48, 48);
+                drawTemplate(ctx, 'icon', illustration, 1.2, 3, {});
+                url = swatchCanvas.toDataURL('image/png');
+            }
+        }
+    } catch (err) {
+        console.warn('[TemplatePanel] swatch preview failed:', err?.message);
+    }
+    swatchCache.set(key, url);
+    return url;
+}
+
 const IllustrationSwatch = ({ illustration }) => {
-    const ref = useRef(null);
-    useEffect(() => {
-        const canvas = ref.current;
-        const ctx = canvas?.getContext('2d');
-        if (!ctx) return;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        drawTemplate(ctx, 'icon', illustration, 1.2, 3, {});
-    }, [illustration]);
-    return <canvas ref={ref} width={48} height={48} aria-hidden="true" className="w-9 h-9 shrink-0" />;
+    const url = swatchUrl(illustration);
+    return url
+        ? <img src={url} alt="" aria-hidden="true" width={48} height={48} className="w-9 h-9 shrink-0" />
+        : <span aria-hidden="true" className="w-9 h-9 shrink-0" />;
 };
 
 const TemplateEditor = ({ trackId, clip }) => {

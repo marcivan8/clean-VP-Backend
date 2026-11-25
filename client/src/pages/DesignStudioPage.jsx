@@ -32,7 +32,9 @@ import {
 
 import { Logo } from '../components/Logo.jsx';
 import { useUserPlan } from '../hooks/useUserPlan.js';
+import ProFeatureLock from '../components/ProFeatureLock.jsx';
 import useTimelineStore from '../store/useTimelineStore.js';
+import { ensureEditorFonts } from '../lib/editorFonts.js';
 import { executeDesignCommand } from '../agent/DesignStudioCommandRegistry.js';
 import CanvasToolbar from '../design-studio/components/CanvasToolbar.jsx';
 import InteractiveVectorCanvas from '../design-studio/components/InteractiveVectorCanvas.jsx';
@@ -82,12 +84,25 @@ const DIRECTIONS = [
     },
 ];
 
+// Design Studio is a Pro feature (R104). The server refuses its AI routes for
+// other plans; this only decides what to show. Kept as a wrapper so the editor's
+// many hooks never run for a locked account.
 export default function DesignStudioPage() {
+    const { plan, loading } = useUserPlan();
+    if (loading) return <div style={{ minHeight: '100vh', background: 'var(--bg)' }} aria-busy="true" />;
+    if (plan !== 'pro') return <ProFeatureLock feature="designStudio" required="pro" />;
+    return <DesignStudioEditor />;
+}
+
+function DesignStudioEditor() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const projectId = searchParams.get('projectId') || useTimelineStore.getState().projectId || 'default_design';
-    const { isPro, plan } = useUserPlan();
-    const { projectName, addOverlayClip, addAssets, assets: timelineAssets = [] } = useTimelineStore();
+    const { projectName, addOverlayClip, addAssets } = useTimelineStore();
+
+    useEffect(() => {
+        ensureEditorFonts();
+    }, []);
 
     // Format Dropdown & Variations Tray State
     const [formatDropdownOpen, setFormatDropdownOpen] = useState(false);
@@ -130,7 +145,7 @@ export default function DesignStudioPage() {
 
     // Asset & Media Drawer State
     const [assetDrawerOpen, setAssetDrawerOpen] = useState(false);
-    const [assetDrawerTab, setAssetDrawerTab] = useState('upload'); // 'upload' | 'timeline'
+    const [assetDrawerTab, setAssetDrawerTab] = useState('upload'); // 'upload' | 'studio'
 
     // Visual Brand Kit Panel State
     const [brandKitModalOpen, setBrandKitModalOpen] = useState(false);
@@ -232,7 +247,7 @@ export default function DesignStudioPage() {
     const [selectedLayerId, setSelectedLayerId] = useState('headline');
     const [selectedLayerIds, setSelectedLayerIds] = useState(['headline']);
     const [showGuides, setShowGuides] = useState(false);
-    const [zoom, setZoom] = useState(0.75);
+    const [zoom, setZoom] = useState(0.45);
     const [leftRailTab, setLeftRailTab] = useState('layers');
     const [customComponents, setCustomComponents] = useState(() => {
         try {
@@ -243,6 +258,15 @@ export default function DesignStudioPage() {
             }
             const fallback = localStorage.getItem('vp_custom_components');
             return fallback ? JSON.parse(fallback) : [];
+        } catch {
+            return [];
+        }
+    });
+    const [studioMediaAssets, setStudioMediaAssets] = useState(() => {
+        try {
+            const saved = localStorage.getItem(`vp_design_studio_${projectId}`);
+            const parsed = saved ? JSON.parse(saved) : null;
+            return Array.isArray(parsed?.mediaAssets) ? parsed.mediaAssets : [];
         } catch {
             return [];
         }
@@ -262,6 +286,7 @@ export default function DesignStudioPage() {
                     if (ds.brandKit) setBrandKit(ds.brandKit);
                     if (ds.briefText) setBriefText(ds.briefText);
                     if (Array.isArray(ds.customComponents)) setCustomComponents(ds.customComponents);
+                    if (Array.isArray(ds.mediaAssets)) setStudioMediaAssets(ds.mediaAssets);
                 }
             }).catch(() => { });
         }).catch(() => { });
@@ -278,6 +303,7 @@ export default function DesignStudioPage() {
                     brandKit,
                     briefText,
                     customComponents,
+                    mediaAssets: studioMediaAssets,
                     updatedAt: Date.now(),
                 };
                 localStorage.setItem(`vp_design_studio_${projectId}`, JSON.stringify(payload));
@@ -316,7 +342,7 @@ export default function DesignStudioPage() {
         }, 1500);
 
         return () => clearTimeout(timer);
-    }, [layers, selectedFormat, brandKit, briefText, customComponents, projectId, projectName, currentFormat]);
+    }, [layers, selectedFormat, brandKit, briefText, customComponents, studioMediaAssets, projectId, projectName, currentFormat]);
 
     // Network online listener to sync pending edits
     useEffect(() => {
@@ -351,6 +377,7 @@ export default function DesignStudioPage() {
                     if (ds.brandKit) setBrandKit(ds.brandKit);
                     if (ds.briefText) setBriefText(ds.briefText);
                     if (Array.isArray(ds.customComponents)) setCustomComponents(ds.customComponents);
+                    if (Array.isArray(ds.mediaAssets)) setStudioMediaAssets(ds.mediaAssets);
                 }
             }).catch(() => { });
         }).catch(() => { });
@@ -367,6 +394,7 @@ export default function DesignStudioPage() {
                     brandKit,
                     briefText,
                     customComponents,
+                    mediaAssets: studioMediaAssets,
                     updatedAt: Date.now(),
                 };
                 localStorage.setItem(`vp_design_studio_${projectId}`, JSON.stringify(payload));
@@ -405,7 +433,7 @@ export default function DesignStudioPage() {
         }, 1500);
 
         return () => clearTimeout(timer);
-    }, [layers, selectedFormat, brandKit, briefText, customComponents, projectId, projectName, currentFormat]);
+    }, [layers, selectedFormat, brandKit, briefText, customComponents, studioMediaAssets, projectId, projectName, currentFormat]);
 
     // Network online listener to sync pending edits
     useEffect(() => {
@@ -562,6 +590,7 @@ export default function DesignStudioPage() {
             visible: true,
             locked: false,
         };
+        pushUndo();
         setLayers(prev => [...prev.filter(l => !selectedLayerIds.includes(l.id)), compound]);
         setSelectedLayerIds([compoundId]);
         setSelectedLayerId(compoundId);
@@ -570,48 +599,30 @@ export default function DesignStudioPage() {
     const handleGroupSelected = () => {
         if (selectedLayerIds.length < 2) return;
         const groupId = `group_${Date.now()}`;
-        const selLayers = layers.filter(l => selectedLayerIds.includes(l.id));
-        const minX = Math.min(...selLayers.map(l => l.x));
-        const minY = Math.min(...selLayers.map(l => l.y));
-        const maxX = Math.max(...selLayers.map(l => l.x + (l.w || 100)));
-        const maxY = Math.max(...selLayers.map(l => l.y + (l.h || 100)));
-        const groupFrame = {
-            id: groupId,
-            name: 'Group Container',
-            type: 'frame',
-            x: minX,
-            y: minY,
-            w: Math.max(40, maxX - minX),
-            h: Math.max(40, maxY - minY),
-            fill: 'transparent',
-            stroke: '#2A2E39',
-            strokeWidth: 1,
-            strokeStyle: 'dashed',
-            opacity: 100,
-            visible: true,
-            locked: false,
-        };
-        setLayers(prev => [...prev, groupFrame]);
-        setSelectedLayerIds([groupId]);
-        setSelectedLayerId(groupId);
+        pushUndo();
+        setLayers(prev => prev.map(layer => selectedLayerIds.includes(layer.id) ? { ...layer, groupId } : layer));
     };
 
     const handleUngroupSelected = () => {
-        const frameLayer = layers.find(l => selectedLayerIds.includes(l.id) && l.type === 'frame');
-        if (!frameLayer) return;
-        setLayers(prev => prev.filter(l => l.id !== frameLayer.id));
-        setSelectedLayerIds([]);
-        setSelectedLayerId(null);
+        const groupIds = new Set(layers.filter(layer => selectedLayerIds.includes(layer.id) && layer.groupId).map(layer => layer.groupId));
+        if (!groupIds.size) return;
+        pushUndo();
+        setLayers(prev => prev.map(layer => groupIds.has(layer.groupId) ? (({ groupId, ...rest }) => rest)(layer) : layer));
     };
+
+    const canUngroupSelected = layers.some(layer => selectedLayerIds.includes(layer.id) && layer.groupId);
 
     const handleAlignLayers = (type) => {
         const ids = selectedLayerIds.length > 0 ? selectedLayerIds : (selectedLayerId ? [selectedLayerId] : []);
         if (ids.length === 0) return;
+        pushUndo();
         setLayers(prev => {
             const sel = prev.filter(l => ids.includes(l.id));
             if (sel.length === 0) return prev;
             let targetX = 0;
             let targetY = 0;
+            if (type === 'centerH') type = 'center_h';
+            if (type === 'centerV') type = 'center_v';
             if (type === 'left') targetX = Math.min(...sel.map(l => l.x));
             else if (type === 'right') targetX = Math.max(...sel.map(l => l.x + (l.w || 100)));
             else if (type === 'center_h' || type === 'center') targetX = Math.round((currentFormat.w - (sel[0].w || 100)) / 2);
@@ -638,6 +649,7 @@ export default function DesignStudioPage() {
         const updated = distributeSmartSelection(sel, axis);
         const map = {};
         updated.forEach(u => { map[u.id] = { x: u.x, y: u.y }; });
+        pushUndo();
         setLayers(prev => prev.map(l => map[l.id] ? { ...l, ...map[l.id] } : l));
     };
 
@@ -649,12 +661,15 @@ export default function DesignStudioPage() {
             x: child.x + 80,
             y: child.y + 80,
         }));
+        if (!newLayers.length) return;
+        pushUndo();
         setLayers(prev => [...prev, ...newLayers]);
         setSelectedLayerIds(newLayers.map(l => l.id));
         setSelectedLayerId(newLayers[0]?.id || null);
     };
 
     const handleApplyTheme = (tm) => {
+        pushUndo();
         setLayers(prev => prev.map(l => {
             if (l.id === 'background' || l.type === 'frame') return { ...l, fill: tm.colors.surface };
             if (l.type === 'text') return { ...l, fill: tm.colors.text };
@@ -664,6 +679,7 @@ export default function DesignStudioPage() {
     };
 
     const handleApplyTypographyStyle = (style) => {
+        pushUndo();
         setLayers(prev => prev.map(l => {
             if (selectedLayerIds.includes(l.id) && (l.type === 'text' || l.type === 'badge')) {
                 return {
@@ -680,6 +696,9 @@ export default function DesignStudioPage() {
     };
 
     const handleUpdateLayer = (layerId, updates) => {
+        const current = layers.find(layer => layer.id === layerId);
+        if (!current || !Object.entries(updates).some(([key, value]) => current[key] !== value)) return;
+        pushUndo();
         setLayers(prev => prev.map(l => l.id === layerId ? { ...l, ...updates } : l));
     };
 
@@ -826,6 +845,16 @@ export default function DesignStudioPage() {
                 const reader = new FileReader();
                 reader.onload = (uploadEvent) => {
                     const dataUrl = uploadEvent.target.result;
+                    const mediaAsset = {
+                        id: `studio_media_${Date.now()}`,
+                        name: file.name.replace(/\.[^.]+$/, ''),
+                        type: 'image',
+                        url: dataUrl,
+                        thumbnailUrl: dataUrl,
+                        mimeType: file.type,
+                        origin: 'design-studio',
+                    };
+                    setStudioMediaAssets(prev => [mediaAsset, ...prev]);
                     const rect = canvasContainerRef.current?.getBoundingClientRect();
                     const dropX = rect ? Math.round(((e.clientX - rect.left) / rect.width) * currentFormat.w) : 400;
                     const dropY = rect ? Math.round(((e.clientY - rect.top) / rect.height) * currentFormat.h) : 250;
@@ -881,6 +910,32 @@ export default function DesignStudioPage() {
         setSelectedLayerId(id);
         setAssetDrawerOpen(false);
         showToast(`Added ${newLayer.name} to canvas`);
+    };
+
+    const handleUploadStudioMedia = (file) => {
+        if (!file || !file.type.startsWith('image/')) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const dataUrl = event.target?.result;
+            if (typeof dataUrl !== 'string') return;
+            const mediaAsset = {
+                id: `studio_media_${Date.now()}`,
+                name: file.name.replace(/\.[^.]+$/, ''),
+                type: 'image',
+                url: dataUrl,
+                thumbnailUrl: dataUrl,
+                mimeType: file.type,
+                origin: 'design-studio',
+            };
+            setStudioMediaAssets(prev => [mediaAsset, ...prev]);
+            handleAddAssetToCanvas(mediaAsset, mediaAsset.name);
+        };
+        reader.onerror = () => showToast(`Could not read ${file.name}`);
+        reader.readAsDataURL(file);
+    };
+
+    const handleDeleteStudioMediaAsset = (assetId) => {
+        setStudioMediaAssets(prev => prev.filter(asset => asset.id !== assetId));
     };
 
     // Toggle Brand Kit Styling on/off
@@ -1143,60 +1198,68 @@ export default function DesignStudioPage() {
     };
 
     // Layer Hierarchy operations
-    const handleBringToFront = () => {
-        if (!selectedLayerId || selectedLayerId === 'background') return;
+    const handleBringToFront = (targetId = selectedLayerId) => {
+        if (!targetId || targetId === 'background') return;
+        if (layers.find(layer => layer.id === targetId)?.type === 'bg') return;
         pushUndo();
         setLayers(prev => {
-            const idx = prev.findIndex(l => l.id === selectedLayerId);
+            const idx = prev.findIndex(l => l.id === targetId);
             if (idx === -1) return prev;
             const copy = [...prev];
             const [item] = copy.splice(idx, 1);
-            copy.unshift(item);
+            copy.push(item);
             return copy;
         });
         showToast('Brought to front');
     };
 
-    const handleBringForward = () => {
-        if (!selectedLayerId || selectedLayerId === 'background') return;
+    const handleBringForward = (targetId = selectedLayerId) => {
+        if (!targetId || targetId === 'background') return;
+        const currentIndex = layers.findIndex(layer => layer.id === targetId);
+        if (currentIndex < 0 || layers[currentIndex].type === 'bg' || currentIndex >= layers.length - 1) return;
         pushUndo();
         setLayers(prev => {
-            const idx = prev.findIndex(l => l.id === selectedLayerId);
-            if (idx <= 0) return prev;
-            const copy = [...prev];
-            const [item] = copy.splice(idx, 1);
-            copy.splice(idx - 1, 0, item);
-            return copy;
-        });
-        showToast('Brought forward');
-    };
-
-    const handleSendBackward = () => {
-        if (!selectedLayerId || selectedLayerId === 'background') return;
-        pushUndo();
-        setLayers(prev => {
-            const idx = prev.findIndex(l => l.id === selectedLayerId);
-            if (idx === -1 || idx >= prev.length - 2) return prev; // Keep above background
+            const idx = prev.findIndex(l => l.id === targetId);
+            if (idx === -1 || prev[idx].type === 'bg' || idx >= prev.length - 1) return prev;
             const copy = [...prev];
             const [item] = copy.splice(idx, 1);
             copy.splice(idx + 1, 0, item);
             return copy;
         });
+        showToast('Brought forward');
+    };
+
+    const handleSendBackward = (targetId = selectedLayerId) => {
+        if (!targetId || targetId === 'background') return;
+        const currentIndex = layers.findIndex(layer => layer.id === targetId);
+        const currentBackgroundIndex = layers.findIndex(l => l.id === 'background' || l.type === 'bg');
+        if (currentIndex < 0 || layers[currentIndex].type === 'bg' || currentIndex <= Math.max(0, currentBackgroundIndex)) return;
+        pushUndo();
+        setLayers(prev => {
+            const idx = prev.findIndex(l => l.id === targetId);
+            const backgroundIndex = prev.findIndex(l => l.id === 'background' || l.type === 'bg');
+            if (idx < 0 || prev[idx].type === 'bg' || idx <= Math.max(0, backgroundIndex)) return prev;
+            const copy = [...prev];
+            const [item] = copy.splice(idx, 1);
+            copy.splice(idx - 1, 0, item);
+            return copy;
+        });
         showToast('Sent backward');
     };
 
-    const handleSendToBack = () => {
-        if (!selectedLayerId || selectedLayerId === 'background') return;
+    const handleSendToBack = (targetId = selectedLayerId) => {
+        if (!targetId || targetId === 'background') return;
+        if (layers.find(layer => layer.id === targetId)?.type === 'bg') return;
         pushUndo();
         setLayers(prev => {
-            const idx = prev.findIndex(l => l.id === selectedLayerId);
-            if (idx === -1) return prev;
+            const idx = prev.findIndex(l => l.id === targetId);
+            if (idx === -1 || prev[idx].type === 'bg') return prev;
             const copy = [...prev];
             const [item] = copy.splice(idx, 1);
             // Place right above background
             const bgIdx = copy.findIndex(l => l.id === 'background' || l.type === 'bg');
             if (bgIdx !== -1) {
-                copy.splice(bgIdx, 0, item);
+                copy.splice(bgIdx + 1, 0, item);
             } else {
                 copy.push(item);
             }
@@ -1205,11 +1268,28 @@ export default function DesignStudioPage() {
         showToast('Sent to back');
     };
 
-    const handleDuplicateLayer = () => {
-        if (!selectedLayerId || selectedLayerId === 'background') return;
+    const handleReorderLayers = (fromId, toId) => {
+        const fromIndex = layers.findIndex(layer => layer.id === fromId);
+        const toIndex = layers.findIndex(layer => layer.id === toId);
+        if (fromIndex < 0 || toIndex < 0 || fromId === 'background' || layers[toIndex].id === 'background' || layers[fromIndex].type === 'bg' || layers[toIndex].type === 'bg') return;
         pushUndo();
-        const idx = layers.findIndex(l => l.id === selectedLayerId);
+        setLayers(prev => {
+            const topFirst = [...prev].reverse();
+            const source = topFirst.findIndex(layer => layer.id === fromId);
+            const target = topFirst.findIndex(layer => layer.id === toId);
+            if (source < 0 || target < 0) return prev;
+            const reordered = [...topFirst];
+            const [item] = reordered.splice(source, 1);
+            reordered.splice(target, 0, item);
+            return reordered.reverse();
+        });
+    };
+
+    const handleDuplicateLayer = (targetId = selectedLayerId) => {
+        if (!targetId || targetId === 'background' || layers.find(layer => layer.id === targetId)?.type === 'bg') return;
+        const idx = layers.findIndex(l => l.id === targetId);
         if (idx === -1) return;
+        pushUndo();
         const target = layers[idx];
         const newLayer = {
             ...target,
@@ -1219,8 +1299,9 @@ export default function DesignStudioPage() {
             y: (target.y || 0) + 24,
         };
         const copy = [...layers];
-        copy.splice(idx, 0, newLayer);
+        copy.splice(idx + 1, 0, newLayer);
         setLayers(copy);
+        setSelectedLayerIds([newLayer.id]);
         setSelectedLayerId(newLayer.id);
         showToast(`Duplicated ${target.name}`);
     };
@@ -1230,6 +1311,7 @@ export default function DesignStudioPage() {
         pushUndo();
         const isBg = selectedLayerId === 'background';
         setLayers(prev => prev.filter(l => l.id !== selectedLayerId));
+        setSelectedLayerIds(prev => prev.filter(id => id !== selectedLayerId));
         setSelectedLayerId(null);
         showToast(isBg ? 'Deleted background layer. Canvas is now transparent.' : 'Layer deleted');
     };
@@ -1362,6 +1444,10 @@ export default function DesignStudioPage() {
             if ((e.key === 'Delete' || e.key === 'Backspace') && selectedLayerId) {
                 e.preventDefault();
                 handleDeleteSelectedLayer();
+            } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g') {
+                e.preventDefault();
+                if (canUngroupSelected) handleUngroupSelected();
+                else handleGroupSelected();
             } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd' && selectedLayerId) {
                 e.preventDefault();
                 handleDuplicateLayer();
@@ -1369,7 +1455,7 @@ export default function DesignStudioPage() {
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [selectedLayerId, editingTextId]);
+    }, [selectedLayerId, selectedLayerIds, layers, canUngroupSelected, editingTextId]);
 
     // AI Director tweak submission
     const handleApplyAiTweak = (e, overridePrompt) => {
@@ -1862,7 +1948,7 @@ export default function DesignStudioPage() {
                 userSelect: 'none',
             }}>
                 {/* Left: Brand, Navigation, Project */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, minWidth: 0, whiteSpace: 'nowrap' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <Logo size={20} />
                         <span style={{
@@ -1904,6 +1990,7 @@ export default function DesignStudioPage() {
                         type="button"
                         onClick={() => navigate('/dashboard')}
                         title="Projects Hub"
+                        aria-label="Projects Hub"
                         style={{
                             display: 'flex',
                             alignItems: 'center',
@@ -1919,7 +2006,6 @@ export default function DesignStudioPage() {
                         }}
                     >
                         <Film size={14} color="#64748B" />
-                        <span>Projects</span>
                     </button>
 
                     <span style={{ color: '#CBD5E1', fontSize: 14 }}>/</span>
@@ -1932,22 +2018,30 @@ export default function DesignStudioPage() {
                         fontSize: 11.5,
                         fontWeight: 600,
                         fontFamily: 'var(--f-mono, monospace)',
+                        maxWidth: 160,
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
                     }}>
                         {projectName || 'Scene & Thumbnail Design'}
                     </div>
                 </div>
 
                 {/* Center: Format Dropdown */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ position: 'relative' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, width: 210, minWidth: 0, whiteSpace: 'nowrap' }}>
+                    <div style={{ position: 'relative', width: '100%', minWidth: 0 }}>
                         <button
                             type="button"
                             onClick={() => setFormatDropdownOpen(o => !o)}
                             style={{
                                 display: 'flex',
+                                width: '100%',
+                                minWidth: 0,
+                                maxWidth: '100%',
                                 alignItems: 'center',
                                 gap: 7,
-                                padding: '6px 14px',
+                                padding: '6px 8px',
                                 borderRadius: 8,
                                 border: '1px solid #E2E8F0',
                                 background: '#F8FAFC',
@@ -1959,10 +2053,7 @@ export default function DesignStudioPage() {
                             }}
                         >
                             <Crop size={14} color="#0B7C91" />
-                            <span>{currentFormat.label}</span>
-                            <span style={{ color: '#64748B', fontFamily: 'var(--f-mono, monospace)', fontSize: 11 }}>
-                                {currentFormat.res.split('·')[0].trim()}
-                            </span>
+                            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentFormat.label}</span>
                             <ChevronDown size={13} color="#64748B" />
                         </button>
 
@@ -2015,7 +2106,7 @@ export default function DesignStudioPage() {
                 </div>
 
                 {/* Right: Actions (Undo, Redo, Variations, Save to Timeline, Export) */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, whiteSpace: 'nowrap' }}>
                     <div style={{ display: 'flex', gap: 2 }}>
                         <button
                             type="button"
@@ -2062,6 +2153,8 @@ export default function DesignStudioPage() {
                     <button
                         type="button"
                         onClick={() => setShowVariationsTray(v => !v)}
+                        title="Show creative variations"
+                        aria-label="Creative variations"
                         style={{
                             height: 32,
                             padding: '0 12px',
@@ -2075,15 +2168,19 @@ export default function DesignStudioPage() {
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: 6,
+                            flexShrink: 0,
+                            whiteSpace: 'nowrap',
                         }}
                     >
                         <Sparkles size={13} color="#0B7C91" />
-                        <span>Variations (4)</span>
+                        <span>4</span>
                     </button>
 
                     <button
                         type="button"
                         onClick={handleSaveToTimeline}
+                        title="Save to timeline"
+                        aria-label="Save to timeline"
                         style={{
                             height: 32,
                             padding: '0 14px',
@@ -2097,10 +2194,11 @@ export default function DesignStudioPage() {
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: 6,
+                            flexShrink: 0,
+                            whiteSpace: 'nowrap',
                         }}
                     >
                         <Save size={13} />
-                        <span>Save to timeline</span>
                     </button>
 
                     <button
@@ -2119,16 +2217,20 @@ export default function DesignStudioPage() {
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: 6,
+                            flexShrink: 0,
+                            whiteSpace: 'nowrap',
                         }}
-                        title="Converts Design Studio layers into live After Effects motion composition with kinetic typography and entrance animations"
+                        title="Save as animated scene · Converts layers into a motion composition"
+                        aria-label="Save as animated scene"
                     >
                         <Film size={13} color="#00E5FF" />
-                        <span>Save as Animated Scene</span>
                     </button>
 
                     <button
                         type="button"
                         onClick={handleExportSizes}
+                        title="Export sizes"
+                        aria-label="Export sizes"
                         style={{
                             height: 32,
                             padding: '0 14px',
@@ -2142,10 +2244,11 @@ export default function DesignStudioPage() {
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: 6,
+                            flexShrink: 0,
+                            whiteSpace: 'nowrap',
                         }}
                     >
                         <Download size={13} />
-                        <span>Export 2 sizes</span>
                     </button>
                 </div>
             </header>
@@ -2163,14 +2266,17 @@ export default function DesignStudioPage() {
                 <LayersAndAssetsPanel
                     layers={layers}
                     setLayers={setLayers}
+                    onReorderLayers={handleReorderLayers}
+                    onBeforeLayerChange={pushUndo}
                     selectedLayerIds={selectedLayerIds}
                     setSelectedLayerIds={(ids) => {
                         setSelectedLayerIds(ids);
-                        if (ids.length > 0) setSelectedLayerId(ids[0]);
+                        setSelectedLayerId(ids[0] || null);
                     }}
                     onInsertComponent={handleInsertComponent}
-                    timelineAssets={timelineAssets}
+                    mediaAssets={studioMediaAssets}
                     onAddAssetToCanvas={handleAddAssetToCanvas}
+                    onDeleteMediaAsset={handleDeleteStudioMediaAsset}
                     brandKit={brandKit}
                     setBrandKit={setBrandKit}
                     onApplyBrandKit={handleApplyBrandKit}
@@ -2202,6 +2308,7 @@ export default function DesignStudioPage() {
                         onExecuteBoolean={handleExecuteBoolean}
                         onGroupSelected={handleGroupSelected}
                         onUngroupSelected={handleUngroupSelected}
+                        canUngroupSelected={canUngroupSelected}
                         snapToGrid={snapEnabled}
                         setSnapToGrid={setSnapEnabled}
                         showGuides={showGuides}
@@ -2218,7 +2325,7 @@ export default function DesignStudioPage() {
                         selectedLayerIds={selectedLayerIds}
                         setSelectedLayerIds={(ids) => {
                             setSelectedLayerIds(ids);
-                            if (ids.length > 0) setSelectedLayerId(ids[0]);
+                            setSelectedLayerId(ids[0] || null);
                         }}
                         activeTool={activeTool}
                         setActiveTool={setActiveTool}
@@ -2482,6 +2589,7 @@ export default function DesignStudioPage() {
 
                             <div
                                 onClick={() => {
+                                    pushUndo();
                                     setLayers(prev => prev.map(l => l.id === contextMenu.layerId ? { ...l, locked: !l.locked } : l));
                                     setContextMenu(null);
                                 }}
@@ -2495,6 +2603,7 @@ export default function DesignStudioPage() {
 
                             <div
                                 onClick={() => {
+                                    pushUndo();
                                     setLayers(prev => prev.map(l => l.id === contextMenu.layerId ? { ...l, visible: !l.visible } : l));
                                     setContextMenu(null);
                                 }}
@@ -2548,7 +2657,8 @@ export default function DesignStudioPage() {
                                 onClick={() => {
                                     pushUndo();
                                     setLayers(prev => prev.filter(l => l.id !== contextMenu.layerId));
-                                    setSelectedLayerId('background');
+                                    setSelectedLayerIds(prev => prev.filter(id => id !== contextMenu.layerId));
+                                    if (selectedLayerId === contextMenu.layerId) setSelectedLayerId(null);
                                     setContextMenu(null);
                                     showToast('Layer deleted');
                                 }}
@@ -2655,6 +2765,7 @@ export default function DesignStudioPage() {
 
                             <div
                                 onClick={() => {
+                                    pushUndo();
                                     setLayers(prev => prev.map(l => l.id === contextMenu.layerId ? { ...l, locked: !l.locked } : l));
                                     setContextMenu(null);
                                 }}
@@ -2668,6 +2779,7 @@ export default function DesignStudioPage() {
 
                             <div
                                 onClick={() => {
+                                    pushUndo();
                                     setLayers(prev => prev.map(l => l.id === contextMenu.layerId ? { ...l, visible: !l.visible } : l));
                                     setContextMenu(null);
                                 }}
@@ -2800,7 +2912,7 @@ export default function DesignStudioPage() {
                                     Assets & Media Bin
                                 </h2>
                                 <p style={{ margin: '4px 0 0', fontSize: 12, color: '#5F6876' }}>
-                                    Import local images, cutout subjects, or choose footage from your active project timeline.
+                                    Import images into this design project. Studio media stays separate from Video Editor media.
                                 </p>
                             </div>
                             <button
@@ -2812,7 +2924,7 @@ export default function DesignStudioPage() {
                             </button>
                         </div>
 
-                        {/* Tab switch: Upload vs Timeline Media */}
+                        {/* Tab switch: Upload vs Studio Media */}
                         <div style={{ display: 'flex', gap: 8, borderBottom: '1px solid rgba(16, 21, 29, 0.08)', paddingBottom: 10, marginBottom: 16 }}>
                             <button
                                 type="button"
@@ -2828,26 +2940,26 @@ export default function DesignStudioPage() {
                                     cursor: 'pointer',
                                 }}
                             >
-                                Upload Local Image
+                                Upload Image
                             </button>
                             <button
                                 type="button"
-                                onClick={() => setAssetDrawerTab('timeline')}
+                                onClick={() => setAssetDrawerTab('studio')}
                                 style={{
                                     padding: '6px 14px',
                                     borderRadius: 8,
                                     border: 'none',
-                                    background: assetDrawerTab === 'timeline' ? '#F0F9FB' : 'transparent',
-                                    color: assetDrawerTab === 'timeline' ? '#0B7C91' : '#5F6876',
+                                    background: assetDrawerTab === 'studio' ? '#F0F9FB' : 'transparent',
+                                    color: assetDrawerTab === 'studio' ? '#0B7C91' : '#5F6876',
                                     fontSize: 13,
-                                    fontWeight: assetDrawerTab === 'timeline' ? 600 : 500,
+                                    fontWeight: assetDrawerTab === 'studio' ? 600 : 500,
                                     cursor: 'pointer',
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: 6,
                                 }}
                             >
-                                Project Media Bin ({timelineAssets.length})
+                                Studio Media ({studioMediaAssets.length})
                             </button>
                         </div>
 
@@ -2883,18 +2995,18 @@ export default function DesignStudioPage() {
                             </div>
                         )}
 
-                        {/* Tab 2: Timeline Media Bin */}
-                        {assetDrawerTab === 'timeline' && (
+                        {/* Tab 2: This design project's media */}
+                        {assetDrawerTab === 'studio' && (
                             <div style={{ overflowY: 'auto', maxHeight: 380, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                {timelineAssets.length === 0 ? (
+                                {studioMediaAssets.length === 0 ? (
                                     <div style={{ textAlign: 'center', padding: '40px 20px', color: '#5F6876' }}>
                                         <Film size={32} color="#5F6876" style={{ margin: '0 auto 10px' }} />
-                                        <div style={{ fontSize: 13, fontWeight: 500 }}>No media files in timeline yet</div>
-                                        <div style={{ fontSize: 12, marginTop: 4 }}>Upload video footage or images in the Video Editor to access them here.</div>
+                                        <div style={{ fontSize: 13, fontWeight: 500 }}>No images in this Studio project yet</div>
+                                        <div style={{ fontSize: 12, marginTop: 4 }}>Upload images here. This media bin is separate from the Video Editor.</div>
                                     </div>
                                 ) : (
                                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
-                                        {timelineAssets.map((asset, idx) => (
+                                        {studioMediaAssets.map((asset, idx) => (
                                             <div
                                                 key={asset.id || idx}
                                                 style={{
@@ -2942,22 +3054,24 @@ export default function DesignStudioPage() {
                                                     <div style={{ fontSize: 12, fontWeight: 600, color: '#10151D', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                         {asset.name || `Asset ${idx + 1}`}
                                                     </div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleAddAssetToCanvas(asset, asset.name)}
-                                                        style={{
-                                                            padding: '6px 8px',
-                                                            borderRadius: 6,
-                                                            background: '#0B7C91',
-                                                            color: '#FFFFFF',
-                                                            border: 'none',
-                                                            fontSize: 11.5,
-                                                            fontWeight: 600,
-                                                            cursor: 'pointer',
-                                                        }}
-                                                    >
-                                                        Add to Canvas
-                                                    </button>
+                                                    <div style={{ display: 'flex', gap: 6 }}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleAddAssetToCanvas(asset, asset.name)}
+                                                            style={{ flex: 1, padding: '6px 8px', borderRadius: 6, background: '#0B7C91', color: '#FFFFFF', border: 'none', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}
+                                                        >
+                                                            Add to Canvas
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            aria-label={`Remove ${asset.name || 'image'} from Studio media`}
+                                                            title="Remove from Studio media"
+                                                            onClick={() => handleDeleteStudioMediaAsset(asset.id)}
+                                                            style={{ padding: '6px 8px', borderRadius: 6, background: '#FEF2F2', color: '#B91C1C', border: 'none', cursor: 'pointer' }}
+                                                        >
+                                                            <Trash2 size={14} />
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         ))}
@@ -3227,11 +3341,8 @@ export default function DesignStudioPage() {
                 style={{ display: 'none' }}
                 onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) {
-                        const reader = new FileReader();
-                        reader.onload = ev => handleAddAssetToCanvas(ev.target.result, file.name.replace(/\.[^.]+$/, ''));
-                        reader.readAsDataURL(file);
-                    }
+                    if (file) handleUploadStudioMedia(file);
+                    e.target.value = '';
                 }}
             />
             <input

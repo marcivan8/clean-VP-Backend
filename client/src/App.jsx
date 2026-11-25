@@ -1,6 +1,7 @@
 import React, { lazy, Suspense, useEffect } from 'react';
 import { bindEditSteps } from './store/useEditStepsStore';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { MARKET_ENABLED } from './lib/marketFlag';
 import ConsentBanner from './components/ConsentBanner';
 import { supabase } from './lib/supabaseClient';
 import useSessionStore from './store/useSessionStore';
@@ -11,7 +12,13 @@ const HomePage = lazy(() => import('./pages/HomePage'));
 const EditorPage = lazy(() => import('./pages/EditorPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const AnalyzerPage = lazy(() => import('./pages/AnalyzerPage'));
-const MarketplacePage = lazy(() => import('./pages/MarketplacePage'));
+// VIBED Market: the gate picks buyer / talent per account; the Trust desk is
+// admin-only (R100). MarketplacePage is now loaded through the gate.
+const MarketGate = lazy(() => import('./market/MarketGate').then((m) => ({ default: m.MarketGate })));
+const MarketAdminGate = lazy(() => import('./market/MarketGate').then((m) => ({ default: m.MarketAdminGate })));
+// Talent onboarding (R101): the public page the landing nav links to, then the guided setup.
+const BecomeTalentPage = lazy(() => import('./market/talent/BecomeTalentPage'));
+const TalentSetup = lazy(() => import('./market/talent/TalentSetup'));
 const DesignStudioPage = lazy(() => import('./pages/DesignStudioPage'));
 const DataPage = lazy(() => import('./pages/DataPage'));
 const GdprPage = lazy(() => import('./pages/GdprPage'));
@@ -61,7 +68,16 @@ function App() {
                     <Route path="/editor/:projectId" element={<EditorPage />} />
 
                     {/* Studio & Crew Marketplace — Pro & Business member network */}
-                    <Route path="/marketplace"       element={<MarketplacePage />} />
+                    {/* VIBED Market is hidden until it runs on real data (R102):
+                        with the switch off, its paths send people home. */}
+                    {['/marketplace', '/admin/trust', '/talent', '/talent/setup'].map((path) => (
+                        <Route key={path} path={path} element={MARKET_ENABLED ? {
+                            '/marketplace': <MarketGate />,
+                            '/admin/trust': <MarketAdminGate />,
+                            '/talent': <BecomeTalentPage />,
+                            '/talent/setup': <TalentSetup />,
+                        }[path] : <Navigate to="/" replace />} />
+                    ))}
 
                     {/* Design Studio — Figma-class AI & manual workspace */}
                     <Route path="/design"            element={<DesignStudioPage />} />

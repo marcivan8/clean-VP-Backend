@@ -2961,16 +2961,20 @@ module.exports = async function processExportJob(job) {
     // above — the same table client/src/utils/playerDimensions.js uses for
     // the live `<Player>`). That equals `targetWidth` exactly for the common
     // case (no platform preset, default '1080p' resolution tier), which is
-    // why the earlier R57/clip.scale fix looked complete on its own. It is
-    // NOT equal whenever a DIFFERENT resolution tier is chosen — '720p'/'2k'/
-    // '4k' all scale targetWidth/targetHeight by getResolutionDimensions()
-    // above, but nothing scaled the caption font/stroke to match, so a
-    // caption authored (and correctly shown) at the 1080p reference came out
-    // proportionally too big at 720p and too small at 2k/4k. Computed once
-    // here and applied to BOTH caption render paths below (the plain
-    // per-clip drawtext loop and the animated captionProgram path).
+    // why the earlier R57/clip.scale fix looked complete on its own. At other
+    // resolution tiers, the captions must scale with the rendered frame. A
+    // platform preset can also change the output aspect ratio: the source
+    // frame is fit inside that output using buildScaleFilter() (decrease + pad),
+    // so caption size must use the same contain scale on BOTH axes. Width-only
+    // scaling made portrait captions exported to landscape platforms up to
+    // 3.16x too large (and the reverse export too small). Computed once here
+    // and applied to BOTH caption render paths below (plain drawtext and the
+    // animated captionProgram path).
     const captionRefDims = ASPECT_RATIO_DIMENSIONS[settings.aspectRatio] || ASPECT_RATIO_DIMENSIONS['16:9'];
-    const captionScaleFactor = targetWidth / captionRefDims.width;
+    const captionScaleFactor = Math.min(
+        targetWidth / captionRefDims.width,
+        targetHeight / captionRefDims.height,
+    );
 
     let videoBitrate;
     switch (settings.quality) {

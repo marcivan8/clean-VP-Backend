@@ -81,7 +81,7 @@ app.use(helmet({
       // Editor fonts come from Bunny Fonts (EU), not Google Fonts.
       styleSrc:                ["'self'", "'unsafe-inline'", "https://fonts.bunny.net"],
       fontSrc:                 ["'self'", "https://fonts.bunny.net"],
-      imgSrc:                  ["'self'", "data:", "blob:", "https://storage.googleapis.com", "https://*.basemaps.cartocdn.com", "https://*.tile.openstreetmap.org", "https://tile.openstreetmap.org", "https://*.posthog.com", "https://*.i.posthog.com", ...STOCK_MEDIA_HOSTS],
+      imgSrc:                  ["'self'", "data:", "blob:", "https://storage.googleapis.com", "https://tiles.openfreemap.org", "https://*.posthog.com", "https://*.i.posthog.com", ...STOCK_MEDIA_HOSTS],
       // Stock clips are previewed and scrubbed straight from the provider's
       // CDN before anything is imported, so the same hosts have to be allowed
       // for media as for images — a thumbnail that loads over a <video> that
@@ -92,9 +92,8 @@ app.use(helmet({
         "https://*.supabase.co",
         "wss://*.supabase.co",
         "https://storage.googleapis.com",
-        "https://*.basemaps.cartocdn.com",
-        "https://*.tile.openstreetmap.org",
-        "https://tile.openstreetmap.org",
+        // Market map (R102): OpenFreeMap style, vector tiles, glyphs and sprites.
+        "https://tiles.openfreemap.org",
         // Sentry error reporting — both ingest domains (EU + global)
         "https://*.ingest.sentry.io",
         "https://*.ingest.de.sentry.io",
@@ -155,9 +154,18 @@ app.options('*', corsMiddleware);
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 // Global: 120 req/min per IP
+// Media READS are not counted: playback issues a range request per seek /
+// buffer refill, and a project with many clips crossed 120/min from playback
+// alone. A <video> element never retries a 429, it just goes black, and from
+// then on every other request from that browser was refused too. These reads
+// are already gated by the signed media cookie (services/mediaAccess.js) and
+// proxyRoutes.js documents that playback must never be rate-limited.
+const isMediaRead = (req) => (req.method === 'GET' || req.method === 'HEAD')
+  && (req.path.startsWith('/api/proxy/gcs-media/') || req.path.startsWith('/uploads/'));
 const globalLimiter = rateLimit({
   windowMs: 60_000, max: 120,
   standardHeaders: true, legacyHeaders: false,
+  skip: isMediaRead,
   message: { error: 'Too many requests, please slow down.' }
 });
 app.use(globalLimiter);
@@ -180,6 +188,15 @@ const motionAiLimiter = rateLimit({
   windowMs: 60_000, max: 15,
   standardHeaders: true, legacyHeaders: false,
   message: { error: 'AI rate limit reached. Please wait before sending more requests.' }
+});
+// Queuing per-asset analysis makes no model call itself (it enqueues a BullMQ
+// job; the worker runs one at a time, R24). It used to share brainAiLimiter's
+// 15/min with /analyze, so a 25-file import was refused past the 15th file and
+// starved the assistant for a minute. Own budget, sized for a large batch.
+const assetQueueLimiter = rateLimit({
+  windowMs: 60_000, max: 60,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many uploads queued for analysis at once. Retrying shortly.' }
 });
 const motionLookupLimiter = rateLimit({
   windowMs: 60_000, max: 60,
@@ -233,6 +250,17 @@ const waveformLimiter = rateLimit({
   standardHeaders: true, legacyHeaders: false,
   message: { error: 'Waveform extraction rate limit reached. Please wait a moment.' }
 });
+
+// ── Stripe webhook — MUST stay ABOVE the body parser below ───────────────────
+// Stripe's constructEvent verifies a signature over the exact request bytes.
+// body-parser sets `req._body = true` once it has parsed, and express.raw()
+// returns early when it sees that flag — so a route-level raw parser on a router
+// mounted after the global express.json() below is a SILENT no-op: req.body
+// arrives as a parsed object and the signature can never verify. That was the
+// state of the Polar webhook this replaced. Do not move this line down.
+app.post('/api/stripe/webhook',
+  express.raw({ type: 'application/json' }),
+  require('./routes/stripeWebhook').webhookHandler);
 
 // Body parsing middleware
 app.use(express.json({ limit: '50mb' }));
@@ -322,6 +350,13 @@ app.use('/api/email', authLimiter, require('./routes/emailRoutes')); // Unsubscr
 // OAuth state signature against the callback, and normal connecting never
 // trips it. R149.
 app.use('/api/social', authLimiter, require('./routes/socialRoutes'));
+// VIBED Market account roles + Trust desk gate (R100). Cheap reads, covered
+// by the global limiter; the role write is a single row and final.
+// Hidden until the market runs on real data (R102): with MARKET_ENABLED unset
+// the routes do not exist (404), matching the client switch.
+if (process.env.MARKET_ENABLED === 'true') {
+  app.use('/api/market', require('./routes/marketRoutes'));
+}
 app.use('/api/analyze', uploadLimiter, analyzeRoutes);
 app.use('/api/v2/analyze', uploadLimiter, analyzeRoutes);
 app.use('/analyze', uploadLimiter, analyzeRoutes);          // legacy/proxy
@@ -339,7 +374,9 @@ app.use('/api/brain', (req, res, next) => {
     || routePath === '/feedback'
     || routePath === '/observe-command'
     || (req.method === 'DELETE' && routePath === '/profile/reset');
-  return cheap ? next() : brainAiLimiter(req, res, next);
+  if (cheap) return next();
+  if (req.method === 'POST' && routePath === '/analyze-asset') return assetQueueLimiter(req, res, next);
+  return brainAiLimiter(req, res, next);
 }, brainRoutes);
 app.use('/api/motion', (req, res, next) => {
   // Technique ranking is a bounded local knowledge-base lookup, not a model
@@ -363,8 +400,8 @@ app.use('/api/session', require('./routes/sessionRoutes')); // Anonymous session
 app.use('/api/captions', require('./routes/captionRoutes')); // Caption generation
 app.use('/api/admin',   require('./routes/adminRoutes'));   // Temp admin ops (remove after use)
 app.use('/api/health',  require('./routes/dataHealthRoutes')); // Dependency-table row counts (admin-secret gated)
-app.use('/api/polar',    require('./routes/polarWebhook'));   // Polar subscription webhooks
-app.use('/api/checkout', require('./routes/polarWebhook'));  // alias: /api/checkout/create
+app.use('/api/stripe',   require('./routes/stripeWebhook').router);  // Stripe billing: status, cancel, reactivate, portal
+app.use('/api/checkout', require('./routes/stripeWebhook').router);  // alias: /api/checkout/create
 app.use('/api/projects',   require('./routes/projectRoutes'));   // Project thumbnail upload
 app.use('/api/assets', uploadLimiter, require('./routes/mediaAssetRoutes')); // User image assets for timeline and chat
 app.use('/api/interview', interviewLimiter, require('./routes/interviewRoutes')); // Interview/podcast smart editing

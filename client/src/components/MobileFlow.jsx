@@ -782,7 +782,7 @@ function VersionsStep() {
 /* ── Out of free Auto edits ───────────────────────────────────────────────── */
 
 /* Deliberately not a hand-rolled screen. PlanSheet is already the mobile
-   plan-limit sheet, already wired to the same Polar checkout the pricing page
+   plan-limit sheet, already wired to the same Stripe Checkout the pricing page
    uses, and already shows the target plan's real price and features. A second
    upgrade surface would drift from it within a release. It rides on
    MobileSheet (z 60/61), so it sits above the flow and whatever the user

@@ -29,6 +29,9 @@ import { captureShortThumbnail, getCachedShortThumbnail, thumbnailKey } from '..
 import { useUserPlan } from '../hooks/useUserPlan.js';
 import { EventBus, EVENT_TYPES } from '../agent/EventBus.js';
 import useAIStore from '../store/useAIStore.js';
+import SocialPublisher from './SocialPublisher.jsx';
+import SocialPerformancePanel from './SocialPerformancePanel.jsx';
+import ProFeatureLock from './ProFeatureLock.jsx';
 
 const fmt = (s) => {
     const n = Math.max(0, Math.round(Number(s) || 0));
@@ -88,6 +91,8 @@ export default function ShortsPanel({ onExport }) {
     const navigate = useNavigate();
     const { plan } = useUserPlan();
     const isFree = plan === 'free';
+    // Publishing and post analytics are Pro only (R104); the server refuses them too.
+    const canPublish = plan === 'pro';
     const shorts = useTimelineStore(s => s.shorts) || [];
     const previewId = useTimelineStore(s => s.shortPreview?.shortId || null);
     const hasCaptions = useTimelineStore(s => (s.shortPreview?.saved?.tracks || s.tracks || []).some(tr => tr.type === 'text' && (tr.clips || []).length > 0));
@@ -394,6 +399,8 @@ export default function ShortsPanel({ onExport }) {
                 </label>
             </div>
 
+            {canPublish ? <SocialPerformancePanel /> : !isFree && <ProFeatureLock feature="social" required="pro" variant="inline" />}
+
             {sorted.length === 0 && <p className="text-[11px] text-muted-foreground">{t('shortsPanel.empty')}</p>}
 
             <ul className="space-y-2">
@@ -475,9 +482,20 @@ export default function ShortsPanel({ onExport }) {
                                 </div>
                             </div>
                             {short.exportUrl && (
-                                <a href={short.exportUrl} target="_blank" rel="noreferrer" className="block mt-1 text-[10px] text-primary underline">
-                                    {t('shortsPanel.download')}
-                                </a>
+                                <>
+                                    <a href={short.exportUrl} target="_blank" rel="noreferrer" className="block mt-1 text-[10px] text-primary underline">
+                                        {t('shortsPanel.download')}
+                                    </a>
+                                    {canPublish && <SocialPublisher short={short} mediaUrl={short.exportUrl} editContext={{
+                                        durationSeconds: Math.max(0, Number(short.end) - Number(short.start)),
+                                        pickerScore: short.score,
+                                        hookEvent: short.hookEvent,
+                                        captionsEnabled: hasCaptions,
+                                        polishEnabled: polish,
+                                        soundEffectsEnabled: sfx,
+                                        speakerPopOutEnabled: popOut,
+                                    }} />}
+                                </>
                             )}
                             {errors[short.id] && <p className="mt-1 text-[10px] text-amber-400">{errors[short.id]}</p>}
                         </li>

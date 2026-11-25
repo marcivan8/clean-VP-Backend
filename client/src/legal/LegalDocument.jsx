@@ -76,6 +76,7 @@ function Block({ block, values, t }) {
     if (block == null) return null;
     if (typeof block === 'string') return <p style={{ margin: 0 }}><Inline text={block} /></p>;
     if (block.requires && !values[block.requires]) return null;
+    if (typeof block.text === 'string') return <p style={{ margin: 0 }}><Inline text={block.text} /></p>;
 
     if (block.list) {
         return (

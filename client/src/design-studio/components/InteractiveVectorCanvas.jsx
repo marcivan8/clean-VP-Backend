@@ -483,14 +483,19 @@ export default function InteractiveVectorCanvas({
 
         const pt = getCanvasPoint(e);
         const isShift = e.shiftKey || e.metaKey || e.ctrlKey;
+        const isGroupDrillDown = Boolean(layer.groupId && e.detail >= 2 && !isShift);
 
         let nextSelected = [...selectedLayerIds];
-        if (isShift) {
+        if (isGroupDrillDown) {
+            nextSelected = [layer.id];
+        } else if (isShift) {
             if (nextSelected.includes(layer.id)) {
                 nextSelected = nextSelected.filter(id => id !== layer.id);
             } else {
                 nextSelected.push(layer.id);
             }
+        } else if (layer.groupId) {
+            nextSelected = layers.filter(item => item.groupId === layer.groupId).map(item => item.id);
         } else if (!nextSelected.includes(layer.id)) {
             nextSelected = [layer.id];
         }
@@ -601,10 +606,11 @@ export default function InteractiveVectorCanvas({
                         onContextMenu={(e) => {
                             e.preventDefault();
                             if (onContextMenu) {
+                                const targetLayer = e.target.closest('[data-layer-id]')?.getAttribute('data-layer-id');
                                 onContextMenu({
                                     x: e.clientX,
                                     y: e.clientY,
-                                    layerId: selectedLayerIds[0] || null,
+                                    layerId: targetLayer || selectedLayerIds[0] || null,
                                 });
                             }
                         }}
@@ -678,6 +684,7 @@ export default function InteractiveVectorCanvas({
                     return (
                         <g
                             key={layer.id}
+                            data-layer-id={layer.id}
                             transform={`translate(${layer.x}, ${layer.y}) rotate(${rot}, ${lw / 2}, ${lh / 2})`}
                             style={{
                                 cursor: layer.locked ? 'not-allowed' : 'pointer',

@@ -4,7 +4,7 @@ export type ButtonVariant = "primary" | "glass" | "ghost" | "danger";
 export type ButtonSize = "sm" | "md" | "lg";
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  /** Visual style. `primary` = cyan glow fill; `glass` = blurred panel; `ghost` = text-only; `danger` = red. */
+  /** Visual style. `primary` = violet fill; `glass` = blurred panel; `ghost` = text-only; `danger` = red. */
   variant?: ButtonVariant;
   size?: ButtonSize;
   /** Optional leading icon node (e.g. a Lucide <svg/>). */
@@ -12,6 +12,8 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   /** Optional trailing icon node. */
   iconRight?: React.ReactNode;
   disabled?: boolean;
+  type?: "button" | "submit" | "reset";
+  className?: string;
   /** Stretch to fill container width. */
   full?: boolean;
 }

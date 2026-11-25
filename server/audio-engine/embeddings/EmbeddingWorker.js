@@ -13,7 +13,7 @@
  * Rules:
  * - Always async, never blocks request path
  * - Embedding failure is logged, job is NOT retried more than 3 times
- * - Worker concurrency: 3 (embedding calls are I/O-bound)
+ * - Worker concurrency: default 3, WORKER_CONCURRENCY_EMBEDDING (embedding calls are I/O-bound)
  */
 
 const { Worker } = require('bullmq');
@@ -101,10 +101,11 @@ async function processEmbeddingJob(job) {
  *
  * @returns {Worker}
  */
-function createEmbeddingWorker() {
+function createEmbeddingWorker({ concurrency = 3 } = {}) {
+    // worker.js passes WORKER_CONCURRENCY_EMBEDDING (R98); 3 when unset.
     const worker = new Worker(QUEUE_NAME, processEmbeddingJob, {
         connection:  redisConnection,
-        concurrency: 3,
+        concurrency,
     });
 
     worker.on('completed', (job, result) => {

@@ -95,5 +95,18 @@
     "done": "You are unsubscribed. No more summaries or product updates will be sent to this address.",
     "invalid": "This link is not valid. Use the link from a recent email, or write to us and we will unsubscribe you.",
     "error": "Something went wrong. Please try again in a moment."
+  },
+  "planLock": {
+    "cta": "Upgrade to {{plan}} · {{price}}/month",
+    "back": "Back to my projects",
+    "failed": "Checkout could not open. Try again in a moment.",
+    "designStudio": {
+      "title": "Design Studio is a Pro feature",
+      "body": "Thumbnails, covers and graphics with an AI design copilot are part of the Pro plan. Your videos and projects are not affected."
+    },
+    "social": {
+      "title": "Publishing is a Pro feature",
+      "body": "Publishing to YouTube Shorts, Instagram Reels and TikTok, scheduling, and post performance analysis are part of the Pro plan. You can still download every short you export."
+    }
   }
 }

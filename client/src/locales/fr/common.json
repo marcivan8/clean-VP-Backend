@@ -95,5 +95,18 @@
     "done": "Votre désabonnement est pris en compte. Plus aucun récapitulatif ni actualité ne sera envoyé à cette adresse.",
     "invalid": "Ce lien n'est pas valide. Utilisez le lien d'un e-mail récent, ou écrivez-nous et nous vous désabonnerons.",
     "error": "Une erreur est survenue. Réessayez dans un instant."
+  },
+  "planLock": {
+    "cta": "Passer à {{plan}} · {{price}}/mois",
+    "back": "Retour à mes projets",
+    "failed": "Le paiement n'a pas pu s'ouvrir. Réessayez dans un instant.",
+    "designStudio": {
+      "title": "Design Studio est réservé au plan Pro",
+      "body": "Les miniatures, couvertures et visuels avec un copilote de design IA font partie du plan Pro. Vos vidéos et projets ne sont pas concernés."
+    },
+    "social": {
+      "title": "La publication est réservée au plan Pro",
+      "body": "La publication sur YouTube Shorts, Instagram Reels et TikTok, la programmation et l'analyse des performances font partie du plan Pro. Vous pouvez toujours télécharger chaque short exporté."
+    }
   }
 }

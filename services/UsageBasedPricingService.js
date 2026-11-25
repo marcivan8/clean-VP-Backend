@@ -2,22 +2,22 @@
 const User = require('../models/User');
 const VideoAnalysis = require('../models/VideoAnalysis');
 const { supabaseAdmin } = require('../config/database');
-const PolarService = require('./PolarService');
+const SubscriptionTierService = require('./SubscriptionTierService');
 
 class UsageBasedPricingService {
   constructor() {
-    // Mirror PolarService's tier catalogue so callers that reference
+    // Mirror the tier catalogue so callers that reference
     // UsageBasedPricingService.tiers still work without modification.
-    this.tiers = PolarService.getTiers();
+    this.tiers = SubscriptionTierService.getTiers();
   }
 
   /**
-   * Resolve the user's active tier via Polar.sh.
-   * Falls back to explorer when Polar is unconfigured or the API fails.
-   * Requires the user's email to look up their Polar customer record.
+   * Resolve the user's active tier from profiles.plan (the column the Stripe
+   * webhook writes and middleware/usageGate.js enforces against).
+   * Falls back to explorer when the user cannot be resolved.
    */
   async getUserTier(userId, userEmail = null) {
-    const { tier, source } = await PolarService.getUserTier(userEmail);
+    const { tier, source } = await SubscriptionTierService.getUserTier(userId, userEmail);
     console.log(`[UsageBasedPricingService] User ${userId} tier=${tier.name} (source=${source})`);
     return {
       tier: { ...tier, id: tier.id ?? tier.name.toLowerCase() },
@@ -36,7 +36,7 @@ class UsageBasedPricingService {
   async getUsageStatistics(userId, userEmail = null) {
     try {
       const userUsage = await User.getUsage(userId);
-      const { tier } = await PolarService.getUserTier(userEmail);
+      const { tier } = await SubscriptionTierService.getUserTier(userId, userEmail);
 
       const history = await VideoAnalysis.findByUser(userId, 5);
 
@@ -103,15 +103,16 @@ class UsageBasedPricingService {
 
   /**
    * Check whether a user is allowed to perform a billable action.
-   * Pass userEmail so getUserTier can query Polar.
+   * NOTE: this method currently has no callers; middleware/usageGate.js is the
+   * live gate (R9). Kept because routes/auth.js reads the tier catalogue.
    */
   async checkUsageLimit(userId, feature, userEmail = null) {
     if (feature === 'videoAnalysis' || feature === 'videoAnalyses') {
       const check = await User.checkUsageLimits(userId);
 
       // If the user's DB limit already accounts for their tier, honour it.
-      // Otherwise ask Polar for the real entitlement.
-      const { tier } = await PolarService.getUserTier(userEmail);
+      // Otherwise resolve the entitlement from profiles.plan.
+      const { tier } = await SubscriptionTierService.getUserTier(userId, userEmail);
       const tierLimit = isFinite(tier.limits.videoAnalyses)
           ? tier.limits.videoAnalyses
           : Infinity;

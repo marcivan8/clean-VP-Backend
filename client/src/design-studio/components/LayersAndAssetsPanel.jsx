@@ -17,18 +17,58 @@ import {
     Layers, FolderOpen, Palette, Component, Eye, EyeOff, Lock, Unlock,
     Trash2, Type, Square, Circle, Image as ImageIcon, Star, Minus,
     Frame, Search, Plus, Check, PanelLeftClose, PanelLeftOpen,
-    UploadCloud, Film, ArrowUpRight
+    UploadCloud, Film, ArrowUpRight, GripVertical
 } from 'lucide-react';
 import { STARTER_COMPONENTS } from '../designSystem.js';
+
+function ComponentPreview({ component }) {
+    const width = Math.max(1, component.w || 1);
+    const height = Math.max(1, component.h || 1);
+    return (
+        <div style={{ height: '72px', borderRadius: '6px', background: '#10151D', display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
+            <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+                {(component.layers || []).map(layer => {
+                    const x = Number(layer.x) || 0;
+                    const y = Number(layer.y) || 0;
+                    const w = Math.max(1, Number(layer.w) || 1);
+                    const h = Math.max(1, Number(layer.h) || 1);
+                    if (layer.type === 'image' && layer.src) {
+                        return <image key={layer.id} href={layer.src} x={x} y={y} width={w} height={h} preserveAspectRatio={layer.imageFit === 'contain' ? 'xMidYMid meet' : 'xMidYMid slice'} />;
+                    }
+                    if (layer.type === 'ellipse') {
+                        return <ellipse key={layer.id} cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} fill={layer.fill || 'transparent'} stroke={layer.stroke || 'none'} strokeWidth={layer.strokeWidth || 0} />;
+                    }
+                    if (layer.type === 'text') {
+                        const textX = x + (layer.textAlign === 'center' ? w / 2 : layer.textAlign === 'right' ? w : 0);
+                        return <text key={layer.id} x={textX} y={y + Number(layer.fontSize || 12)} fill={layer.fill || '#F7F9FC'} fontFamily={layer.fontFamily || 'Geist'} fontSize={layer.fontSize || 12} fontWeight={layer.fontWeight || 500} textAnchor={layer.textAlign === 'center' ? 'middle' : layer.textAlign === 'right' ? 'end' : 'start'}>{String(layer.text || '').split('\n').map((line, index) => <tspan key={index} x={textX} dy={index ? Number(layer.fontSize || 12) * (layer.lineHeight || 1.15) : 0}>{line}</tspan>)}</text>;
+                    }
+                    if (layer.type === 'line') {
+                        return <line key={layer.id} x1={x} y1={y + h / 2} x2={x + w} y2={y + h / 2} stroke={layer.stroke || '#F7F9FC'} strokeWidth={layer.strokeWidth || 1} />;
+                    }
+                    if (layer.type === 'polygon' && layer.sides === 3) {
+                        return <path key={layer.id} d={`M ${x + w / 2} ${y} L ${x + w} ${y + h} L ${x} ${y + h} Z`} fill={layer.fill || '#F7F9FC'} />;
+                    }
+                    if (layer.type === 'vector' && layer.pathD) {
+                        return <path key={layer.id} d={layer.pathD} transform={`translate(${x} ${y})`} fill={layer.fill || 'none'} stroke={layer.stroke || '#F7F9FC'} strokeWidth={layer.strokeWidth || 1} />;
+                    }
+                    return <rect key={layer.id} x={x} y={y} width={w} height={h} rx={layer.cornerRadius || 0} fill={layer.fill || (layer.type === 'image' ? '#303A48' : 'transparent')} stroke={layer.stroke || 'none'} strokeWidth={layer.strokeWidth || 0} />;
+                })}
+            </svg>
+        </div>
+    );
+}
 
 export default function LayersAndAssetsPanel({
     layers = [],
     setLayers,
+    onReorderLayers,
+    onBeforeLayerChange,
     selectedLayerIds = [],
     setSelectedLayerIds,
     onInsertComponent,
-    timelineAssets = [],
+    mediaAssets = [],
     onAddAssetToCanvas,
+    onDeleteMediaAsset,
     brandKit = {
         name: 'VIBED Studio Kit',
         accent: '#00E5FF',
@@ -53,6 +93,8 @@ export default function LayersAndAssetsPanel({
     const setActiveTab = setExternalActiveTab || setInternalTab;
     const [drawerExpanded, setDrawerExpanded] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
+    const [componentQuery, setComponentQuery] = useState('');
+    const [componentCategory, setComponentCategory] = useState('All');
 
     // Layer type icon helper
     const getLayerIcon = (type) => {
@@ -72,18 +114,21 @@ export default function LayersAndAssetsPanel({
     // Toggle layer visibility
     const handleToggleVisibility = (layerId, e) => {
         e.stopPropagation();
+        onBeforeLayerChange?.();
         setLayers(prev => prev.map(l => l.id === layerId ? { ...l, visible: !l.visible } : l));
     };
 
     // Toggle layer lock
     const handleToggleLock = (layerId, e) => {
         e.stopPropagation();
+        onBeforeLayerChange?.();
         setLayers(prev => prev.map(l => l.id === layerId ? { ...l, locked: !l.locked } : l));
     };
 
     // Delete layer
     const handleDeleteLayer = (layerId, e) => {
         e.stopPropagation();
+        onBeforeLayerChange?.();
         setLayers(prev => prev.filter(l => l.id !== layerId));
         setSelectedLayerIds(prev => prev.filter(id => id !== layerId));
     };
@@ -105,6 +150,17 @@ export default function LayersAndAssetsPanel({
         { name: 'Warm Editorial', accent: '#C85A17', accent2: '#10151D', surface: '#F4EDE2', text: '#10151D', display: 'Instrument Serif' },
         { name: 'Monochrome Pro', accent: '#10151D', accent2: '#5F6876', surface: '#10151D', text: '#FFFFFF', display: 'Geist' },
     ];
+
+    const allLibraryComponents = [...customComponents, ...STARTER_COMPONENTS];
+    const componentCategories = ['All', ...new Set(allLibraryComponents.map(component => component.category || 'Other'))];
+    const filterLibrary = (component) => {
+        const query = componentQuery.trim().toLowerCase();
+        const searchable = [component.name, component.category, component.description, ...(component.tags || [])].filter(Boolean).join(' ').toLowerCase();
+        return (componentCategory === 'All' || (component.category || 'Other') === componentCategory)
+            && (!query || searchable.includes(query));
+    };
+    const filteredCustomComponents = customComponents.filter(filterLibrary);
+    const filteredStarterComponents = STARTER_COMPONENTS.filter(filterLibrary);
 
     return (
         <div style={{
@@ -270,10 +326,24 @@ export default function LayersAndAssetsPanel({
                                 {/* Layer Rows */}
                                 {filteredLayers.slice().reverse().map(layer => {
                                     const isSelected = selectedLayerIds.includes(layer.id);
+                                    const isBackground = layer.id === 'background' || layer.type === 'bg';
                                     const IconComp = getLayerIcon(layer.type);
                                     return (
                                         <div
                                             key={layer.id}
+                                            draggable={!searchQuery && !isBackground}
+                                            onDragStart={(event) => {
+                                                event.dataTransfer.effectAllowed = 'move';
+                                                event.dataTransfer.setData('text/plain', layer.id);
+                                            }}
+                                            onDragOver={(event) => {
+                                                if (!searchQuery && !isBackground) event.preventDefault();
+                                            }}
+                                            onDrop={(event) => {
+                                                event.preventDefault();
+                                                const fromId = event.dataTransfer.getData('text/plain');
+                                                if (fromId && fromId !== layer.id && !searchQuery && onReorderLayers) onReorderLayers(fromId, layer.id);
+                                            }}
                                             onClick={() => {
                                                 setSelectedLayerIds([layer.id]);
                                             }}
@@ -285,11 +355,12 @@ export default function LayersAndAssetsPanel({
                                                 borderRadius: '6px',
                                                 background: isSelected ? '#F0F9FB' : 'transparent',
                                                 border: isSelected ? '1px solid #0B7C91' : '1px solid transparent',
-                                                cursor: 'pointer',
+                                                cursor: isBackground ? 'default' : (searchQuery ? 'pointer' : 'grab'),
                                                 transition: 'background 0.12s ease',
                                             }}
                                         >
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
+                                                {!isBackground && <GripVertical size={12} color="#94A3B8" aria-hidden="true" />}
                                                 <IconComp size={13} color={isSelected ? '#0B7C91' : '#64748B'} />
                                                 <span style={{
                                                     overflow: 'hidden',
@@ -393,21 +464,21 @@ export default function LayersAndAssetsPanel({
                                     </span>
                                 </div>
 
-                                {/* Project Media Bin */}
+                                {/* Design Studio's independent media bin */}
                                 <div>
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                                         <span style={{ fontSize: '11px', fontWeight: 600, color: '#475569' }}>
-                                            PROJECT MEDIA ({timelineAssets.length})
+                                            STUDIO MEDIA ({mediaAssets.length})
                                         </span>
                                     </div>
 
-                                    {timelineAssets.length === 0 ? (
+                                    {mediaAssets.length === 0 ? (
                                         <div style={{ padding: '16px 8px', textAlign: 'center', color: '#94A3B8', fontSize: '11px', lineHeight: 1.4 }}>
-                                            No media in active project yet. Upload video or images in the Editor to use them here.
+                                            No images in this Studio project yet. Upload an image to add it here.
                                         </div>
                                     ) : (
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                            {timelineAssets.map((asset, i) => (
+                                            {mediaAssets.map((asset, i) => (
                                                 <div
                                                     key={asset.id || i}
                                                     style={{
@@ -439,7 +510,7 @@ export default function LayersAndAssetsPanel({
                                                     </div>
                                                     <div style={{ flex: 1, minWidth: 0 }}>
                                                         <div style={{ fontSize: '11.5px', fontWeight: 600, color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                            {asset.name || 'Project Asset'}
+                                                            {asset.name || 'Studio Image'}
                                                         </div>
                                                         <button
                                                             type="button"
@@ -459,6 +530,17 @@ export default function LayersAndAssetsPanel({
                                                             Add to Canvas
                                                         </button>
                                                     </div>
+                                                    {onDeleteMediaAsset && (
+                                                        <button
+                                                            type="button"
+                                                            aria-label={`Remove ${asset.name || 'image'} from Studio media`}
+                                                            title="Remove from Studio media"
+                                                            onClick={() => onDeleteMediaAsset(asset.id)}
+                                                            style={{ padding: 5, border: 'none', borderRadius: 5, background: '#FEF2F2', color: '#B91C1C', cursor: 'pointer' }}
+                                                        >
+                                                            <Trash2 size={13} />
+                                                        </button>
+                                                    )}
                                                 </div>
                                             ))}
                                         </div>
@@ -585,15 +667,28 @@ export default function LayersAndAssetsPanel({
                         {/* 4. COMPONENTS TAB */}
                         {activeTab === 'components' && (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+                                    <label htmlFor="component-library-search" style={{ fontSize: '10px', fontFamily: 'var(--f-mono, monospace)', fontWeight: 700, color: '#64748B', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Find a component or icon</label>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '6px', padding: '6px 8px' }}>
+                                        <Search size={13} color="#94A3B8" />
+                                        <input id="component-library-search" type="search" value={componentQuery} onChange={(event) => setComponentQuery(event.target.value)} placeholder="Search components and icons…" style={{ minWidth: 0, width: '100%', border: 'none', outline: 'none', background: 'transparent', fontSize: '11px', color: '#0F172A' }} />
+                                    </div>
+                                    <select aria-label="Filter component category" value={componentCategory} onChange={(event) => setComponentCategory(event.target.value)} style={{ width: '100%', padding: '7px 8px', border: '1px solid #E2E8F0', borderRadius: '6px', background: '#FFFFFF', color: '#334155', fontSize: '11px' }}>
+                                        {componentCategories.map(category => <option key={category} value={category}>{category === 'All' ? 'All categories' : category}</option>)}
+                                    </select>
+                                    <span style={{ fontSize: '10px', color: '#64748B' }}>{filteredCustomComponents.length + filteredStarterComponents.length} components and icons · inserted as editable layers</span>
+                                    <span style={{ fontSize: '10px', color: '#64748B', lineHeight: 1.4 }}>Lucide icon vectors are free to use under the ISC license. <a href="https://lucide.dev/icons" target="_blank" rel="noreferrer" style={{ color: '#0B7C91', fontWeight: 600 }}>Browse Lucide</a></span>
+                                </div>
+
                                 {/* Custom Components Section */}
-                                {customComponents.length > 0 && (
+                                {filteredCustomComponents.length > 0 && (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 2px' }}>
                                             <span style={{ fontSize: '10px', fontFamily: 'var(--f-mono, monospace)', fontWeight: 700, color: '#0B7C91', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                                                Custom Master Components ({customComponents.length})
+                                                Your Components ({filteredCustomComponents.length})
                                             </span>
                                         </div>
-                                        {customComponents.map(cmp => (
+                                        {filteredCustomComponents.map(cmp => (
                                             <div
                                                 key={cmp.id}
                                                 style={{
@@ -607,6 +702,7 @@ export default function LayersAndAssetsPanel({
                                                     boxShadow: '0 2px 8px rgba(0, 229, 255, 0.08)',
                                                 }}
                                             >
+                                                <ComponentPreview component={cmp} />
                                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                                                     <span style={{ fontWeight: 600, color: '#0F172A', fontSize: '11.5px' }}>{cmp.name}</span>
                                                     <span style={{ fontSize: '9px', color: '#16A34A', background: '#DCFCE7', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>MASTER</span>
@@ -635,7 +731,7 @@ export default function LayersAndAssetsPanel({
                                                         }}
                                                     >
                                                         <Plus size={12} />
-                                                        <span>Insert Instance</span>
+                                                    <span>Insert editable layers</span>
                                                     </button>
                                                     {onDeleteCustomComponent && (
                                                         <button
@@ -666,9 +762,9 @@ export default function LayersAndAssetsPanel({
                                 {/* System Starter Components */}
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                                     <span style={{ fontSize: '10px', fontFamily: 'var(--f-mono, monospace)', fontWeight: 700, color: '#64748B', letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 2px' }}>
-                                        Starter Components
+                                        Built-in Components & Icons ({filteredStarterComponents.length})
                                     </span>
-                                    {STARTER_COMPONENTS.map(cmp => (
+                                    {filteredStarterComponents.map(cmp => (
                                         <div
                                             key={cmp.id}
                                             style={{
@@ -681,12 +777,14 @@ export default function LayersAndAssetsPanel({
                                                 gap: '4px',
                                             }}
                                         >
+                                            <ComponentPreview component={cmp} />
                                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                                                 <span style={{ fontWeight: 600, color: '#0F172A', fontSize: '11.5px' }}>{cmp.name}</span>
                                                 <span style={{ fontSize: '9.5px', color: '#0B7C91', fontWeight: 600 }}>{cmp.category}</span>
                                             </div>
+                                            {cmp.description && <span style={{ fontSize: '10px', color: '#64748B', lineHeight: 1.4 }}>{cmp.description}</span>}
                                             <span style={{ fontSize: '10.5px', color: '#64748B' }}>
-                                                {cmp.w} x {cmp.h} px · {cmp.layers.length} layers
+                                                {cmp.w} × {cmp.h} px · {cmp.layers.length} editable {cmp.category === 'Icons · Lucide' ? 'vector paths' : 'layers'}
                                             </span>
                                             <button
                                                 type="button"
@@ -708,7 +806,7 @@ export default function LayersAndAssetsPanel({
                                                 }}
                                             >
                                                 <Plus size={12} />
-                                                <span>Insert</span>
+                                                <span>Insert editable layers</span>
                                             </button>
                                         </div>
                                     ))}

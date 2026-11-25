@@ -610,3 +610,98 @@ export const ScriptFlow = () => {
         </section>
     );
 };
+
+/* 5 — Design Studio (Pro, R104) ------------------------------------------- */
+
+/**
+ * A drawn mock of the studio rather than a screenshot, so it stays sharp and
+ * in both languages. Everything it shows exists in the product: the six
+ * formats, the layer list, the copilot prompt, background removal, saving to
+ * the timeline and PNG export.
+ */
+export const DesignStudioShowcase = () => {
+    const { t } = useTranslation('landing');
+    const layers = t('v2.design.layers', { returnObjects: true });
+
+    return (
+        <section className="vl-sec" id="design" style={{ background: 'var(--vl-bg)' }}>
+            <div className="vl-wrap">
+                <Reveal>
+                    <span className="vl-mono" style={{
+                        display: 'inline-block', marginBottom: 14, fontSize: 11, fontWeight: 600, letterSpacing: '0.1em',
+                        color: 'var(--vl-cyan-soft)', border: '1px solid rgba(0,229,255,0.35)', borderRadius: 999, padding: '4px 10px',
+                    }}>{t('v2.design.badge')}</span>
+                </Reveal>
+                <SectionHead title={t('v2.design.title')} lead={t('v2.design.lead')} />
+
+                <Reveal>
+                    <div className="vl-card" style={{
+                        borderRadius: 18, padding: 18, marginBottom: 40,
+                        display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'stretch',
+                    }}>
+                        <div style={{ flex: '3 1 320px', minWidth: 0 }}>
+                            <div className="vl-mono" style={{ fontSize: 11, color: 'var(--vl-ink-4)', marginBottom: 8 }}>{t('v2.design.canvasLabel')}</div>
+                            <div aria-hidden="true" style={{
+                                position: 'relative', aspectRatio: '16 / 9', borderRadius: 12, overflow: 'hidden',
+                                background: 'linear-gradient(135deg, #0B1E2D 0%, #1B0E33 100%)',
+                                border: '1px solid rgba(255,255,255,0.08)',
+                            }}>
+                                <div style={{
+                                    position: 'absolute', right: '8%', bottom: 0, width: '34%', aspectRatio: '3 / 4',
+                                    borderRadius: '50% 50% 8px 8px', background: 'linear-gradient(180deg, #3A4A5E, #1D2733)',
+                                    boxShadow: '0 0 0 2px rgba(0,229,255,0.55)',
+                                }} />
+                                <div style={{
+                                    position: 'absolute', left: '6%', top: '22%', width: '52%',
+                                    fontFamily: 'var(--vl-display)', fontWeight: 800, lineHeight: 0.95,
+                                    fontSize: 'clamp(20px, 4.4vw, 44px)', color: '#fff',
+                                    outline: '1.5px dashed rgba(0,229,255,0.7)', outlineOffset: 6,
+                                }}>{t('v2.design.headline')}</div>
+                                <div style={{
+                                    position: 'absolute', left: '6%', top: '68%', width: '22%', height: 8, borderRadius: 4,
+                                    background: 'linear-gradient(90deg, var(--vl-cyan), #8A2BE2)',
+                                }} />
+                            </div>
+                            <div style={{
+                                marginTop: 12, display: 'flex', alignItems: 'center', gap: 10,
+                                padding: '10px 14px', borderRadius: 999,
+                                background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                            }}>
+                                <Icon name="sparkle" size={15} color="var(--vl-cyan-soft)" />
+                                <span style={{ fontSize: 13.5, color: 'var(--vl-ink-2)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {t('v2.design.prompt')}
+                                </span>
+                            </div>
+                        </div>
+                        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+                            <div className="vl-mono" style={{ fontSize: 11, color: 'var(--vl-ink-4)', marginBottom: 8 }}>{t('v2.design.layersLabel')}</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                {(Array.isArray(layers) ? layers : []).map((name, i) => (
+                                    <div key={name} style={{
+                                        padding: '9px 12px', borderRadius: 9, fontSize: 13,
+                                        background: i === 0 ? 'rgba(0,229,255,0.1)' : 'rgba(255,255,255,0.04)',
+                                        border: `1px solid ${i === 0 ? 'rgba(0,229,255,0.35)' : 'rgba(255,255,255,0.08)'}`,
+                                        color: i === 0 ? 'var(--vl-cyan-soft)' : 'var(--vl-ink-2)',
+                                    }}>{name}</div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </Reveal>
+
+                <Stagger step={0.1} style={{ display: 'flex', gap: 22, flexWrap: 'wrap' }}>
+                    {['a', 'b', 'c'].map((k) => (
+                        <StaggerItem key={k} className="vl-card vl-card-hover" style={{ flex: '1 1 260px', minWidth: 0, padding: 26, borderRadius: 16 }}>
+                            <h3 style={{ fontWeight: 700, fontSize: 15.5, color: 'var(--vl-ink)', margin: '0 0 8px' }}>
+                                {t(`v2.design.cards.${k}.title`)}
+                            </h3>
+                            <p style={{ fontSize: 14, color: 'var(--vl-ink-3)', lineHeight: 1.55, margin: 0 }}>
+                                {t(`v2.design.cards.${k}.body`)}
+                            </p>
+                        </StaggerItem>
+                    ))}
+                </Stagger>
+            </div>
+        </section>
+    );
+};

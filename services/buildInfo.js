@@ -68,10 +68,36 @@ function getBuildId() {
  *   2 — R38: _ensureAssetRow() creates the row before any update, and
  *       _resolveToLocalFile() downloads the object to a local path before the
  *       analyzers touch it. A worker below this writes NO media_assets rows.
+ *   3 — R160: consumes the social-publishing queue for scheduled Shorts/Reels.
+ *       A worker below this leaves queued social posts waiting until redeploy.
+ *   4 — R161: syncs post analytics daily. A worker below this never refreshes
+ *       social performance data or applies approved editing guidance.
  */
-const WORKER_CAPABILITY_VERSION = 2;
+const WORKER_CAPABILITY_VERSION = 4;
+
+// ── Worker heartbeat keys (shared by worker.js and QueueHealthProbe) ────────
+// HEARTBEAT_KEY is the original single key: every worker instance overwrites
+// it, so with several replicas it only ever shows the last writer. Kept for
+// compatibility with an API deployed before R98. Each instance ALSO writes
+// HEARTBEAT_INSTANCE_PREFIX + its id, which is what the probe reads now.
+const HEARTBEAT_KEY = 'vibed:worker:heartbeat';
+const HEARTBEAT_INSTANCE_PREFIX = 'vibed:worker:heartbeat:instance:';
+
+/**
+ * A stable id for this worker process. Uses the platform's replica id when
+ * there is one (Railway, Fly), else hostname + pid — unique per process, which
+ * is all the probe needs to count instances.
+ */
+function workerInstanceId(env = process.env) {
+    const platformId = env.RAILWAY_REPLICA_ID || env.FLY_ALLOC_ID || null;
+    const raw = platformId || `${require('os').hostname()}-${process.pid}`;
+    return String(raw).replace(/[^A-Za-z0-9_.:-]/g, '_').slice(0, 80);
+}
 
 module.exports = {
     getBuildId,
     WORKER_CAPABILITY_VERSION,
+    HEARTBEAT_KEY,
+    HEARTBEAT_INSTANCE_PREFIX,
+    workerInstanceId,
 };

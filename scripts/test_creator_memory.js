@@ -339,7 +339,7 @@ console.log('\n── supabase writes never use .catch() on the builder ──')
         'server/brain/media/MediaIntelligencePipeline.js',
         'server/brain/ProjectIntelligence.js',
         'server/brain/UserProfileEngine.js',
-        'routes/polarWebhook.js',
+        'routes/stripeWebhook.js',
     ];
 
     for (const rel of files) {

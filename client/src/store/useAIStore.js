@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { parseConversation } from '../agent/conversationPersistence.js';
 
 // Monotonic counter stamped onto every log AND suggestion as they are created.
 // ReasoningPanel merges the two collections into ONE chronological stream, and
@@ -67,6 +68,15 @@ const useAIStore = create((set) => ({
     })),
 
     clearSession: () => set({ logs: [], suggestions: [], isAnalyzing: false, contextualSuggestion: null }),
+    // R105: put back the conversation saved with the project (or empty it when
+    // the project has none). New messages must sort after the restored ones,
+    // so the sequence counter jumps past the highest saved _seq.
+    restoreConversation: (saved) => {
+        const { logs, suggestions } = parseConversation(saved);
+        const maxSeq = Math.max(0, ...logs.map(l => Number(l._seq) || 0), ...suggestions.map(x => Number(x._seq) || 0));
+        if (maxSeq > _seqCounter) _seqCounter = maxSeq;
+        set({ logs, suggestions, isAnalyzing: false, contextualSuggestion: null });
+    },
 
     removeSuggestion: (id) => set((state) => ({
         suggestions: state.suggestions.filter(s => s.id !== id)

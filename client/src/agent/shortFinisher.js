@@ -31,6 +31,9 @@ import { PLATFORM_PROFILES } from './PlatformProfiles.js';
 // this cached a single resolved asset per query, so every transition's sound
 // effect in the whole video was the literal same clip.
 const sfxCache = new Map();
+let performanceGuidanceCache = [];
+let performanceGuidanceAt = 0;
+let performanceGuidancePromise = null;
 
 /**
  * The optional headline call has a bounded wait. Scene structure and timing
@@ -64,10 +67,10 @@ async function fetchWithTimeout(url, options, ms = PLAN_TIMEOUT_MS) {
  * transcript. The local scene plan and Motion KB lookup do not use this cache.
  */
 const planCache = new Map();
-const planKey = (kind, text, platform, duration) => `${kind}|${platform}|${Math.round(Number(duration) * 100)}|${text}`;
+const planKey = (kind, text, platform, duration, guidance = '') => `${kind}|${platform}|${Math.round(Number(duration) * 100)}|${guidance}|${text}`;
 
-async function cachedPlan(kind, text, platform, duration, run) {
-    const key = planKey(kind, text, platform, duration);
+async function cachedPlan(kind, text, platform, duration, run, guidance = '') {
+    const key = planKey(kind, text, platform, duration, guidance);
     if (planCache.has(key)) return planCache.get(key);
     const promise = run();
     // The PROMISE is cached, not its result: two previews started at once
@@ -136,12 +139,12 @@ export async function addSfxTrack(tracks, cues, level, fetchAsset = fetchSfxAsse
 }
 
 /** Optional AI headline/keyword suggestion, or null (local copy applies). */
-export async function fetchShortPlan(text, platform, duration) {
+export async function fetchShortPlan(text, platform, duration, performanceGuidance = '') {
     return cachedPlan('short', text, platform, duration, async () => {
         try {
             const res = await fetchWithTimeout('/api/motion/short-plan', {
                 method: 'POST',
-                body: JSON.stringify({ text, platform, duration }),
+                body: JSON.stringify({ text, platform, duration, performanceGuidance }),
             });
             const data = await res.json().catch(() => ({}));
             return res.ok ? (data.plan || null) : null;
@@ -152,7 +155,36 @@ export async function fetchShortPlan(text, platform, duration) {
             console.warn(`[shortFinisher] short plan unavailable, using rules: ${why}`);
             return null;
         }
-    });
+    }, performanceGuidance);
+}
+
+async function approvedPerformanceGuidance(platform) {
+    if (Date.now() - performanceGuidanceAt > 60_000) {
+        if (!performanceGuidancePromise) {
+            performanceGuidancePromise = authFetch('/api/social/analytics')
+                .then(async response => {
+                    if (!response.ok) return [];
+                    const body = await response.json().catch(() => ({}));
+                    return Array.isArray(body.guidance) ? body.guidance : [];
+                })
+                .catch(err => {
+                    console.warn('[shortFinisher] social performance guidance unavailable:', err.message);
+                    return [];
+                })
+                .then(items => {
+                    performanceGuidanceCache = items;
+                    performanceGuidanceAt = Date.now();
+                    return items;
+                })
+                .finally(() => { performanceGuidancePromise = null; });
+        }
+        await performanceGuidancePromise;
+    }
+    const provider = platform === 'reels' ? 'instagram' : platform === 'shorts' ? 'youtube' : platform;
+    return performanceGuidanceCache
+        .filter(item => item.provider === 'all' || item.provider === provider)
+        .map(item => String(item.instruction || '').trim())
+        .filter(Boolean).slice(0, 4).join('; ').slice(0, 500);
 }
 
 /** Optional AI-directed generative scene plan from /api/motion/scene-plan (desktop After Effects-grade scene plan). */
@@ -232,29 +264,36 @@ export async function finishShort(state, short, opts = {}) {
     const events = (Array.isArray(short.events) ? short.events : []).map(e => ({ ...e, timelineTime: Number(e.timelineTime) - start }));
     const wantsPolish = opts.polish !== false;
     if (!wantsPolish && !opts.popOut) return { ...built, applied: [], words };
+    const performanceGuidancePromise = wantsPolish
+        ? (opts.performanceGuidance !== undefined
+            ? Promise.resolve(String(opts.performanceGuidance || '').slice(0, 500))
+            : approvedPerformanceGuidance(profile.id))
+        : Promise.resolve('');
 
     const text = words.map(w => String(w.word ?? w.text ?? '')).join(' ').slice(0, 2000);
     const isReel = profile.id === 'reels' || state.editingStyle === 'reel' || opts.editingStyle === 'reel';
     const isMobile = typeof window !== 'undefined' && typeof window.innerWidth === 'number' && window.innerWidth < 768;
     const isDesktop = !isMobile;
 
-    const [plan, techniques, visualContext, generativePlan] = wantsPolish ? await Promise.all([
-        opts.plan !== undefined ? opts.plan
-            : (text ? (opts.fetchPlan || fetchShortPlan)(text, profile.id, built.duration) : null),
+    const guidanceAwarePlan = opts.plan !== undefined
+        ? Promise.resolve(opts.plan)
+        : (text ? performanceGuidancePromise.then(guidance =>
+            (opts.fetchPlan || fetchShortPlan)(text, profile.id, built.duration, guidance)) : Promise.resolve(null));
+    const guidanceAwareScenePlan = (isDesktop && isReel && opts.scenePlan === undefined && opts.generative === true && text)
+        ? performanceGuidancePromise.then(guidance => fetchGenerativeScenePlan({
+            brief: `Pro finish for ${profile.id === 'reels' ? 'Instagram Reels' : profile.id === 'shorts' ? 'YouTube Shorts' : 'TikTok'}: open strong, surface the key point, and close with a punchy call to action.${guidance ? ` Follow user-approved performance guidance where relevant: ${guidance}` : ''}`,
+            transcript: text, platform: profile.id, tone: 'punchy', signal: opts.signal,
+        }))
+        : Promise.resolve(null);
+    const [performanceGuidance, plan, techniques, visualContext, generativePlan] = wantsPolish ? await Promise.all([
+        performanceGuidancePromise,
+        guidanceAwarePlan,
         opts.motionTechniques !== undefined ? opts.motionTechniques
             : (text ? (opts.fetchMotionTechniques || fetchShortMotionTechniques)(text, profile.id, '', opts.signal) : []),
         opts.visualContext !== undefined ? opts.visualContext
             : (state.projectId ? fetchShortVisualContext(state.projectId, opts.signal) : []),
-        (isDesktop && isReel && opts.scenePlan === undefined && opts.generative === true && text)
-            ? fetchGenerativeScenePlan({
-                brief: `Pro finish for ${profile.id === 'reels' ? 'Instagram Reels' : profile.id === 'shorts' ? 'YouTube Shorts' : 'TikTok'}: open strong, surface the key point, and close with a punchy call to action.`,
-                transcript: text,
-                platform: profile.id,
-                tone: 'punchy',
-                signal: opts.signal,
-            })
-            : Promise.resolve(null),
-    ]) : [null, [], [], null];
+        guidanceAwareScenePlan,
+    ]) : ['', null, [], [], null];
 
     const localPlan = wantsPolish && (opts.scenePlan || fallbackShortScenePlan(words, {
         headline: plan?.headline,

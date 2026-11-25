@@ -165,6 +165,8 @@ export default function MotionPanel() {
         return Object.keys(MOTION_PARAM_DEFS).filter(p => !existing[p] || existing[p].length === 0);
     }, [editorModel]);
 
+    // R105: one tree for both states. With two separate returns, selecting a
+    // clip unmounted and rebuilt the whole template library (see TemplatePanel).
     if (!clip) {
         return (
             <section className="p-4 border-b border-border/50">
@@ -172,6 +174,7 @@ export default function MotionPanel() {
                     <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold">
                         {t('motionPanel.title')}
                     </div>
+                    <span />
                 </div>
                 <StyleRecipePanel />
                 <TemplatePanel selectedClip={null} selectedTrackId={null} />

@@ -3,7 +3,7 @@
   "title": "Vos droits et comment les exercer",
   "lastUpdated": "Dernière mise à jour : {{date}}",
   "intro": [
-    "Le Règlement général sur la protection des données vous donne la maîtrise de vos données personnelles. Cette page présente chaque droit simplement et la façon la plus rapide de l'exercer auprès de Vibed. Les traitements eux-mêmes sont décrits dans notre [Politique de confidentialité](/privacy)."
+    "Le Règlement général sur la protection des données vous donne la maîtrise de vos données personnelles. Cette page présente chaque droit simplement et la façon la plus rapide de l'exercer auprès de CIJE, responsable du traitement pour VIBED STUDIO. Les traitements eux-mêmes sont décrits dans notre [Politique de confidentialité](/privacy)."
   ],
   "sections": [
     {
@@ -43,6 +43,10 @@
               ],
               [
                 "Toute autre demande (copie de vos données, rectification, opposition...)",
+                "Écrire à [{{email}}](mailto:{{email}})"
+              ],
+              [
+                "Déconnecter un compte YouTube ou Instagram ou demander la suppression des données sociales",
                 "Écrire à [{{email}}](mailto:{{email}})"
               ]
             ]
@@ -115,15 +119,28 @@
           "defs": [
             {
               "term": "Responsable du traitement",
-              "desc": "{{ownerName}}, {{legalForm}}, exerçant sous le nom {{tradeName}}"
+              "desc": "{{ownerName}}, {{legalForm}}, cocontractant et exploitant de la marque {{brandName}} sous CAPE. {{capeRelationship}}"
             },
             {
               "term": "Adresse",
               "desc": "{{address}}"
             },
             {
+              "term": "SIRET",
+              "desc": "{{siret}}"
+            },
+            {
+              "term": "N° de TVA intracommunautaire",
+              "desc": "{{vatNumber}}"
+            },
+            {
               "term": "E-mail",
               "desc": "[{{email}}](mailto:{{email}})"
+            },
+            {
+              "term": "Téléphone",
+              "desc": "{{phone}}",
+              "requires": "phone"
             }
           ]
         }

@@ -21,6 +21,18 @@ const uploadLimiter = rateLimit({
     message: { error: 'Upload rate limit reached. Please wait a moment.' }
 });
 
+// Direct-to-GCS uploads make two small calls per file (upload-url, then
+// process-direct); the bytes go straight to GCS and the encode is bounded by
+// the worker queue (one at a time, R24). At 10/min a multi-file import failed
+// outright after the 5th file in a minute. These two get their own budget,
+// sized for a large batch; /upload and /generate (which do the heavy work in
+// this process) keep the strict one.
+const directUploadLimiter = rateLimit({
+    windowMs: 60_000, max: 120,
+    standardHeaders: true, legacyHeaders: false,
+    message: { error: 'Upload rate limit reached. Please wait a moment.' }
+});
+
 const uploadsDir = path.resolve(__dirname, '../uploads');
 const uploadDir  = path.join(uploadsDir, 'temp');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -297,7 +309,7 @@ router.post('/upload', uploadLimiter, authMiddleware, (req, res, next) => {
  * POST /api/proxy/upload-url
  * Generate a Resumable Session URL for direct-to-GCS browser uploads.
  */
-router.post('/upload-url', uploadLimiter, authMiddleware, async (req, res) => {
+router.post('/upload-url', directUploadLimiter, authMiddleware, async (req, res) => {
     try {
         const { filename, contentType } = req.body;
         if (!storageConfig.bucket || storageConfig.useLocalStorage) {
@@ -328,7 +340,7 @@ router.post('/upload-url', uploadLimiter, authMiddleware, async (req, res) => {
  * POST /api/proxy/process-direct
  * Triggers the proxy generation job for a file that was just directly uploaded to GCS.
  */
-router.post('/process-direct', uploadLimiter, authMiddleware, async (req, res) => {
+router.post('/process-direct', directUploadLimiter, authMiddleware, async (req, res) => {
     try {
         const { destPath, originalFilename } = req.body;
         const userId = resolveUserId(req);

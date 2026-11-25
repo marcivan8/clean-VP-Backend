@@ -6,6 +6,8 @@ export interface PromptBarProps {
   /** Fired on Enter / send-button press with the current value. */
   onSubmit?: (value: string) => void;
   placeholder?: string;
+  /** Accessible name for the text field; defaults to "Describe an edit". */
+  ariaLabel?: string;
   /** Busy state — violet pulsing dot, disabled input, "···" send glyph. */
   busy?: boolean;
   /** Quick-fill suggestion chips shown above the bar. */

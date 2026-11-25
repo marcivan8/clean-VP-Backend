@@ -644,6 +644,7 @@ async function generateMotionScript({
     editingStyle,
     timeoutMs,
     signal,
+    seed = '',
     composer,
     buildPrompt,
     cleanLayers,
@@ -656,8 +657,13 @@ async function generateMotionScript({
         throw new Error('layers is required (at least one {id, kind, duration})');
     }
 
-    const fallbackFor = l => composer.planMotionFromBrief(cleanBrief || 'animate it', { duration: l.duration });
-    const rulesScripts = () => Object.fromEntries(list.map(l => [l.id, fallbackFor(l)]));
+    const fallbackFor = l => composer.planMotionFromBrief(cleanBrief || 'animate it', {
+        duration: l.duration, kind: l.kind, role: l.role, name: l.name || l.id,
+        content: l.content, editingStyle, seed,
+    });
+    const rulesScripts = () => typeof composer.planMotionForLayers === 'function'
+        ? composer.planMotionForLayers(list, cleanBrief || 'animate it', { editingStyle, seed })
+        : Object.fromEntries(list.map(l => [l.id, fallbackFor(l)]));
 
     const configuredProvider = resolveMotionProvider();
 
@@ -674,7 +680,7 @@ async function generateMotionScript({
         return {
             source: 'rules',
             layers: rulesScripts(),
-            notes: null,
+            notes: 'Offline deterministic motion recipe.',
             provider: 'rules',
             model: 'deterministic',
             latencyMs: 0,
@@ -712,7 +718,7 @@ async function generateMotionScript({
         return {
             source: 'rules',
             layers: rulesScripts(),
-            notes: null,
+            notes: 'Offline deterministic motion recipe (provider unavailable).',
             provider: effectiveProvider,
             model: 'none',
             latencyMs: Date.now() - startTime,
@@ -731,7 +737,7 @@ async function generateMotionScript({
         return {
             source: 'rules',
             layers: rulesScripts(),
-            notes: null,
+            notes: 'Offline deterministic motion recipe (request cancelled).',
             provider: effectiveProvider,
             model: 'none',
             latencyMs: Date.now() - startTime,
@@ -814,7 +820,7 @@ async function generateMotionScript({
         return {
             source: 'rules',
             layers: rulesScripts(),
-            notes: null,
+            notes: `Offline deterministic motion recipe (${failureCategory || 'provider error'}).`,
             provider: activeProvider,
             model: activeModel,
             latencyMs,
@@ -854,7 +860,9 @@ async function generateMotionScript({
     return {
         source: finalSource,
         layers: out,
-        notes: typeof parsedData?.notes === 'string' ? parsedData.notes.slice(0, 200) : null,
+        notes: usedLLM === list.length
+            ? (typeof parsedData?.notes === 'string' ? parsedData.notes.slice(0, 200) : null)
+            : usedLLM > 0 ? 'AI and offline recipe layers were combined.' : 'Offline deterministic motion recipes were used.',
         provider: activeProvider,
         model: activeModel,
         latencyMs,

@@ -1,7 +1,7 @@
 /* ============================================================
    Vibed — Webfonts
-   Display: Instrument Serif · Body: Geist · Mono: JetBrains Mono
-   Self-hosted woff2 (latin subset). Variable files cover all weights.
+   Display: Plus Jakarta Sans · Body: Geist · Editorial: Instrument Serif
+   Technical: JetBrains Mono. Self-hosted woff2.
    ============================================================ */
 
 @font-face {
@@ -34,4 +34,27 @@
   font-weight: 400 700;
   font-display: swap;
   src: url("../fonts/JetBrainsMono-Variable.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/plus-jakarta-sans-500.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../fonts/plus-jakarta-sans-700.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("../fonts/plus-jakarta-sans-800.woff2") format("woff2");
 }

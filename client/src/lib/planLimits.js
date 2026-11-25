@@ -5,6 +5,7 @@
  * Update here if pricing changes — enforced on both client (UX) and
  * server (Supabase RLS / edge function) sides.
  */
+import { LEGAL } from '../legal/legalInfo.js';
 
 export const PLAN_LIMITS = {
     free:    2,
@@ -54,10 +55,15 @@ export const AI_OPS_LIMITS = {
 // wall. Server side is authoritative, this is for copy. R148.
 export const FREE_TRIAL_AUTO_RUNS = 3;
 
-export const PLAN_PRICES = {
-    creator: '€15',
-    pro:     '€35',
-};
+// Prices come from ONE place, client/src/legal/legalInfo.js (the landing page,
+// the terms and the legal pages read the same values), so the upgrade sheet can
+// never quote a different price from the one Stripe charges. It used to say
+// €15 / €35 here while checkout charged €19 / €39.
+export function planPrice(plan, lang = 'en') {
+    const p = LEGAL.prices[plan];
+    if (!p) return null;
+    return p[String(lang).startsWith('fr') ? 'fr' : 'en'];
+}
 
 export const PLAN_LABELS = { free: 'Free', creator: 'Creator', pro: 'Pro' };
 

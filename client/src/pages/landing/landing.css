@@ -36,16 +36,16 @@
   /* surfaces */
   --vl-bg: var(--bg);
   --vl-bg-2: var(--bg-2);
-  --vl-surface: rgba(255, 255, 255, 0.035);
-  --vl-surface-2: rgba(255, 255, 255, 0.065);
+  --vl-surface: var(--ds-surface-marketing);
+  --vl-surface-2: var(--ds-surface-marketing-raised);
   --vl-line: var(--line);
   --vl-line-strong: var(--line-strong);
 
   /* ink */
   --vl-ink: var(--fg);
-  --vl-ink-2: #C7D0DA;
-  --vl-ink-3: #A9B4C0;
-  --vl-ink-4: #8B96A5;
+  --vl-ink-2: var(--ds-text-marketing-secondary);
+  --vl-ink-3: var(--ds-text-marketing-tertiary);
+  --vl-ink-4: var(--ds-text-marketing-quaternary);
 
   /* accent */
   --vl-cyan: var(--cyan);

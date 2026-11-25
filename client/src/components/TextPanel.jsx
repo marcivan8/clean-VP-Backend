@@ -6,6 +6,7 @@ import { AlignLeft, AlignCenter, AlignRight, Plus, Bold, Italic, Underline, Rota
 import SaveAsPresetButton from './SaveAsPresetButton.jsx';
 import { autoEmphasizeCaptions, clearAllEmphasis, toggleEmphasisWord } from '../utils/captionEmphasis.js';
 import { resolveEmphasis } from '../motion/CaptionModel.js';
+import { findDeletedWords } from '../motion/captionEdits.js';
 import {
     PanelSection, ControlRow, Segmented, ToggleGroup, NumberField,
     TrackSlider, SwatchRow, SelectField,
@@ -138,6 +139,11 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true
     const { t } = useTranslation('editor');
     // Fall back to onUpdate if no live variant provided
     const live = onLiveUpdate || onUpdate;
+    // R105: the caption as it was when the text box got focus. The textarea
+    // writes as you type, so this is the only record of the words that were
+    // spoken; on blur, removed words offer to cut the video too.
+    const [before, setBefore] = useState(null);
+    const [removed, setRemoved] = useState(null);
 
     if (!clip) return null;
 
@@ -159,9 +165,32 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true
                     <textarea
                         value={clip.content || ''}
                         onChange={(e) => onUpdate({ content: e.target.value })}
+                        onFocus={() => { setBefore({ content: clip.content || '', words: clip.words }); setRemoved(null); }}
+                        onBlur={() => {
+                            if (!before) return;
+                            const r = findDeletedWords(before.words, before.content, clip.content || '');
+                            setRemoved(r.ranges.length ? r : null);
+                        }}
                         style={{ ...S.input, resize: 'vertical', minHeight: 52, lineHeight: 1.4 }}
                         rows={2}
                     />
+                    {removed && before && (
+                        <div role="status" style={{ marginTop: 6, padding: 8, borderRadius: 5, border: '1px solid color-mix(in oklch, var(--accent) 40%, transparent)', background: 'color-mix(in oklch, var(--accent) 8%, transparent)', fontSize: 11, color: 'var(--fg-2)', lineHeight: 1.45 }}>
+                            {t('textPanel.cutPrompt', { count: removed.deleted.length, seconds: removed.seconds.toFixed(1) })}
+                            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                                <button type="button" onClick={() => {
+                                    const r = useTimelineStore.getState().cutDeletedCaptionWords(clip.id, clip.content || '', before);
+                                    if (!r.ok) console.warn('[TextPanel] cut not applied:', r.error);
+                                    setRemoved(null); setBefore(null);
+                                }} style={{ ...S.input, cursor: 'pointer', background: 'var(--accent)', color: '#fff', border: 0, fontWeight: 600, width: 'auto' }}>
+                                    {t('textPanel.cutToo')}
+                                </button>
+                                <button type="button" onClick={() => { setRemoved(null); setBefore(null); }} style={{ ...S.input, cursor: 'pointer', width: 'auto' }}>
+                                    {t('textPanel.textOnly')}
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 

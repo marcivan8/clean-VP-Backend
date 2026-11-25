@@ -3,10 +3,11 @@ import React from "react";
 export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   /** Inner padding in px. Default 20. */
   padding?: number;
-  /** Lift + lit stroke on hover; cursor pointer. */
+  /** Lift + lit stroke on hover. If onClick is provided, also enables button keyboard semantics. */
   interactive?: boolean;
   /** Add a persistent soft cyan glow bloom. */
   glow?: boolean;
+  className?: string;
   children: React.ReactNode;
 }
 

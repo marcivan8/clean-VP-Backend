@@ -34,7 +34,7 @@ export function Badge({ children, tone = "cyan", dot = true, style = {}, ...rest
       {...rest}
     >
       {dot && (
-        <span style={{ width: 7, height: 7, borderRadius: "50%", background: t.dotColor, boxShadow: t.glow }} />
+        <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: t.dotColor, boxShadow: t.glow }} />
       )}
       {children}
     </span>

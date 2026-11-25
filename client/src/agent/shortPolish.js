@@ -816,6 +816,8 @@ function applyReferenceTextStyle(placements, directive, fallbackAnimation) {
 export function polishShort(built, profile, opts = {}) {
     const baseLook = POLISH_LOOK[profile?.id] || POLISH_LOOK.tiktok;
     const referenceStyle = buildStyleReferencePlan(opts.referenceStyleProfile);
+    const approvedCameraEnergy = opts.plan?.cameraEnergy === 'low' ? 0.78
+        : opts.plan?.cameraEnergy === 'high' ? 1.2 : 1;
     const sourcePalette = Array.isArray(opts.scenePlan?.palette) ? opts.scenePlan.palette : [];
     const sourceAccent = sourcePalette.find(color => /^#[\da-f]{6}$/i.test(String(color || '')));
     const look = {
@@ -836,9 +838,10 @@ export function polishShort(built, profile, opts = {}) {
         ...(referenceStyle.textColor ? { titleColor: referenceStyle.textColor } : {}),
         ...(referenceStyle.titleStyle?.fontFamily ? { titleFont: referenceStyle.titleStyle.fontFamily } : {}),
         ...(referenceStyle.titleStyle?.color ? { titleColor: referenceStyle.titleStyle.color } : {}),
-        cameraEnergy: Math.max(0.2, Math.min(0.9, baseLook.cameraEnergy * referenceStyle.motionScale)),
         } : {}),
     };
+    look.cameraEnergy = Math.max(0.2, Math.min(0.9,
+        baseLook.cameraEnergy * (referenceStyle?.motionScale || 1) * approvedCameraEnergy));
     // ── R158 — which layers a short gets by default ──────────────────────────
     //
     // Was { title, captions, camera, numbers, cuts } all on. The hook title and

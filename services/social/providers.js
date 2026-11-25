@@ -49,12 +49,11 @@ const PROVIDERS = {
         id: 'instagram',
         label: 'Instagram',
         clientIdParam: 'client_id',
-        // Instagram publishing runs through the Facebook Graph API and needs
-        // a Business or Creator account linked to a Facebook Page. There is
-        // also a newer Instagram-login variant; override these if you use it.
-        authorizeUrl: env('INSTAGRAM_AUTHORIZE_URL', 'https://www.facebook.com/v21.0/dialog/oauth'),
-        tokenUrl:     env('INSTAGRAM_TOKEN_URL',     'https://graph.facebook.com/v21.0/oauth/access_token'),
-        scopes: ['instagram_basic', 'instagram_content_publish', 'pages_show_list'],
+        // Instagram Login does not require a Facebook Page. Publishing still
+        // requires an eligible professional account and Meta app review.
+        authorizeUrl: env('INSTAGRAM_AUTHORIZE_URL', 'https://www.instagram.com/oauth/authorize'),
+        tokenUrl:     env('INSTAGRAM_TOKEN_URL',     'https://api.instagram.com/oauth/access_token'),
+        scopes: ['instagram_business_basic', 'instagram_business_content_publish', 'instagram_business_manage_insights'],
         scopeSeparator: ',',
         envClientId: 'INSTAGRAM_CLIENT_ID',
         envClientSecret: 'INSTAGRAM_CLIENT_SECRET',
@@ -68,7 +67,11 @@ const PROVIDERS = {
         clientIdParam: 'client_id',
         authorizeUrl: env('YOUTUBE_AUTHORIZE_URL', 'https://accounts.google.com/o/oauth2/v2/auth'),
         tokenUrl:     env('YOUTUBE_TOKEN_URL',     'https://oauth2.googleapis.com/token'),
-        scopes: ['https://www.googleapis.com/auth/youtube.upload'],
+        scopes: [
+            'https://www.googleapis.com/auth/youtube.upload',
+            'https://www.googleapis.com/auth/yt-analytics.readonly',
+            'https://www.googleapis.com/auth/youtube.readonly',
+        ],
         scopeSeparator: ' ',
         envClientId: 'YOUTUBE_CLIENT_ID',
         envClientSecret: 'YOUTUBE_CLIENT_SECRET',

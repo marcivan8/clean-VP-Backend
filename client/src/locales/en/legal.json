@@ -13,20 +13,48 @@
         {
           "defs": [
             {
-              "term": "Name",
-              "desc": "{{ownerName}}, {{legalForm}}"
+              "term": "Brand operated",
+              "desc": "{{brandName}}"
+            },
+            {
+              "term": "Company name (RCS)",
+              "desc": "{{ownerName}}"
             },
             {
               "term": "Trade name",
-              "desc": "{{tradeName}}"
+              "desc": "{{cijeTradeName}}"
             },
             {
-              "term": "Address",
+              "term": "Legal form",
+              "desc": "{{companyForm}}",
+              "requires": "companyForm"
+            },
+            {
+              "term": "Share capital",
+              "desc": "{{shareCapital}}",
+              "requires": "shareCapital"
+            },
+            {
+              "term": "Trade register (RCS)",
+              "desc": "{{rcs}}",
+              "requires": "rcs"
+            },
+            {
+              "term": "Registered office",
+              "desc": "{{headOffice}}",
+              "requires": "headOffice"
+            },
+            {
+              "term": "Paris establishment",
               "desc": "{{address}}"
             },
             {
-              "term": "SIREN",
-              "desc": "{{siren}}"
+              "term": "SIRET",
+              "desc": "{{siret}}"
+            },
+            {
+              "term": "EU VAT number",
+              "desc": "{{vatNumber}}"
             },
             {
               "term": "Email",
@@ -39,7 +67,17 @@
             },
             {
               "term": "Publication director",
-              "desc": "{{ownerName}}"
+              "desc": "{{publicationDirector}}",
+              "requires": "publicationDirector"
+            },
+            {
+              "term": "CAPE",
+              "desc": "{{capeRelationship}}"
+            },
+            {
+              "term": "Website address",
+              "desc": "{{website}}",
+              "requires": "website"
             }
           ]
         }
@@ -62,6 +100,11 @@
             {
               "term": "Files",
               "desc": "Google Cloud (Google Cloud EMEA Limited), data hosted in the European Union, [cloud.google.com](https://cloud.google.com)"
+            },
+            {
+              "term": "Primary host phone",
+              "desc": "{{hostPhone}}",
+              "requires": "hostPhone"
             }
           ]
         }

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import Icon from './LandingIcons';
 import CtaObject from './CtaObject';
 import { createCheckout, goToSignup } from './checkout';
+import { LEGAL } from '../../legal/legalInfo';
 
 /* Mid-page CTA band ------------------------------------------------------- */
 
@@ -51,6 +52,8 @@ const CRAFT = [
     { key: 'b', icon: 'captions' },
     { key: 'c', icon: 'crop' },
     { key: 'd', icon: 'sparkle' },
+    { key: 'e', icon: 'calendar', pro: true },
+    { key: 'f', icon: 'layers', pro: true },
 ];
 
 export const CraftGrid = () => {
@@ -75,7 +78,12 @@ export const CraftGrid = () => {
                             <h3 style={{
                                 fontFamily: 'var(--vl-display)', fontWeight: 800, fontSize: 18,
                                 color: 'var(--vl-ink)', margin: '0 0 9px',
-                            }}>{t(`v2.craft.${c.key}.title`)}</h3>
+                            }}>{t(`v2.craft.${c.key}.title`)}{c.pro && (
+                                <span className="vl-mono" style={{
+                                    marginLeft: 8, verticalAlign: 'middle', fontSize: 10, fontWeight: 600, letterSpacing: '0.08em',
+                                    color: 'var(--vl-cyan-soft)', border: '1px solid rgba(0,229,255,0.35)', borderRadius: 999, padding: '2px 7px',
+                                }}>{t('v2.craft.proTag')}</span>
+                            )}</h3>
                             <p style={{ fontSize: 14.5, color: 'var(--vl-ink-3)', lineHeight: 1.6, margin: 0 }}>
                                 {t(`v2.craft.${c.key}.body`)}
                             </p>
@@ -123,13 +131,13 @@ export const TrustBar = () => {
 /* Pricing ----------------------------------------------------------------- */
 
 const PLAN_META = [
-    { key: 'free', name: 'Free', price: '€0', period: '' },
-    { key: 'creator', name: 'Creator', price: '€15', period: '/ month', highlight: true },
-    { key: 'pro', name: 'Pro', price: '€35', period: '/ month' },
+    { key: 'free', name: 'Free', period: '' },
+    { key: 'creator', name: 'Creator', period: '/ month', highlight: true },
+    { key: 'pro', name: 'Pro', period: '/ month' },
 ];
 
 export const PricingV2 = () => {
-    const { t } = useTranslation('landing');
+    const { t, i18n } = useTranslation('landing');
     const [loading, setLoading] = useState(null);
 
     const plans = t('pricing.plans', { returnObjects: true }) || {};
@@ -152,6 +160,8 @@ export const PricingV2 = () => {
                 }}>
                     {PLAN_META.map((meta) => {
                         const data = plans[meta.key] || {};
+                        const language = String(i18n.language || 'en').startsWith('fr') ? 'fr' : 'en';
+                        const price = meta.key === 'free' ? (language === 'fr' ? '0 €' : '€0') : LEGAL.prices[meta.key][language];
                         const features = data.features || [];
                         const locked = data.locked || [];
                         // R163 — features that are PUBLISHED but NOT BUILT get their
@@ -195,7 +205,7 @@ export const PricingV2 = () => {
                                     <span style={{
                                         fontFamily: 'var(--vl-display)', fontWeight: 800,
                                         fontSize: 42, letterSpacing: '-0.02em', color: 'var(--vl-ink)',
-                                    }}>{meta.price}</span>
+                                    }}>{price}</span>
                                     {meta.period && (
                                         <span style={{ fontSize: 14, color: 'var(--vl-ink-4)' }}>{meta.period}</span>
                                     )}

@@ -20,7 +20,7 @@ body {
 
 /* ---- Editorial display ------------------------------------- */
 .display {
-  font-family: var(--f-display);
+  font-family: var(--f-serif);
   font-weight: var(--fw-regular);
   line-height: var(--lh-tight);
   letter-spacing: var(--ls-display);

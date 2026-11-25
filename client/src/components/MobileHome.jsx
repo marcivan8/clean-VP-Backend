@@ -290,7 +290,8 @@ export default function MobileHome({
             {/* ── Account ── */}
             <MobileSheet open={accountOpen} title={user?.email || t('mobileHome.account')} onClose={() => setAccountOpen(false)}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <SheetRow icon={<Users size={20} />} label="Marketplace" onClick={() => { setAccountOpen(false); onMarketplace?.(); }} />
+                    {/* Only when the market is live (R102): the dashboard passes no handler otherwise. */}
+                    {onMarketplace && <SheetRow icon={<Users size={20} />} label="Marketplace" onClick={() => { setAccountOpen(false); onMarketplace(); }} />}
                     <SheetRow icon={<Sparkles size={20} />} label="Design Studio" onClick={() => { setAccountOpen(false); onDesign?.(); }} />
                     <SheetRow icon={<Palette size={20} />} label={t('yourStyle')} onClick={() => { setAccountOpen(false); onStyle(); }} />
                     <SheetRow icon={<CreditCard size={20} />} label={t('mobileHome.billing')} onClick={() => { setAccountOpen(false); onBilling(); }} />

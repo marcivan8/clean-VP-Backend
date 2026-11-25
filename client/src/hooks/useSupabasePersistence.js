@@ -17,6 +17,7 @@
  *   useSupabasePersistence();
  */
 
+import useAIStore from '../store/useAIStore.js';
 import { useEffect, useRef } from 'react';
 import useTimelineStore from '../store/useTimelineStore';
 import { supabase } from '../lib/supabaseClient.js';
@@ -132,8 +133,17 @@ export function useSupabasePersistence() {
             { equalityFn: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3] }
         );
 
+        // R105: the conversation is saved with the project, so a new message
+        // has to reach the cloud copy too, not only the local autosave.
+        const unsubChat = useAIStore.subscribe((st, prev) => {
+            if (st.logs === prev.logs && st.suggestions === prev.suggestions) return;
+            clearTimeout(timerRef.current);
+            timerRef.current = setTimeout(executeSave, DEBOUNCE_MS);
+        });
+
         return () => {
             unsub();
+            unsubChat();
             clearTimeout(timerRef.current);
             clearTimeout(thumbTimerRef.current);
         };

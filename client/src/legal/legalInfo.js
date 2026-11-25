@@ -2,41 +2,76 @@
 // Change it here, not in the locale files: the texts read these values
 // through {{placeholders}}.
 //
-// TO CONFIRM before publishing (see claude/rgpd-audit-2026-10.md):
-//   - ownerName: full legal name exactly as it will appear on the SIRENE register
-//   - siren: set once the INSEE registration is done (null shows "pending")
-//   - phone: the LCEN requires a phone number for an EI (null hides the line)
-//   - railwayRegion: where the Railway services run (Settings > Region)
-//   - mediator: the consumer mediation body you join (required for B2C sales)
+// CIJE identity details supplied by the user. A value left null renders as
+// NOTHING: every line or sentence that shows it carries `requires: "<key>"`
+// and LegalDocument hides it. (It used to print "To be completed"; the owner
+// asked for empty information to be removed instead.) LCEN art. 6-III
+// requires, for a company: name, legal form, share capital, registered office,
+// RCS registration, phone, email, a NATURAL PERSON as publication director, and
+// the host's name, address and phone. Fill the nulls before publishing.
+// SIRET 822 297 560 00192 passes its Luhn check and FR41822297560 is the VAT
+// number its SIREN produces (key (12 + 3 * (SIREN mod 97)) mod 97 = 41).
 
 export const LEGAL = {
     tradeName: 'Vibed',
-    ownerName: 'Marc Ivan Stevie Nguidjol',
-    street: '24 rue Pasteur',
-    postcode: '94270',
-    city: 'Le Kremlin-Bicêtre',
+    brandName: 'VIBED STUDIO',
+    // Denomination exactly as on the RCS (Kbis); the trade name is shown separately.
+    ownerName: "COOPERATIVE D'INITIATIVE JEUNES (CIJE)",
+    cijeTradeName: "Coopérative d'Initiative Jeunes Entrepreneur.e.s",
+    legalForm: 'personne morale',
+    // From the Kbis: société coopérative à responsabilité limitée (SCIC SARL),
+    // variable capital. The Kbis states no fixed amount, so the variable-capital
+    // mention stands in for it.
+    companyForm: {
+        en: 'limited-liability cooperative company (SCIC SARL) with variable capital',
+        fr: 'société coopérative à responsabilité limitée (SCIC SARL) à capital variable',
+    },
+    shareCapital: { en: 'Variable capital', fr: 'Capital variable' },
+    rcs: {
+        en: '822 297 560 R.C.S. Bastia (secondary registration: R.C.S. Paris)',
+        fr: '822 297 560 R.C.S. Bastia (immatriculation secondaire : R.C.S. Paris)',
+    },
+    // The main registration is in Bastia, so the HEAD OFFICE is there; the Paris
+    // address below is the establishment (SIRET …00192).
+    headOffice: '6 route de Ville la Chapelle, 20200 Bastia, France',
+    street: '148 rue du Faubourg Saint-Denis',
+    postcode: '75010',
+    city: 'Paris',
     country: { en: 'France', fr: 'France' },
     email: 'marc@vibedstudio.com',
     phone: null,
-    siren: null,
-    lastUpdated: '2026-11-01',
+    website: 'https://vibedstudio.com', // production URL (auth redirects, email domain)
+    hostPhone: null,
+    siret: '822 297 560 00192',
+    vatNumber: 'FR41822297560',
+    capeRelationship: {
+        en: 'VIBED STUDIO is a brand legally hosted under a CAPE agreement by CIJE.',
+        fr: 'VIBED STUDIO est une marque hébergée juridiquement sous CAPE par la CIJE Île-de-France.',
+    },
+    // Must be a natural person (normally CIJE's legal representative, or the
+    // person it delegates). "CIJE / VIBED STUDIO" is not valid for this line.
+    // CIJE's gérant (legal representative), per the contract documentation.
+    publicationDirector: {
+        en: 'Christian Crozet, manager (gérant) of CIJE',
+        fr: 'Christian Crozet, gérant de la CIJE',
+    },
+    lastUpdated: '2026-11-25',
     railwayRegion: { en: 'United States', fr: 'États-Unis' },
     hostingerEntity: { en: 'Hostinger (Türkiye)', fr: 'Hostinger (Turquie)' },
     mediator: null,
     retentionDays: { free: 7, creator: 30 },
-    prices: { creator: '€15', pro: '€35' },
+    prices: {
+        creator: { en: '€19', fr: '19 €' },
+        pro: { en: '€39', fr: '39 €' },
+    },
 };
 
 const TEXT = {
     en: {
-        legalForm: 'sole trader (entrepreneur individuel, EI)',
-        sirenPending: 'registration in progress',
-        mediatorPending: 'being appointed; until then, write to us and we will reply within 15 days',
+        legalForm: 'limited-liability cooperative company (SCIC SARL) with variable capital',
     },
     fr: {
-        legalForm: 'entrepreneur individuel (EI)',
-        sirenPending: "en cours d'immatriculation",
-        mediatorPending: 'en cours de désignation ; dans l\'intervalle, écrivez-nous et nous vous répondrons sous 15 jours',
+        legalForm: 'société coopérative à responsabilité limitée (SCIC SARL) à capital variable',
     },
 };
 
@@ -49,20 +84,32 @@ export function legalValues(lang) {
     });
     return {
         tradeName: LEGAL.tradeName,
+        brandName: LEGAL.brandName,
         ownerName: LEGAL.ownerName,
         legalForm: tx.legalForm,
         address: `${LEGAL.street}, ${LEGAL.postcode} ${LEGAL.city}, ${LEGAL.country[l]}`,
         email: LEGAL.email,
         phone: LEGAL.phone || '',
-        siren: LEGAL.siren || tx.sirenPending,
+        website: LEGAL.website || '',
+        hostPhone: LEGAL.hostPhone || '',
+        siret: LEGAL.siret,
+        vatNumber: LEGAL.vatNumber,
+        capeRelationship: LEGAL.capeRelationship[l],
+        publicationDirector: LEGAL.publicationDirector?.[l] || '',
+        companyForm: LEGAL.companyForm?.[l] || '',
+        shareCapital: LEGAL.shareCapital?.[l] || '',
+        rcs: LEGAL.rcs?.[l] || '',
+        headOffice: LEGAL.headOffice || '',
+        cijeTradeName: LEGAL.cijeTradeName,
+        siren: LEGAL.siret.slice(0, 11).replace(/\s/g, ''),
         date,
         railwayRegion: LEGAL.railwayRegion[l],
         hostingerEntity: LEGAL.hostingerEntity[l],
-        mediator: LEGAL.mediator || tx.mediatorPending,
+        mediator: LEGAL.mediator || '',
         freeDays: LEGAL.retentionDays.free,
         creatorDays: LEGAL.retentionDays.creator,
-        creatorPrice: LEGAL.prices.creator,
-        proPrice: LEGAL.prices.pro,
+        creatorPrice: LEGAL.prices.creator[l],
+        proPrice: LEGAL.prices.pro[l],
         interpolation: { escapeValue: false },
     };
 }

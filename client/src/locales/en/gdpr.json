@@ -3,7 +3,7 @@
   "title": "Your rights and how to use them",
   "lastUpdated": "Last updated: {{date}}",
   "intro": [
-    "The General Data Protection Regulation gives you control over your personal data. This page explains each right in plain terms and the quickest way to use it with Vibed. Our [Privacy Policy](/privacy) describes the processing itself."
+    "The General Data Protection Regulation gives you control over your personal data. This page explains your rights and how to exercise them with CIJE, the data controller for VIBED STUDIO. The processing itself is described in our [Privacy Policy](/privacy)."
   ],
   "sections": [
     {
@@ -44,6 +44,10 @@
               [
                 "Anything else (copy of your data, correction, objection...)",
                 "Email [{{email}}](mailto:{{email}})"
+              ],
+              [
+                "Disconnect a YouTube or Instagram account or request deletion of social data",
+                "Write to [{{email}}](mailto:{{email}})"
               ]
             ]
           }
@@ -115,15 +119,28 @@
           "defs": [
             {
               "term": "Data controller",
-              "desc": "{{ownerName}}, {{legalForm}}, trading as {{tradeName}}"
+              "desc": "{{ownerName}}, a {{legalForm}}, contracting party and operator of the {{brandName}} brand under CAPE. {{capeRelationship}}"
             },
             {
               "term": "Address",
               "desc": "{{address}}"
             },
             {
+              "term": "SIRET",
+              "desc": "{{siret}}"
+            },
+            {
+              "term": "EU VAT number",
+              "desc": "{{vatNumber}}"
+            },
+            {
               "term": "Email",
               "desc": "[{{email}}](mailto:{{email}})"
+            },
+            {
+              "term": "Phone",
+              "desc": "{{phone}}",
+              "requires": "phone"
             }
           ]
         }

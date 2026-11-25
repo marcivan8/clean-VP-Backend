@@ -1,0 +1,63 @@
+/* Shared interaction states for the production primitives. */
+.ds-button:focus-visible,
+.ds-icon-button:focus-visible,
+.ds-card:focus-visible,
+.ds-tab:focus-visible,
+.ds-input:focus-visible,
+.ds-prompt-input:focus-visible,
+.ds-prompt-submit:focus-visible,
+.ds-slider-input:focus-visible,
+.ds-switch-input:focus-visible + .ds-switch-track,
+.ds-tag-remove:focus-visible {
+  outline: 2px solid var(--ds-focus, var(--accent-2, #00E5FF));
+  outline-offset: 3px;
+}
+
+.ds-input:focus:not(:focus-visible),
+.ds-prompt-input:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.ds-button:disabled,
+.ds-icon-button:disabled,
+.ds-tab:disabled,
+.ds-prompt-submit:disabled {
+  cursor: not-allowed;
+}
+
+.ds-button:active:not(:disabled),
+.ds-icon-button:active:not(:disabled),
+.ds-tab:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.ds-switch-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-button,
+  .ds-icon-button,
+  .ds-card,
+  .ds-tab,
+  .ds-input-shell,
+  .ds-prompt-shell,
+  .ds-prompt-suggestion,
+  .ds-prompt-submit,
+  .ds-card,
+  .ds-prompt-dot,
+  .ds-switch-track {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}

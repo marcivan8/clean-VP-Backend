@@ -13,6 +13,7 @@ const exportQueue   = new Queue('export-processing',   { connection });
 // concurrency comments — this queue is I/O-bound like analysisQueue, not
 // CPU-bound like videoQueue/exportQueue).
 const visionQueue   = new Queue('object-segmentation', { connection });
+const socialQueue   = new Queue('social-publishing', { connection });
 
 module.exports = {
     videoQueue,
@@ -20,4 +21,5 @@ module.exports = {
     analysisQueue,
     exportQueue,
     visionQueue,
+    socialQueue,
 };

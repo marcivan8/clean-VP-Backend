@@ -189,7 +189,8 @@
         "locked": [
           "Styles de montage et mode Auto",
           "Panneaux Shorts et Stock",
-          "Intelligence de transcription"
+          "Intelligence de transcription",
+          "Design Studio et publication sociale"
         ]
       },
       "creator": {
@@ -216,12 +217,15 @@
           "Vidéos jusqu'à 4 heures",
           "Projets conservés pendant l'abonnement",
           "Opérations IA illimitées",
+          "Design Studio : miniatures, couvertures et visuels avec un copilote IA",
+          "Publication et programmation sur YouTube Shorts, Instagram Reels et TikTok (selon l'accès de chaque plateforme)",
+          "Statistiques des publications et recommandations de montage à valider",
           "Accès anticipé aux nouvelles fonctionnalités"
         ],
         "soon": [
           "File de traitement prioritaire",
           "2 sièges d'équipe",
-          "Score de viralité + analyse de performance"
+          "Score de viralité"
         ],
         "locked": []
       }
@@ -437,7 +441,16 @@
       "d": {
         "title": "Meilleurs moments, classés",
         "body": "La passe marque les passages qui portent le propos, à garder ou retirer en un clic."
-      }
+      },
+      "e": {
+        "title": "Publication sociale et résultats",
+        "body": "Préparez ou programmez des Shorts YouTube et des Reels Instagram, puis suivez les statistiques disponibles. Les conseils de montage restent à valider."
+      },
+      "f": {
+        "title": "Design Studio modifiable",
+        "body": "Créez des compositions avec des calques, composants et polices modifiables. Chaque projet garde son propre bac de médias."
+      },
+      "proTag": "PRO"
     },
     "trust": {
       "a": "100+ créateurs montent sur VIBED",
@@ -486,6 +499,35 @@
       "title": "Comment fonctionne VIBED",
       "close": "Fermer la vidéo",
       "note": "Sans son. 44 secondes, de l'import à l'export."
+    },
+    "design": {
+      "badge": "PRO",
+      "title": "Miniatures et visuels, au même endroit que le montage.",
+      "lead": "Design Studio transforme une image de votre vidéo, ou vos propres images, en miniature, couverture ou visuel pour les réseaux. Vous décrivez la modification, le copilote l'applique, et chaque calque reste modifiable.",
+      "canvasLabel": "Miniature vidéo · 1280 × 720",
+      "layersLabel": "Calques",
+      "layers": [
+        "Titre",
+        "Sujet, fond supprimé",
+        "Forme d'accent",
+        "Image vidéo 0:11"
+      ],
+      "prompt": "Agrandis le titre et place-le à gauche",
+      "headline": "3 PRISES, 1 MONTAGE",
+      "cards": {
+        "a": {
+          "title": "Six formats aux bonnes dimensions",
+          "body": "Miniature YouTube, post carré, publicité 4:5, produit, packaging et impression A4, chacun à sa vraie taille en pixels."
+        },
+        "b": {
+          "title": "Un copilote qui modifie les calques",
+          "body": "Écrivez « agrandis le titre » ou « supprime le fond ». Il modifie le calque visé, et un clic annule."
+        },
+        "c": {
+          "title": "Retour dans la vidéo",
+          "body": "Enregistrez un visuel sur la timeline du projet en surimpression, ou exportez-le en PNG."
+        }
+      }
     }
   }
 }

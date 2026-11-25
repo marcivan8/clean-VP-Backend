@@ -75,6 +75,17 @@ const PATHS = {
             <path d="M18.2 14v4.6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8.4a2 2 0 0 1 2-2h4.6" {...S} strokeWidth={1.8} />
         </>
     ),
+    calendar: (
+        <>
+            <rect x="3.5" y="5.2" width="17" height="15.3" rx="2.4" {...S} strokeWidth={1.8} />
+            <path d="M7.5 3.5v3.4M16.5 3.5v3.4M3.8 9.5h16.4M7.7 13h2.2m4.2 0h2.2m-8.6 3.4h2.2m4.2 0h2.2" {...S} strokeWidth={1.8} />
+        </>
+    ),
+    layers: (
+        <>
+            <path d="m12 3.6 8.5 4.6-8.5 4.6-8.5-4.6zM3.5 12l8.5 4.6 8.5-4.6M3.5 16.3l8.5 4.2 8.5-4.2" {...S} strokeWidth={1.8} />
+        </>
+    ),
 };
 
 export const ICON_NAMES = Object.keys(PATHS);

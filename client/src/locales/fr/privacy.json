@@ -12,7 +12,7 @@
       "id": "controller",
       "title": "1. Responsable du traitement",
       "blocks": [
-        "Le responsable du traitement est {{ownerName}}, {{legalForm}}, exerçant sous le nom commercial {{tradeName}}.",
+        "Le responsable du traitement et le cocontractant du service est {{ownerName}}, {{legalForm}}, qui porte la marque {{brandName}} sous CAPE. {{capeRelationship}}",
         {
           "defs": [
             {
@@ -24,8 +24,17 @@
               "desc": "[{{email}}](mailto:{{email}})"
             },
             {
-              "term": "SIREN",
-              "desc": "{{siren}}"
+              "term": "SIRET",
+              "desc": "{{siret}}"
+            },
+            {
+              "term": "N° de TVA intracommunautaire",
+              "desc": "{{vatNumber}}"
+            },
+            {
+              "term": "Téléphone",
+              "desc": "{{phone}}",
+              "requires": "phone"
             }
           ]
         },
@@ -38,6 +47,9 @@
       "blocks": [
         "**Compte.** Votre adresse e-mail, votre nom si vous le renseignez, et votre mot de passe, conservé sous forme hachée, donc illisible, par notre prestataire d'authentification. Nous n'y avons jamais accès en clair.",
         "**Vos contenus.** Les vidéos, fichiers audio et images que vous importez, les projets que vous créez (timeline, sous-titres, textes, réglages), les fichiers que vous exportez et les miniatures que nous générons.",
+        "**Studio de design.** Les compositions, calques, composants personnalisés, préférences de polices et références de médias ajoutés au bac de médias propre à un projet Design Studio. Le bac du Design Studio est distinct de la médiathèque de l'éditeur.",
+        "**Comptes sociaux.** Lorsque vous connectez YouTube ou Instagram, nous traitons l'identifiant et le nom du compte, les autorisations accordées et des jetons d'accès chiffrés conservés côté serveur. Nous ne renvoyons jamais ces jetons au navigateur.",
+        "**Publications et résultats sociaux.** Les titres, descriptions, légendes, liens de médias, heures de programmation, état de publication, identifiants des publications et résultats statistiques des Shorts/Reels publiés par Vibed. Nous enregistrons également le contexte de montage et les recommandations générées, acceptées ou ignorées.",
         "**Analyse de vos contenus.** Pour faire fonctionner les outils de montage, nous produisons des transcriptions, des étiquettes de locuteurs (« Intervenant 1 », « Intervenant 2 »), des descriptions de scènes, la position des visages dans l'image et d'autres données techniques du même type. Ces résultats sont enregistrés avec votre projet.",
         "**Instructions données à l'assistant.** Les demandes que vous écrivez à l'assistant IA, ses réponses, et la trace des suggestions acceptées ou refusées.",
         "**Profil de style.** Des préférences de montage déduites de votre façon de travailler : rythme, polices, plateformes visées, type de contenu. Voir la section 7.",
@@ -93,6 +105,18 @@
               [
                 "Réponse aux demandes des autorités et conservation des documents exigés par la loi",
                 "Obligation légale"
+              ],
+              [
+                "Connecter un compte social, préparer et publier ou programmer un Short ou un Reel à votre demande",
+                "Exécution du service demandé et gestion de votre compte connecté"
+              ],
+              [
+                "Récupérer et conserver temporairement les statistiques d'une publication Vibed afin d'afficher ses résultats",
+                "Exécution de la fonction d'analyse que vous utilisez"
+              ],
+              [
+                "Comparer les résultats mesurés et proposer des pistes de montage pour de futurs contenus",
+                "Exécution de la fonction d'analyse ; aucune recommandation n'est appliquée sans votre validation"
               ]
             ]
           }
@@ -110,7 +134,8 @@
             "**Compréhension de vos demandes :** le texte de votre demande, avec la transcription et les éléments du projet dont l'assistant a besoin, est envoyé à Groq ou OpenAI.",
             "**Analyse visuelle :** des images fixes extraites de votre vidéo sont envoyées à Google (Gemini) ou OpenAI, par exemple pour décrire les scènes ou choisir des plans d'illustration.",
             "**Détourage :** un lien privé et temporaire vers la vidéo est envoyé à Replicate pour séparer une personne de l'arrière-plan.",
-            "**Recherche dans notre bibliothèque de médias :** le texte de votre recherche est envoyé à OpenAI pour trouver les éléments correspondants."
+            "**Recherche dans notre bibliothèque de médias :** le texte de votre recherche est envoyé à OpenAI pour trouver les éléments correspondants.",
+            "**Rédaction de textes pour les réseaux sociaux :** le titre, le contexte et la plateforme que vous fournissez sont transmis au prestataire d'IA de conversation configuré pour générer une proposition de description ou de légende."
           ]
         },
         "Seules les données nécessaires à la fonction sont transmises. Les prestataires les traitent selon leurs conditions d'API professionnelles et ne les conservent pas au-delà de ce que ces conditions prévoient. Nous n'utilisons pas vos contenus pour entraîner des modèles d'IA.",
@@ -122,7 +147,7 @@
       "id": "recipients",
       "title": "5. Destinataires et sous-traitants",
       "blocks": [
-        "Vos données ne sont accessibles qu'à nous et aux prestataires ci-dessous, chacun limité à sa mission et lié par un accord de traitement des données. Polar agit pour son propre compte en tant que vendeur de votre abonnement (marchand officiel, ou « merchant of record »).",
+        "Vos données sont accessibles à CIJE et aux prestataires ci-dessous selon leurs missions. Stripe traite les paiements ; les plateformes sociales reçoivent uniquement les données nécessaires lorsque vous connectez un compte ou demandez une publication ou des statistiques. Les jetons OAuth sont chiffrés et utilisés côté serveur.",
         {
           "table": {
             "head": [
@@ -143,13 +168,8 @@
               ],
               [
                 "Railway",
-                "Serveurs de l'application",
+                "Serveurs de l'application, y compris nos propres modèles de séparation des intervenants et d'assistant de montage",
                 "{{railwayRegion}}"
-              ],
-              [
-                "Fly.io",
-                "Serveurs de rendu vidéo",
-                "Paris, France"
               ],
               [
                 "AssemblyAI",
@@ -173,7 +193,7 @@
               ],
               [
                 "Replicate",
-                "Détourage de sujets",
+                "Détourage de sujets (ancienne fonction, non utilisée par la suppression d'arrière-plan actuelle, qui s'exécute dans votre navigateur)",
                 "États-Unis"
               ],
               [
@@ -197,9 +217,34 @@
                 "Union européenne"
               ],
               [
-                "Polar",
-                "Paiements, en tant que marchand officiel (avec Stripe)",
-                "États-Unis"
+                "Stripe",
+                "Paiements et gestion des abonnements",
+                "Stripe Payments Europe, Ltd. (Irlande), avec transferts vers Stripe, Inc. (États-Unis)"
+              ],
+              [
+                "Google / YouTube",
+                "Connexion du compte, publication et statistiques YouTube",
+                "Selon les conditions et l'infrastructure de Google"
+              ],
+              [
+                "Meta / Instagram",
+                "Connexion du compte, publication des Reels et statistiques",
+                "Selon les conditions et l'infrastructure de Meta"
+              ],
+              [
+                "TikTok",
+                "Connexion du compte et publication, si vous connectez TikTok",
+                "Selon les conditions et l'infrastructure de TikTok"
+              ],
+              [
+                "Pexels, Vecteezy",
+                "Recherche de vidéos et d'images libres : ils reçoivent uniquement les mots-clés recherchés, jamais votre compte ni vos fichiers",
+                "Pexels : Allemagne ; Vecteezy : États-Unis"
+              ],
+              [
+                "jsDelivr, Google (fichiers de modèles)",
+                "Fourniture du code et des modèles open source des fonctions exécutées dans votre navigateur (suppression d'arrière-plan, analyse des rushes). Ils voient votre adresse IP ; votre vidéo ne quitte pas votre appareil pour ces fonctions",
+                "Réseaux mondiaux"
               ]
             ]
           }
@@ -211,7 +256,7 @@
       "id": "transfers",
       "title": "6. Transferts hors de l'Union européenne",
       "blocks": [
-        "Certains prestataires sont situés hors de l'UE, ou sont des sociétés susceptibles d'accéder aux données depuis l'extérieur de l'UE. La Suisse bénéficie d'une décision d'adéquation de la Commission européenne. Pour les États-Unis et la Turquie, les transferts reposent sur les clauses contractuelles types adoptées par la Commission européenne, ou sur le cadre de protection des données UE-États-Unis (Data Privacy Framework) lorsque le prestataire y est certifié, complétés par les mesures de sécurité du prestataire.",
+        "Certains prestataires sont situés hors de l'UE, ou sont des sociétés susceptibles d'accéder aux données depuis l'extérieur de l'UE. La Suisse bénéficie d'une décision d'adéquation de la Commission européenne. Pour les États-Unis et la Turquie, les transferts reposent sur les clauses contractuelles types adoptées par la Commission européenne, ou sur le cadre de protection des données UE-États-Unis (Data Privacy Framework) lorsque le prestataire y est certifié, complétés par les mesures de sécurité du prestataire. Les connexions à Google/YouTube et Meta/Instagram peuvent également impliquer les transferts décrits dans les politiques de ces plateformes ; les modalités applicables dépendent du compte et du service utilisés.",
         "Vous pouvez obtenir une copie des garanties applicables à un prestataire en écrivant à [{{email}}](mailto:{{email}})."
       ]
     },
@@ -277,6 +322,18 @@
               [
                 "Votre choix en matière de cookies",
                 "6 mois, puis nous vous le redemandons"
+              ],
+              [
+                "Jetons et identifiants de comptes sociaux",
+                "Jusqu'à la déconnexion du compte social ou à la suppression du compte Vibed"
+              ],
+              [
+                "Historique des publications sociales et recommandations",
+                "Jusqu'à la suppression du compte Vibed"
+              ],
+              [
+                "Instantanés quotidiens des statistiques sociales",
+                "30 jours au maximum"
               ]
             ]
           }
@@ -302,7 +359,7 @@
             "définir des directives relatives au sort de vos données après votre décès."
           ]
         },
-        "Plusieurs de ces droits s'exercent directement dans l'application : supprimer un projet depuis le tableau de bord, supprimer votre compte depuis la [page compte](/account), gérer votre profil de style sur [Votre style](/style), vous désabonner via le lien présent dans chaque e-mail d'actualité, et modifier votre choix dans Gestion des cookies, en pied de page. Pour toute autre demande, écrivez à [{{email}}](mailto:{{email}}). Nous répondons dans un délai d'un mois. En cas de doute raisonnable sur votre identité, nous pouvons vous demander de la confirmer.",
+        "Plusieurs de ces droits s'exercent directement dans l'application : supprimer un projet depuis le tableau de bord, supprimer votre compte depuis la [page compte](/account), gérer votre profil de style sur [Votre style](/style), vous désabonner via le lien présent dans chaque e-mail d'actualité, et modifier votre choix dans Gestion des cookies, en pied de page. Pour toute autre demande, écrivez à [{{email}}](mailto:{{email}}). Nous répondons dans un délai d'un mois. En cas de doute raisonnable sur votre identité, nous pouvons vous demander de la confirmer. Vous pouvez déconnecter un compte YouTube ou Instagram depuis l'éditeur ; cela supprime les jetons enregistrés, mais ne retire pas un contenu déjà publié de la plateforme.",
         "Si vous estimez que vos données n'ont pas été traitées correctement, vous pouvez adresser une réclamation à la CNIL : [www.cnil.fr](https://www.cnil.fr), 3 place de Fontenoy, TSA 80715, 75334 Paris Cedex 07. Nous vous remercions de nous contacter d'abord, afin que nous puissions chercher une solution avec vous."
       ]
     },

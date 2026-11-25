@@ -86,3 +86,66 @@ export function shiftWords(words, delta) {
         end: Number.isFinite(Number(w?.end)) ? Number(w.end) + d : w?.end,
     }));
 }
+
+/**
+ * R105: which spoken words a caption edit REMOVED, so the editor can offer to
+ * cut that stretch of the video.
+ *
+ * Old and new texts are aligned on their common words (longest common
+ * subsequence, case and punctuation ignored). A gap where old words have no
+ * counterpart at all is a deletion. A gap where the new text puts something
+ * else is a REWRITE (a spelling fix, a reworded line) and cuts nothing: an
+ * edit must never cut speech the user only re-typed.
+ *
+ * @param {Array} words    the caption's timed words, as displayed (absolute)
+ * @param {string} oldText the caption text before the edit
+ * @param {string} newText the caption text after the edit
+ * @returns {{ deleted: number[], kept: Array, ranges: Array<[number,number]>, seconds: number }}
+ *          empty when nothing was deleted or the words cannot be mapped to the text
+ */
+export function findDeletedWords(words, oldText, newText) {
+    const none = { deleted: [], kept: [], ranges: [], seconds: 0 };
+    const ws = timed(words);
+    if (ws.length === 0) return none;
+    const oldTokens = tokenize(oldText);
+    // Only when each displayed word is one timed word can a token be mapped to time.
+    if (oldTokens.length !== ws.length) return none;
+    const norm = (s) => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
+    const a = oldTokens.map(norm);
+    const b = tokenize(newText).map(norm);
+    const n = a.length, m = b.length;
+    const L = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) {
+        L[i][j] = a[i] && a[i] === b[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    }
+    // Walk the alignment, collecting gaps.
+    const deleted = [];
+    let i = 0, j = 0;
+    let gapOld = [], gapNew = 0;
+    const flush = () => { if (gapOld.length && gapNew === 0) deleted.push(...gapOld); gapOld = []; gapNew = 0; };
+    while (i < n || j < m) {
+        if (i < n && j < m && a[i] && a[i] === b[j]) { flush(); i++; j++; }
+        else if (j < m && (i >= n || L[i][j + 1] >= L[i + 1][j])) { gapNew++; j++; }
+        else { gapOld.push(i); i++; }
+    }
+    flush();
+    // Punctuation-only tokens ("-", "...") carry no speech worth a cut.
+    const real = deleted.filter((k) => a[k]);
+    if (!real.length) return none;
+    const set = new Set(real);
+    const ranges = [];
+    for (const k of real) {
+        const s = Number(ws[k].start);
+        const e = Number.isFinite(Number(ws[k].end)) ? Number(ws[k].end) : s;
+        const last = ranges[ranges.length - 1];
+        if (last && k - 1 === last.k) { last.r[1] = e; last.k = k; } else ranges.push({ k, r: [s, e] });
+    }
+    const out = ranges.map((x) => x.r).filter(([s, e]) => e - s > 0.02);
+    if (!out.length) return none;
+    return {
+        deleted: real,
+        kept: ws.filter((_, k) => !set.has(k)).map((w, idx) => ({ ...w, text: tokenize(newText)[idx] ?? wordText(w) })),
+        ranges: out,
+        seconds: out.reduce((t, [s, e]) => t + (e - s), 0),
+    };
+}

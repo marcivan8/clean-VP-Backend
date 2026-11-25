@@ -189,7 +189,8 @@
         "locked": [
           "Editing styles & Auto mode",
           "Shorts & Stock panels",
-          "Transcript intelligence"
+          "Transcript intelligence",
+          "Design Studio and social publishing"
         ]
       },
       "creator": {
@@ -216,12 +217,15 @@
           "Videos up to 4 hours",
           "Projects kept while subscribed",
           "Unlimited AI operations",
+          "Design Studio: thumbnails, covers and social graphics with an AI copilot",
+          "YouTube Shorts, Instagram Reels and TikTok publishing and scheduling (where each platform allows it)",
+          "Post performance metrics and editing recommendations for you to approve",
           "Early access to new features"
         ],
         "soon": [
           "Priority processing queue",
           "2 team seats",
-          "Virality scoring + performance analysis"
+          "Virality scoring"
         ],
         "locked": []
       }
@@ -437,7 +441,16 @@
       "d": {
         "title": "Best moments, ranked",
         "body": "The pass marks the sections that carry the point, so you can keep or drop them in a click."
-      }
+      },
+      "e": {
+        "title": "Social publishing and performance",
+        "body": "Prepare or schedule YouTube Shorts and Instagram Reels, then review available performance metrics. Editing recommendations remain yours to approve."
+      },
+      "f": {
+        "title": "An editable Design Studio",
+        "body": "Build compositions with editable layers, components and fonts. Each project has its own media bin."
+      },
+      "proTag": "PRO"
     },
     "trust": {
       "a": "100+ creators editing on VIBED",
@@ -486,6 +499,35 @@
       "title": "How VIBED works",
       "close": "Close video",
       "note": "No sound. 44 seconds, start to export."
+    },
+    "design": {
+      "badge": "PRO",
+      "title": "Thumbnails and graphics, in the same place as the edit.",
+      "lead": "Design Studio turns a frame of your video, or your own images, into a thumbnail, a cover or a social graphic. You describe the change, the copilot makes it, and every layer stays editable.",
+      "canvasLabel": "Video thumbnail · 1280 × 720",
+      "layersLabel": "Layers",
+      "layers": [
+        "Headline",
+        "Subject, background removed",
+        "Accent shape",
+        "Video frame 0:11"
+      ],
+      "prompt": "Make the headline bigger and put it on the left",
+      "headline": "3 TAKES, 1 CUT",
+      "cards": {
+        "a": {
+          "title": "Six formats, sized for you",
+          "body": "YouTube thumbnail, square social post, 4:5 ad, product, packaging and A4 print, each at its real pixel size."
+        },
+        "b": {
+          "title": "A copilot that edits layers",
+          "body": "Type \"make the title bigger\" or \"remove the background\". It changes the layer you mean, and one click undoes it."
+        },
+        "c": {
+          "title": "Back into the video",
+          "body": "Save a design to the project timeline as an overlay, or export it as PNG files."
+        }
+      }
     }
   }
 }

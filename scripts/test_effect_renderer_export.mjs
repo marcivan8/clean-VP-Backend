@@ -29,6 +29,13 @@ globalThis.fetch = async (url, options = {}) => {
     if (url === '/api/render') {
         return new Response(JSON.stringify({ jobId: 'export-test-1' }), { status: 200 });
     }
+    if (url === '/api/jobs/status-batch') {
+        // R96: pollJobResult asks about all pending jobs in one batch request.
+        return new Response(JSON.stringify({ jobs: { 'export-test-1': {
+            state: 'completed', progress: 100,
+            result: { success: true, url: '/exports/test.mp4', filename: 'test.mp4' }
+        } } }), { status: 200 });
+    }
     if (url === '/api/jobs/export-test-1/status') {
         return new Response(JSON.stringify({
             state: 'completed', progress: 100,
@@ -198,7 +205,7 @@ try {
     assert.equal(result.url, '/exports/test.mp4');
     assert.equal(requests.length, 2, 'enqueue export and poll canonical job status');
     assert.equal(requests[0].url, '/api/render');
-    assert.equal(requests[1].url, '/api/jobs/export-test-1/status');
+    assert.equal(requests[1].url, '/api/jobs/status-batch');
     const payload = JSON.parse(requests[0].options.body);
     assert.equal(payload.settings.resolution, '1080p');
     assert.equal(payload.timeline.tracks[0].clips[0].effects[0].kind, 'brightness');

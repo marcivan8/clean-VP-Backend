@@ -5,7 +5,11 @@ const ffmpegPath = require('ffmpeg-static');
 const path = require('path');
 const fs = require('fs');
 const { audioQueue } = require('../queue/queues');
-const { optionalAuth } = require('../middleware/auth');
+const { optionalAuth, authenticateUser } = require('../middleware/auth');
+// Production requires a user: the job records them as its owner, and job
+// status is only readable by its owner (R97). A job queued anonymously could
+// never be polled.
+const silenceAuth = process.env.NODE_ENV === 'production' ? authenticateUser : optionalAuth;
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -20,7 +24,7 @@ ffmpeg.setFfmpegPath(ffmpegPath);
  * so videoQueue and audioQueue can both have a job #13.  A prefixed string ID
  * is globally unique across all queues.
  */
-router.post('/detect', optionalAuth, async (req, res) => {
+router.post('/detect', silenceAuth, async (req, res) => {
     try {
         const { filename, threshold = '-30dB', duration = '0.5', transcript } = req.body;
         // R91: breathing room around speech (editing style pacing), 0-500 ms.
@@ -66,7 +70,7 @@ router.post('/detect', optionalAuth, async (req, res) => {
             }
         }
 
-        const userId = req.user?.id || null;
+        const userId = req.user?.id || (process.env.NODE_ENV !== 'production' ? 'dev-user' : null);
         console.log(`🎤 Enqueuing silence detection for: ${filename} (threshold=${threshold}, minDur=${duration}s)`);
 
         // ── KEY FIX: unique string jobId prevents cross-queue ID collisions ──
