@@ -14,6 +14,8 @@ jest.mock('../middleware/auth', () => ({
 jest.mock('../middleware/usageGate', () => ({
     aiGate: (req, res, next) => next(),
     stockGate: (req, res, next) => next(),
+    // R167: routes build their plan gates at load time (requirePlan('pro')).
+    requirePlan: () => (req, res, next) => next(),
 }));
 
 const app = require('../index');
