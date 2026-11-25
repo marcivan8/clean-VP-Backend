@@ -12,6 +12,11 @@ import { fileURLToPath } from 'url';
 import { transformSync } from '../../client/node_modules/esbuild/lib/main.js';
 
 const STUB = new URL('./stub-supabase.mjs', import.meta.url).href;
+// The shared design system lives OUTSIDE client/ ("Vibed Design System/"), so a
+// bare import there ('react', 'react/jsx-runtime') climbs to the repo root,
+// which has no react. Vite resolves it from client/; so does this, which also
+// keeps ONE React instance (two copies break hooks).
+const CLIENT_PARENT = new URL('../../client/package.json', import.meta.url).href;
 const EMPTY = 'export default {};';
 
 export async function resolve(spec, ctx, next) {
@@ -19,6 +24,9 @@ export async function resolve(spec, ctx, next) {
     if (/\.css$/.test(spec)) return { url: 'data:text/javascript,' + encodeURIComponent(EMPTY), shortCircuit: true };
     try { return await next(spec, ctx); }
     catch (e) {
+        if (!spec.startsWith('.') && !spec.startsWith('/') && !spec.includes(':') && ctx.parentURL !== CLIENT_PARENT) {
+            try { return await next(spec, { ...ctx, parentURL: CLIENT_PARENT }); } catch { /* fall through to the original error */ }
+        }
         if ((spec.startsWith('.') || spec.startsWith('/')) && ctx.parentURL) {
             for (const ext of ['.jsx', '.js', '/index.jsx', '/index.js']) {
                 const u = new URL(spec + ext, ctx.parentURL);

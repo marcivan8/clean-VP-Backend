@@ -277,7 +277,9 @@ console.log('── 5. What the API returns about a connection ──');
         expires_at: new Date(Date.now() + 3600_000).toISOString(),
         connected_at: new Date().toISOString(),
         external_id: 'open-id-123',
-        scopes: 'video.upload',
+        // Every scope the provider asks for: a connection missing one must be
+        // reconnected (accounts.js publicAccount), which is checked below.
+        scopes: 'user.info.basic,video.upload',
     };
     const out = publicAccount(row);
     const serialised = JSON.stringify(out);
@@ -287,6 +289,15 @@ console.log('── 5. What the API returns about a connection ──');
     assert.deepEqual(Object.keys(out).sort(), ['connectedAt', 'expiresAt', 'handle', 'needsReconnect', 'provider']);
     assert.equal(out.needsReconnect, false);
     ok('a connection is reported without any token, encrypted or otherwise');
+}
+
+{
+    const { publicAccount } = require('../services/social/accounts.js');
+    // Connected before the app asked for a scope it now needs: sign in again.
+    const old = publicAccount({ provider: 'tiktok', access_token: encrypt('a'), refresh_token: encrypt('r'),
+        expires_at: new Date(Date.now() + 3600_000).toISOString(), scopes: 'video.upload' });
+    assert.equal(old.needsReconnect, true);
+    ok('a connection missing a scope the provider now needs asks to reconnect');
 }
 
 {
@@ -306,6 +317,7 @@ console.log('── 5. What the API returns about a connection ──');
         access_token: encrypt('a'),
         refresh_token: encrypt('r'),
         expires_at: new Date(Date.now() - 1000).toISOString(),
+        scopes: 'user.info.basic video.upload',
     }).needsReconnect, false);
     ok('an unusable connection says so rather than looking healthy');
 }

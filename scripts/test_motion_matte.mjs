@@ -139,10 +139,11 @@ await check('briefs map to the named motions', () => {
     assert.deepEqual(verbs('slide in from the left and fly out'), ['slide-in', 'fly-out']);
     assert.deepEqual(verbs('typewriter'), ['typewriter']);
     assert.deepEqual(verbs('elegant'), ['blur-in', 'breathe', 'fade-out']);
-    // R103 round F — the punchy mood gained a `follow-through` beat right
-    // after the entrance. A slam that stops dead is the thing the principle
-    // exists to fix, and this mood is the loudest in the set.
-    assert.deepEqual(verbs('animate it'), ['slam-in', 'follow-through', 'punch', 'whip-out']);
+    // A bare "animate it" on a title now comes from the offline RULE_RECIPES
+    // table (title / punchy): rise, a punch on the meaning, then a short fade.
+    // (It used to be slam-in, follow-through, punch, whip-out from the old
+    // MOOD_BEATS table; the named-motion and mood briefs above are unchanged.)
+    assert.deepEqual(verbs('animate it'), ['rise-in', 'punch', 'fade-out']);
     assert.equal(C.planMotionFromBrief('slide in from the left').beats[0].direction, 'right');
 });
 await check('"subtle" lowers energy and "very" raises it', () => {
@@ -194,7 +195,7 @@ await check('the command animates the targets with the rules director when the m
         const before = S.getState().past.length;
         const res = await engine.executeStoreAction({ action: 'compose_motion', args: { brief: 'make the title slam in then shake' } }, null);
         assert.equal(res.success, true, res.message);
-        assert.match(res.message, /built from the motion library/);
+        assert.match(res.message, /built from an offline motion recipe/);
         const title = S.getState().tracks.find(t => t.id === 't1').clips.find(c => c.id === 'title');
         assert.ok(title.animations.length >= 2 && title.animations.every(a => a.source === 'composed'));
         assert.ok(title.animations.some(a => a.presetId === 'composed:slam-in'));

@@ -309,7 +309,8 @@ await check('the AI short plan: prompt and clean-up', () => {
     assert.match(p, /3 to 7 words/);
     assert.match(p, /"headline"/);
     assert.deepEqual(M.cleanShortPlan({ headline: '"How we 3x\'d revenue" #growth 🚀', keywords: ['revenue growth', 'x'.repeat(50)] }),
-        { headline: "How we 3x'd revenue growth", keywords: ['revenue', 'x'.repeat(30)], titleBrief: '' });
+        // cameraEnergy: unknown or missing → 'standard' (low | standard | high).
+        { headline: "How we 3x'd revenue growth", keywords: ['revenue', 'x'.repeat(30)], titleBrief: '', cameraEnergy: 'standard' });
     assert.equal(M.cleanShortPlan({ headline: 'Hi' }), null, 'one word is not a headline');
 });
 await check('Shorts tab: finish toggles, open as project, user copy without em dashes', () => {

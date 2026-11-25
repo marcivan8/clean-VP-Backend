@@ -398,10 +398,17 @@ await check('every control is exported and keyboard-reachable', () => {
     }
     // A styling pass that drops keyboard access is a regression in a nicer
     // coat, so the roles are pinned.
-    for (const s of ['role="radiogroup"', 'role="radio"', 'role="switch"', 'aria-checked',
+    for (const s of ['role="radiogroup"', 'role="radio"', 'aria-checked',
         'type="range"', 'aria-expanded', 'tabIndex']) {
         assert.ok(kit.includes(s), s);
     }
+    // ToggleSwitch now delegates to the design system's Switch, so the switch
+    // role lives there. Follow the delegation rather than drop the check.
+    const switchSrc = /import \{[^}]*\bSwitch\b[^}]*\} from '\.\.\/\.\.\/designSystem\.js'/.test(kit)
+        ? read('../Vibed Design System/components/core/Switch.jsx') : kit;
+    // A native checkbox carries its state in `checked`; aria-checked is only
+    // needed on a non-input element.
+    assert.ok(switchSrc.includes('role="switch"') && (switchSrc.includes('aria-checked') || /type="checkbox"/.test(switchSrc)), 'role="switch"');
 });
 
 await check('the kit uses tokens, never a hard-coded theme colour', () => {
