@@ -33,6 +33,9 @@ import {
 import { Logo } from '../components/Logo.jsx';
 import { useUserPlan } from '../hooks/useUserPlan.js';
 import ProFeatureLock from '../components/ProFeatureLock.jsx';
+import { createDesignProject, loadDesign, saveDesign, isCloudId } from '../lib/designProjects.js';
+import { buildLocalVariations, applyVariationPatches } from '../design-studio/designVariations.js';
+import { authFetch } from '../utils/authFetch.js';
 import useTimelineStore from '../store/useTimelineStore.js';
 import { ensureEditorFonts } from '../lib/editorFonts.js';
 import { executeDesignCommand } from '../agent/DesignStudioCommandRegistry.js';
@@ -84,6 +87,31 @@ const DIRECTIONS = [
     },
 ];
 
+/**
+ * R170: a small, faithful preview of a variation: the real layers, scaled.
+ * Text, shapes, badges and images are drawn as HTML so the card needs no canvas.
+ */
+function VariationPreview({ layers, format }) {
+    const W = format?.w || 1280, H = format?.h || 720;
+    const bg = (layers || []).find(l => l.type === 'bg');
+    return (
+        <span aria-hidden="true" style={{ position: 'relative', display: 'block', width: '100%', aspectRatio: `${W} / ${H}`, maxHeight: 64, borderRadius: 5, overflow: 'hidden', background: bg?.fill || '#0F172A', containerType: 'inline-size' }}>
+            {(layers || []).filter(l => l.type !== 'bg' && l.visible !== false).slice(0, 40).map(l => {
+                const pct = (v, total) => `${((Number(v) || 0) / total) * 100}%`;
+                const base = { position: 'absolute', left: pct(l.x, W), top: pct(l.y, H), width: pct(l.w, W), height: pct(l.h, H), opacity: (Number(l.opacity ?? 100)) / 100, transform: l.rotation ? `rotate(${l.rotation}deg)` : undefined, overflow: 'hidden' };
+                if (l.type === 'text') {
+                    return <span key={l.id} style={{ ...base, color: l.fill || '#fff', fontFamily: l.fontFamily, fontWeight: l.fontWeight || 700, fontSize: `${((Number(l.fontSize) || 24) / W) * 100}cqw`, lineHeight: l.lineHeight || 1, textAlign: l.textAlign || 'left', textTransform: l.textTransform, whiteSpace: 'pre-line' }}>{l.text}</span>;
+                }
+                if (l.type === 'image') {
+                    return l.src ? <img key={l.id} src={l.src} alt="" style={{ ...base, objectFit: 'cover' }} /> : <span key={l.id} style={{ ...base, background: l.fill || '#334155' }} />;
+                }
+                const round = l.type === 'ellipse' || l.type === 'circle' ? '50%' : l.type === 'badge' ? 999 : `${((Number(l.cornerRadius) || 0) / W) * 100}cqw`;
+                return <span key={l.id} style={{ ...base, background: l.fill && l.fill !== 'transparent' ? l.fill : 'transparent', border: l.stroke && l.stroke !== 'transparent' ? `1px solid ${l.stroke}` : undefined, borderRadius: round }} />;
+            })}
+        </span>
+    );
+}
+
 // Design Studio is a Pro feature (R104). The server refuses its AI routes for
 // other plans; this only decides what to show. Kept as a wrapper so the editor's
 // many hooks never run for a locked account.
@@ -91,14 +119,119 @@ export default function DesignStudioPage() {
     const { plan, loading } = useUserPlan();
     if (loading) return <div style={{ minHeight: '100vh', background: 'var(--bg)' }} aria-busy="true" />;
     if (plan !== 'pro') return <ProFeatureLock feature="designStudio" required="pro" />;
-    return <DesignStudioEditor />;
+    return <DesignProjectGate />;
 }
 
-function DesignStudioEditor() {
+/**
+ * R170: which design is open. Every design is a project in the account, with
+ * its own name and id; the studio never borrows the video editor's project.
+ *   - no ?projectId   → ask for a name (and a format), create it, open it
+ *   - a saved design  → load it from the account, then open the editor
+ *   - an old browser-only design (id not a UUID) → move it to the account
+ *   - a video project → refuse, never write to it
+ */
+function DesignProjectGate() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
-    const projectId = searchParams.get('projectId') || useTimelineStore.getState().projectId || 'default_design';
-    const { projectName, addOverlayClip, addAssets } = useTimelineStore();
+    const projectId = searchParams.get('projectId');
+    const [state, setState] = useState({ status: 'loading' });
+
+    useEffect(() => {
+        let cancelled = false;
+        const done = (next) => { if (!cancelled) setState(next); };
+        (async () => {
+            if (!projectId) { done({ status: 'new' }); return; }
+            if (!isCloudId(projectId)) {
+                // Made before designs were saved in the account: move it there.
+                let local = null, name = 'Design project';
+                try {
+                    local = JSON.parse(localStorage.getItem(`vp_design_studio_${projectId}`) || 'null');
+                    const index = JSON.parse(localStorage.getItem('vp_design_projects') || '[]');
+                    name = index.find(p => p.id === projectId)?.name || name;
+                } catch { /* unreadable cache: start the move from nothing */ }
+                const created = await createDesignProject(name, local || {});
+                if (created.error) { done({ status: 'error', message: created.error }); return; }
+                try {
+                    if (local) localStorage.setItem(`vp_design_studio_${created.id}`, JSON.stringify(local));
+                    const index = JSON.parse(localStorage.getItem('vp_design_projects') || '[]');
+                    localStorage.setItem('vp_design_projects', JSON.stringify(index.filter(p => p.id !== projectId)));
+                } catch { /* the account copy exists either way */ }
+                if (!cancelled) navigate(`/design?projectId=${created.id}`, { replace: true });
+                return;
+            }
+            const loaded = await loadDesign(projectId);
+            if (loaded.error) { done({ status: 'error', message: loaded.error, notDesign: loaded.notDesign }); return; }
+            // The editor reads its first state from this cache key.
+            try { localStorage.setItem(`vp_design_studio_${projectId}`, JSON.stringify(loaded.design)); }
+            catch { /* quota: the editor then starts from defaults and the account copy is kept */ }
+            done({ status: 'ready', name: loaded.name });
+        })();
+        return () => { cancelled = true; };
+    }, [projectId, navigate]);
+
+    if (state.status === 'new') return <NewDesignDialog />;
+    if (state.status === 'ready') return <DesignStudioEditor key={projectId} projectId={projectId} projectName={state.name} />;
+    if (state.status === 'error') {
+        return (
+            <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', color: 'var(--fg)', padding: 16 }}>
+                <div style={{ maxWidth: 420, textAlign: 'center' }}>
+                    <p style={{ fontSize: 15, marginBottom: 16 }}>{state.message}</p>
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+                        <button type="button" onClick={() => navigate('/design')} style={{ padding: '9px 16px', borderRadius: 999, border: 0, background: 'var(--accent)', color: '#fff', cursor: 'pointer' }}>New design</button>
+                        <button type="button" onClick={() => navigate('/dashboard')} style={{ padding: '9px 16px', borderRadius: 999, border: '0.5px solid var(--line-strong)', background: 'transparent', color: 'var(--fg)', cursor: 'pointer' }}>My projects</button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+    return <div style={{ minHeight: '100vh', background: 'var(--bg)' }} aria-busy="true" />;
+}
+
+/** "Name your design" — shown whenever the studio is opened without a design. */
+function NewDesignDialog() {
+    const navigate = useNavigate();
+    const [name, setName] = useState('');
+    const [format, setFormat] = useState('thumbnail');
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState('');
+    const submit = async (e) => {
+        e.preventDefault();
+        const clean = name.trim();
+        if (!clean) { setError('Give your design a name.'); return; }
+        setBusy(true); setError('');
+        const created = await createDesignProject(clean, { selectedFormat: format });
+        if (created.error) { setBusy(false); setError(created.error); return; }
+        navigate(`/design?projectId=${created.id}`, { replace: true });
+    };
+    return (
+        <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'var(--bg)', color: 'var(--fg)', fontFamily: 'var(--f-sans)' }}>
+            <form onSubmit={submit} aria-labelledby="new-design-title" style={{ width: '100%', maxWidth: 440, padding: '28px 24px', borderRadius: 16, background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.09)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <h1 id="new-design-title" style={{ fontSize: 22, margin: 0 }}>New design</h1>
+                <label htmlFor="new-design-name" style={{ fontSize: 13, color: 'var(--fg-2)' }}>Project name</label>
+                <input id="new-design-name" autoFocus value={name} maxLength={120} onChange={e => setName(e.target.value)} placeholder="e.g. Launch thumbnail"
+                    style={{ height: 44, padding: '0 12px', borderRadius: 10, border: '1px solid var(--line-strong)', background: 'var(--bg-2)', color: 'var(--fg)', fontSize: 15 }} />
+                <label htmlFor="new-design-format" style={{ fontSize: 13, color: 'var(--fg-2)' }}>Format</label>
+                <select id="new-design-format" value={format} onChange={e => setFormat(e.target.value)}
+                    style={{ height: 44, padding: '0 10px', borderRadius: 10, border: '1px solid var(--line-strong)', background: 'var(--bg-2)', color: 'var(--fg)', fontSize: 14 }}>
+                    {FORMAT_PRESETS.map(f => <option key={f.id} value={f.id}>{f.label} · {f.res}</option>)}
+                </select>
+                {error && <p role="alert" style={{ margin: 0, fontSize: 13, color: 'var(--coral, #F87171)' }}>{error}</p>}
+                <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+                    <button type="submit" disabled={busy} style={{ flex: 1, height: 44, borderRadius: 999, border: 0, background: 'linear-gradient(135deg, var(--accent), var(--violet))', color: '#fff', fontWeight: 600, fontSize: 14, cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>
+                        {busy ? 'Creating…' : 'Create design'}
+                    </button>
+                    <button type="button" onClick={() => navigate('/dashboard')} style={{ height: 44, padding: '0 18px', borderRadius: 999, border: '0.5px solid var(--line-strong)', background: 'transparent', color: 'var(--fg)', fontSize: 14, cursor: 'pointer' }}>
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    );
+}
+
+function DesignStudioEditor({ projectId, projectName }) {
+    const navigate = useNavigate();
+    const { addOverlayClip, addAssets } = useTimelineStore();
 
     useEffect(() => {
         ensureEditorFonts();
@@ -133,7 +266,7 @@ function DesignStudioEditor() {
                 if (parsed.briefText) return parsed.briefText;
             }
         } catch { }
-        return 'Lead with the ratio, keep the hand in frame, must read at 120px wide';
+        return '';
     });
     const [videoFrame, setVideoFrame] = useState('Frame 0:11');
 
@@ -179,76 +312,24 @@ function DesignStudioEditor() {
     const logoInputRef = useRef(null);
 
     // Canvas Layers State
+    // R170: a new design starts blank (a background only). The sample layers
+    // that used to appear here ("22 G IN. THREE CIRCLES.") were a demo, and a
+    // design saved with no layers came back as that demo.
     const [layers, setLayers] = useState(() => {
+        const blank = [{ id: 'background', name: 'Background', type: 'bg', fill: '#0F172A', visible: true, locked: false }];
         try {
-            const saved = localStorage.getItem(`vp_design_studio_${projectId}`);
-            if (saved) {
-                const parsed = JSON.parse(saved);
-                if (Array.isArray(parsed.layers) && parsed.layers.length > 0) {
-                    return parsed.layers;
-                }
-            }
-        } catch { }
-        return [
-            {
-                id: 'headline',
-                name: 'Headline',
-                type: 'text',
-                text: '22 G IN.\nTHREE CIRCLES.',
-                x: 64,
-                y: 392,
-                w: 612,
-                h: 148,
-                fontSize: 72,
-                fontFamily: 'Plus Jakarta Sans',
-                fill: '#F4EDE2',
-                opacity: 100,
-                visible: true,
-                locked: false,
-            },
-            {
-                id: 'duration',
-                name: 'Duration badge',
-                type: 'badge',
-                text: '0:30',
-                x: 48,
-                y: 48,
-                w: 84,
-                h: 32,
-                fill: '#C85A17',
-                opacity: 100,
-                visible: true,
-                locked: false,
-            },
-            {
-                id: 'subject',
-                name: 'Subject cutout',
-                meta: 'Frame 0:11 · masked',
-                type: 'image',
-                x: 740,
-                y: 120,
-                w: 420,
-                h: 560,
-                fill: 'linear-gradient(180deg, #42291A 0%, #1A1109 100%)',
-                visible: true,
-                locked: false,
-            },
-            {
-                id: 'background',
-                name: 'Background',
-                type: 'bg',
-                fill: 'linear-gradient(160deg, #1C1109 0%, #2D1A10 100%)',
-                visible: true,
-                locked: false,
-            },
-        ];
+            const parsed = JSON.parse(localStorage.getItem(`vp_design_studio_${projectId}`) || 'null');
+            if (Array.isArray(parsed?.layers) && parsed.layers.length > 0) return parsed.layers;
+        } catch { /* unreadable cache: start blank */ }
+        return blank;
     });
 
-    const [selectedLayerId, setSelectedLayerId] = useState('headline');
-    const [selectedLayerIds, setSelectedLayerIds] = useState(['headline']);
+    const [selectedLayerId, setSelectedLayerId] = useState(null);
+    const [selectedLayerIds, setSelectedLayerIds] = useState([]);
     const [showGuides, setShowGuides] = useState(false);
     const [zoom, setZoom] = useState(0.45);
-    const [leftRailTab, setLeftRailTab] = useState('layers');
+    // R170: a design with nothing on it yet opens on the component library.
+    const [leftRailTab, setLeftRailTab] = useState(() => (layers.every(l => l.type === 'bg') ? 'components' : 'layers'));
     const [customComponents, setCustomComponents] = useState(() => {
         try {
             const saved = localStorage.getItem(`vp_design_studio_${projectId}`);
@@ -272,187 +353,85 @@ function DesignStudioEditor() {
         }
     });
 
-    // Cloud project sync from Supabase
+    // R170: ONE save path. The design lives in the account (designProjects.js);
+    // localStorage is only a cache the loader fills before this editor mounts.
+    // The two copies of the old sync/autosave/online blocks wrote
+    // `{ metadata: { design_studio } }` as a project's whole timeline_state,
+    // which wiped the video project the studio had borrowed an id from.
+    const [saveState, setSaveState] = useState('saved'); // 'saved' | 'saving' | 'error'
     useEffect(() => {
-        if (!projectId || projectId === 'default_design') return;
-        import('../lib/projectsApi.js').then(({ getProject }) => {
-            getProject(projectId).then(proj => {
-                if (proj?.metadata?.design_studio) {
-                    const ds = proj.metadata.design_studio;
-                    if (Array.isArray(ds.layers) && ds.layers.length > 0) {
-                        setLayers(ds.layers);
-                    }
-                    if (ds.selectedFormat) setSelectedFormat(ds.selectedFormat);
-                    if (ds.brandKit) setBrandKit(ds.brandKit);
-                    if (ds.briefText) setBriefText(ds.briefText);
-                    if (Array.isArray(ds.customComponents)) setCustomComponents(ds.customComponents);
-                    if (Array.isArray(ds.mediaAssets)) setStudioMediaAssets(ds.mediaAssets);
-                }
-            }).catch(() => { });
-        }).catch(() => { });
-    }, [projectId]);
-
-    // Debounced autosave (1.5s) to localStorage and project database
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            try {
-                const payload = {
-                    projectId,
-                    layers,
-                    selectedFormat,
-                    brandKit,
-                    briefText,
-                    customComponents,
-                    mediaAssets: studioMediaAssets,
-                    updatedAt: Date.now(),
-                };
-                localStorage.setItem(`vp_design_studio_${projectId}`, JSON.stringify(payload));
-
-                // Maintain in vp_design_projects index so it reflects in dashboard
-                const projectsRaw = localStorage.getItem('vp_design_projects');
-                let projectList = [];
-                if (projectsRaw) {
-                    try { projectList = JSON.parse(projectsRaw); } catch { }
-                }
-                const existingIdx = projectList.findIndex(p => p.id === projectId);
-                const projectMeta = {
-                    id: projectId,
-                    name: projectName || 'Design Project',
-                    isDesign: true,
-                    aspect_ratio: currentFormat.id === 'thumbnail' ? '16:9' : (currentFormat.id === 'packaging' ? '9:16' : '1:1'),
-                    updated_at: new Date().toISOString(),
-                    thumbnail_url: null,
-                };
-                if (existingIdx !== -1) {
-                    projectList[existingIdx] = { ...projectList[existingIdx], ...projectMeta };
-                } else {
-                    projectList.unshift(projectMeta);
-                }
-                localStorage.setItem('vp_design_projects', JSON.stringify(projectList));
-
-                // Sync to Supabase project record
-                if (projectId && projectId !== 'default_design') {
-                    import('../lib/projectsApi.js').then(({ updateProject }) => {
-                        updateProject(projectId, { metadata: { design_studio: payload } }).catch(() => { });
-                    }).catch(() => { });
-                }
-            } catch (err) {
-                console.warn('[DesignStudioPage] Autosave error:', err);
-            }
+        const timer = setTimeout(async () => {
+            const payload = { layers, selectedFormat, brandKit, briefText, customComponents, mediaAssets: studioMediaAssets };
+            try { localStorage.setItem(`vp_design_studio_${projectId}`, JSON.stringify({ ...payload, updatedAt: Date.now() })); }
+            catch { /* quota: the account copy below is the real save */ }
+            setSaveState('saving');
+            const ok = await saveDesign(projectId, payload);
+            setSaveState(ok ? 'saved' : 'error');
         }, 1500);
-
         return () => clearTimeout(timer);
-    }, [layers, selectedFormat, brandKit, briefText, customComponents, studioMediaAssets, projectId, projectName, currentFormat]);
+    }, [layers, selectedFormat, brandKit, briefText, customComponents, studioMediaAssets, projectId]);
 
-    // Network online listener to sync pending edits
+    // Back online: push the cached state that may not have reached the account.
     useEffect(() => {
         const handleOnline = () => {
-            if (projectId && projectId !== 'default_design') {
-                try {
-                    const saved = localStorage.getItem(`vp_design_studio_${projectId}`);
-                    if (saved) {
-                        const parsed = JSON.parse(saved);
-                        import('../lib/projectsApi.js').then(({ updateProject }) => {
-                            updateProject(projectId, { metadata: { design_studio: parsed } }).catch(() => { });
-                        }).catch(() => { });
-                    }
-                } catch { }
-            }
+            try {
+                const cached = JSON.parse(localStorage.getItem(`vp_design_studio_${projectId}`) || 'null');
+                if (cached) saveDesign(projectId, cached).then(ok => setSaveState(ok ? 'saved' : 'error'));
+            } catch { /* nothing cached */ }
         };
         window.addEventListener('online', handleOnline);
         return () => window.removeEventListener('online', handleOnline);
     }, [projectId]);
 
-    // Cloud project sync from Supabase
-    useEffect(() => {
-        if (!projectId || projectId === 'default_design') return;
-        import('../lib/projectsApi.js').then(({ getProject }) => {
-            getProject(projectId).then(proj => {
-                if (proj?.metadata?.design_studio) {
-                    const ds = proj.metadata.design_studio;
-                    if (Array.isArray(ds.layers) && ds.layers.length > 0) {
-                        setLayers(ds.layers);
-                    }
-                    if (ds.selectedFormat) setSelectedFormat(ds.selectedFormat);
-                    if (ds.brandKit) setBrandKit(ds.brandKit);
-                    if (ds.briefText) setBriefText(ds.briefText);
-                    if (Array.isArray(ds.customComponents)) setCustomComponents(ds.customComponents);
-                    if (Array.isArray(ds.mediaAssets)) setStudioMediaAssets(ds.mediaAssets);
-                }
-            }).catch(() => { });
-        }).catch(() => { });
-    }, [projectId]);
+    // R170: Variations are the CURRENT design restyled. `aiVariations` holds
+    // the last AI set; until Regenerate is pressed (or after the tray closes)
+    // the tray shows instant variations computed from the layers as they are.
+    const [aiVariations, setAiVariations] = useState(null);
+    const [variationRound, setVariationRound] = useState(0);
+    const [variationsBusy, setVariationsBusy] = useState(false);
+    const [variationsNote, setVariationsNote] = useState('');
+    const trayVariations = aiVariations || buildLocalVariations(layers, { format: currentFormat, brandKit, round: variationRound });
 
-    // Debounced autosave (1.5s) to localStorage and project database
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            try {
-                const payload = {
-                    projectId,
-                    layers,
-                    selectedFormat,
-                    brandKit,
-                    briefText,
-                    customComponents,
-                    mediaAssets: studioMediaAssets,
-                    updatedAt: Date.now(),
-                };
-                localStorage.setItem(`vp_design_studio_${projectId}`, JSON.stringify(payload));
+    const toggleVariations = () => {
+        setShowVariationsTray(open => {
+            if (open) { setAiVariations(null); setVariationsNote(''); }
+            return !open;
+        });
+    };
 
-                // Maintain in vp_design_projects index so it reflects in dashboard
-                const projectsRaw = localStorage.getItem('vp_design_projects');
-                let projectList = [];
-                if (projectsRaw) {
-                    try { projectList = JSON.parse(projectsRaw); } catch { }
-                }
-                const existingIdx = projectList.findIndex(p => p.id === projectId);
-                const projectMeta = {
-                    id: projectId,
-                    name: projectName || 'Design Project',
-                    isDesign: true,
-                    aspect_ratio: currentFormat.id === 'thumbnail' ? '16:9' : (currentFormat.id === 'packaging' ? '9:16' : '1:1'),
-                    updated_at: new Date().toISOString(),
-                    thumbnail_url: null,
-                };
-                if (existingIdx !== -1) {
-                    projectList[existingIdx] = { ...projectList[existingIdx], ...projectMeta };
-                } else {
-                    projectList.unshift(projectMeta);
-                }
-                localStorage.setItem('vp_design_projects', JSON.stringify(projectList));
-
-                // Sync to Supabase project record
-                if (projectId && projectId !== 'default_design') {
-                    import('../lib/projectsApi.js').then(({ updateProject }) => {
-                        updateProject(projectId, { metadata: { design_studio: payload } }).catch(() => { });
-                    }).catch(() => { });
-                }
-            } catch (err) {
-                console.warn('[DesignStudioPage] Autosave error:', err);
+    const regenerateVariations = async () => {
+        if (variationsBusy) return;
+        setVariationsBusy(true);
+        setVariationsNote('');
+        const nextRound = variationRound + 1;
+        try {
+            const res = await authFetch('/api/ai/design-variations', {
+                method: 'POST',
+                body: JSON.stringify({ layers, format: { w: currentFormat.w, h: currentFormat.h }, brandKit, brief: briefText }),
+            });
+            const data = await res.json().catch(() => null);
+            const ai = res.ok && data?.success ? applyVariationPatches(layers, data.variations) : [];
+            if (ai.length) {
+                // Fewer than four usable AI directions: fill the row with instant ones.
+                const fill = buildLocalVariations(layers, { format: currentFormat, brandKit, round: nextRound }).slice(0, 4 - ai.length);
+                setAiVariations([...ai, ...fill]);
+                setVariationsNote(ai.length < 4 ? `${ai.length} AI direction${ai.length === 1 ? '' : 's'} plus instant ones.` : '');
+            } else {
+                setAiVariations(null);
+                setVariationRound(nextRound);
+                setVariationsNote(res.status === 402
+                    ? (data?.message || 'No AI operations left this month. Showing new instant variations.')
+                    : 'The AI could not propose directions right now. Showing new instant variations.');
             }
-        }, 1500);
-
-        return () => clearTimeout(timer);
-    }, [layers, selectedFormat, brandKit, briefText, customComponents, studioMediaAssets, projectId, projectName, currentFormat]);
-
-    // Network online listener to sync pending edits
-    useEffect(() => {
-        const handleOnline = () => {
-            if (projectId && projectId !== 'default_design') {
-                try {
-                    const saved = localStorage.getItem(`vp_design_studio_${projectId}`);
-                    if (saved) {
-                        const parsed = JSON.parse(saved);
-                        import('../lib/projectsApi.js').then(({ updateProject }) => {
-                            updateProject(projectId, { metadata: { design_studio: parsed } }).catch(() => { });
-                        }).catch(() => { });
-                    }
-                } catch { }
-            }
-        };
-        window.addEventListener('online', handleOnline);
-        return () => window.removeEventListener('online', handleOnline);
-    }, [projectId]);
+        } catch (err) {
+            console.warn('[DesignStudio] variations request failed:', err.message);
+            setAiVariations(null);
+            setVariationRound(nextRound);
+            setVariationsNote('The AI could not be reached. Showing new instant variations.');
+        } finally {
+            setVariationsBusy(false);
+        }
+    };
 
     const handleCreateMasterComponent = (layer) => {
         const selected = layers.filter(l => selectedLayerIds.includes(l.id));
@@ -1458,36 +1437,6 @@ function DesignStudioEditor() {
     }, [selectedLayerId, selectedLayerIds, layers, canUngroupSelected, editingTextId]);
 
     // AI Director tweak submission
-    const handleApplyAiTweak = (e, overridePrompt) => {
-        e?.preventDefault();
-        const promptToRun = overridePrompt || aiPrompt;
-        if (!promptToRun.trim()) return;
-
-        setAiStatusMessage('Applying AI layout composition...');
-
-        setTimeout(() => {
-            pushUndo();
-            const res = executeDesignCommand(promptToRun, {
-                layers,
-                setLayers,
-                selectedLayerId,
-                setSelectedLayerId,
-                selectedFormat,
-                setSelectedFormat,
-                applyDirection,
-                setDirections,
-                directions,
-                setSafeAreasEnabled,
-                handleExport2Sizes: handleExportSizes,
-                handleSaveAsMotionScene,
-                onRemoveBackground: handleToggleBackgroundRemoval,
-            });
-
-            setAiStatusMessage(res.message || 'Layers updated. Reversible via history.');
-            showToast(res.message || 'Layers updated.');
-            setTimeout(() => setAiStatusMessage(''), 4500);
-        }, 200);
-    };
 
     // Render Canvas to Image DataURL
     const renderCanvasToImage = (targetW, targetH) => {
@@ -2024,8 +1973,11 @@ function DesignStudioEditor() {
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
                     }}>
-                        {projectName || 'Scene & Thumbnail Design'}
+                        {projectName || 'Untitled design'}
                     </div>
+                    <span role="status" style={{ fontSize: 11, marginLeft: 8, whiteSpace: 'nowrap', color: saveState === 'error' ? '#DC2626' : '#94A3B8' }}>
+                        {saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Not saved' : 'Saved'}
+                    </span>
                 </div>
 
                 {/* Center: Format Dropdown */}
@@ -2152,7 +2104,7 @@ function DesignStudioEditor() {
 
                     <button
                         type="button"
-                        onClick={() => setShowVariationsTray(v => !v)}
+                        onClick={toggleVariations}
                         title="Show creative variations"
                         aria-label="Creative variations"
                         style={{
@@ -2389,6 +2341,10 @@ function DesignStudioEditor() {
                         setBriefText={setBriefText}
                         showToast={showToast}
                         pushUndo={pushUndo}
+                        format={currentFormat}
+                        brandKit={brandKit}
+                        mediaAssets={studioMediaAssets}
+                        customComponents={customComponents}
                     />
 
                     {/* Slide-Up Creative Directions Variations Tray */}
@@ -2416,17 +2372,20 @@ function DesignStudioEditor() {
                                         Creative Directions
                                     </span>
                                     <span style={{ fontSize: 11, color: '#64748B' }}>
-                                        4 live generated variations · click to apply
+                                        {aiVariations ? 'AI directions of your design' : 'Instant variations of your design'} · click to apply, one undo
                                     </span>
+                                    {variationsNote && <span role="status" style={{ fontSize: 11, color: '#B45309' }}>{variationsNote}</span>}
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                     <button
                                         type="button"
-                                        onClick={(e) => handleApplyAiTweak(e, briefText)}
-                                        style={{ background: 'none', border: 'none', color: '#0B7C91', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                                        onClick={regenerateVariations}
+                                        disabled={variationsBusy}
+                                        title="Ask the AI for four new art directions of this design"
+                                        style={{ background: 'none', border: 'none', color: '#0B7C91', fontSize: 11.5, fontWeight: 600, cursor: variationsBusy ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 4, opacity: variationsBusy ? 0.6 : 1 }}
                                     >
-                                        <RefreshCw size={12} />
-                                        Regenerate
+                                        <RefreshCw size={12} style={variationsBusy ? { animation: 'spin 1s linear infinite' } : undefined} />
+                                        {variationsBusy ? 'Generating…' : 'Regenerate'}
                                     </button>
                                     <button
                                         type="button"
@@ -2439,45 +2398,28 @@ function DesignStudioEditor() {
                             </div>
 
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, flex: 1, minHeight: 0 }}>
-                                {directions.map((dir, idx) => (
-                                    <div
+                                {trayVariations.length === 0 && (
+                                    <div style={{ gridColumn: '1 / -1', fontSize: 12, color: '#64748B', alignSelf: 'center' }}>Add something to the canvas first: variations restyle what is there.</div>
+                                )}
+                                {trayVariations.map((dir, idx) => (
+                                    <button
+                                        type="button"
                                         key={dir.id || idx}
                                         onClick={() => applyDirection(dir)}
+                                        title={`Apply ${dir.title}`}
                                         style={{
-                                            border: '1px solid #E2E8F0',
-                                            borderRadius: 8,
-                                            padding: 8,
-                                            background: '#FFFFFF',
-                                            cursor: 'pointer',
-                                            display: 'flex',
-                                            flexDirection: 'column',
-                                            justifyContent: 'space-between',
-                                            transition: 'border-color 0.15s ease',
+                                            border: '1px solid #E2E8F0', borderRadius: 8, padding: 6, background: '#FFFFFF', cursor: 'pointer',
+                                            display: 'flex', flexDirection: 'column', gap: 4, minHeight: 0, textAlign: 'left',
                                         }}
                                         onMouseEnter={(e) => e.currentTarget.style.borderColor = '#0B7C91'}
                                         onMouseLeave={(e) => e.currentTarget.style.borderColor = '#E2E8F0'}
                                     >
-                                        <div style={{
-                                            height: 52,
-                                            borderRadius: 6,
-                                            background: dir.bg || '#1F140E',
-                                            padding: '6px 8px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            color: dir.textFill || '#FFFFFF',
-                                            fontWeight: 700,
-                                            fontSize: 11,
-                                            textAlign: 'center',
-                                            overflow: 'hidden',
-                                        }}>
-                                            {dir.headline || dir.title}
-                                        </div>
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
-                                            <span style={{ fontSize: 11, fontWeight: 600, color: '#0F172A' }}>{dir.title}</span>
-                                            <span style={{ fontSize: 9.5, color: '#64748B' }}>{dir.style}</span>
-                                        </div>
-                                    </div>
+                                        <VariationPreview layers={dir.layers} format={currentFormat} />
+                                        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                                            <span style={{ fontSize: 11, fontWeight: 600, color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dir.title}</span>
+                                            <span style={{ fontSize: 9.5, color: '#64748B', flexShrink: 0 }}>{dir.source === 'ai' ? 'AI' : dir.style}</span>
+                                        </span>
+                                    </button>
                                 ))}
                             </div>
                         </div>

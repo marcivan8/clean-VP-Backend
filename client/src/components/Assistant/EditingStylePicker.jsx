@@ -99,6 +99,7 @@ const EditingStylePicker = ({ disabled = false }) => {
             EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                 reason: 'paid_feature',
                 upgradeRequired: 'creator',
+                feature: 'editingStyles',
                 message: t('editingStyles.styleUpgradeRequired'),
             });
             return;
@@ -112,6 +113,7 @@ const EditingStylePicker = ({ disabled = false }) => {
             EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                 reason: 'paid_feature',
                 upgradeRequired: 'creator',
+                feature: 'autoMode',
                 message: t('editingStyles.autoUpgradeRequired'),
             });
             return;

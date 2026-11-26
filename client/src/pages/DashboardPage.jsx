@@ -43,6 +43,7 @@ import {
 } from '../lib/projectsApi.js';
 import useTimelineStore from '../store/useTimelineStore.js';
 import { useUserPlan } from '../hooks/useUserPlan.js';
+import { isCloudId } from '../lib/designProjects.js';
 import { atLimit, planLimitLabel, getProjectLimit } from '../lib/planLimits.js';
 import MobileHome from '../components/MobileHome.jsx';
 import PlanSheet from '../components/PlanSheet.jsx';
@@ -721,27 +722,19 @@ export default function DashboardPage() {
         // Media cookie first: project thumbnails are owner-only.
         const [list] = await Promise.all([listProjects(), ensureMediaSession()]);
 
-        // Load design projects from localStorage
+        // R170: designs are saved in the account now (listProjects marks them
+        // isDesign). Designs made before that lived only in this browser: they
+        // are still listed, and opening one moves it to the account. The
+        // made-up "Kettle Drum Launch" sample this used to seed is gone.
         let designList = [];
         try {
             const raw = localStorage.getItem('vp_design_projects');
-            if (raw) {
-                designList = JSON.parse(raw);
-            } else {
-                designList = [
-                    {
-                        id: 'design-kettle-drum',
-                        name: 'Kettle Drum Launch · Thumbnail',
-                        isDesign: true,
-                        aspect_ratio: '16:9',
-                        updated_at: new Date(Date.now() - 3600000 * 5).toISOString(),
-                        thumbnail_url: null,
-                    }
-                ];
-                localStorage.setItem('vp_design_projects', JSON.stringify(designList));
-            }
+            const local = raw ? JSON.parse(raw) : [];
+            designList = (Array.isArray(local) ? local : [])
+                .filter(p => p && p.id && p.id !== 'design-kettle-drum' && !isCloudId(p.id))
+                .map(p => ({ ...p, isDesign: true, localOnly: true }));
         } catch (e) {
-            console.warn('[DashboardPage] Failed to parse design projects:', e);
+            console.warn('[DashboardPage] Failed to parse local design projects:', e);
         }
 
         setProjects([...(Array.isArray(list) ? list : []), ...designList]);
@@ -874,7 +867,7 @@ export default function DashboardPage() {
 
     async function handleRename(projectId, newName) {
         const found = projects.find(p => p.id === projectId);
-        if (found?.isDesign) {
+        if (found?.localOnly) {
             try {
                 const raw = localStorage.getItem('vp_design_projects');
                 if (raw) {
@@ -894,7 +887,7 @@ export default function DashboardPage() {
     async function handleDuplicate(projectId, projectName) {
         if (atLimit(plan, projects.length)) { setShowLimitModal(true); return; }
         const found = projects.find(p => p.id === projectId);
-        if (found?.isDesign) {
+        if (found?.localOnly) {
             const copy = {
                 ...found,
                 id: `design-${Date.now()}`,
@@ -918,7 +911,7 @@ export default function DashboardPage() {
 
     async function handleDelete(projectId) {
         const found = projects.find(p => p.id === projectId);
-        if (found?.isDesign) {
+        if (found?.localOnly) {
             try {
                 const raw = localStorage.getItem('vp_design_projects');
                 if (raw) {
@@ -1037,6 +1030,7 @@ export default function DashboardPage() {
                     onStyle={() => navigate('/style')}
                     onMarketplace={MARKET_ENABLED ? () => navigate('/marketplace') : undefined}
                     onDesign={() => navigate('/design')}
+                    onPlanner={() => navigate('/planner')}
                     onBilling={() => navigate('/account')}
                     onSignOut={handleSignOut}
                     onSeePlans={() => setPlansSheetOpen(true)}
@@ -1134,6 +1128,24 @@ export default function DashboardPage() {
                             onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-3)'}
                         >
                             Design Studio
+                        </button>
+
+                        <button
+                            onClick={() => navigate('/planner')}
+                            style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: 'var(--fg-3)',
+                                fontSize: 13,
+                                padding: '6px 12px',
+                                borderRadius: 999,
+                                cursor: 'pointer',
+                                transition: 'color 0.15s',
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.color = 'var(--fg)'}
+                            onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-3)'}
+                        >
+                            {t('planner.title', 'Planner')}
                         </button>
 
                         <button
@@ -1332,6 +1344,7 @@ export default function DashboardPage() {
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/dashboard'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'rgba(255, 255, 255, 0.08)', border: 'none', color: '#FFFFFF', fontSize: 14, fontWeight: 600, borderRadius: 8 }}>Projects</button>
                     {MARKET_ENABLED && <button onClick={() => { setMobileMenuOpen(false); navigate('/marketplace'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg)', fontSize: 14 }}>Marketplace</button>}
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/design'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg)', fontSize: 14 }}>Design Studio</button>
+                    <button onClick={() => { setMobileMenuOpen(false); navigate('/planner'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg)', fontSize: 14 }}>{t('planner.title', 'Planner')}</button>
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/style'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg)', fontSize: 14 }}>Style</button>
                     <button onClick={() => { setMobileMenuOpen(false); navigate('/account'); }} style={{ textAlign: 'left', padding: '10px 14px', background: 'none', border: 'none', color: 'var(--fg-3)', fontSize: 14 }}>Billing</button>
                 </div>

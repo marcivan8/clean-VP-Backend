@@ -87,6 +87,8 @@ const useMobileFlowStore = create((set, get) => ({
             reason: info.reason || 'ai_ops',
             message: info.message || null,
             upgradeRequired: info.upgradeRequired || 'creator',
+            feature: info.feature || null,
+            code: info.code || null,
         },
     }),
 

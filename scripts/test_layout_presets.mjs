@@ -54,7 +54,7 @@ const CC = require(path.join(ROOT, 'server/compositor/CompositorCompiler.js'));
     const src = fs.readFileSync(path.join(ROOT, 'client/src/motion/Compositor.js'), 'utf8');
     const m = src.match(/const LAYOUT_FRAME_PRESETS = (\[[^\]]*\]);/);
     assert.ok(m, 'inline preset list found');
-    assert.deepEqual(JSON.parse(m[1].replace(/'/g, '"')), LP.LAYOUT_PRESETS);
+    assert.deepEqual(JSON.parse(m[1].replace(/'/g, '"')), LP.FRAMED_PRESETS);
     assert.ok(src.includes('[f.x, f.y, f.w, f.h].every(Number.isFinite) && f.w > 0 && f.h > 0'));
     ok("Compositor's inline hasLayoutFrame matches LayoutPresets'");
 }

@@ -3437,7 +3437,11 @@ module.exports = async function processExportJob(job) {
                                 const escapedTextFile = textFilePath.replace(/\\/g, '/').replace(/:/g, '\\:');
                                 const xPct = Number(sClip.x) || 50;
                                 const yPct = Number(sClip.y) || 50;
-                                const fsPx = Math.round((Number(sClip.fontSize) || 48) * (targetWidth / 1080));
+                                // Same size rule as the caption paths below and the preview
+                                // (TextOverlay: fontSize * previewScale * clip.scale). It used
+                                // targetWidth / 1080, which made text behind the speaker 1.78x
+                                // too big on a 16:9 export and ignored a caption the user resized.
+                                const fsPx = Math.round((Number(sClip.fontSize) || 48) * (Number(sClip.scale) || 1) * captionScaleFactor);
                                 const fontColor = sClip.color || '#ffffff';
                                 const xExpr = `(w*${(xPct / 100).toFixed(4)}-text_w/2)`;
                                 const yExpr = `(h*${(yPct / 100).toFixed(4)}-text_h/2)`;
@@ -4799,7 +4803,12 @@ module.exports = async function processExportJob(job) {
                     // Default matches addCaptionClips: 2px black outline.
                     // Same clip.scale correction as fontSize above — the preview's
                     // CSS scale() visually scales the stroke along with the glyphs.
-                    const strokeWidth = Math.round((clip.stroke?.width ?? 2) * (clip.scale || 1) * captionScaleFactor);
+                    // R174: drawtext's border is all OUTSIDE the glyph; the
+                    // preview's outline is centred and half hidden under the
+                    // fill (paint-order: stroke fill). Half the width = the same
+                    // visible outline.
+                    const cssStroke = (clip.stroke?.width ?? 2) * (clip.scale || 1) * captionScaleFactor;
+                    const strokeWidth = cssStroke > 0 ? Math.max(1, Math.round(cssStroke / 2)) : 0;
                     const strokeColor = (clip.stroke?.color || '#000000').replace('#', '0x');
                     const strokePart  = strokeWidth > 0
                         ? `:borderw=${strokeWidth}:bordercolor=${strokeColor}`

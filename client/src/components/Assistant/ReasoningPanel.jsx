@@ -12,7 +12,7 @@ import { useBrain } from '../../hooks/useBrain.js';
 import { buildProposals } from '../../agent/DirectorIntelligence.js';
 // R61 — motion behaviour for this card's caption style packs. See
 // LEGACY_PACK_MOTION for why the mapping lives there rather than a second picker.
-import { CAPTION_STYLES, FONT_STACK, captionPackUpdates, previewStyle } from './captionStylePacks.js';
+import { CAPTION_STYLES, FONT_STACK, captionPackUpdates, previewStyle, sampleParts } from './captionStylePacks.js';
 import BrainPanel from '../BrainPanel.jsx';
 import { useTranslation } from 'react-i18next';
 import { enqueueIfVideoNotReady, drainPromptQueue } from '../../agent/rokaPromptQueue.js';
@@ -626,7 +626,7 @@ const CaptionStylesCard = ({ log }) => {
                                         and the chat box's Styles menu, so the same pack
                                         cannot look like three different packs. */}
                                     <span style={{ ...previewStyle(style, 20), position: 'relative', zIndex: 1 }}>
-                                        {style.sample}
+                                        {sampleParts(style).map((part, i) => <span key={i} style={part.size !== 1 ? { fontSize: `${part.size}em` } : undefined}>{part.text}</span>)}
                                     </span>
                                 </div>
                                 {/* Style name + font label + tag */}

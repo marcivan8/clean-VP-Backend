@@ -269,6 +269,20 @@ export const CAPTION_STYLE_PACKS = {
         animationPreset: 'fade',
         wordHighlight: { mode: 'terminal-cursor', color: '#34D399', cursor: '█', scale: 1.0 },
     },
+    // R173 — the key words are set much LARGER than the rest of the line, in
+    // the same colour: size alone carries the emphasis. The words come from
+    // keyword emphasis (clip.emphasis), so this pack is only half a look until
+    // they are picked; applying it picks them (see packWantsKeywords).
+    'big-words': {
+        id: 'big-words', name: 'Big Words',
+        fontFamily: 'Montserrat', fontWeight: 800, fontSize: 46,
+        color: '#FFFFFF',
+        stroke: { width: 3, color: '#000000' },
+        textShadow: '0 3px 10px rgba(0,0,0,0.6)',
+        uppercase: true,
+        animationPreset: 'pop',
+        wordHighlight: { mode: 'none', scale: 1 },
+    },
     'neon-punch': {
         id: 'neon-punch', name: 'Neon Electric',
         fontFamily: 'Rajdhani', fontWeight: 800, fontSize: 52,
@@ -327,6 +341,7 @@ export const LEGACY_PACK_MOTION = {
     'brand-block':   { uppercase: true,  animationPreset: 'scale-reveal', wordHighlight: { mode: 'box', color: '#111111', background: '#FFFFFF', scale: 1.06 } },
     'mono-tech-caption': { uppercase: false, animationPreset: 'blur-reveal', wordHighlight: { mode: 'color', color: '#34D399', scale: 1.02 } },
     'bootzy-caption': { uppercase: false, animationPreset: 'pop', wordHighlight: { mode: 'box', color: '#111111', background: '#FFE500', scale: 1.08 } },
+    'big-words':     { uppercase: true,  animationPreset: 'pop',         wordHighlight: { mode: 'none',  scale: 1 } },
 };
 
 /**
@@ -410,6 +425,9 @@ export const EMPHASIS_BY_PACK = {
     'hormozi-bounce':      { mode: 'box',   color: '#000000', background: '#FFE500', scale: 1.15 },
     'typewriter-terminal': { mode: 'color', color: '#34D399', scale: 1.0 },
     'neon-punch':          { mode: 'color', color: '#00E5FF', scale: 1.1 },
+    // R173: a LAYOUT size, not a zoom: the word is set in a 1.7x font and the
+    // line makes room (preview: font-size em; export: RasterCaptionCompiler).
+    'big-words':           { mode: 'size', size: 1.7, scale: 1 },
     // LEGACY_PACK_MOTION ids (the Text panel's original picker)
     'bold-impact':   { mode: 'color', color: '#FFE500', scale: 1.12 },
     'clean-modern':  { mode: 'box',   color: '#000000', background: '#FFE500', scale: 1.04 },
@@ -433,6 +451,15 @@ export const EMPHASIS_BY_PACK = {
 };
 
 const DEFAULT_EMPHASIS = { mode: 'color', color: '#FACC15', scale: 1.12 };
+
+/**
+ * True for a pack whose look IS the emphasis (R173 'big-words'): without
+ * picked key words it renders as plain text, so whoever applies it should pick
+ * them for captions that have none.
+ */
+export function packWantsKeywords(packId) {
+    return EMPHASIS_BY_PACK[packId]?.mode === 'size';
+}
 
 function isYellowish(hex) {
     const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());

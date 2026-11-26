@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Search, User, X, MoreHorizontal, Image as ImageIcon, Camera, FilePlus2, Palette, CreditCard, LogOut, Pencil, Copy, Trash2, Loader2, ArrowLeft, ChevronRight, Users, Sparkles } from 'lucide-react';
+import { Plus, Search, User, X, MoreHorizontal, Image as ImageIcon, Camera, FilePlus2, Palette, CreditCard, LogOut, Pencil, Copy, Trash2, Loader2, ArrowLeft, ChevronRight, Users, Sparkles, CalendarDays } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Logo } from './Logo.jsx';
 import MobileSheet, { SheetRow } from './MobileSheet.jsx';
@@ -95,7 +95,7 @@ export default function MobileHome({
     projects, loading, user, plan, aiOpsUsed, formatWhen,
     creating, createError, newVideoOpen, onNewVideoOpenChange, onPickVideo, onEmptyProject,
     onOpen, onRename, onDuplicate, onDelete, onStyle, onBilling, onSignOut, onSeePlans,
-    onMarketplace, onDesign,
+    onMarketplace, onDesign, onPlanner,
 }) {
     const { t } = useTranslation('dashboard');
     const [search, setSearch] = useState('');
@@ -293,6 +293,7 @@ export default function MobileHome({
                     {/* Only when the market is live (R102): the dashboard passes no handler otherwise. */}
                     {onMarketplace && <SheetRow icon={<Users size={20} />} label="Marketplace" onClick={() => { setAccountOpen(false); onMarketplace(); }} />}
                     <SheetRow icon={<Sparkles size={20} />} label="Design Studio" onClick={() => { setAccountOpen(false); onDesign?.(); }} />
+                    {onPlanner && <SheetRow icon={<CalendarDays size={20} />} label={t('planner.title', 'Planner')} onClick={() => { setAccountOpen(false); onPlanner(); }} />}
                     <SheetRow icon={<Palette size={20} />} label={t('yourStyle')} onClick={() => { setAccountOpen(false); onStyle(); }} />
                     <SheetRow icon={<CreditCard size={20} />} label={t('mobileHome.billing')} onClick={() => { setAccountOpen(false); onBilling(); }} />
                     <SheetRow icon={<LogOut size={20} />} label={t('signout')} onClick={() => { setAccountOpen(false); onSignOut(); }} danger />

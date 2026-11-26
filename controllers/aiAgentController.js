@@ -2692,128 +2692,141 @@ const detectRepeatedTakesHandler = async (req, res) => {
  * Translates natural language design instructions into canvas operations
  * using the configured LLM for the 'design' capability (or custom Railway Brain).
  */
-const designCopilotHandler = async (req, res) => {
-    try {
-        const { prompt, layers = [], selectedLayerId = null, format = { w: 1280, h: 720 } } = req.body;
-        if (!prompt || typeof prompt !== 'string') {
-            return res.status(400).json({ error: 'Prompt is required' });
+// ── Design Studio AI (R170) ─────────────────────────────────────────────────
+// One model call shared by the copilot and the Variations tray. The browser
+// sanitises every operation before applying it (design-studio/designOperations.js,
+// designVariations.js); this side only shapes the prompt and bounds the size.
+
+const DESIGN_LAYER_FIELDS = ['id', 'name', 'type', 'x', 'y', 'w', 'h', 'fill', 'stroke', 'strokeWidth', 'text', 'fontSize', 'fontFamily', 'fontWeight', 'textAlign', 'textTransform', 'letterSpacing', 'lineHeight', 'cornerRadius', 'opacity', 'rotation'];
+
+function summarizeDesignLayers(layers, selectedLayerId) {
+    return (Array.isArray(layers) ? layers : []).slice(0, 80).map(l => {
+        const out = {};
+        for (const k of DESIGN_LAYER_FIELDS) if (l && l[k] !== undefined && l[k] !== null && l[k] !== '') out[k] = typeof l[k] === 'string' ? l[k].slice(0, 160) : l[k];
+        if (l?.id === selectedLayerId) out.selected = true;
+        return out;
+    });
+}
+
+function summarizeBrandKit(kit) {
+    if (!kit || typeof kit !== 'object') return null;
+    const pick = ['name', 'accent', 'accent2', 'surface', 'text', 'display', 'body'];
+    return Object.fromEntries(pick.filter(k => typeof kit[k] === 'string').map(k => [k, kit[k].slice(0, 60)]));
+}
+
+async function callDesignModel(systemPrompt, userContent, { maxTokens = 3000, temperature = 0.3 } = {}) {
+    const brainTarget = getBrainAIClient();
+    const cloudClient = getAIClient({ capability: 'design' });
+    const model = resolveModel('gpt-4o', { capability: 'design' });
+    const provider = resolveProvider({ capability: 'design' });
+    const callPayload = {
+        model, temperature, max_tokens: maxTokens,
+        response_format: { type: 'json_object' },
+        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
+    };
+    let completion = null;
+    let usedCustom = false;
+    if (brainTarget.isCustom && brainTarget.client) {
+        try {
+            completion = await brainTarget.client.chat.completions.create({ ...callPayload, model: brainTarget.model },
+                { timeout: Number(process.env.BRAIN_AI_TIMEOUT_MS) || 240_000 });
+            usedCustom = true;
+        } catch (customErr) {
+            console.warn('[DesignAI] Custom Railway Brain failed; failing over to cloud client:', customErr.message);
         }
-
-        const brainTarget = getBrainAIClient();
-        const cloudClient = getAIClient({ capability: 'design' });
-        const model = resolveModel('gpt-4o', { capability: 'design' });
-        const provider = resolveProvider({ capability: 'design' });
-
-        const layersSummary = (Array.isArray(layers) ? layers : []).map(l => ({
-            id: l.id,
-            name: l.name,
-            type: l.type,
-            x: l.x,
-            y: l.y,
-            w: l.w,
-            h: l.h,
-            fill: l.fill,
-            text: l.text,
-            fontSize: l.fontSize,
-            selected: l.id === selectedLayerId,
-        }));
-
-        const systemPrompt = `You are VIBED Design Studio AI Copilot, an expert visual art director and vector graphics engineer.
-Your task is to translate natural language design instructions into discrete canvas operations.
-
-Active Canvas State:
-- Resolution: ${format.w || 1280}x${format.h || 720}
-- Currently Selected Layer: ${selectedLayerId ? JSON.stringify(selectedLayerId) : 'none'}
-- Existing Canvas Layers:
-${JSON.stringify(layersSummary, null, 2)}
-
-Design Principles:
-- Geometric balance, high contrast, clean typography (Plus Jakarta Sans, Instrument Serif, JetBrains Mono).
-- Default canvas is 1280x720. Safe margins: 48px from borders.
-- Supported layer types: "rect", "circle", "star", "line", "badge", "text".
-- Colors: White (#FFFFFF), Black (#1A1C22), Blue (#3B82F6), Cyan (#00E5FF), Red (#EF4444), Green (#10B981), Orange (#C85A17), Yellow (#FBBF24), Transparent (transparent).
-- When asked to change or update a shape and one is selected, update it via "update_layer" instead of duplicating.
-- When asked to add a new shape or card, generate it via "add_layer".
-
-OUTPUT FORMAT:
-Return a JSON object strictly matching:
-{
-  "message": "Clear 1-sentence confirmation of what was designed or modified.",
-  "operations": [
-    {
-      "op": "add_layer" | "update_layer" | "delete_layer",
-      "layerId": "id of existing layer if updating/deleting",
-      "layer": {
-        "id": "unique string id",
-        "name": "Human-friendly layer name",
-        "type": "rect" | "circle" | "star" | "line" | "badge" | "text",
-        "x": 300,
-        "y": 200,
-        "w": 360,
-        "h": 240,
-        "fill": "#FFFFFF",
-        "borderRadius": 16,
-        "opacity": 100,
-        "rotation": 0,
-        "dropShadow": true,
-        "shadowBlur": 20,
-        "shadowOffsetY": 6,
-        "shadowColor": "rgba(0,0,0,0.25)"
-      },
-      "patch": {
-        "fill": "#FFFFFF",
-        "w": 400
-      }
     }
+    if (!completion) {
+        if (!cloudClient) throw new Error('AI client unavailable for design capability');
+        completion = await cloudClient.chat.completions.create(callPayload);
+    }
+    const parsed = repairAndParseJSON(completion?.choices?.[0]?.message?.content);
+    if (!parsed.data) throw new Error(`Failed to parse AI response: ${parsed.error}`);
+    return { data: parsed.data, provider: usedCustom ? 'custom' : provider, model: usedCustom ? brainTarget.model : model };
+}
+
+const DESIGN_RULES = `Design principles:
+- Strong hierarchy: one dominant headline, at most two supporting text levels. Short, punchy copy; never lorem ipsum.
+- High contrast between text and what is behind it. Keep 48px safe margins from every edge.
+- Use the brand kit colours and fonts when one is given. Fonts available: Plus Jakarta Sans, Instrument Serif, Geist, Inter, Anton, Montserrat, Oswald, Bebas Neue, Playfair Display, JetBrains Mono.
+- Fills: hex colours, rgba(), or linear-gradient(...)/radial-gradient(...) strings.
+- Layer types you may create: "rect", "ellipse", "star", "line", "badge", "text". Reuse components and icons from the catalog instead of drawing them from shapes.
+- Images: only reuse an image from "Media" by its mediaId; never invent images or urls.`;
+
+function designCopilotPrompt({ format, layers, selectedLayerId, brandKit, catalog, media, mode }) {
+    const W = Number(format?.w) || 1280, H = Number(format?.h) || 720;
+    return `You are VIBED Design Studio's AI art director. You turn a request into canvas operations.
+Canvas: ${W}x${H} px. Coordinates are pixels from the top-left. ${mode === 'build' ? 'The user wants a COMPLETE design: build the whole composition (background, headline, supporting text, accents, components or icons), typically 5 to 20 layers. Replace placeholder layers rather than piling on top of them.' : 'Make the change the user asks for. When a layer is selected and the request is about it, update that layer instead of adding one.'}
+Selected layer: ${selectedLayerId ? JSON.stringify(selectedLayerId) : 'none'}
+Brand kit: ${brandKit ? JSON.stringify(brandKit) : 'none'}
+Current layers (back to front):
+${JSON.stringify(layers)}
+Component catalog (insert with add_component; "slots" are text layers you may rewrite):
+${JSON.stringify(catalog || [])}
+Media (images the user uploaded): ${JSON.stringify(media || [])}
+${DESIGN_RULES}
+Reply with JSON only:
+{
+  "message": "one sentence saying what you designed or changed",
+  "operations": [
+    { "op": "set_background", "fill": "#0B1220" },
+    { "op": "add_layer", "layer": { "name": "Headline", "type": "text", "x": 64, "y": 300, "w": 700, "h": 160, "text": "TWO LINES\\nMAX", "fontSize": 84, "fontFamily": "Anton", "fontWeight": 800, "fill": "#FFFFFF", "textAlign": "left" } },
+    { "op": "add_layer", "layer": { "name": "Photo", "type": "image", "x": 760, "y": 80, "w": 440, "h": 560, "mediaId": "<id from Media>" } },
+    { "op": "add_component", "componentId": "cmp_cta_button", "x": 64, "y": 520, "scale": 1.2, "text": { "label": "WATCH NOW" } },
+    { "op": "update_layer", "layerId": "existing-id", "patch": { "fill": "#00E5FF", "fontSize": 96 } },
+    { "op": "delete_layer", "layerId": "existing-id" }
   ]
 }`;
+}
 
-        const callPayload = {
-            model,
-            temperature: 0.2,
-            max_tokens: 800,
-            response_format: { type: 'json_object' },
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: `Design instruction: "${prompt}"` },
-            ],
-        };
-
-        let completion;
-        if (brainTarget.isCustom && brainTarget.client) {
-            try {
-                console.log(`[DesignCopilot] Routing to custom Railway Brain model (${brainTarget.model})...`);
-                completion = await brainTarget.client.chat.completions.create({
-                    ...callPayload,
-                    model: brainTarget.model,
-                }, { timeout: Number(process.env.BRAIN_AI_TIMEOUT_MS) || 240_000 });
-            } catch (customErr) {
-                console.warn('[DesignCopilot] Custom Railway Brain failed; failing over to cloud client:', customErr.message);
-            }
-        }
-
-        if (!completion) {
-            if (!cloudClient) {
-                throw new Error('AI client unavailable for design capability');
-            }
-            completion = await cloudClient.chat.completions.create(callPayload);
-        }
-
-        const raw = completion?.choices?.[0]?.message?.content;
-        const parsed = repairAndParseJSON(raw);
-        if (!parsed.data) {
-            throw new Error(`Failed to parse AI response: ${parsed.error}`);
-        }
-
-        return res.json({
-            success: true,
-            message: parsed.data.message || 'Updated canvas layout.',
-            operations: Array.isArray(parsed.data.operations) ? parsed.data.operations : [],
-            provider: brainTarget.isCustom && completion ? 'custom' : provider,
-            model: brainTarget.isCustom && completion ? brainTarget.model : model,
+const designCopilotHandler = async (req, res) => {
+    try {
+        const { prompt, layers = [], selectedLayerId = null, format = { w: 1280, h: 720 }, brandKit = null, catalog = [], media = [], mode = 'edit' } = req.body || {};
+        if (!prompt || typeof prompt !== 'string') return res.status(400).json({ error: 'Prompt is required' });
+        const system = designCopilotPrompt({
+            format,
+            layers: summarizeDesignLayers(layers, selectedLayerId),
+            selectedLayerId,
+            brandKit: summarizeBrandKit(brandKit),
+            catalog: (Array.isArray(catalog) ? catalog : []).slice(0, 160),
+            // Ids and names only: uploads are data: URLs, far too large for a prompt.
+            media: (Array.isArray(media) ? media : []).slice(0, 20).map(m => ({ id: String(m?.id || '').slice(0, 80), name: String(m?.name || '').slice(0, 60) })).filter(m => m.id),
+            mode: mode === 'build' ? 'build' : 'edit',
         });
+        const result = await callDesignModel(system, `Request: "${prompt.slice(0, 4000)}"`, { maxTokens: mode === 'build' ? 3500 : 1800, temperature: 0.3 });
+        const operations = Array.isArray(result.data.operations) ? result.data.operations.slice(0, 60) : [];
+        return res.json({ success: true, message: String(result.data.message || 'Updated the design.').slice(0, 300), operations, provider: result.provider, model: result.model });
     } catch (err) {
         console.error('[DesignCopilot] error:', err.message);
+        return res.status(500).json({ error: err.message, success: false });
+    }
+};
+
+/**
+ * Four art directions of the design IN PROGRESS. The model restyles the
+ * existing layers by id (patches only: it may not add or remove layers), so a
+ * variation keeps the user's content and only its art direction changes.
+ */
+const designVariationsHandler = async (req, res) => {
+    try {
+        const { layers = [], format = { w: 1280, h: 720 }, brandKit = null, brief = '' } = req.body || {};
+        const summary = summarizeDesignLayers(layers, null);
+        if (summary.length === 0) return res.status(400).json({ error: 'There is nothing on the canvas to vary yet.' });
+        const W = Number(format?.w) || 1280, H = Number(format?.h) || 720;
+        const system = `You are VIBED Design Studio's art director. Propose FOUR clearly different art directions for the design below, keeping its content.
+Canvas: ${W}x${H} px.
+Brand kit: ${JSON.stringify(summarizeBrandKit(brandKit))}
+Brief: ${JSON.stringify(String(brief || '').slice(0, 600))}
+Layers (back to front):
+${JSON.stringify(summary)}
+${DESIGN_RULES}
+Each direction changes the layers by id with "patches": colours (fill, stroke), typography (fontFamily, fontSize, fontWeight, textTransform, letterSpacing, lineHeight, textAlign), layout (x, y, w, h, rotation), opacity, cornerRadius, and may tighten the copy ("text"). Do not invent layer ids. Make the four directions genuinely different from each other and from the current design (for example: bold high-contrast, editorial serif, minimal, vibrant).
+Reply with JSON only:
+{ "variations": [ { "title": "2-4 words", "style": "one short label", "patches": { "<layer id>": { "fill": "#111111", "fontFamily": "Anton" } } } ] }`;
+        const result = await callDesignModel(system, 'Propose the four directions now.', { maxTokens: 3000, temperature: 0.8 });
+        const variations = Array.isArray(result.data.variations) ? result.data.variations.slice(0, 4) : [];
+        return res.json({ success: true, variations, provider: result.provider, model: result.model });
+    } catch (err) {
+        console.error('[DesignVariations] error:', err.message);
         return res.status(500).json({ error: err.message, success: false });
     }
 };
@@ -2828,4 +2841,5 @@ module.exports = {
     reorderClipsHandler,
     detectRepeatedTakesHandler,
     designCopilotHandler,
+    designVariationsHandler,
 };

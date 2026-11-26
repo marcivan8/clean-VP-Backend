@@ -804,6 +804,8 @@ function LimitStep({ onShare }) {
                 open
                 reason={limitInfo?.reason || 'ai_ops'}
                 upgradeTo={limitInfo?.upgradeRequired || 'creator'}
+                feature={limitInfo?.feature}
+                code={limitInfo?.code}
                 onClose={() => (hasSomething ? toResult() : close())}
             />
         </>

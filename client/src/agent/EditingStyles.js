@@ -62,6 +62,9 @@ export const EDITING_STYLES = {
         // Silence removal: shortest pause that gets cut, and breathing room kept around speech.
         pacing: { minSilence: 0.3, padding: 0.05 },
         recipeId: 'punchy',
+        // R173: Reel captions set the key words larger in the same colour
+        // (CaptionModel 'big-words'), instead of the recipe's own pack.
+        captionPack: 'big-words',
         rhythmZoom: 'dynamic',
         transition: 'whip-left',
         // Instagram Reels' own ideal range (PlatformProfiles.js 'reels':

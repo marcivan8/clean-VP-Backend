@@ -1528,6 +1528,8 @@
     "sfxHint": "Whooshes on cuts, pops on graphics, hits on the title, at the platform level.",
     "popOut": "Speaker pop-out",
     "popOutHint": "Softens and dims the background behind the person (free on-device model, takes a moment the first time).",
+    "duoSplit": "Split two speakers",
+    "duoSplitHint": "When two people sit side by side in one wide shot, the host goes in the top half and the guest in the bottom half, with captions on the line between them. Uses the scene analysis (\"detect the scene\"); shorts without it stay single.",
     "open": "Open as project",
     "openFailed": "The short could not be saved as a project.",
     "applied": "Added: {{list}}.",

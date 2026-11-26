@@ -107,6 +107,153 @@
     "social": {
       "title": "La publication est réservée au plan Pro",
       "body": "La publication sur YouTube Shorts, Instagram Reels et TikTok, la programmation et l'analyse des performances font partie du plan Pro. Vous pouvez toujours télécharger chaque short exporté."
+    },
+    "planner": {
+      "title": "Le Planning fait partie du plan Pro",
+      "body": "Un calendrier de toutes vos publications programmées et publiées, tous projets confondus, pour les déplacer, les annuler ou les marquer comme faites. La publication et la programmation font partie du plan Pro."
+    }
+  },
+  "upgradeFeatures": {
+    "youGet": "Avec {{plan}}",
+    "without": "Sans",
+    "alsoIn": "Aussi dans {{plan}}",
+    "shorts": {
+      "title": "Les Shorts font partie du plan Creator",
+      "body": "Transformez une longue vidéo en shorts verticaux prêts à publier, sans tout remonter à la main.",
+      "gains": [
+        "Vibed trouve les meilleurs moments et coupe en fin de phrase",
+        "Chaque short est recadré en 9:16 avec sous-titres, titre d'accroche et zones sûres de la plateforme",
+        "Quand deux personnes sont côte à côte, le short peut les séparer : l'hôte en haut, l'invité en bas",
+        "Exportez un short ou tous d'un coup"
+      ],
+      "without": "Vous pouvez toujours monter et exporter la vidéo complète, mais les shorts se découpent et se recadrent à la main.",
+      "overlap": [
+        "shorts"
+      ]
+    },
+    "stock": {
+      "title": "Les médias de stock font partie du plan Creator",
+      "body": "Cherchez des vidéos et images de stock et placez-les sur votre timeline en plans de coupe.",
+      "gains": [
+        "Recherche de photos et vidéos par mot-clé depuis le panneau Médias",
+        "Suggestions de plans de coupe liées à ce qui est dit",
+        "Placés en calques que vous pouvez déplacer, couper et animer"
+      ],
+      "without": "Vous pouvez toujours utiliser vos propres vidéos et images.",
+      "overlap": [
+        "stock"
+      ]
+    },
+    "editingStyles": {
+      "title": "Les styles de montage font partie du plan Creator",
+      "body": "Choisissez Vlog, Face caméra, Interview, Podcast ou Reel et chaque commande suit ce style.",
+      "gains": [
+        "Rythme des silences, zooms, transitions et sous-titres adaptés au style",
+        "Effets sonores au bon niveau (aucun pour un podcast)",
+        "Des suggestions adaptées au format que vous faites"
+      ],
+      "without": "Les commandes fonctionnent, avec les mêmes réglages neutres pour chaque vidéo.",
+      "overlap": [
+        "styles"
+      ]
+    },
+    "autoMode": {
+      "title": "Le mode Auto fait partie du plan Creator",
+      "body": "Une seule demande monte toute la vidéo dans le style choisi, annulable en une fois.",
+      "gains": [
+        "Nettoyage, sous-titres, rythme de zoom et animation s'enchaînent sans vous",
+        "Chaque format a son propre déroulé : Reel, Vlog, Face caméra, Interview, Podcast",
+        "Annulez tout le montage en un geste"
+      ],
+      "without": "Vous pouvez toujours lancer chaque modification vous-même, une par une.",
+      "overlap": [
+        "auto"
+      ]
+    },
+    "autoTrial": {
+      "title": "Vos montages Auto gratuits sont utilisés",
+      "body": "Le mode Auto monte toute la vidéo à partir d'une demande. Le plan gratuit en inclut quelques-uns pour essayer.",
+      "gains": [
+        "Montages Auto illimités dans vos opérations IA du mois",
+        "Tous les styles de montage, pas seulement celui par défaut",
+        "100 opérations IA par mois pour les sous-titres, le nettoyage et les commandes"
+      ],
+      "without": "Le montage manuel, la suppression des silences et l'export continuent de fonctionner.",
+      "overlap": [
+        "auto"
+      ]
+    },
+    "aiOps": {
+      "title": "Vous avez utilisé les opérations IA du mois",
+      "body": "Chaque commande IA, passe de sous-titres ou analyse utilise une opération.",
+      "gains": [
+        "Plus d'opérations IA chaque mois (illimitées en Pro)",
+        "Continuez avec Roka aujourd'hui au lieu d'attendre la remise à zéro",
+        "Des vidéos plus longues et un stockage plus long"
+      ],
+      "without": "Vos projets, le montage manuel et l'export continuent de fonctionner jusqu'à la remise à zéro.",
+      "overlap": [
+        "opérations ia",
+        "ai operations"
+      ]
+    },
+    "projects": {
+      "title": "Vous avez atteint votre limite de projets",
+      "body": "Le plan gratuit garde un petit nombre de projets actifs.",
+      "gains": [
+        "Projets illimités",
+        "Un stockage plus long avant la suppression des anciens projets",
+        "Vidéos jusqu'à 90 minutes (4 heures en Pro)"
+      ],
+      "without": "Supprimez un projet pour faire de la place, ou continuez dans ceux que vous avez.",
+      "overlap": [
+        "projets"
+      ]
+    },
+    "designStudio": {
+      "title": "Design Studio fait partie du plan Pro",
+      "body": "Créez miniatures, couvertures et visuels à côté de vos vidéos, avec un copilote de design IA.",
+      "gains": [
+        "Décrivez un visuel et le copilote le construit, ou le décline de quatre façons",
+        "Formats YouTube, Instagram, TikTok et story avec votre kit de marque",
+        "Détourage, composants et icônes, export PNG ou directement sur votre timeline"
+      ],
+      "without": "Vos vidéos et projets ne sont pas concernés ; les miniatures se font ailleurs.",
+      "overlap": [
+        "design studio"
+      ]
+    },
+    "social": {
+      "title": "La publication fait partie du plan Pro",
+      "body": "Publiez et programmez vos shorts sur les réseaux depuis Vibed, puis suivez leurs résultats.",
+      "gains": [
+        "Programmez des YouTube Shorts et Instagram Reels depuis le panneau Shorts (selon l'accès de chaque plateforme)",
+        "Titres et légendes rédigés par l'IA pour chaque plateforme",
+        "Vues, durée de visionnage et engagement par publication, avec des recommandations de montage à valider"
+      ],
+      "without": "Vous pouvez toujours télécharger chaque short et le publier vous-même.",
+      "overlap": [
+        "publication",
+        "statistiques",
+        "publishing",
+        "performance"
+      ]
+    },
+    "planner": {
+      "title": "Le Planning fait partie du plan Pro",
+      "body": "Un seul calendrier avec toutes vos publications programmées et publiées, tous projets confondus.",
+      "gains": [
+        "Le mois en un coup d'œil : programmé, à publier à la main, publié",
+        "Déplacez une publication à un autre jour ou une autre heure, ou annulez-la",
+        "Les statistiques de chaque publication, directement dans le calendrier"
+      ],
+      "without": "Sans la publication, vous publiez chaque short vous-même et suivez tout ailleurs.",
+      "overlap": [
+        "publication",
+        "statistiques",
+        "publishing",
+        "performance"
+      ]
     }
   }
 }

@@ -100,7 +100,7 @@ console.log('\nAll auto-reframe checks passed.');
     const shortSrc = fs.readFileSync(new URL('../client/src/agent/shortTimeline.js', import.meta.url), 'utf8');
     assert.ok(/import \{[^}]*computeReframePlan[^}]*\} from '\.\.\/motion\/LayoutPresets\.js'/.test(storeSrc),
         'useTimelineStore.js should import computeReframePlan from LayoutPresets.js');
-    assert.ok(/import \{ computeReframePlan \} from '\.\.\/motion\/LayoutPresets\.js'/.test(shortSrc),
+    assert.ok(/import \{[^}]*computeReframePlan[^}]*\} from '\.\.\/motion\/LayoutPresets\.js'/.test(shortSrc),
         'shortTimeline.js should import computeReframePlan from LayoutPresets.js');
     ok('both reframeToFrame() (live editor) and buildShortTimeline() (shorts/repurposing) import the SAME computeReframePlan — no duplicated crop logic to drift apart');
 }

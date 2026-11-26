@@ -80,7 +80,9 @@ await check('weight, italic, alignment and the full shadow travel to the export'
 });
 await check('the image renderer synthesises bold and italic, white by default', () => {
     const src = read('server/compositor/RasterCaptionCompiler.js');
-    assert.match(src, /const synthBold = weight === 'bold' \|\| weight === 'bolder' \|\| Number\(weight\) >= 600;/);
+    // R174: bold is faked only when the font FILE is not already bold (browser rule).
+    assert.match(src, /const wantsBold = weight === 'bold' \|\| weight === 'bolder' \|\| Number\(weight\) >= 600;/);
+    assert.match(src, /const synthBold = wantsBold && \(Number\(metrics\?\.weightClass\) \|\| 400\) < 600;/);
     assert.match(src, /ctx\.transform\(1, 0, -0\.21, 1, 0\.21 \* w\.baseline, 0\)/);
     assert.match(src, /const baseColor = cssColor\(entry\.style\.color, '#FFFFFF'\)/);
 });

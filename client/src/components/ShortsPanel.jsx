@@ -18,7 +18,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Smartphone, Play, Square, Download, Loader2, Trash2, Wand2, ExternalLink, Sparkles, Volume2, UserCheck, AlertTriangle, Lock } from 'lucide-react';
+import { Smartphone, Play, Square, Download, Loader2, Trash2, Wand2, ExternalLink, Sparkles, Volume2, UserCheck, AlertTriangle, Lock, Rows2 } from 'lucide-react';
 
 import useTimelineStore from '../store/useTimelineStore';
 import { PLATFORM_IDS, PLATFORM_PROFILES, profileNotes } from '../agent/PlatformProfiles.js';
@@ -113,6 +113,9 @@ export default function ShortsPanel({ onExport }) {
     // Treatment options
     const [polish, setPolish] = useState(true);
     const [popOut, setPopOut] = useState(false);
+    // Two people side by side in one wide shot: host on top, guest below.
+    // On by default; only takes effect when the scene analysis found a duo.
+    const [duo, setDuo] = useState(true);
     const [sfx, setSfx] = useState(true);
 
     const sorted = useMemo(() => [...shorts].sort((a, b) => (a.start || 0) - (b.start || 0)), [shorts]);
@@ -148,6 +151,7 @@ export default function ShortsPanel({ onExport }) {
         if (isFree) {
             EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                 reason: 'paid_feature',
+                feature: 'shorts',
                 message: t('shortsPanel.lockedMessage', 'AI Shorts repurposing is available on Creator and Pro plans.'),
                 upgradeRequired: 'creator',
             });
@@ -176,6 +180,7 @@ export default function ShortsPanel({ onExport }) {
         if (isFree) {
             EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                 reason: 'paid_feature',
+                feature: 'shorts',
                 message: t('shortsPanel.lockedMessage', 'AI Shorts repurposing is available on Creator and Pro plans.'),
                 upgradeRequired: 'creator',
             });
@@ -189,7 +194,7 @@ export default function ShortsPanel({ onExport }) {
         setErrors(e => ({ ...e, [short.id]: null }));
         try {
             if (popOut) await ensureMattesFor(short);
-            const built = await finishShort(mainEditState(), short, { polish, popOut, sfx });
+            const built = await finishShort(mainEditState(), short, { polish, popOut, sfx, duo });
             const ok = useTimelineStore.getState().startShortPreview(short, built, { label: profile.label });
             if (!ok) setErrors(e => ({ ...e, [short.id]: t('shortsPanel.previewFailed') }));
         } catch (err) {
@@ -198,12 +203,13 @@ export default function ShortsPanel({ onExport }) {
         } finally {
             setPreparing(null);
         }
-    }, [preparing, polish, popOut, sfx, t, isFree]);
+    }, [preparing, polish, popOut, sfx, duo, t, isFree]);
 
     const handleExport = useCallback(async (short) => {
         if (isFree && process.env.NODE_ENV === 'production') {
             EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                 reason: 'paid_feature',
+                feature: 'shorts',
                 message: t('shortsPanel.lockedMessage', 'AI Shorts repurposing is available on Creator and Pro plans.'),
                 upgradeRequired: 'creator',
             });
@@ -215,7 +221,7 @@ export default function ShortsPanel({ onExport }) {
         setErrors(e => ({ ...e, [short.id]: null }));
         try {
             if (popOut) await ensureMattesFor(short);
-            const built = await finishShort(mainEditState(), short, { polish, popOut, sfx });
+            const built = await finishShort(mainEditState(), short, { polish, popOut, sfx, duo });
             const result = await onExport(
                 { platform: profile.exportPreset, quality: 'high', resolution: '1080p', fps: profile.fps },
                 {
@@ -251,12 +257,13 @@ export default function ShortsPanel({ onExport }) {
         } finally {
             setBusy(b => { const n = { ...b }; delete n[short.id]; return n; });
         }
-    }, [onExport, busy, polish, popOut, sfx, isFree, t]);
+    }, [onExport, busy, polish, popOut, sfx, duo, isFree, t]);
 
     const handleOpenAsProject = useCallback(async (short) => {
         if (isFree) {
             EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                 reason: 'paid_feature',
+                feature: 'shorts',
                 message: t('shortsPanel.lockedMessage', 'AI Shorts repurposing is available on Creator and Pro plans.'),
                 upgradeRequired: 'creator',
             });
@@ -267,7 +274,7 @@ export default function ShortsPanel({ onExport }) {
             // The project is built from the main edit, so the preview ends first.
             useTimelineStore.getState().exitShortPreview();
             if (popOut) await ensureMattesFor(short);
-            const built = await finishShort(useTimelineStore.getState(), short, { polish, popOut, sfx });
+            const built = await finishShort(useTimelineStore.getState(), short, { polish, popOut, sfx, duo });
             const st = useTimelineStore.getState();
             const data = {
                 ...(st.saveProject() || {}),
@@ -289,7 +296,7 @@ export default function ShortsPanel({ onExport }) {
             console.error('[ShortsPanel] open as project failed:', err.message);
             setErrors(e => ({ ...e, [short.id]: err.message }));
         }
-    }, [navigate, polish, popOut, sfx, t, isFree]);
+    }, [navigate, polish, popOut, sfx, duo, t, isFree]);
 
     const handleRemove = useCallback((short) => {
         const st = useTimelineStore.getState();
@@ -301,6 +308,7 @@ export default function ShortsPanel({ onExport }) {
         if (isFree && process.env.NODE_ENV === 'production') {
             EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                 reason: 'paid_feature',
+                feature: 'shorts',
                 message: t('shortsPanel.lockedMessage', 'AI Shorts repurposing is available on Creator and Pro plans.'),
                 upgradeRequired: 'creator',
             });
@@ -345,7 +353,7 @@ export default function ShortsPanel({ onExport }) {
                     </p>
                     <button
                         type="button"
-                        onClick={() => EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, { reason: 'paid_feature', upgradeRequired: 'creator' })}
+                        onClick={() => EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, { reason: 'paid_feature', feature: 'shorts', upgradeRequired: 'creator' })}
                         className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm flex items-center gap-1.5"
                     >
                         <Sparkles className="w-3 h-3" />
@@ -396,6 +404,12 @@ export default function ShortsPanel({ onExport }) {
                         <UserCheck className="w-3 h-3 text-primary" /> {t('shortsPanel.popOut')}
                     </span>
                     <input type="checkbox" checked={popOut} onChange={e => setPopOut(e.target.checked)} className="rounded" />
+                </label>
+                <label className="flex items-center justify-between cursor-pointer" title={t('shortsPanel.duoSplitHint')}>
+                    <span className="flex items-center gap-1.5 text-foreground">
+                        <Rows2 className="w-3 h-3 text-primary" /> {t('shortsPanel.duoSplit')}
+                    </span>
+                    <input type="checkbox" checked={duo} onChange={e => setDuo(e.target.checked)} className="rounded" />
                 </label>
             </div>
 

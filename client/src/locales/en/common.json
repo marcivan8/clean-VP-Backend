@@ -107,6 +107,153 @@
     "social": {
       "title": "Publishing is a Pro feature",
       "body": "Publishing to YouTube Shorts, Instagram Reels and TikTok, scheduling, and post performance analysis are part of the Pro plan. You can still download every short you export."
+    },
+    "planner": {
+      "title": "The Planner is a Pro feature",
+      "body": "A calendar of every scheduled and published post across your projects, where you can move, cancel or mark posts as done. Publishing and scheduling are part of the Pro plan."
+    }
+  },
+  "upgradeFeatures": {
+    "youGet": "With {{plan}}",
+    "without": "Without it",
+    "alsoIn": "Also in {{plan}}",
+    "shorts": {
+      "title": "Shorts is a Creator feature",
+      "body": "Turn one long video into ready-to-post vertical shorts, without re-editing by hand.",
+      "gains": [
+        "Vibed finds the strongest moments and cuts them on sentence boundaries",
+        "Each short is reframed to 9:16 with captions, a hook title and the platform's safe zones",
+        "When two people sit side by side, the short can split them: host on top, guest below",
+        "Export one short or all of them in one go"
+      ],
+      "without": "You can still edit and export the full video, but shorts have to be cut and reframed by hand.",
+      "overlap": [
+        "shorts"
+      ]
+    },
+    "stock": {
+      "title": "Stock media is a Creator feature",
+      "body": "Search stock footage and images and drop them onto your timeline as b-roll.",
+      "gains": [
+        "Search photos and videos by keyword from the Assets panel",
+        "AI b-roll suggestions matched to what is being said",
+        "Placed as overlays you can move, trim and animate"
+      ],
+      "without": "You can still use your own uploaded footage and images.",
+      "overlap": [
+        "stock"
+      ]
+    },
+    "editingStyles": {
+      "title": "Editing styles are a Creator feature",
+      "body": "Pick Vlog, Talking head, Interview, Podcast or Reel and every command follows that style.",
+      "gains": [
+        "Silence pacing, zooms, transitions and captions tuned to the style",
+        "Sound effects at the right level for the style (none for podcasts)",
+        "Suggestions that fit the format you are making"
+      ],
+      "without": "Commands still work, with the same neutral defaults for every video.",
+      "overlap": [
+        "styles"
+      ]
+    },
+    "autoMode": {
+      "title": "Auto mode is a Creator feature",
+      "body": "One prompt edits the whole video in your chosen style, as a single undo.",
+      "gains": [
+        "Clean-up, captions, zoom rhythm and animation run in order, hands-free",
+        "Each format has its own playbook: Reel, Vlog, Talking head, Interview, Podcast",
+        "Undo the whole run in one tap"
+      ],
+      "without": "You can still run each edit yourself, one command at a time.",
+      "overlap": [
+        "auto"
+      ]
+    },
+    "autoTrial": {
+      "title": "Your free Auto edits are used",
+      "body": "Auto mode edits the whole video from one prompt. The free plan includes a few runs to try it.",
+      "gains": [
+        "Unlimited Auto runs within your monthly AI operations",
+        "Every editing style, not just the default",
+        "100 AI operations a month for captions, clean-up and commands"
+      ],
+      "without": "Manual editing, silence removal and export keep working.",
+      "overlap": [
+        "auto"
+      ]
+    },
+    "aiOps": {
+      "title": "You've used this month's AI operations",
+      "body": "Each AI command, caption pass or analysis uses one operation.",
+      "gains": [
+        "More AI operations each month (unlimited on Pro)",
+        "Keep editing with Roka today instead of waiting for the reset",
+        "Longer videos and more storage"
+      ],
+      "without": "Your projects, manual editing and export keep working until the monthly reset.",
+      "overlap": [
+        "ai operations",
+        "opérations ia"
+      ]
+    },
+    "projects": {
+      "title": "You've reached your project limit",
+      "body": "The free plan keeps a small number of active projects.",
+      "gains": [
+        "Unlimited projects",
+        "Longer storage before old projects are removed",
+        "Videos up to 90 minutes (4 hours on Pro)"
+      ],
+      "without": "Delete a project to make room, or keep working in the ones you have.",
+      "overlap": [
+        "projects"
+      ]
+    },
+    "designStudio": {
+      "title": "Design Studio is a Pro feature",
+      "body": "Design thumbnails, covers and social graphics next to your videos, with an AI design copilot.",
+      "gains": [
+        "Describe a design and the copilot builds it, or restyles it four ways",
+        "YouTube, Instagram, TikTok and story formats with your brand kit",
+        "Background removal, components and icons, PNG export or straight onto your timeline"
+      ],
+      "without": "Your videos and projects are not affected; thumbnails have to be made elsewhere.",
+      "overlap": [
+        "design studio"
+      ]
+    },
+    "social": {
+      "title": "Publishing is a Pro feature",
+      "body": "Publish and schedule your shorts to social platforms from Vibed, then see how they perform.",
+      "gains": [
+        "Schedule YouTube Shorts and Instagram Reels from the Shorts panel (where each platform allows it)",
+        "AI-written titles and captions for each platform",
+        "Views, watch time and engagement per post, with editing recommendations you approve"
+      ],
+      "without": "You can still download every short and post it yourself.",
+      "overlap": [
+        "publishing",
+        "performance",
+        "publication",
+        "statistiques"
+      ]
+    },
+    "planner": {
+      "title": "The Planner is a Pro feature",
+      "body": "One calendar with every scheduled and published post across all your projects.",
+      "gains": [
+        "See the month at a glance: scheduled, to post by hand, and published",
+        "Move a post to another day or time, or cancel it",
+        "Stats on each published post, right in the calendar"
+      ],
+      "without": "Without publishing you post each short yourself and keep track elsewhere.",
+      "overlap": [
+        "publishing",
+        "performance",
+        "publication",
+        "statistiques"
+      ]
     }
   }
 }

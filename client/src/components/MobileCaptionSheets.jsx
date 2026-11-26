@@ -5,7 +5,7 @@ import { Scissors, Merge, Play, Type, Trash2 } from 'lucide-react';
 import useAIStore from '../store/useAIStore';
 import useTimelineStore from '../store/useTimelineStore';
 import { findDeletedWords } from '../motion/captionEdits.js';
-import { CAPTION_STYLES, FONT_STACK, captionPackUpdates } from './Assistant/captionStylePacks.js';
+import { CAPTION_STYLES, FONT_STACK, captionPackUpdates, sampleParts } from './Assistant/captionStylePacks.js';
 import { submitRokaPrompt } from '../agent/rokaPromptQueue.js';
 import MobileSheet, { SheetLabel, SheetRow, SheetChip } from './MobileSheet';
 
@@ -100,8 +100,9 @@ function StyleSheet({ onClose }) {
                                 fontSize: 22, color: style.color, textShadow: style.textShadow || 'none',
                                 textTransform: style.transform === 'uppercase' ? 'uppercase' : 'none',
                                 WebkitTextStroke: style.stroke ? `${Math.min(1, style.stroke.width / 2)}px ${style.stroke.color}` : undefined,
+                                paintOrder: 'stroke fill',
                             }}>
-                                {style.sample}
+                                {sampleParts(style).map((part, i) => <span key={i} style={part.size !== 1 ? { fontSize: `${part.size}em` } : undefined}>{part.text}</span>)}
                             </span>
                             <span style={{ fontFamily: 'var(--f-sans)', fontSize: 11.5, color: 'var(--fg-2)' }}>{style.name}</span>
                         </button>

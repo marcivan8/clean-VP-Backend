@@ -1300,6 +1300,9 @@ export function polishShort(built, profile, opts = {}) {
             if (t.type !== 'video') continue;
             for (const c of t.clips) {
                 if (c.type && c.type !== 'video') continue;
+                // Stacked two-speaker split (DuoSplit.js): this clip is hidden
+                // under two static halves, a move on it would never show.
+                if (c.duoSplit) continue;
                 const d = Number(c.duration) || 0;
                 // Floor at 0.3s for motion application
                 if (d < 0.3) continue;

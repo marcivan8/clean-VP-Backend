@@ -1528,6 +1528,8 @@
     "sfxHint": "Whoosh sur les coupes, pops sur les graphiques, impacts sur le titre, au niveau de la plateforme.",
     "popOut": "Mise en avant de la personne",
     "popOutHint": "Adoucit et assombrit l’arrière-plan derrière la personne (modèle gratuit sur l’appareil, un peu plus long la première fois).",
+    "duoSplit": "Écran partagé à deux",
+    "duoSplitHint": "Quand deux personnes sont côte à côte dans un même plan large, l’hôte va en haut et l’invité en bas, avec les sous-titres sur la ligne entre les deux. Utilise l’analyse de scène (« analyse la scène ») ; sans elle, le short reste en plan unique.",
     "open": "Ouvrir comme projet",
     "openFailed": "Le short n’a pas pu être enregistré comme projet.",
     "applied": "Ajouté : {{list}}.",

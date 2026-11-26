@@ -21,6 +21,15 @@ import { legacyPackToCaptionStyle } from '../../motion/CaptionModel.js';
 
 // Caption style presets for TASK 3
 export const CAPTION_STYLES = [
+    // R173: key words set ~1.7x larger, same colour. Applying it picks the key
+    // words automatically (useTimelineStore.applyCaptionStyleToAll).
+    {
+        id: 'big-words', name: 'Big Words', font: 'Montserrat', weight: 800,
+        fontLabel: 'Montserrat ExtraBold', tag: 'Reels / Shorts',
+        color: '#FFFFFF', stroke: { width: 1.5, color: '#000000' },
+        textShadow: '0 3px 10px rgba(0,0,0,0.6)', transform: 'uppercase', sample: 'MAKE IT BIG',
+        sampleEmphasis: [2],
+    },
     {
         id: 'bold-impact',  name: 'Bold Impact',  font: 'Anton',            weight: 900,
         fontLabel: 'Anton',             tag: 'TikTok / viral',
@@ -180,6 +189,21 @@ export function captionPackUpdates(style, opts = {}) {
         animations: [],
         animation: 'none',
     };
+}
+
+/**
+ * The card's sample split into words, flagging the ones a size-emphasis pack
+ * enlarges, so the preview shows the look (R173). Plain packs: one part.
+ * @returns {{text:string, size:number}[]}
+ */
+export function sampleParts(style) {
+    const text = String(style?.sample || '');
+    const big = Array.isArray(style?.sampleEmphasis) ? style.sampleEmphasis : null;
+    if (!big || big.length === 0) return [{ text, size: 1 }];
+    return text.split(' ').map((word, i, all) => ({
+        text: i < all.length - 1 ? `${word} ` : word,
+        size: big.includes(i) ? 1.7 : 1,
+    }));
 }
 
 /** The pack with this id, or null. */

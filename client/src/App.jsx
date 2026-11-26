@@ -28,6 +28,7 @@ const SuccessPage = lazy(() => import('./pages/SuccessPage'));
 const CookiePolicyPage = lazy(() => import('./pages/CookiePolicyPage'));
 const UserStylePage = lazy(() => import('./pages/UserStylePage'));
 const AccountPage = lazy(() => import('./pages/AccountPage'));
+const PlannerPage = lazy(() => import('./pages/PlannerPage'));
 const TermsPage = lazy(() => import('./pages/TermsPage'));
 const LegalNoticePage = lazy(() => import('./pages/LegalNoticePage'));
 const UnsubscribePage = lazy(() => import('./pages/UnsubscribePage'));
@@ -89,6 +90,7 @@ function App() {
                     was reachable (see CLAUDE.md R37). */}
                     <Route path="/style"    element={<UserStylePage />} />
                     <Route path="/account"  element={<AccountPage />} />
+                    <Route path="/planner"  element={<PlannerPage />} />
 
                     <Route path="/data"     element={<DataPage />} />
                     <Route path="/gdpr"     element={<GdprPage />} />

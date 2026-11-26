@@ -19,6 +19,9 @@ import useDeviceType from '../hooks/useDeviceType';
 import { supabase } from '../lib/supabaseClient';
 import { captureEvent } from '../lib/posthog';
 import PlanSheet from './PlanSheet.jsx';
+import UpgradeFeatureDetails from './UpgradeFeatureDetails.jsx';
+import { featureFromPayload, planForFeature } from '../lib/upgradeFeatures.js';
+import { useUserPlan } from '../hooks/useUserPlan.js';
 
 async function startCheckout(plan) {
     try {
@@ -41,16 +44,21 @@ async function startCheckout(plan) {
     }
 }
 
-const UpgradeModal = ({ message, upgradeRequired = 'creator', reason = 'ai_ops', onClose }) => {
+const UpgradeModal = ({ message, upgradeRequired = 'creator', reason = 'ai_ops', feature: featureProp, code, onClose }) => {
     const { t } = useTranslation('editor');
+    const { t: tc } = useTranslation('common');
+    const { plan } = useUserPlan();
     const [loading, setLoading] = useState(false);
-    const nextPlanLabel = upgradeRequired === 'pro' ? 'Pro' : 'Creator';
+    // R172: name the feature that was refused, and offer the plan that has it.
+    const feature = featureFromPayload({ feature: featureProp, code, reason });
+    const targetPlan = (feature && planForFeature(feature, { upgradeTo: upgradeRequired, currentPlan: plan })) || upgradeRequired;
+    const nextPlanLabel = targetPlan === 'pro' ? 'Pro' : 'Creator';
     // Mobile: a bottom sheet with full-size buttons instead of a centered card.
     const { isMobile } = useDeviceType();
 
     const handleUpgrade = async () => {
         setLoading(true);
-        await startCheckout(upgradeRequired);
+        await startCheckout(targetPlan);
         // No setLoading(false) on success — window.location.href navigation
         // is about to replace this page; leaving the spinner on avoids a
         // flash back to the idle button during that navigation.
@@ -59,7 +67,7 @@ const UpgradeModal = ({ message, upgradeRequired = 'creator', reason = 'ai_ops',
 
     // Mobile: the plan sheet from the redesign (reset date, plan card).
     if (isMobile) {
-        return <PlanSheet open reason={reason} upgradeTo={upgradeRequired} onClose={onClose} />;
+        return <PlanSheet open reason={reason} plan={plan} upgradeTo={upgradeRequired} feature={featureProp} code={code} onClose={onClose} />;
     }
 
     return (
@@ -71,7 +79,7 @@ const UpgradeModal = ({ message, upgradeRequired = 'creator', reason = 'ai_ops',
             <div
                 role="dialog"
                 aria-modal="true"
-                className={isMobile ? "relative w-full overflow-hidden" : "relative w-full max-w-sm rounded-2xl overflow-hidden"}
+                className={isMobile ? "relative w-full overflow-hidden" : (feature ? "relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl" : "relative w-full max-w-sm rounded-2xl overflow-hidden")}
                 style={isMobile
                     ? { background: 'var(--bg-2)', borderTop: '1px solid var(--line-strong)', borderRadius: '20px 20px 0 0', paddingBottom: 'env(safe-area-inset-bottom)' }
                     : { background: 'var(--bg-2)', border: '0.5px solid var(--line-strong)' }}
@@ -103,10 +111,13 @@ const UpgradeModal = ({ message, upgradeRequired = 'creator', reason = 'ai_ops',
                         </div>
                         <div>
                             <h2 style={{ fontFamily: 'var(--f-sans)', fontSize: 15, fontWeight: 700, color: 'var(--fg)', lineHeight: 1.3 }}>
-                                {reason === 'paid_feature' ? (t('editingStyles.featureUpgradeHeading', 'Upgrade to unlock')) : t('quotaModal.heading')}
+                                {feature && feature !== 'aiOps' ? tc(`upgradeFeatures.${feature}.title`)
+                                    : reason === 'paid_feature' ? (t('editingStyles.featureUpgradeHeading', 'Upgrade to unlock')) : t('quotaModal.heading')}
                             </h2>
                             <p className="mt-1" style={{ fontFamily: 'var(--f-sans)', fontSize: isMobile ? 14 : 12, color: 'var(--fg-3)', lineHeight: 1.6 }}>
-                                {message || t('quotaModal.bodyFallback')}
+                                {feature && !['aiOps', 'autoTrial', 'projects'].includes(feature)
+                                    ? tc(`upgradeFeatures.${feature}.body`)
+                                    : (message || t('quotaModal.bodyFallback'))}
                             </p>
                             {isMobile && (
                                 <p className="mt-2" style={{ fontFamily: 'var(--f-sans)', fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.5 }}>
@@ -115,6 +126,12 @@ const UpgradeModal = ({ message, upgradeRequired = 'creator', reason = 'ai_ops',
                             )}
                         </div>
                     </div>
+
+                    {feature && (
+                        <div className="mb-5">
+                            <UpgradeFeatureDetails feature={feature} plan={targetPlan} compact showBody={false} />
+                        </div>
+                    )}
 
                     <div className="flex flex-col gap-2">
                         <button

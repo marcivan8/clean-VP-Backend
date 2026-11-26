@@ -13,10 +13,14 @@
  *   - video clips get a 9:16 crop centred on the speaker (the same
  *     fillFrameCrop the Reel style uses), unless the user set their own crop;
  *   - captions move into the platform's safe zone (above the bottom UI);
- *   - a transition on the very last clip is dropped (nothing comes after it).
+ *   - a transition on the very last clip is dropped (nothing comes after it);
+ *   - two people side by side in one wide shot (a duo scene analysis exists
+ *     for the asset): the host goes in the top half, the guest in the bottom
+ *     half (DuoSplit.js), and captions sit on the seam. `duo: false` turns it off.
  */
 
-import { computeReframePlan } from '../motion/LayoutPresets.js';
+import { computeReframePlan, sourceAspectOf } from '../motion/LayoutPresets.js';
+import { duoAnchorsFromScene, duoSplitFrames } from '../motion/DuoSplit.js';
 
 const EPS = 1e-3;
 
@@ -134,7 +138,71 @@ export function buildShortTimeline(tracks, short, opts = {}) {
     }
     if (lastVideo?.transition) delete lastVideo.transition;
 
-    return { tracks: sliced, duration, aspectRatio, reframed };
+    const duoSplit = opts.duo === false ? 0 : applyDuoSplit(sliced, {
+        frameAspect, assets: opts.assets, scenes: opts.sceneAnalysisByAsset,
+    });
+    if (duoSplit > 0) {
+        for (const track of sliced) {
+            for (const c of track.clips) if (isCaptionClip(c, track)) { c.y = DUO_CAPTION_Y; c.x = 50; c.position = undefined; }
+        }
+    }
+
+    return { tracks: sliced, duration, aspectRatio, reframed, duoSplit };
 }
 
-export default { sliceTimeline, buildShortTimeline };
+/** Caption height for the stacked split: on the seam between the halves. */
+export const DUO_CAPTION_Y = 50;
+export const DUO_TRACK_ID = 'track-short-duo';
+
+/**
+ * Stack the two speakers. For every base-track video clip whose asset has a
+ * usable duo analysis, adds two muted, framed copies of it (host on top,
+ * guest below) on an overlay track drawn under the short's other graphics.
+ * The base clip stays underneath, fully covered; it keeps the audio.
+ * Mutates `tracks`. Returns how many clips were split.
+ */
+export function applyDuoSplit(tracks, { frameAspect, assets = [], scenes = null } = {}) {
+    if (!scenes || typeof scenes !== 'object') return 0;
+    const base = (tracks || []).find(t => t.type === 'video');
+    if (!base) return 0;
+    const halves = [];
+    let split = 0;
+    for (const c of base.clips || []) {
+        if (c.type && c.type !== 'video') continue;
+        const anchors = duoAnchorsFromScene(scenes[c.assetId]);
+        if (!anchors) continue;
+        const frames = duoSplitFrames({ ...anchors, sourceAspect: sourceAspectOf(c, assets), frameAspect });
+        if (!frames) continue;
+        // The base is fully covered by the two halves: a background matte on it
+        // would be rendered for nothing. shortPolish skips camera moves on it.
+        c.duoSplit = true;
+        delete c.layerMask;
+        delete c.layerTarget;
+        const half = (frame, role) => ({
+            ...c,
+            id: `${c.id}-duo-${role}`,
+            type: 'video',
+            name: role === 'top' ? 'Host' : 'Guest',
+            frame,
+            fit: 'cover',
+            muted: true,
+            volume: 0,
+            animations: [],
+            keyframes: undefined,
+            virtualCam: undefined,
+            transition: undefined,
+            duoSplit: role,
+        });
+        halves.push(half(frames.top, 'top'), half(frames.bottom, 'bottom'));
+        split += 1;
+    }
+    if (split === 0) return 0;
+    const minOrder = Math.min(0, ...(tracks || []).filter(t => t.type === 'overlay' && Number.isFinite(Number(t.order))).map(t => Number(t.order)));
+    const firstOverlay = tracks.findIndex(t => t.type === 'overlay');
+    const track = { id: DUO_TRACK_ID, type: 'overlay', name: 'Split speakers', order: minOrder - 1, clips: halves };
+    if (firstOverlay >= 0) tracks.splice(firstOverlay, 0, track);
+    else tracks.push(track);
+    return split;
+}
+
+export default { sliceTimeline, buildShortTimeline, applyDuoSplit };

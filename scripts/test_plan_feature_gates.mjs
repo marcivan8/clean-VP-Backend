@@ -67,7 +67,7 @@ for (const r of ["get('/publications', authenticateUser, async", "delete('/publi
 
 console.log('\n§3 the browser shows the lock');
 const ds = code('../client/src/pages/DesignStudioPage.jsx');
-ok(/if \(plan !== 'pro'\) return <ProFeatureLock feature="designStudio"/.test(ds) && /return <DesignStudioEditor \/>/.test(ds), 'Design Studio renders the lock for every plan but Pro');
+ok(/if \(plan !== 'pro'\) return <ProFeatureLock feature="designStudio"/.test(ds) && /return <DesignProjectGate \/>/.test(ds), 'Design Studio renders the lock for every plan but Pro');
 const shorts = code('../client/src/components/ShortsPanel.jsx');
 ok(/canPublish = plan === 'pro'/.test(shorts) && /\{canPublish && <SocialPublisher/.test(shorts) && /canPublish \? <SocialPerformancePanel/.test(shorts), 'Shorts panel hides publishing and analytics below Pro');
 const share = code('../client/src/components/ShareDestinations.jsx');

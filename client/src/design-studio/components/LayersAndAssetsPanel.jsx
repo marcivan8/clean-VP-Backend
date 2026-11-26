@@ -139,8 +139,8 @@ export default function LayersAndAssetsPanel({
 
     const TABS = [
         { id: 'layers', label: 'Layers', icon: Layers },
-        { id: 'assets', label: 'Assets & Media', icon: FolderOpen },
-        { id: 'brandkit', label: 'Brand Kit', icon: Palette },
+        { id: 'assets', label: 'Assets & Media', short: 'Media', icon: FolderOpen },
+        { id: 'brandkit', label: 'Brand Kit', short: 'Brand', icon: Palette },
         { id: 'components', label: 'Components', icon: Component },
     ];
 
@@ -171,9 +171,11 @@ export default function LayersAndAssetsPanel({
             overflow: 'hidden',
             userSelect: 'none',
         }}>
-            {/* 1. Slim Left Icon Rail (48px) */}
+            {/* 1. Left rail. R170: each icon carries its name; an icon-only rail
+                hid the Components library (132 components and icons) from
+                people who did not hover the fourth icon. */}
             <div style={{
-                width: '48px',
+                width: '60px',
                 background: '#F8FAFC',
                 borderRight: '1px solid #E2E8F0',
                 display: 'flex',
@@ -199,10 +201,15 @@ export default function LayersAndAssetsPanel({
                                 }
                             }}
                             title={tab.label}
+                            aria-label={tab.label}
+                            aria-pressed={isActive && drawerExpanded}
                             style={{
                                 position: 'relative',
-                                width: '36px',
-                                height: '36px',
+                                width: '52px',
+                                minHeight: '46px',
+                                padding: '5px 0',
+                                flexDirection: 'column',
+                                gap: '3px',
                                 borderRadius: '8px',
                                 background: isActive ? '#FFFFFF' : 'transparent',
                                 color: isActive ? '#0B7C91' : '#64748B',
@@ -227,6 +234,7 @@ export default function LayersAndAssetsPanel({
                                 }} />
                             )}
                             <IconComp size={18} />
+                            <span style={{ fontSize: '9.5px', fontWeight: isActive ? 700 : 500, lineHeight: 1 }}>{tab.short || tab.label}</span>
                         </button>
                     );
                 })}

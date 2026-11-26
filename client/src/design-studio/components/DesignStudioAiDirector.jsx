@@ -18,8 +18,11 @@ import {
 } from 'lucide-react';
 import { executeDesignCommand } from '../../agent/DesignStudioCommandRegistry.js';
 import { authFetch } from '../../utils/authFetch.js';
+import { STARTER_COMPONENTS } from '../designSystem.js';
+import { applyDesignOperations, buildComponentCatalog, isBuildRequest } from '../designOperations.js';
 
 const QUICK_SUGGESTIONS = [
+    'Create a bold YouTube thumbnail: big two-line headline, my photo on the right, a red badge',
     'Remove the background',
     'Animate this design',
     'Make headline larger, push left',
@@ -45,6 +48,10 @@ export default function DesignStudioAiDirector({
     setBriefText,
     showToast,
     pushUndo,
+    format = null,
+    brandKit = null,
+    mediaAssets = [],
+    customComponents = [],
 }) {
     const [isExpanded, setIsExpanded] = useState(false);
     const [promptText, setPromptText] = useState('');
@@ -52,7 +59,7 @@ export default function DesignStudioAiDirector({
     const [history, setHistory] = useState([
         {
             role: 'assistant',
-            text: 'I can help you build, transform, and arrange vector layers, auto layout, and typography. Type a command or pick a suggestion.',
+            text: 'Describe a whole design ("create a launch thumbnail with…") and I will build it with your brand kit, components and images, or ask for one change ("make the headline bigger"). Every result is one undo.',
         },
     ]);
     const [statusMessage, setStatusMessage] = useState(null);
@@ -87,86 +94,71 @@ export default function DesignStudioAiDirector({
             showToast,
         };
 
-        // Tier 1: Fast local parser execution (0ms)
-        const localResult = executeDesignCommand(textToRun, ctx);
-        const hasUnrecognized = Array.isArray(localResult.results) && localResult.results.some(r => !r.success || /unrecognized/i.test(r.message || ''));
+        // R170: a whole brief ("create a thumbnail for…") goes straight to the
+        // AI in build mode. The local parser understands single commands; it
+        // used to claim a long brief whenever it recognised every clause, and
+        // the AI was never asked.
+        const build = isBuildRequest(textToRun);
 
-        if (localResult.success && !hasUnrecognized) {
-            setHistory(prev => [
-                ...prev,
-                {
-                    role: 'assistant',
-                    text: localResult.message,
-                    success: true,
-                },
-            ]);
-            setStatusMessage({ type: 'success', text: localResult.message });
-            setTimeout(() => setStatusMessage(null), 5000);
-            return;
+        // Tier 1: fast local parser for single edits (instant, free).
+        if (!build) {
+            const localResult = executeDesignCommand(textToRun, ctx);
+            const hasUnrecognized = Array.isArray(localResult.results) && localResult.results.some(r => !r.success || /unrecognized/i.test(r.message || ''));
+            if (localResult.success && !hasUnrecognized) {
+                setHistory(prev => [...prev, { role: 'assistant', text: localResult.message, success: true }]);
+                setStatusMessage({ type: 'success', text: localResult.message });
+                setTimeout(() => setStatusMessage(null), 5000);
+                return;
+            }
         }
 
-        // Tier 2: AI / LLM Design Copilot Fallback (supports complex & creative instructions)
+        // Tier 2: the AI art director, with the real format, brand kit,
+        // component library, icons and uploads.
         setIsExecuting(true);
-        setStatusMessage({ type: 'info', text: 'AI is designing...' });
-
+        setStatusMessage({ type: 'info', text: build ? 'AI is designing the whole composition...' : 'AI is designing...' });
+        const components = [...(Array.isArray(customComponents) ? customComponents : []), ...STARTER_COMPONENTS];
+        const media = (Array.isArray(mediaAssets) ? mediaAssets : []).filter(m => m?.url);
+        const fail = (text) => {
+            setHistory(prev => [...prev, { role: 'assistant', text, success: false }]);
+            setStatusMessage({ type: 'error', text });
+        };
         try {
             const res = await authFetch('/api/ai/design-copilot', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     prompt: textToRun,
+                    mode: build ? 'build' : 'edit',
                     layers: Array.isArray(layers) ? layers : [],
                     selectedLayerId: selectedLayerIds[0] || null,
-                    format: selectedFormat || { w: 1280, h: 720 },
+                    format: { w: format?.w || 1280, h: format?.h || 720, id: format?.id || selectedFormat },
+                    brandKit,
+                    catalog: buildComponentCatalog(components),
+                    media: media.map(m => ({ id: m.id, name: m.name })),
                 }),
             });
-
             const data = await res.json().catch(() => null);
-            if (!res.ok || !data?.success) {
-                const fallbackMsg = data?.error || localResult.message || 'Could not understand command.';
-                setHistory(prev => [...prev, { role: 'assistant', text: fallbackMsg, success: false }]);
-                setStatusMessage({ type: 'error', text: fallbackMsg });
+            if (res.status === 402) { fail(data?.message || 'You have used your AI operations for this month.'); return; }
+            if (!res.ok || !data?.success) { fail(data?.error || 'The AI could not design that. Try describing it differently.'); return; }
+
+            const result = applyDesignOperations(layers, data.operations, { components, media, format, mode: build ? 'build' : 'edit' });
+            if (result.applied === 0) {
+                // R30: never "done" over an unchanged canvas.
+                fail(`Nothing was changed. ${result.skipped.length ? `The AI proposed ${result.skipped.slice(0, 3).join(', ')}, which could not be applied.` : 'The AI did not propose a usable change.'}`);
                 return;
             }
-
-            // Apply operations returned by LLM
-            if (Array.isArray(data.operations) && data.operations.length > 0 && typeof setLayers === 'function') {
-                setLayers(prev => {
-                    let updated = [...(Array.isArray(prev) ? prev : [])];
-                    for (const op of data.operations) {
-                        if (op.op === 'add_layer' && op.layer) {
-                            const newId = op.layer.id || `layer_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
-                            updated = [...updated, { ...op.layer, id: newId }];
-                            if (typeof setSelectedLayerIds === 'function') {
-                                setSelectedLayerIds([newId]);
-                            }
-                        } else if (op.op === 'update_layer' && (op.layerId || op.layer?.id)) {
-                            const targetId = op.layerId || op.layer?.id;
-                            const patch = op.patch || op.layer || {};
-                            updated = updated.map(l => l.id === targetId ? { ...l, ...patch } : l);
-                        } else if (op.op === 'delete_layer' && (op.layerId || op.layer?.id)) {
-                            const targetId = op.layerId || op.layer?.id;
-                            updated = updated.filter(l => l.id !== targetId);
-                        }
-                    }
-                    return updated;
-                });
-            }
-
-            const replyMessage = data.message || 'Updated canvas layout.';
+            if (typeof setLayers === 'function') setLayers(result.layers);
+            if (typeof setSelectedLayerIds === 'function' && result.selectIds.length) setSelectedLayerIds(result.selectIds.slice(0, 40));
+            const note = result.skipped.length ? ` Skipped: ${result.skipped.slice(0, 3).join(', ')}.` : '';
+            const replyMessage = `${data.message || 'Updated the design.'}${note} One undo reverts it.`;
             setHistory(prev => [...prev, { role: 'assistant', text: replyMessage, success: true }]);
             setStatusMessage({ type: 'success', text: replyMessage });
-            if (typeof showToast === 'function') {
-                showToast(replyMessage);
-            }
+            if (typeof showToast === 'function') showToast(data.message || 'Updated the design.');
         } catch (err) {
-            console.error('[DesignStudioAiDirector] AI fallback error:', err.message);
-            const fallbackMsg = localResult.message || 'Could not execute design instruction.';
-            setHistory(prev => [...prev, { role: 'assistant', text: fallbackMsg, success: false }]);
-            setStatusMessage({ type: 'error', text: fallbackMsg });
+            console.error('[DesignStudioAiDirector] AI error:', err.message);
+            fail('The AI could not be reached. Check your connection and try again.');
         } finally {
             setIsExecuting(false);
-            setTimeout(() => setStatusMessage(null), 5000);
+            setTimeout(() => setStatusMessage(null), 6000);
         }
     };
 

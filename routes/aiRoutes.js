@@ -10,6 +10,7 @@ const {
     reorderClipsHandler,
     detectRepeatedTakesHandler,
     designCopilotHandler,
+    designVariationsHandler,
 } = require('../controllers/aiAgentController');
 const { authenticateUser } = require('../middleware/auth');
 const { aiGate, requirePlan } = require('../middleware/usageGate');
@@ -27,6 +28,7 @@ router.post('/smart-cleanup',      authenticateUser, aiGate, smartCleanupHandler
 router.post('/reorder-clips',      authenticateUser, aiGate, reorderClipsHandler);
 router.post('/detect-repeated-takes', authenticateUser, aiGate, detectRepeatedTakesHandler);
 router.post('/design-copilot',     authenticateUser, designStudioGate, aiGate, designCopilotHandler);
+router.post('/design-variations',  authenticateUser, designStudioGate, aiGate, designVariationsHandler); // R170
 
 module.exports = router;
 

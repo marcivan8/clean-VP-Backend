@@ -3059,6 +3059,7 @@ export class VideoEditorTools {
                     const { EventBus, EVENT_TYPES } = await import('./EventBus.js');
                     EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                         reason: 'paid_feature',
+                        feature: 'stock',
                         message: 'Stock footage is available on Creator and Pro plans.',
                         upgradeRequired: 'creator',
                     });
