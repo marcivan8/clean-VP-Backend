@@ -140,16 +140,17 @@ const ChatComposer = ({ inputRef, placeholder, busy, onSend, onStop, onKeyDown, 
                 <div className="hidden md:flex items-center gap-1.5 min-w-0">
                     <EditingStylePicker disabled={busy} />
                 </div>
-                <div className="ml-auto flex items-center gap-2.5">
-                    {newlineHint && !busy && (
-                        <span className="text-[10px] opacity-30 hidden 2xl:inline" style={{ color: 'var(--fg)', fontFamily: 'var(--f-mono)' }}>{newlineHint}</span>
-                    )}
+                {/* The newline hint used to sit here, between the style picker and
+                    the send button. The panel is narrow at any screen size, so on
+                    wide screens (where it was shown) it landed on top of the
+                    Normal/Auto toggle. It is the send button's tooltip now. */}
+                <div className="ml-auto flex items-center gap-2.5 shrink-0">
                     {busy ? (
                         <button type="button" onClick={onStop} className="chat-composer__send chat-composer__send--stop" aria-label={t('assistant.stop')} title={t('assistant.stop')}>
                             <Square className="w-3.5 h-3.5" fill="currentColor" />
                         </button>
                     ) : (
-                        <button type="button" onClick={onSend} className="chat-composer__send" aria-label={t('assistant.send')} title={t('assistant.send')}>
+                        <button type="button" onClick={onSend} className="chat-composer__send" aria-label={t('assistant.send')} title={newlineHint ? `${t('assistant.send')} (${newlineHint})` : t('assistant.send')}>
                             <ArrowUp className="w-4 h-4" strokeWidth={2.4} />
                         </button>
                     )}

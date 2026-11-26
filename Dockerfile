@@ -4,6 +4,10 @@ WORKDIR /app/client
 COPY client/package*.json ./
 RUN npm ci
 COPY client/ ./
+# client/src/index.css and client/src/designSystem.js import from
+# "../../Vibed Design System/", i.e. /app/Vibed Design System here. Without
+# this copy the build fails: ENOENT '../../Vibed Design System/styles.css'.
+COPY ["Vibed Design System/", "/app/Vibed Design System/"]
 
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_ANON_KEY
