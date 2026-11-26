@@ -15,7 +15,17 @@ ML_Dataset/
 ML_Models/
 _to_delete/
 Claude outputs/
-Vibed Design System/
+# The client imports the design system's stylesheet and core components
+# from OUTSIDE client/ (client/src/index.css, client/src/designSystem.js), so
+# exactly those parts must reach the build; the rest (logo explorations, the
+# bundle, previews) stays out.
+Vibed Design System/*
+!Vibed Design System/styles.css
+!Vibed Design System/tokens
+!Vibed Design System/fonts
+!Vibed Design System/components
+Vibed Design System/components/*
+!Vibed Design System/components/core
 vibed-design-extracted/
 *.zip
 silent_video.mp4

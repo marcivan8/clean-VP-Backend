@@ -388,7 +388,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                 </div>
 
                                 {/* FPS / Format — compact row */}
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                         <Label>{t('exportModal.labelFrameRate')}</Label>
                                         <div style={{
@@ -409,19 +409,29 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                         <Label>{t('exportModal.labelFormat')}</Label>
-                                        <div style={{
-                                            display: 'flex', gap: 2,
-                                            background: 'var(--glass)',
-                                            border: '0.5px solid var(--line)',
-                                            borderRadius: 'var(--r-sm)',
-                                            padding: 3,
-                                        }}>
-                                            {[['mp4', 'MP4'], ['webm', 'WEBM'], ['png-sequence', 'PNG sequence'], ['transparent-png-sequence', 'Alpha PNG'], ['transparent-mov', 'Alpha MOV'], ['transparent-webm', 'Alpha WebM']].map(([fmt, label]) => (
-                                                <button key={fmt} onClick={() => setSettings(s => ({ ...s, format: fmt }))} style={pill(settings.format === fmt)}>
-                                                    {label}
-                                                </button>
-                                            ))}
-                                        </div>
+                                        {/* Two labelled rows of three: the six formats used to share one
+                                            row at half the modal's width, which wrapped every label. */}
+                                        {[
+                                            { key: 'video', label: t('exportModal.formatGroupVideo', 'Video'), items: [['mp4', 'MP4'], ['webm', 'WebM'], ['png-sequence', t('exportModal.formatPngSequence', 'PNG sequence')]] },
+                                            { key: 'alpha', label: t('exportModal.formatGroupAlpha', 'Transparent (graphics and captions only)'), items: [['transparent-png-sequence', 'Alpha PNG'], ['transparent-mov', 'Alpha MOV'], ['transparent-webm', 'Alpha WebM']] },
+                                        ].map(group => (
+                                            <div key={group.key} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                                                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9.5, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--fg-4)' }}>{group.label}</span>
+                                                <div role="radiogroup" aria-label={group.label} style={{
+                                                    display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 2,
+                                                    background: 'var(--glass)',
+                                                    border: '0.5px solid var(--line)',
+                                                    borderRadius: 'var(--r-sm)',
+                                                    padding: 3,
+                                                }}>
+                                                    {group.items.map(([fmt, label]) => (
+                                                        <button key={fmt} role="radio" aria-checked={settings.format === fmt} onClick={() => setSettings(s => ({ ...s, format: fmt }))} style={{ ...pill(settings.format === fmt), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', padding: '8px 4px' }}>
+                                                            {label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
                                         {['transparent-png-sequence', 'transparent-mov', 'transparent-webm'].includes(settings.format) && (
                                             <p style={{ margin: 0, fontSize: 10, lineHeight: 1.4, color: 'var(--fg-3)' }}>
                                                 {settings.format === 'transparent-mov'

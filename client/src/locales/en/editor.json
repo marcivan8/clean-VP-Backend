@@ -52,7 +52,10 @@
     "engineCinematic": "Cinematic",
     "engineChromiumRender": "Chromium render",
     "beta": "BETA",
-    "revideoWarning": "Renders through a real browser engine for more accurate fonts/effects. Requires the Lambda render worker to be configured on this deployment — if it isn't, you'll see an error and can fall back to Standard."
+    "revideoWarning": "Renders through a real browser engine for more accurate fonts/effects. Requires the Lambda render worker to be configured on this deployment — if it isn't, you'll see an error and can fall back to Standard.",
+    "formatGroupVideo": "Video",
+    "formatGroupAlpha": "Transparent (graphics and captions only)",
+    "formatPngSequence": "PNG sequence"
   },
   "settings": {
     "title": "Settings",

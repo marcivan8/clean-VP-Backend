@@ -1357,12 +1357,12 @@ section { padding: 96px 0; position: relative; }
 }
 /* Normal | Auto, beside the style button. */
 .chat-composer__mode {
-  display: flex; align-items: center; height: 32px; padding: 2px; gap: 2px;
+  display: flex; align-items: center; height: 32px; padding: 2px; gap: 2px; flex-shrink: 0;
   border-radius: 999px; border: 1px solid var(--line);
   background: color-mix(in oklch, var(--fg) 4%, transparent);
 }
 .chat-composer__mode-btn {
-  display: inline-flex; align-items: center; gap: 4px; height: 100%;
+  display: inline-flex; align-items: center; gap: 4px; height: 100%; white-space: nowrap;
   padding: 0 11px; border-radius: 999px; font: 500 11px var(--f-sans);
   transition: background 0.12s ease, color 0.12s ease;
 }

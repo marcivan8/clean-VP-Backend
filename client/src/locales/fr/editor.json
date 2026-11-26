@@ -52,7 +52,10 @@
     "engineCinematic": "Cinématique",
     "engineChromiumRender": "Rendu Chromium",
     "beta": "BÊTA",
-    "revideoWarning": "Effectue le rendu via un vrai moteur de navigateur pour des polices/effets plus fidèles. Nécessite que le worker de rendu Lambda soit configuré sur ce déploiement — sinon, une erreur s'affichera et vous pourrez revenir au mode Standard."
+    "revideoWarning": "Effectue le rendu via un vrai moteur de navigateur pour des polices/effets plus fidèles. Nécessite que le worker de rendu Lambda soit configuré sur ce déploiement — sinon, une erreur s'affichera et vous pourrez revenir au mode Standard.",
+    "formatGroupVideo": "Vidéo",
+    "formatGroupAlpha": "Transparent (graphismes et sous-titres seuls)",
+    "formatPngSequence": "Séquence PNG"
   },
   "settings": {
     "title": "Paramètres",
