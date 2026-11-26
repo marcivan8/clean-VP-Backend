@@ -117,7 +117,12 @@ function compileCaptionEntry(entry, ctx) {
 
     const escapedFont = ctx.escapePath(ctx.fontFile);
     const mainColor = parseColor(entry.style.color || '#FACC15');
-    const strokeWidth = entry.style.stroke?.width ?? 0;
+    // R174: drawtext's border lies entirely OUTSIDE the glyph, while the
+    // preview's outline is centred on it with the inside hidden under the fill
+    // (paint-order: stroke fill), so only half of it shows. Half the width
+    // here is the same visible outline.
+    const cssStrokeWidth = Number(entry.style.stroke?.width) || 0;
+    const strokeWidth = cssStrokeWidth > 0 ? Math.max(1, Math.round(cssStrokeWidth / 2)) : 0;
     const strokeColor = strokeWidth > 0 ? parseColor(entry.style.stroke.color || '#000000') : null;
 
     // Glow uses the TEXT'S OWN colour, matching MotionResolver.resolvedToCSS

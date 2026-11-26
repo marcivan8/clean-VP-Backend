@@ -29,6 +29,14 @@
  */
 
 export const LAYOUT_PRESETS = ['split', 'fullscreen', 'pip'];
+/**
+ * Every preset drawn as a framed cover box. LAYOUT_PRESETS is what a user can
+ * pick; 'cover' (the short's dashboard speaker box) and 'duo' (the stacked
+ * two-speaker split, DuoSplit.js) are placed by code. 'cover' frames were
+ * written by shortPolish but never matched here, so that box drew unframed.
+ * Keep in sync with Compositor.js's LAYOUT_FRAME_PRESETS.
+ */
+export const FRAMED_PRESETS = [...LAYOUT_PRESETS, 'cover', 'duo'];
 
 /** Approximate head position inside a person-segmentation box. */
 const HEAD_FROM_TOP = 0.2;
@@ -80,7 +88,7 @@ export function frameForPreset(preset, { frameAspect, sourceAspect = null, corne
 /** True when a clip is laid out by a preset (and must be drawn as a cover box). */
 export function hasLayoutFrame(clip) {
     const f = clip?.frame;
-    return !!(f && LAYOUT_PRESETS.includes(f.preset)
+    return !!(f && FRAMED_PRESETS.includes(f.preset)
         && [f.x, f.y, f.w, f.h].every(Number.isFinite) && f.w > 0 && f.h > 0);
 }
 
@@ -183,17 +191,19 @@ export function fillFrameCrop({ bboxTrack = null, sourceStart = 0, duration = In
  *   later call can tell "this crop is ours" from a crop set some other way.
  * @returns {{work:Array<{trackId:string, clipId:string, crop:object|null}>, subjectAwareCount:number, skippedCount:number}}
  */
+/** Width / height of a clip's source video, or null when unknown. */
+export function sourceAspectOf(c, assets = []) {
+    const asset = (assets || []).find(a => a.id === c?.assetId) || null;
+    const r = c?.metadata?.resolution || asset?.resolution || null;
+    if (r && r.w > 0 && r.h > 0) return r.w / r.h;
+    if (asset && asset.width > 0 && asset.height > 0) return asset.width / asset.height;
+    const lm = c?.layerMask;
+    if (lm && lm.sourceWidth > 0 && lm.sourceHeight > 0) return lm.sourceWidth / lm.sourceHeight;
+    return null;
+}
+
 export function computeReframePlan(tracks, { frameAspect, assets = [], aspectRatio } = {}) {
-    const assetOf = (c) => (assets || []).find(a => a.id === c?.assetId) || null;
-    const aspectOf = (c) => {
-        const r = c?.metadata?.resolution || assetOf(c)?.resolution || null;
-        if (r && r.w > 0 && r.h > 0) return r.w / r.h;
-        const a = assetOf(c);
-        if (a && a.width > 0 && a.height > 0) return a.width / a.height;
-        const lm = c?.layerMask;
-        if (lm && lm.sourceWidth > 0 && lm.sourceHeight > 0) return lm.sourceWidth / lm.sourceHeight;
-        return null;
-    };
+    const aspectOf = (c) => sourceAspectOf(c, assets);
     const work = [];
     let subjectAwareCount = 0, skippedCount = 0;
     for (const t of (tracks || []).filter(tr => tr.type === 'video')) {
@@ -227,14 +237,31 @@ export function computeReframePlan(tracks, { frameAspect, assets = [], aspectRat
  */
 export function frameToCss(frame) {
     const pct = (v) => `${Math.round(v * 100000) / 1000}%`;
+    const fx = clamp(Number(frame.focusX ?? 0.5), 0, 1);
+    const fy = clamp(Number(frame.focusY ?? 0.5), 0, 1);
+    const zoom = frameZoom(frame);
+    // zoom > 1: the media element is `zoom` times the box and shifted by
+    // (zoom - 1) * focus, so the source moves by (scaledSize - boxSize) * focus
+    // in total -- exactly the export's scale(box * zoom, cover) + crop(box at
+    // focus) (CompositorCompiler).
+    const zoomed = zoom > 1
+        ? { position: 'absolute', maxWidth: 'none', left: pct(-(zoom - 1) * fx), top: pct(-(zoom - 1) * fy) }
+        : {};
     return {
         box: { left: pct(frame.x), top: pct(frame.y), width: pct(frame.w), height: pct(frame.h), overflow: 'hidden' },
         media: {
-            width: '100%', height: '100%', display: 'block',
+            width: pct(zoom), height: pct(zoom), display: 'block',
             objectFit: 'cover',
-            objectPosition: `${pct(clamp(Number(frame.focusX ?? 0.5), 0, 1))} ${pct(clamp(Number(frame.focusY ?? 0.5), 0, 1))}`,
+            objectPosition: `${pct(fx)} ${pct(fy)}`,
+            ...zoomed,
         },
     };
 }
 
-export default { LAYOUT_PRESETS, frameForPreset, hasLayoutFrame, splitSpeakerCrop, frameToCss };
+/** A frame's zoom past cover, 1..4 (1 when absent). */
+export function frameZoom(frame) {
+    const z = Number(frame?.zoom);
+    return Number.isFinite(z) && z > 1 ? Math.min(4, z) : 1;
+}
+
+export default { LAYOUT_PRESETS, FRAMED_PRESETS, frameForPreset, hasLayoutFrame, splitSpeakerCrop, frameToCss, frameZoom };

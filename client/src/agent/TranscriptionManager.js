@@ -197,6 +197,7 @@ class TranscriptionManagerClass {
                     // IDELayout listens on to show a real upgrade modal.
                     EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                         reason: quotaReason(errorData),
+                        code: errorData?.error,
                         message: errorData?.message || "You've used all your AI operations this month.",
                         upgradeRequired: errorData?.upgradeRequired || 'creator',
                     });

@@ -67,7 +67,7 @@ import { MAX_MOTION_BLUR_SAMPLES } from './MotionLimits.js';
 // imported: the regression suites load this file by concatenating a fixed list
 // of motion modules, and scripts/test_layout_presets.mjs checks the two stay
 // identical.
-const LAYOUT_FRAME_PRESETS = ['split', 'fullscreen', 'pip'];
+const LAYOUT_FRAME_PRESETS = ['split', 'fullscreen', 'pip', 'cover', 'duo'];
 function hasLayoutFrame(clip) {
     const f = clip?.frame;
     return !!(f && LAYOUT_FRAME_PRESETS.includes(f.preset)
@@ -817,6 +817,8 @@ export function buildCompositionPlan(tracks, opts = {}) {
                     mode: 'cover',
                     focusX: Math.max(0, Math.min(1, Number(f.focusX ?? 0.5))),
                     focusY: Math.max(0, Math.min(1, Number(f.focusY ?? 0.5))),
+                    // Cover past the box (DuoSplit.js); 1 = plain cover.
+                    ...(Number(f.zoom) > 1 ? { zoom: Math.min(4, Number(f.zoom)) } : {}),
                     preset: f.preset,
                 };
             }

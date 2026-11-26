@@ -255,8 +255,8 @@ await check('Shorts tab: mounted, exports through the normal path with a per-sho
     assert.match(ide, /if \(!override\) saveActiveExport/);
     const panel = read('client/src/components/ShortsPanel.jsx');
     // R92 round C: the panel goes through the finisher, which builds the short's own timeline.
-    assert.match(panel, /finishShort\(useTimelineStore\.getState\(\), short, \{ polish, popOut, sfx \}\)/);
-    assert.match(read('client/src/agent/shortFinisher.js'), /buildShortTimeline\(state\.tracks, short, \{ assets: state\.assets, profile, pad \}\)/);
+    assert.match(panel, /finishShort\(useTimelineStore\.getState\(\), short, \{ polish, popOut, sfx(?:, duo)? \}\)/);
+    assert.match(read('client/src/agent/shortFinisher.js'), /buildShortTimeline\(state\.tracks, short, \{\s*assets: state\.assets, profile(?:: platformProfile)?, pad[,\s]/);
     assert.match(panel, /platform: profile\.exportPreset/);
     assert.match(read('client/src/hooks/useSupabasePersistence.js'), /state\.tracks, state\.editingStyle, state\.shorts/);
 });

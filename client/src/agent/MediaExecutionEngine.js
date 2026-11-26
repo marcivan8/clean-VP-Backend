@@ -38,7 +38,8 @@ import { EventBus, EVENT_TYPES } from './EventBus.js';
 // R58 — Motion Graphics engine. Caption grouping now preserves per-word
 // timings instead of collapsing them to a line of text; see
 // groupWordsIntoCaptions below and client/src/motion/CaptionModel.js.
-import { groupWordsIntoSegments, stylePackToClipFields } from '../motion/CaptionModel.js';
+import { groupWordsIntoSegments, stylePackToClipFields, CAPTION_STYLE_PACKS } from '../motion/CaptionModel.js';
+import { getEditingStyle } from './EditingStyles.js';
 import { STYLE_RECIPES, recipeTransitionForCut, pickTransitionCuts } from '../motion/StyleRecipes.js';
 import { TRANSITION_DEFAULT_DURATION } from '../motion/TransitionFX.js';
 import { autoEmphasizeCaptions } from '../utils/captionEmphasis.js';
@@ -1148,6 +1149,29 @@ export class MediaExecutionEngine {
         return { ok: true, baked: true, people: baked.bboxTrack.length > 0 };
     }
 
+
+    /**
+     * R173: captions added while the Reel editing style is picked get that
+     * style's caption look (Big Words) and their key words, in the same undo
+     * step as adding them. Captions that already carry a pack (kept from an
+     * earlier style, see addCaptionClips) are left as they are.
+     */
+    _applyStyleCaptionLook() {
+        try {
+            const st = useTimelineStore.getState();
+            const packId = getEditingStyle(st.editingStyle)?.captionPack;
+            if (!packId || !CAPTION_STYLE_PACKS[packId]) return false;
+            const clips = (st.tracks || []).filter(t => t.type === 'text').flatMap(t => t.clips || []);
+            if (clips.length === 0 || clips.some(c => c.captionStyle?.packId)) return false;
+            const fields = stylePackToClipFields(packId);
+            if (!fields) return false;
+            st.applyCaptionUpdate(fields, { clipId: clips[0].id, scope: 'global', skipHistory: true });
+            return true;
+        } catch (err) {
+            console.error('[MediaExecutionEngine] style caption look failed:', err);
+            return false;
+        }
+    }
     _findClipAndTrack(store, clipId) {
         if (!clipId) return { trackId: null, clipId: null };
         for (const track of (store.tracks || [])) {
@@ -2005,7 +2029,12 @@ export class MediaExecutionEngine {
 
             // ── R90 (A7): one-click style recipes ────────────────────────────
             case 'apply_style_recipe': {
-                const baseRecipe = STYLE_RECIPES[args.recipeId];
+                const recipeBase = STYLE_RECIPES[args.recipeId];
+                // R173: the editing style's own caption look (Reel → Big Words),
+                // keyword emphasis on so the look has its words.
+                const baseRecipe = recipeBase && args.captionPack && CAPTION_STYLE_PACKS[args.captionPack]
+                    ? { ...recipeBase, captionPack: args.captionPack, keywords: true }
+                    : recipeBase;
                 if (!baseRecipe) return { action, success: false, message: `Which style recipe? Choose one: ${Object.keys(STYLE_RECIPES).join(', ')} (for example "apply the punchy recipe").` };
                 let recipe = baseRecipe;
                 let referenceStyle = null;
@@ -4624,6 +4653,7 @@ export class MediaExecutionEngine {
                     if (response.status === 402 || body?.error === 'AI_OPS_LIMIT') {
                         EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                             reason: quotaReason(body),
+                            code: body?.error,
                             message: body?.message || "You've used all your AI operations this month.",
                             upgradeRequired: body?.upgradeRequired || 'creator',
                         });
@@ -4689,6 +4719,7 @@ export class MediaExecutionEngine {
         }
         console.log(`[MediaExecutionEngine] 💬 captions: adding ${captions.length} caption clips`);
         store.addCaptionClips(captions, { skipHistory: !!opts.skipHistory, replaceRange: range });
+        this._applyStyleCaptionLook();
 
         // Files still without words, not counting ones that simply have no speech.
         const missing = Math.max(0, sources.filter(s => !isDone(s.key)).length - noSpeech);
@@ -4863,6 +4894,7 @@ export class MediaExecutionEngine {
                     );
                     console.log(`[MediaExecutionEngine] 💬 autoCaptions (short-circuit): adding ${captions.length} caption clips`);
                     store.addCaptionClips(captions);
+                    this._applyStyleCaptionLook();
                 }
 
                 return { engine: 'api', success: true, endpoint, result: { text: words.map(w => w.word).join(' '), words } };
@@ -4990,6 +5022,7 @@ export class MediaExecutionEngine {
                         const upgrade = errorBody.upgradeRequired ? ` Upgrade to ${errorBody.upgradeRequired} to continue.` : '';
                         EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                             reason: quotaReason(errorBody),
+                            code: errorBody?.error,
                             message: msg,
                             upgradeRequired: errorBody.upgradeRequired || 'creator',
                         });
@@ -5142,6 +5175,7 @@ export class MediaExecutionEngine {
                     );
                     console.log(`[MediaExecutionEngine] 💬 autoCaptions: adding ${captions.length} caption clips`);
                     store.addCaptionClips(captions);
+                    this._applyStyleCaptionLook();
                 } else {
                     console.warn('[MediaExecutionEngine] ⚠️ autoCaptions: no word timestamps returned — captions cannot be placed');
                 }

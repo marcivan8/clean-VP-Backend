@@ -527,12 +527,16 @@ export class EditPlanner {
                 ]);
             }
             case 'apply_style_recipe': {
+                const activeStyle = getEditingStyle(useTimelineStore.getState().editingStyle);
                 const recipeId = recipeFromText(intent.originalPrompt)
                     // R91: "apply my style" → the recipe of the style picked under the chat box.
-                    || getEditingStyle(useTimelineStore.getState().editingStyle)?.recipeId
+                    || activeStyle?.recipeId
                     || null;
+                // R173: the style's own caption look (Reel → Big Words) replaces
+                // the recipe's when the recipe IS that style's recipe.
+                const captionPack = activeStyle?.captionPack && recipeId === activeStyle.recipeId ? activeStyle.captionPack : undefined;
                 return this.buildPlan(planId, 'apply_style_recipe', [
-                    { step_id: 'step_1', action: 'apply_style_recipe', args: { recipeId }, reason: recipeId ? `Apply the ${recipeId} style recipe` : 'Apply a style recipe' },
+                    { step_id: 'step_1', action: 'apply_style_recipe', args: { recipeId, ...(captionPack ? { captionPack } : {}) }, reason: recipeId ? `Apply the ${recipeId} style recipe` : 'Apply a style recipe' },
                 ]);
             }
             case 'add_template': {

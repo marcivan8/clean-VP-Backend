@@ -31,7 +31,7 @@ const accounts = require('../services/social/accounts');
 const { safeReturnTo } = require('../services/social/returnTo');
 const { supabaseAdmin } = require('../config/database');
 const { enqueuePublication, removePublicationJob } = require('../services/social/publicationQueue');
-const { aiGate, requirePlan } = require('../middleware/usageGate');
+const { aiGate, requirePlan, getUserPlan } = require('../middleware/usageGate');
 
 // Social publishing and post analytics are Pro features (R104). The gate is on
 // everything that STARTS something: connecting an account, scheduling a post,
@@ -44,23 +44,20 @@ const { executeChatCompletionWithFailover } = require('../services/motionProvide
 const storageConfig = require('../config/storage');
 const socialAnalytics = require('../services/social/analytics');
 const { accessTokenFor } = require('../services/social/accessToken');
+const { scheduleOutOfRange, objectPathFromMediaUrl } = require('../services/social/scheduleMedia');
 
 const router = express.Router();
 const PUBLICATION_TABLE = 'social_publications';
 
-async function ownedPublicMediaUrl(value, userId, scheduleMs) {
+// A signed read URL for one of the user's own exports, valid until 12 h after
+// the scheduled time. Meta needs a server-fetchable URL; editor media endpoints
+// require a user cookie and cannot be fetched by Instagram's media processor.
+async function signExportForSchedule(objectPath, scheduleMs) {
     try {
-        const url = new URL(value, 'https://vibed.invalid');
-        const pathPrefix = `/api/proxy/gcs-media/exports/${userId}/`;
-        if (!url.pathname.startsWith(pathPrefix)) return null;
-        if (!storageConfig.bucket) return null;
-        const objectPath = decodeURIComponent(url.pathname.slice('/api/proxy/gcs-media/'.length));
-        if (objectPath.includes('..') || objectPath.includes('\\')) return null;
+        if (!objectPath || !storageConfig.bucket) return null;
         const file = storageConfig.bucket.file(objectPath);
         const [exists] = await file.exists();
         if (!exists) return null;
-        // Meta needs a server-fetchable URL; editor media endpoints require a
-        // user cookie and cannot be fetched by Instagram's media processor.
         const expires = scheduleMs + 12 * 60 * 60 * 1000;
         if (expires > Date.now() + 7 * 24 * 60 * 60 * 1000) return null;
         const [signedUrl] = await file.getSignedUrl({ version: 'v4', action: 'read', expires });
@@ -68,6 +65,26 @@ async function ownedPublicMediaUrl(value, userId, scheduleMs) {
     } catch {
         return null;
     }
+}
+
+async function ownedPublicMediaUrl(value, userId, scheduleMs) {
+    return signExportForSchedule(objectPathFromMediaUrl(value, { userId }), scheduleMs);
+}
+
+// One publication row as the client sees it.
+function publicationShape(row, now = Date.now()) {
+    return {
+        id: row.id, provider: row.provider, title: row.title, caption: row.caption, shortId: row.source_short_id,
+        scheduledAt: row.scheduled_at, publishedAt: row.published_at || null, status: row.status,
+        failureCode: row.failure_code,
+        // Marked done by the user after posting it by hand: no provider id, so
+        // there is nothing to read metrics from.
+        postedManually: row.status === 'published' && !row.provider_post_id,
+        reminderDue: row.status === 'scheduled' && !row.reminder_seen_at
+            && new Date(row.scheduled_at).getTime() - now <= 24 * 60 * 60 * 1000
+            && new Date(row.scheduled_at).getTime() > now,
+        createdAt: row.created_at,
+    };
 }
 
 // Generate editable copy tailored to the selected network. This is an AI
@@ -115,14 +132,44 @@ router.get('/publications', authenticateUser, async (req, res) => {
         return res.status(500).json({ error: 'PUBLICATIONS_UNAVAILABLE' });
     }
     const now = Date.now();
-    res.json({ publications: (data || []).map(row => ({
-        id: row.id, provider: row.provider, title: row.title, caption: row.caption, shortId: row.source_short_id,
-        scheduledAt: row.scheduled_at, status: row.status, failureCode: row.failure_code,
-        reminderDue: row.status === 'scheduled' && !row.reminder_seen_at
-            && new Date(row.scheduled_at).getTime() - now <= 24 * 60 * 60 * 1000
-            && new Date(row.scheduled_at).getTime() > now,
-        createdAt: row.created_at,
-    })) });
+    res.json({ publications: (data || []).map(row => publicationShape(row, now)) });
+});
+
+// The posting calendar (R172): every post whose scheduled time falls in
+// [from, to), at most 100 days. Reading stays open below Pro so someone who
+// left the plan can still see and cancel what is queued; the latest metrics
+// are added for published posts on Pro only, like GET /analytics.
+const CALENDAR_MAX_RANGE_MS = 100 * 24 * 60 * 60 * 1000;
+router.get('/calendar', authenticateUser, async (req, res) => {
+    const from = Date.parse(req.query.from);
+    const to = Date.parse(req.query.to);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from || to - from > CALENDAR_MAX_RANGE_MS) {
+        return res.status(400).json({ error: 'INVALID_RANGE', message: 'Give a from/to range of at most 100 days.' });
+    }
+    try {
+        const { data, error } = await supabaseAdmin.from(PUBLICATION_TABLE).select('*')
+            .eq('user_id', req.user.id).neq('status', 'cancelled')
+            .gte('scheduled_at', new Date(from).toISOString()).lt('scheduled_at', new Date(to).toISOString())
+            .order('scheduled_at', { ascending: true }).limit(500);
+        if (error) throw new Error(error.message);
+        const now = Date.now();
+        const publications = (data || []).map(row => publicationShape(row, now));
+        const plan = await getUserPlan(req.user.id);
+        const publishedIds = (data || []).filter(row => row.status === 'published' && row.provider_post_id).map(row => row.id);
+        if (plan === 'pro' && publishedIds.length) {
+            const { data: snapshots, error: metricsError } = await supabaseAdmin.from('social_publication_metrics')
+                .select('publication_id,metric_date,metrics').eq('user_id', req.user.id)
+                .in('publication_id', publishedIds).order('metric_date', { ascending: false }).limit(2000);
+            if (metricsError) console.error('[social] calendar metrics read failed:', metricsError.message);
+            const latest = new Map();
+            for (const row of snapshots || []) if (!latest.has(row.publication_id)) latest.set(row.publication_id, row.metrics);
+            for (const post of publications) if (latest.has(post.id)) post.metrics = latest.get(post.id);
+        }
+        return res.json({ publications, metricsIncluded: plan === 'pro' });
+    } catch (err) {
+        console.error('[social] calendar read failed:', err.message);
+        return res.status(500).json({ error: 'CALENDAR_UNAVAILABLE' });
+    }
 });
 
 router.get('/analytics', authenticateUser, socialGate, async (req, res) => {
@@ -225,7 +272,7 @@ router.post('/publications', authenticateUser, socialGate, async (req, res) => {
         speakerPopOutEnabled: rawEdit.speakerPopOutEnabled === true,
     };
     if (!['youtube', 'instagram'].includes(providerId) || !provider) return res.status(400).json({ error: 'UNSUPPORTED_PROVIDER' });
-    if (!Number.isFinite(scheduledMs) || scheduledMs < Date.now() + 60_000 || scheduledMs > Date.now() + 6 * 24 * 60 * 60 * 1000 + 12 * 60 * 60 * 1000) {
+    if (scheduleOutOfRange(scheduledMs)) {
         return res.status(400).json({ error: 'SCHEDULE_OUT_OF_RANGE', message: 'Choose a time between one minute and six and a half days from now.' });
     }
     const mediaUrl = await ownedPublicMediaUrl(mediaUrlInput, req.user.id, scheduledMs);
@@ -267,6 +314,83 @@ router.post('/publications', authenticateUser, socialGate, async (req, res) => {
         id: data.id, provider: data.provider, title: data.title, caption: data.caption,
         scheduledAt: data.scheduled_at, status: data.status,
     } });
+});
+
+// Move a scheduled post (R172). The signed media URL is re-issued for the new
+// time (it expires 12 h after the scheduled time) and the queued job is
+// replaced. Starting a new publication time is a Pro action, like scheduling.
+router.patch('/publications/:id', authenticateUser, socialGate, async (req, res) => {
+    const scheduledMs = Date.parse(req.body?.scheduledAt);
+    if (scheduleOutOfRange(scheduledMs)) {
+        return res.status(400).json({ error: 'SCHEDULE_OUT_OF_RANGE', message: 'Choose a time between one minute and six and a half days from now.' });
+    }
+    const { data: row, error: readError } = await supabaseAdmin.from(PUBLICATION_TABLE)
+        .select('id,user_id,provider,status,media_url,scheduled_at').eq('id', req.params.id).eq('user_id', req.user.id).maybeSingle();
+    if (readError) {
+        console.error('[social] reschedule read failed:', readError.message);
+        return res.status(500).json({ error: 'RESCHEDULE_FAILED' });
+    }
+    if (!row) return res.status(404).json({ error: 'PUBLICATION_NOT_FOUND' });
+    if (row.status !== 'scheduled') return res.status(409).json({ error: 'PUBLICATION_NOT_RESCHEDULABLE' });
+
+    const objectPath = objectPathFromMediaUrl(row.media_url, { userId: req.user.id, bucketName: storageConfig.bucket?.name });
+    const mediaUrl = await signExportForSchedule(objectPath, scheduledMs);
+    if (!mediaUrl) return res.status(409).json({ error: 'MEDIA_UNAVAILABLE', message: 'The exported video for this post is no longer available. Cancel it and schedule it again.' });
+    if (row.provider === 'instagram') {
+        try { await accessTokenFor(req.user.id, row.provider, scheduledMs + 12 * 60 * 60 * 1000); }
+        catch (err) {
+            console.error('[social] Instagram token refresh before reschedule failed:', err.message);
+            return res.status(409).json({ error: 'ACCOUNT_RECONNECT_REQUIRED' });
+        }
+    }
+
+    let removed;
+    try { removed = await removePublicationJob(row.id); }
+    catch (err) {
+        console.error('[social] reschedule queue error:', err.message);
+        return res.status(503).json({ error: 'QUEUE_UNAVAILABLE' });
+    }
+    if (!removed) return res.status(409).json({ error: 'PUBLICATION_ALREADY_RUNNING' });
+
+    const { data: updated, error } = await supabaseAdmin.from(PUBLICATION_TABLE).update({
+        scheduled_at: new Date(scheduledMs).toISOString(),
+        reminder_at: new Date(scheduledMs - 24 * 60 * 60 * 1000).toISOString(),
+        reminder_seen_at: null, media_url: mediaUrl, updated_at: new Date().toISOString(),
+    }).eq('id', row.id).eq('user_id', req.user.id).eq('status', 'scheduled')
+        .select('id,user_id,provider,title,caption,source_short_id,scheduled_at,published_at,status,failure_code,provider_post_id,reminder_seen_at,created_at').maybeSingle();
+    if (error) {
+        console.error('[social] reschedule update failed:', error.message);
+        // The old job is gone: put it back so the post still goes out at its old time.
+        try { await enqueuePublication(row, Date.parse(row.scheduled_at) - Date.now()); }
+        catch (requeueErr) { console.error('[social] could not restore the original job:', requeueErr.message); }
+        return res.status(500).json({ error: 'RESCHEDULE_FAILED' });
+    }
+    // Matched nothing: the post was cancelled or started in the meantime.
+    if (!updated) return res.status(409).json({ error: 'PUBLICATION_NOT_RESCHEDULABLE' });
+    try {
+        await enqueuePublication(updated, scheduledMs - Date.now());
+    } catch (err) {
+        await supabaseAdmin.from(PUBLICATION_TABLE).update({ status: 'failed', failure_code: 'QUEUE_UNAVAILABLE' }).eq('id', row.id);
+        console.error('[social] re-enqueue publication failed:', err.message);
+        return res.status(503).json({ error: 'QUEUE_UNAVAILABLE' });
+    }
+    return res.json({ publication: publicationShape(updated) });
+});
+
+// The user posted it by hand after the automatic publish fell back to a
+// reminder (R172). Cleanup, so it stays open below Pro.
+router.post('/publications/:id/posted', authenticateUser, async (req, res) => {
+    const now = new Date().toISOString();
+    const { data, error } = await supabaseAdmin.from(PUBLICATION_TABLE).update({
+        status: 'published', published_at: now, reminder_seen_at: now, failure_code: null, updated_at: now,
+    }).eq('id', req.params.id).eq('user_id', req.user.id).in('status', ['manual_reminder', 'failed'])
+        .select('id,user_id,provider,title,caption,source_short_id,scheduled_at,published_at,status,failure_code,provider_post_id,reminder_seen_at,created_at').maybeSingle();
+    if (error) {
+        console.error('[social] mark posted failed:', error.message);
+        return res.status(500).json({ error: 'MARK_POSTED_FAILED' });
+    }
+    if (!data) return res.status(409).json({ error: 'PUBLICATION_NOT_MANUAL' });
+    return res.json({ publication: publicationShape(data) });
 });
 
 router.post('/publications/:id/reminder-seen', authenticateUser, async (req, res) => {

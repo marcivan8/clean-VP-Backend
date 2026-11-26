@@ -109,14 +109,16 @@ export async function getProject(projectId) {
 export async function listProjects() {
     const { data, error } = await supabase
         .from('projects')
-        .select('id, name, thumbnail_url, aspect_ratio, duration, created_at, updated_at')
+        // R170: `kind` is read out of the JSON so a design shows as a design
+        // without loading its whole state.
+        .select('id, name, thumbnail_url, aspect_ratio, duration, created_at, updated_at, kind:timeline_state->>kind')
         .order('updated_at', { ascending: false });
 
     if (error) {
         console.error('[projectsApi] listProjects failed:', error.message);
         return [];
     }
-    return data ?? [];
+    return (data ?? []).map(p => ({ ...p, isDesign: p.kind === 'design' }));
 }
 
 /**

@@ -129,6 +129,7 @@ export default function AssetPanel({ onClose, initialTab = 'sfx' }) {
         if (isFree) {
             EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                 reason: 'paid_feature',
+                feature: 'stock',
                 message: t('assetPanel.stockLockedMessage', 'Stock media is available on Creator and Pro plans.'),
                 upgradeRequired: 'creator',
             });
@@ -234,6 +235,7 @@ export default function AssetPanel({ onClose, initialTab = 'sfx' }) {
         if (isFree) {
             EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                 reason: 'paid_feature',
+                feature: 'stock',
                 message: t('assetPanel.stockLockedMessage', 'Stock media is available on Creator and Pro plans.'),
                 upgradeRequired: 'creator',
             });
@@ -451,6 +453,7 @@ export default function AssetPanel({ onClose, initialTab = 'sfx' }) {
                                     if (isLocked) {
                                         EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                                             reason: 'paid_feature',
+                                            feature: 'stock',
                                             message: t('assetPanel.stockLockedMessage', 'Stock media is available on Creator and Pro plans.'),
                                             upgradeRequired: 'creator',
                                         });
@@ -698,6 +701,7 @@ export default function AssetPanel({ onClose, initialTab = 'sfx' }) {
                                             type="button"
                                             onClick={() => EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                                                 reason: 'paid_feature',
+                                                feature: 'stock',
                                                 message: t('assetPanel.stockLockedMessage', 'Stock media is available on Creator and Pro plans.'),
                                                 upgradeRequired: 'creator',
                                             })}

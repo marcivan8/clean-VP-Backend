@@ -17,11 +17,14 @@
  */
 
 import { authFetch } from '../utils/authFetch.js';
-import { buildShortTimeline } from './shortTimeline.js';
+import { buildShortTimeline, DUO_CAPTION_Y } from './shortTimeline.js';
 import { fallbackShortScenePlan, polishShort, shiftToShort } from './shortPolish.js';
 import { collectSfxCues, mergeSfxCues, sfxVolume, SFX_QUERIES } from './sfxCues.js';
 import { sfxPlayableUrl } from './animateMoments.js';
 import { PLATFORM_PROFILES } from './PlatformProfiles.js';
+
+/** R173: the caption look of every short the Shorts panel builds. */
+export const SHORTS_CAPTION_PACK = 'big-words';
 
 // Each query caches every playable candidate the library returned (up to 5),
 // plus a rotation counter -- so repeated calls for the same query (e.g. every
@@ -40,6 +43,7 @@ let performanceGuidancePromise = null;
  * are planned locally; the motion-technique and visual-context lookups are
  * also bounded and never call a generative model.
  */
+
 export const PLAN_TIMEOUT_MS = 35000;
 export const MOTION_TECHNIQUE_TIMEOUT_MS = 3000;
 export const VISUAL_CONTEXT_TIMEOUT_MS = 3000;
@@ -255,15 +259,29 @@ export async function fetchShortVisualContext(projectId, signal) {
  * @returns {Promise<{tracks, duration, aspectRatio, applied:string[], words:Array}>}
  */
 export async function finishShort(state, short, opts = {}) {
-    const profile = PLATFORM_PROFILES[short?.platform] || PLATFORM_PROFILES.tiktok;
+    const platformProfile = PLATFORM_PROFILES[short?.platform] || PLATFORM_PROFILES.tiktok;
     const pad = { before: 0.15, after: 0.3 };
-    const built = buildShortTimeline(state.tracks, short, { assets: state.assets, profile, pad });
+    const built = buildShortTimeline(state.tracks, short, {
+        assets: state.assets, profile: platformProfile, pad,
+        // Two people side by side in one wide shot: host on top, guest below.
+        duo: opts.duo !== false, sceneAnalysisByAsset: state.sceneAnalysisByAsset,
+    });
+    // Stacked split: captions belong on the seam, not in the bottom speaker's face.
+    // R173: every short from the Shorts panel uses the Big Words captions
+    // (key words set larger, same colour), whatever the platform. A reference
+    // video's own caption look still wins inside polishShort.
+    const profile = {
+        ...platformProfile,
+        captionPack: SHORTS_CAPTION_PACK,
+        ...(built.duoSplit > 0 ? { captionY: DUO_CAPTION_Y } : {}),
+    };
     const start = Math.max(0, (Number(short.start) || 0) - pad.before);
     const end = start + built.duration;
     const words = shiftToShort(state.captions || [], start, end, 'start');
     const events = (Array.isArray(short.events) ? short.events : []).map(e => ({ ...e, timelineTime: Number(e.timelineTime) - start }));
     const wantsPolish = opts.polish !== false;
-    if (!wantsPolish && !opts.popOut) return { ...built, applied: [], words };
+    const duoNote = built.duoSplit > 0 ? [`split screen: host on top, guest below (${built.duoSplit} clip${built.duoSplit === 1 ? '' : 's'})`] : [];
+    if (!wantsPolish && !opts.popOut) return { ...built, applied: duoNote, words };
     const performanceGuidancePromise = wantsPolish
         ? (opts.performanceGuidance !== undefined
             ? Promise.resolve(String(opts.performanceGuidance || '').slice(0, 500))
@@ -376,7 +394,8 @@ export async function finishShort(state, short, opts = {}) {
         if (placed) polished.applied.push(`sound effects (${placed})`);
     }
     if (plan?.headline) polished.applied.unshift('AI headline');
-    return { ...polished, words };
+    if (duoNote.length) polished.applied.unshift(...duoNote);
+    return { ...polished, duoSplit: built.duoSplit, words };
 }
 
 export default { finishShort, fetchShortPlan, fetchShortMotionTechniques, fetchShortVisualContext, fetchSfxAsset, addSfxTrack, clearPlanCache, PLAN_TIMEOUT_MS };

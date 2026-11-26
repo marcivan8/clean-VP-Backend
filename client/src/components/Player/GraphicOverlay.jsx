@@ -402,16 +402,28 @@ const OverlayVideo = ({ clip, src, currentTime, isPlaying, style, motionContext 
     const radial = radialBlurAtTime(clip, currentTime);
     if (motionContext) return <MotionBlurVideoCanvas clip={clip} src={src} currentTime={currentTime} isPlaying={isPlaying} style={style} motionContext={motionContext} />;
     if (radial && !gradients.length) return <RadialBlurVideoCanvas clip={clip} src={src} target={target} isPlaying={isPlaying} speed={speed} style={style} radial={radial} />;
+    // A framed (layout) clip must COVER its box around the focus point, as the
+    // export does (CompositorCompiler `fit`). This branch used to drop `style`,
+    // so a framed video drew at its own aspect, uncropped: preview and export
+    // disagreed for split-screen b-roll and the stacked two-speaker split.
+    // Only the box-fitting keys are taken; opacity/filters stay as they were.
+    // With gradients the wrapper <div> below already carries the box style
+    // (size and zoom offset), so the video only fills it.
+    const framed = style?.objectFit === 'cover' && style?.objectPosition;
+    const frameFit = !framed ? null : gradients.length
+        ? { width: '100%', height: '100%', objectFit: 'cover', objectPosition: style.objectPosition }
+        : Object.fromEntries(['width', 'height', 'objectFit', 'objectPosition', 'position', 'left', 'top', 'maxWidth']
+            .filter(key => style[key] !== undefined).map(key => [key, style[key]]));
     const video = radial
         ? <RadialBlurVideoCanvas clip={clip} src={src} target={target} isPlaying={isPlaying} speed={speed}
-            style={{ display: 'block', width: '100%', height: 'auto', objectFit: 'cover', pointerEvents: 'none' }} radial={radial} />
+            style={{ display: 'block', width: '100%', height: 'auto', objectFit: 'cover', ...(frameFit || {}), pointerEvents: 'none' }} radial={radial} />
         : <video
             ref={ref}
             src={src}
             muted
             playsInline
             preload="auto"
-            style={{ display: 'block', width: '100%', height: 'auto', pointerEvents: 'none' }}
+            style={{ display: 'block', width: '100%', height: 'auto', ...(frameFit || {}), pointerEvents: 'none' }}
         />;
     if (!gradients.length) return video;
     return <div style={{ ...style, position: 'relative', display: 'block' }}>

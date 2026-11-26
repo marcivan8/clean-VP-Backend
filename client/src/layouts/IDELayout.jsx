@@ -778,6 +778,8 @@ const IDELayout = ({ mode = 'editor' }) => {
                 message: payload?.message,
                 upgradeRequired: payload?.upgradeRequired || 'creator',
                 reason: payload?.reason || 'ai_ops',
+                feature: payload?.feature,
+                code: payload?.code,
             });
         });
         return unsubscribe;
@@ -917,6 +919,7 @@ const IDELayout = ({ mode = 'editor' }) => {
         if (tab === 'shorts' && isFree) {
             EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                 reason: 'paid_feature',
+                feature: 'shorts',
                 message: t('shortsPanel.lockedMessage', 'AI Shorts repurposing is available on Creator and Pro plans.'),
                 upgradeRequired: 'creator',
             });
@@ -2581,6 +2584,8 @@ const IDELayout = ({ mode = 'editor' }) => {
                     message={quotaModal.message}
                     upgradeRequired={quotaModal.upgradeRequired}
                     reason={quotaModal.reason}
+                    feature={quotaModal.feature}
+                    code={quotaModal.code}
                     onClose={() => setQuotaModal(null)}
                 />
             )}
@@ -2846,6 +2851,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                                                 if (tab === 'shorts' && isFree) {
                                                     EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                                                         reason: 'paid_feature',
+                                                        feature: 'shorts',
                                                         message: t('shortsPanel.lockedMessage', 'AI Shorts repurposing is available on Creator and Pro plans.'),
                                                         upgradeRequired: 'creator',
                                                     });

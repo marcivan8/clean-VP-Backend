@@ -50,6 +50,14 @@ const EditorPage = () => {
                     return;
                 }
 
+                // R170: a design project belongs to the Design Studio. Loading it
+                // here would turn it into an empty timeline and the autosave
+                // would overwrite the design.
+                if (project.timeline_state?.kind === 'design') {
+                    navigate(`/design?projectId=${project.id}`, { replace: true });
+                    return;
+                }
+
                 // Hydrate timeline store
                 loadProject(project.timeline_state ?? {});
                 setProjectId(project.id);

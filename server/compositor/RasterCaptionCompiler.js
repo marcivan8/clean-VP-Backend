@@ -263,16 +263,22 @@ function readFontMetrics(fontPath) {
         let ascender = buf.readInt16BE(tables.hhea + 4);
         let descender = buf.readInt16BE(tables.hhea + 6);
         let lineGap = buf.readInt16BE(tables.hhea + 8);
+        let weightClass = 400;
+        let italic = false;
         if (tables['OS/2'] !== undefined) {
             const os2 = tables['OS/2'];
+            weightClass = buf.readUInt16BE(os2 + 4) || 400;
             const fsSelection = buf.readUInt16BE(os2 + 62);
+            italic = !!(fsSelection & 1) || !!(fsSelection & (1 << 9));
             if (fsSelection & (1 << 7)) {
                 ascender = buf.readInt16BE(os2 + 68);
                 descender = buf.readInt16BE(os2 + 70);
                 lineGap = buf.readInt16BE(os2 + 72);
             }
         }
-        result = { ascent: ascender / upm, descent: Math.abs(descender) / upm, lineGap: Math.max(0, lineGap) / upm };
+        // weightClass / italic: what the FILE already is, so synthetic bold and
+        // slant are only added where a browser would add them (R174).
+        result = { ascent: ascender / upm, descent: Math.abs(descender) / upm, lineGap: Math.max(0, lineGap) / upm, weightClass, italic };
     } catch (_) {
         result = null;
     }
@@ -356,8 +362,17 @@ function withAlpha(color, a) {
  * program with no `mix` on its states is read as a fully-on highlight, which
  * is exactly what it used to render.
  */
+/** Layout size of a 'size' emphasis, clamped like the preview (1..3). */
+function emphasisSize(st) {
+    const n = Number(st?.size);
+    return Number.isFinite(n) ? Math.min(3, Math.max(1, n)) : 1;
+}
+
 function wordLook(i, state, raster, baseColor) {
-    const look = { color: baseColor, background: null, scale: 1, opacity: 1, boxed: false };
+    // `size` (R173) is a LAYOUT size: the word is set in a larger font and the
+    // line makes room for it, like the preview's `font-size: <n>em` span.
+    // `scale` stays a visual zoom around the word's centre (no reflow).
+    const look = { color: baseColor, background: null, scale: 1, size: 1, opacity: 1, boxed: false };
     const visible = i < state.shown;
     look.opacity = visible ? 1 : 0;
 
@@ -365,6 +380,7 @@ function wordLook(i, state, raster, baseColor) {
     if (em && Array.isArray(em.indices) && em.indices.includes(i) && em.style) {
         const st = em.style;
         if (st.scale && st.scale !== 1) look.scale = st.scale;
+        if (st.mode === 'size') look.size = emphasisSize(st);
         if ((st.mode === 'color' || st.mode === 'box') && st.color) look.color = st.color;
         if (st.mode === 'box') { look.background = st.background || null; look.boxed = true; }
     }
@@ -408,20 +424,27 @@ function wordLook(i, state, raster, baseColor) {
  * toward the line width (it does in CSS, and it shifts centred lines).
  * 'space' gap: a plain string; trailing spaces hang, so they do not count.
  */
-function layoutLines(ctx, tokens, looks, fontPx, maxWidth, gapMode) {
+function layoutLines(ctx, tokens, looks, fontPx, maxWidth, gapMode, fontFor = null) {
     const em = fontPx;
+    const baseFont = ctx.font;
+    const spaceW = ctx.measureText(' ').width;
     const items = tokens.map((tok, i) => {
+        // R173: a size-emphasised word is measured in its own, larger font,
+        // and its 0.25em margin is in that font too (CSS em is the span's).
+        const size = looks[i].size || 1;
+        if (size !== 1 && fontFor) ctx.font = fontFor(size);
         const w = ctx.measureText(tok).width;
-        const pad = looks[i].boxed ? 0.24 * em : 0;
-        return { i, tok, w, boxW: w + pad, pad };
+        if (size !== 1 && fontFor) ctx.font = baseFont;
+        const pad = looks[i].boxed ? 0.24 * em * size : 0;
+        const ownGap = gapMode === 'margin' ? 0.25 * em * size : spaceW;
+        return { i, tok, w, boxW: w + pad, pad, size, gap: ownGap };
     });
-    const gap = gapMode === 'margin' ? 0.25 * em : ctx.measureText(' ').width;
 
     const lines = [];
     let cur = [];
     let curW = 0;
     for (const it of items) {
-        const advance = it.boxW + gap;
+        const advance = it.boxW + it.gap;
         const fitsW = gapMode === 'margin' ? curW + advance : curW + it.boxW;
         if (cur.length > 0 && fitsW > maxWidth + 0.5) {
             lines.push(cur);
@@ -437,11 +460,15 @@ function layoutLines(ctx, tokens, looks, fontPx, maxWidth, gapMode) {
         let x = 0;
         const placed = line.map((it) => {
             const p = { ...it, x };
-            x += it.boxW + gap;
+            x += it.boxW + it.gap;
             return p;
         });
-        const width = gapMode === 'margin' ? x : x - gap; // hanging space in 'space' mode
-        return { items: placed, width };
+        const last = placed[placed.length - 1];
+        const width = gapMode === 'margin' ? x : x - (last ? last.gap : 0); // hanging space in 'space' mode
+        // The tallest word sets the line box (CSS line-height: normal scales
+        // with each inline-block's own font size).
+        const maxSize = Math.max(1, ...placed.map(it => it.size || 1));
+        return { items: placed, width, maxSize };
     });
 }
 
@@ -455,6 +482,7 @@ function drawState(Canvas, entry, state, opts) {
     const { fontAlias, metrics, renderScale, pxScale, boxWidth, padding } = opts;
     const fontPx = (Number(entry.style.fontSize) || 48) * renderScale;
     const fontSpec = `${fontPx}px "${fontAlias}"`;
+    const fontFor = (size) => (size === 1 ? fontSpec : `${fontPx * size}px "${fontAlias}"`);
 
     const tokens = Array.isArray(entry.tokens) && entry.tokens.length > 0
         ? entry.tokens
@@ -468,7 +496,7 @@ function drawState(Canvas, entry, state, opts) {
     mctx.font = fontSpec;
 
     const maxWidth = boxWidth * renderScale;
-    const lines = layoutLines(mctx, tokens, looks, fontPx, maxWidth, raster.layout?.wordGap === 'margin' ? 'margin' : 'space');
+    const lines = layoutLines(mctx, tokens, looks, fontPx, maxWidth, raster.layout?.wordGap === 'margin' ? 'margin' : 'space', fontFor);
     const lh = metrics
         ? (metrics.ascent + metrics.descent + metrics.lineGap) * fontPx
         : 1.2 * fontPx;
@@ -478,7 +506,7 @@ function drawState(Canvas, entry, state, opts) {
 
     const pad = Math.ceil(padding * renderScale);
     const width = Math.ceil(maxWidth + pad * 2);
-    const height = Math.ceil(lines.length * lh + pad * 2);
+    const height = Math.ceil(lines.reduce((sum, line) => sum + lh * line.maxSize, 0) + pad * 2);
     const canvas = Canvas.createCanvas(width, height);
     const ctx = canvas.getContext('2d');
     ctx.font = fontSpec;
@@ -489,8 +517,13 @@ function drawState(Canvas, entry, state, opts) {
     const strokeW = Number(entry.style.stroke?.width) > 0 ? Number(entry.style.stroke.width) * renderScale : 0;
     const strokeColor = cssColor(entry.style.stroke?.color, '#000000');
     const weight = String(raster.font?.weight || 'normal');
-    const synthBold = weight === 'bold' || weight === 'bolder' || Number(weight) >= 600;
-    const synthItalic = /italic|oblique/.test(String(raster.font?.style || ''));
+    // R174: like a browser, fake bold ONLY when a bold weight is asked for and
+    // the font file is not bold itself. Faking it on an already-bold file
+    // (Montserrat Bold for an 800 caption) made exported letters heavier than
+    // the preview and covered most of the outline.
+    const wantsBold = weight === 'bold' || weight === 'bolder' || Number(weight) >= 600;
+    const synthBold = wantsBold && (Number(metrics?.weightClass) || 400) < 600;
+    const synthItalic = /italic|oblique/.test(String(raster.font?.style || '')) && !metrics?.italic;
     const boldW = synthBold ? Math.max(1, fontPx * 0.045) : 0;
 
     // Shadows: the preview's glow REPLACES clip.textShadow while it is active
@@ -506,18 +539,22 @@ function drawState(Canvas, entry, state, opts) {
         : null;
     const backgroundPadX = Math.max(0, Number(entry.style.backgroundPadding) || 0) * fontPx;
     const backgroundPadY = Math.max(0.04, (Number(entry.style.backgroundPadding) || 0) * 0.55) * fontPx;
-    lines.forEach((line, li) => {
+    let lineTop = pad;
+    lines.forEach((line) => {
         let lineX;
         if (align === 'left') lineX = pad;
         else if (align === 'right') lineX = pad + maxWidth - line.width;
         else lineX = pad + (maxWidth - line.width) / 2;
-        const top = pad + li * lh;
-        const baseline = top + halfLeading + ascentPx;
+        const top = lineTop;
+        const k = line.maxSize || 1;
+        lineTop += lh * k;
+        // All words share one baseline, placed for the tallest word.
+        const baseline = top + (halfLeading + ascentPx) * k;
         if (captionBackground && line.width > 0) {
             const bx = lineX - backgroundPadX;
-            const by = top + halfLeading - backgroundPadY;
+            const by = top + halfLeading * k - backgroundPadY;
             const bw = line.width + backgroundPadX * 2;
-            const bh = contentPx + backgroundPadY * 2;
+            const bh = contentPx * k + backgroundPadY * 2;
             const radius = Math.min(fontPx * 0.06, bh / 2, bw / 2);
             ctx.fillStyle = captionBackground;
             if (typeof ctx.roundRect === 'function') {
@@ -536,16 +573,22 @@ function drawState(Canvas, entry, state, opts) {
                 top,
                 baseline,
                 lineHeight: lh,
+                size: it.size || 1,
             });
         }
     });
 
-    // Paint order per word, like CSS: background box, shadows, fill, stroke.
+    // Paint order, like the preview's CSS: background box, shadows, outline
+    // (paint-order: stroke fill), fill.
     const paintWord = (w, pass) => {
         if (w.look.opacity <= 0) return;
+        const ws = w.size || 1;
         const cx = w.left + w.boxW / 2;
-        const cy = w.top + w.lineHeight / 2;
+        // The word's own box: its font is `ws` times the base, sitting on the
+        // shared baseline.
+        const cy = w.baseline - (ascentPx + halfLeading) * ws + (w.lineHeight * ws) / 2;
         ctx.save();
+        if (ws !== 1) ctx.font = fontFor(ws);
         ctx.globalAlpha = w.look.opacity;
         if (w.look.scale !== 1) {
             ctx.translate(cx, cy);
@@ -558,8 +601,8 @@ function drawState(Canvas, entry, state, opts) {
             ctx.transform(1, 0, -0.21, 1, 0.21 * w.baseline, 0);
         }
         if (pass === 'box' && w.look.background) {
-            const r = 0.08 * fontPx;
-            const bx = w.left, by = w.top + halfLeading, bw = w.boxW, bh = contentPx;
+            const r = 0.08 * fontPx * ws;
+            const bx = w.left, by = w.baseline - ascentPx * ws, bw = w.boxW, bh = contentPx * ws;
             ctx.fillStyle = cssColor(w.look.background, '#000000');
             ctx.beginPath();
             ctx.moveTo(bx + r, by);
@@ -578,28 +621,37 @@ function drawState(Canvas, entry, state, opts) {
                 ctx.shadowOffsetY = sh.y * pxScale * renderScale;
                 ctx.fillStyle = cssColor(w.look.color, '#FFFFFF');
                 ctx.fillText(w.tok, textX, w.baseline);
-                if (boldW > 0) { ctx.lineWidth = boldW; ctx.strokeStyle = ctx.fillStyle; ctx.strokeText(w.tok, textX, w.baseline); }
+                if (boldW > 0) { ctx.lineWidth = boldW * ws; ctx.strokeStyle = ctx.fillStyle; ctx.strokeText(w.tok, textX, w.baseline); }
                 ctx.restore();
+            }
+        } else if (pass === 'stroke') {
+            // R174: the outline is painted UNDER the fill (preview: CSS
+            // paint-order: stroke fill). Centred on the glyph outline, so half
+            // of it shows outside the letter, exactly as before, while the part
+            // inside is covered: no stroke marks on the overlapping contours
+            // inside a glyph, and the fill is not eaten.
+            if (strokeW > 0) {
+                // A fixed width, like CSS: -webkit-text-stroke is in px and an
+                // enlarged (R173 'size') word inherits the same px, not more.
+                ctx.lineWidth = strokeW;
+                ctx.strokeStyle = strokeColor;
+                ctx.strokeText(w.tok, textX, w.baseline);
             }
         } else if (pass === 'fill') {
             ctx.fillStyle = cssColor(w.look.color, '#FFFFFF');
             ctx.fillText(w.tok, textX, w.baseline);
             if (boldW > 0) {
                 // Synthetic bold: thicken the glyph with its own colour.
-                ctx.lineWidth = boldW;
+                ctx.lineWidth = boldW * ws;
                 ctx.strokeStyle = ctx.fillStyle;
-                ctx.strokeText(w.tok, textX, w.baseline);
-            }
-            if (strokeW > 0) {
-                // -webkit-text-stroke: centred on the outline, painted over the fill.
-                ctx.lineWidth = strokeW;
-                ctx.strokeStyle = strokeColor;
                 ctx.strokeText(w.tok, textX, w.baseline);
             }
         }
         ctx.restore();
     };
-    for (const pass of ['box', 'shadow', 'fill']) {
+    // Like CSS for a whole line: backgrounds, shadows, every outline, then
+    // every fill on top (so a neighbour's outline never covers a letter).
+    for (const pass of ['box', 'shadow', 'stroke', 'fill']) {
         for (const w of placedWords) paintWord(w, pass);
     }
 

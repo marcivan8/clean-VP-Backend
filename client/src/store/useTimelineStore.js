@@ -48,7 +48,7 @@ import { computeRangeCut } from '../timeline/rangeCut.js';
 import { computeCaptionFollow } from '../timeline/captionFollow.js';
 import { computeSpeedChange, remapWordsForSpeed } from '../timeline/speedChange.js';
 import { mapTranscriptToTimeline } from '../timeline/transcriptMap.js';
-import { LEGACY_PACK_MOTION } from '../motion/CaptionModel.js';
+import { LEGACY_PACK_MOTION, packWantsKeywords, pickKeywords } from '../motion/CaptionModel.js';
 import { retimeWordsForText, splitCaption, mergeCaptions, shiftWords as shiftCaptionWords, findDeletedWords } from '../motion/captionEdits.js';
 import { contentEndOf, visualEndOf } from '../timeline/contentEnd.js';
 import { isReferenceAsset } from '../utils/assetRoles.js';
@@ -883,9 +883,16 @@ const useTimelineStore = create(
                         // Fan out across EVERY text track, not just the edited
                         // one — a project can have more than one caption track
                         // and "global" has to mean global.
+                        // R173: same key-word seeding as applyCaptionStyleToAll.
+                        const seedKeywords = packWantsKeywords(styleOnly.captionStyle?.packId);
                         for (const track of textTracks) {
                             for (const clip of (track.clips || [])) {
-                                get().updateClip(track.id, clip.id, styleOnly, { skipHistory: true });
+                                let fields = styleOnly;
+                                if (seedKeywords && !(clip.emphasis?.indices?.length > 0)) {
+                                    const { indices } = pickKeywords(String(clip.content || clip.name || ''));
+                                    if (indices.length > 0) fields = { ...styleOnly, emphasis: { indices, source: 'auto' } };
+                                }
+                                get().updateClip(track.id, clip.id, fields, { skipHistory: true });
                                 updated++;
                             }
                         }
@@ -1716,10 +1723,24 @@ const useTimelineStore = create(
                 if (textClips.length === 0 || !fields) return false;
                 const placements = timelineManager.getState().entities.placements;
                 const entityIds = [...new Set(textClips.map(c => placements[c.id]?.clipId).filter(Boolean))];
+                // R173: a pack whose look IS the key words ('big-words') renders
+                // as plain text without them, so captions that have none get
+                // the rule pick (free, instant), in the same undo step. Words
+                // the user or an earlier pick chose are kept.
+                const seedKeywords = packWantsKeywords(fields.captionStyle?.packId);
+                const entityMap = timelineManager.getState().entities.clips;
                 get()._saveHistory();
                 timelineManager.beginTransaction();
                 try {
-                    entityIds.forEach(id => timelineManager.dispatch(TimelineActions.updateClip(id, fields)));
+                    entityIds.forEach(id => {
+                        let clipFields = fields;
+                        const entity = entityMap[id];
+                        if (seedKeywords && !(entity?.emphasis?.indices?.length > 0)) {
+                            const { indices } = pickKeywords(String(entity?.content || entity?.name || ''));
+                            if (indices.length > 0) clipFields = { ...fields, emphasis: { indices, source: 'auto' } };
+                        }
+                        timelineManager.dispatch(TimelineActions.updateClip(id, clipFields));
+                    });
                     timelineManager.commitTransaction('Caption Style');
                 } catch (err) {
                     timelineManager.rollbackTransaction();

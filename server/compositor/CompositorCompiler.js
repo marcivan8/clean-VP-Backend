@@ -667,7 +667,11 @@ function compileOverlaySource(ov, inputIdx, label, frame, options = {}) {
         const bh = even(first.h * H);
         const fx = Math.max(0, Math.min(1, Number(ov.fit.focusX ?? 0.5)));
         const fy = Math.max(0, Math.min(1, Number(ov.fit.focusY ?? 0.5)));
-        parts.push(`scale=${bw}:${bh}:force_original_aspect_ratio=increase`);
+        // zoom > 1 covers a box `zoom` times larger before the crop: the
+        // stacked two-speaker split (DuoSplit.js) aims one face per half.
+        // Same arithmetic as LayoutPresets.frameToCss in the preview.
+        const zoom = Number(ov.fit.zoom) > 1 ? Math.min(4, Number(ov.fit.zoom)) : 1;
+        parts.push(`scale=${even(bw * zoom)}:${even(bh * zoom)}:force_original_aspect_ratio=increase`);
         parts.push(`crop=${bw}:${bh}:'(iw-${bw})*${n4(fx)}':'(ih-${bh})*${n4(fy)}'`);
         parts.push('format=yuva420p');
     } else if (!rotated) {

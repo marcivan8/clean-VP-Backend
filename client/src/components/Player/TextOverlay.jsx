@@ -198,6 +198,14 @@ const CaptionWords = ({ content, words, time, reveal, highlight, emphasis, baseC
                 let scale = 1;
                 if (emStyle && emphasised.has(i)) {
                     if (emStyle.scale && emStyle.scale !== 1) scale = emStyle.scale;
+                    // R173 'size': a real font size, so the line makes room for
+                    // the word (a transform scale would overlap its neighbours
+                    // at 1.7x). The export lays it out the same way
+                    // (RasterCaptionCompiler layoutLines).
+                    if (emStyle.mode === 'size') {
+                        const size = Math.min(3, Math.max(1, Number(emStyle.size) || 1));
+                        if (size !== 1) style.fontSize = `${size}em`;
+                    }
                     if ((emStyle.mode === 'color' || emStyle.mode === 'box') && emStyle.color) style.color = emStyle.color;
                     if (emStyle.mode === 'box') {
                         if (emStyle.background) style.background = emStyle.background;
@@ -650,6 +658,13 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
                             textAlign: clip.textAlign || 'center',
                             textShadow: glowShadow || clip.textShadow || 'none',
                             WebkitTextStroke: clip.stroke ? `${clip.stroke.width * previewScale}px ${clip.stroke.color}` : 'none',
+                            // R174: the outline goes UNDER the letters. Painted over
+                            // them (the CSS default) it traces every overlapping
+                            // contour inside a glyph (stray marks in Montserrat's
+                            // M, 5, R) and eats the fill. Same width, so the
+                            // visible outline outside the letter is unchanged.
+                            // The export does the same (RasterCaptionCompiler).
+                            paintOrder: 'stroke fill',
                             textTransform: clip.captionStyle?.uppercase ? 'uppercase' : 'none',
                             // Composition opacity is applied once to the isolated
                             // parent group below so overlapping siblings fade as

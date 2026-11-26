@@ -7,6 +7,8 @@ import {
     PLAN_LABELS, planPrice, nextPlan, nextUsageReset, getProjectLimit, aiOpsMeter,
     FREE_TRIAL_AUTO_RUNS,
 } from '../lib/planLimits.js';
+import { featureFromPayload, planForFeature } from '../lib/upgradeFeatures.js';
+import UpgradeFeatureDetails from './UpgradeFeatureDetails.jsx';
 
 /**
  * PlanSheet — the mobile plan-limit sheet (mockup "OutOfOps").
@@ -14,16 +16,20 @@ import {
  *   reason 'projects' → project limit reached (dashboard)
  *   reason 'plans'    → "See plans" from the dashboard usage meter
  *   reason 'auto_trial' → the free Auto edits are used up (mobile flow, R148)
- * Shows the next plan's price and first features (same copy as the pricing
- * page), Upgrade (Stripe Checkout) and Not now. Mobile-only callers.
+ *   reason 'paid_feature' + feature → a plan-gated feature (R172)
+ * When the refusal names a feature (upgradeFeatures.js), the sheet explains
+ * THAT feature: what it does, what the plan adds, what still works without
+ * it, then the plan's other lines. Otherwise the next plan's first features
+ * (same copy as the pricing page). Upgrade (Stripe Checkout) and Not now.
  */
-export default function PlanSheet({ open, reason = 'ai_ops', plan = 'free', upgradeTo, used = null, onClose, onBilling }) {
+export default function PlanSheet({ open, reason = 'ai_ops', plan = 'free', upgradeTo, feature: featureProp, code, used = null, onClose, onBilling }) {
     const { t, i18n } = useTranslation('common');
     const { t: tl } = useTranslation('landing');
     const [loading, setLoading] = useState(false);
     const [failed, setFailed] = useState(false);
 
-    const target = upgradeTo || nextPlan(plan);
+    const feature = reason === 'plans' ? null : featureFromPayload({ feature: featureProp, code, reason });
+    const target = feature ? planForFeature(feature, { upgradeTo, currentPlan: plan }) : (upgradeTo || nextPlan(plan));
     const planLabel = PLAN_LABELS[plan] || PLAN_LABELS.free;
     const targetLabel = target ? (PLAN_LABELS[target] || target) : null;
     const resetDate = new Intl.DateTimeFormat(i18n.language || 'en', { day: 'numeric', month: 'long', timeZone: 'UTC' }).format(nextUsageReset());
@@ -42,6 +48,9 @@ export default function PlanSheet({ open, reason = 'ai_ops', plan = 'free', upgr
     } else if (reason === 'auto_trial') {
         title = t('planSheet.autoTrialTitle');
         body = t('planSheet.autoTrialBody', { total: FREE_TRIAL_AUTO_RUNS });
+    } else if (feature && !['aiOps', 'autoTrial', 'projects'].includes(feature)) {
+        title = t(`upgradeFeatures.${feature}.title`);
+        body = null; // the feature block below carries it
     } else if (reason === 'paid_feature') {
         title = t('planSheet.paidFeatureTitle', 'Upgrade to unlock');
         body = t('planSheet.paidFeatureBody', 'Editing styles and Auto mode are available on Creator and Pro plans.');
@@ -63,7 +72,7 @@ export default function PlanSheet({ open, reason = 'ai_ops', plan = 'free', upgr
 
     return (
         <MobileSheet open={open} title={title} onClose={onClose}>
-            <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5, color: 'var(--fg-2)' }}>{body}</p>
+            {body && <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5, color: 'var(--fg-2)' }}>{body}</p>}
 
             {reason === 'plans' && used !== null && !meter.unlimited && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -87,14 +96,16 @@ export default function PlanSheet({ open, reason = 'ai_ops', plan = 'free', upgr
                             </span>
                         )}
                     </div>
-                    <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {feature ? (
+                        <UpgradeFeatureDetails feature={feature} plan={target} compact showBody={body === null} />
+                    ) : <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {featureList.map((f) => (
                             <li key={f} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, color: 'var(--fg-2)' }}>
                                 <Check size={14} style={{ color: 'var(--mint)', flexShrink: 0 }} aria-hidden="true" />
                                 {f}
                             </li>
                         ))}
-                    </ul>
+                    </ul>}
                 </div>
             )}
 

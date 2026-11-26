@@ -103,6 +103,7 @@ const CaptionOverlay = () => {
                             color,
                             textShadow:       textShadow || 'none',
                             WebkitTextStroke: strokeCss,
+                            paintOrder:       'stroke fill', // R174: outline under the letters, like the export
                             textTransform,
                             letterSpacing,
                             lineHeight:       1.1,

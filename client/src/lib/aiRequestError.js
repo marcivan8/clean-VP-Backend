@@ -58,6 +58,7 @@ export async function describeAiFailure(response, fallback = 'The AI service did
     if (response.status === 402) {
         EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
             reason: quotaReason(body),
+            code: body?.error,
             message: serverMessage || say('editor:aiErrors.quota', "You've used all your AI operations."),
             upgradeRequired: body?.upgradeRequired || 'creator',
         });
