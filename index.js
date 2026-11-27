@@ -127,17 +127,35 @@ app.use(helmet({
 }));
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
+// The SPA is served by this same app, so its own origin must always pass:
+// Vite's <script type="module" crossorigin> and <link crossorigin> send an
+// Origin header even for same-origin assets. Before this, the allowlist was
+// only FRONTEND_URL/PUBLIC_URL, compared as exact strings; once NODE_ENV was
+// set to production (2026-11-27) a missing FRONTEND_URL or a www/apex or
+// trailing-slash mismatch made every /assets/* request a 500 and the site
+// rendered blank. Configured URLs now also allow their www/apex twin, and a
+// refused origin is just denied CORS headers (callback(null, false)), never
+// an error, so a bad origin can no longer 500 a file the page needs.
+const DEV_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'];
+function originVariants(url) {
+  try {
+    const u = new URL(String(url).trim());
+    const host = u.host.startsWith('www.') ? u.host.slice(4) : u.host;
+    return [`${u.protocol}//${host}`, `${u.protocol}//www.${host}`];
+  } catch { return []; }
+}
 const allowedOrigins = process.env.NODE_ENV === 'production'
-  ? [process.env.FRONTEND_URL, process.env.PUBLIC_URL].filter(Boolean)
-  : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'];
+  ? [...new Set([process.env.FRONTEND_URL, process.env.PUBLIC_URL].filter(Boolean).flatMap(originVariants))]
+  : DEV_ORIGINS;
 
-const corsOptions = {
-  origin: process.env.NODE_ENV === 'production'
-    ? (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-        callback(new Error(`CORS: origin '${origin}' not allowed`));
-      }
-    : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'],
+function isSameOrigin(req, origin) {
+  try {
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    return !!host && new URL(origin).host === String(host).split(',')[0].trim();
+  } catch { return false; }
+}
+
+const corsBase = {
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   // X-Session-Id carries the anonymous session (client/src/utils/authFetch.js)
@@ -151,7 +169,12 @@ const corsOptions = {
   maxAge: 86400,
 };
 
-const corsMiddleware = cors(corsOptions);
+const corsMiddleware = cors((req, callback) => {
+  const origin = req.headers.origin;
+  const allowed = !origin || allowedOrigins.includes(origin) || (process.env.NODE_ENV === 'production' && isSameOrigin(req, origin));
+  if (!allowed && process.env.NODE_ENV === 'production') console.warn(`[cors] origin '${origin}' not allowed`);
+  callback(null, { ...corsBase, origin: allowed });
+});
 app.use(corsMiddleware);
 // Reuse the same configured middleware for preflight — never allow wildcard here.
 app.options('*', corsMiddleware);
