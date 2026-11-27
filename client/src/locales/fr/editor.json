@@ -1546,7 +1546,8 @@
     "lockedTitle": "Les Shorts IA sont réservés aux abonnements payants",
     "lockedDescription": "Trouvez automatiquement les moments viraux et découpez vos vidéos au format 9:16 avec cadrage intelligent, sous-titres et bruitages sur les forfaits Creator et Pro.",
     "lockedCta": "Débloquer les Shorts",
-    "lockedMessage": "La découpe en shorts IA est disponible sur les forfaits Creator et Pro."
+    "lockedMessage": "La découpe en shorts IA est disponible sur les forfaits Creator et Pro.",
+    "seePerformance": "Voir les performances de vos publications dans le planificateur"
   },
   "scenePanel": {
     "title": "Scène",

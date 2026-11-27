@@ -1546,7 +1546,8 @@
     "lockedTitle": "AI Shorts is a paid feature",
     "lockedDescription": "Automatically find viral moments and repurpose your long-form videos into 9:16 Shorts with smart framing, captions, and sound effects on Creator and Pro plans.",
     "lockedCta": "Upgrade to unlock Shorts",
-    "lockedMessage": "AI Shorts repurposing is available on Creator and Pro plans."
+    "lockedMessage": "AI Shorts repurposing is available on Creator and Pro plans.",
+    "seePerformance": "See how your posts perform in the Planner"
   },
   "scenePanel": {
     "title": "Scene",

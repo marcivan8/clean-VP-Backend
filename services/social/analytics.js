@@ -94,10 +94,43 @@ async function syncSocialAnalytics() {
         }
     }
 
-    const retentionDate = utcDate(Date.now() - 30 * 24 * 60 * 60_000);
-    await supabaseAdmin.from(METRICS).delete().lt('metric_date', retentionDate);
+    await pruneOldSnapshots(utcDate(Date.now() - 30 * 24 * 60 * 60_000));
     console.log(`[social analytics] sync complete: ${synced} synced, ${failed} failed`);
     return { synced, failed };
+}
+
+/**
+ * Daily snapshots are kept 30 days, EXCEPT each post's latest one (R178).
+ * Stats are only refreshed for 30 days after posting, so deleting everything
+ * older than 30 days used to leave any post older than about two months with
+ * no numbers at all, and the Planner showed it as never measured. The latest
+ * snapshot holds the post's final running totals, which is what the table and
+ * the lifetime figures need. Fails soft: a failed prune is logged, never thrown,
+ * so it cannot break the sync that just ran.
+ */
+async function pruneOldSnapshots(retentionDate) {
+    try {
+        const { data: old, error } = await supabaseAdmin.from(METRICS)
+            .select('publication_id,metric_date').lt('metric_date', retentionDate)
+            .order('metric_date', { ascending: false }).limit(5000);
+        if (error) throw new Error(error.message);
+        if (!old?.length) return;
+        const ids = [...new Set(old.map(r => r.publication_id))];
+        const { data: recent, error: recentError } = await supabaseAdmin.from(METRICS)
+            .select('publication_id').in('publication_id', ids).gte('metric_date', retentionDate).limit(5000);
+        if (recentError) throw new Error(recentError.message);
+        const hasRecent = new Set((recent || []).map(r => r.publication_id));
+        const newestOld = new Map();
+        for (const row of old) if (!newestOld.has(row.publication_id)) newestOld.set(row.publication_id, row.metric_date);
+        for (const id of ids) {
+            // With a newer snapshot, nothing old is needed; without one, keep the newest old one.
+            const cutoff = hasRecent.has(id) ? retentionDate : newestOld.get(id);
+            const { error: delError } = await supabaseAdmin.from(METRICS).delete().eq('publication_id', id).lt('metric_date', cutoff);
+            if (delError) throw new Error(delError.message);
+        }
+    } catch (err) {
+        console.warn('[social analytics] pruning old snapshots failed:', err.message);
+    }
 }
 
 async function getUserAnalytics(userId) {
@@ -111,14 +144,19 @@ async function getUserAnalytics(userId) {
 
     const [{ data: snapshots, error: snapshotError }, { data: recommendations, error: recommendationError }] = await Promise.all([
         supabaseAdmin.from(METRICS).select('publication_id,metric_date,metrics,captured_at')
-            .eq('user_id', userId).in('publication_id', ids).order('metric_date', { ascending: false }).limit(1000),
+            .eq('user_id', userId).in('publication_id', ids).order('metric_date', { ascending: false }).limit(4000),
         supabaseAdmin.from(RECOMMENDATIONS).select('id,provider,category,title,rationale,instruction,evidence,status,created_at')
             .eq('user_id', userId).order('created_at', { ascending: false }).limit(30),
     ]);
     if (snapshotError) throw new Error(`SOCIAL_METRICS_QUERY_FAILED: ${snapshotError.message}`);
     if (recommendationError) throw new Error(`SOCIAL_RECOMMENDATIONS_QUERY_FAILED: ${recommendationError.message}`);
     const latest = new Map();
-    for (const row of snapshots || []) if (!latest.has(row.publication_id)) latest.set(row.publication_id, row);
+    const history = new Map();
+    for (const row of snapshots || []) {
+        if (!latest.has(row.publication_id)) latest.set(row.publication_id, row);
+        if (!history.has(row.publication_id)) history.set(row.publication_id, []);
+        history.get(row.publication_id).push({ date: row.metric_date, metrics: row.metrics || {} });
+    }
     const enriched = (posts || []).map(post => ({
         id: post.id,
         provider: post.provider,
@@ -128,6 +166,8 @@ async function getUserAnalytics(userId) {
         editContext: post.edit_context || {},
         metrics: latest.get(post.id)?.metrics || null,
         metricsCapturedAt: latest.get(post.id)?.captured_at || null,
+        // R178: the daily running totals, oldest first, for the Planner's charts.
+        history: (history.get(post.id) || []).slice().reverse(),
         analyticsError: post.analytics_error || null,
     }));
     const measured = enriched.filter(post => post.metrics);
@@ -137,4 +177,4 @@ async function getUserAnalytics(userId) {
     return { posts: enriched, recommendations: recommendations || [], guidance, sampleCount: measured.length };
 }
 
-module.exports = { syncSocialAnalytics, getUserAnalytics, YOUTUBE_METRICS, INSTAGRAM_METRICS };
+module.exports = { syncSocialAnalytics, getUserAnalytics, pruneOldSnapshots, YOUTUBE_METRICS, INSTAGRAM_METRICS };

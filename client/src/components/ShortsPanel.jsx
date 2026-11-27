@@ -18,7 +18,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Smartphone, Play, Square, Download, Loader2, Trash2, Wand2, ExternalLink, Sparkles, Volume2, UserCheck, AlertTriangle, Lock, Rows2 } from 'lucide-react';
+import { Smartphone, Play, Square, Download, Loader2, Trash2, Wand2, ExternalLink, Sparkles, Volume2, UserCheck, AlertTriangle, Lock, Rows2, BarChart3 } from 'lucide-react';
 
 import useTimelineStore from '../store/useTimelineStore';
 import { PLATFORM_IDS, PLATFORM_PROFILES, profileNotes, autoShortCount } from '../agent/PlatformProfiles.js';
@@ -35,7 +35,6 @@ import { useUserPlan } from '../hooks/useUserPlan.js';
 import { EventBus, EVENT_TYPES } from '../agent/EventBus.js';
 import useAIStore from '../store/useAIStore.js';
 import SocialPublisher from './SocialPublisher.jsx';
-import SocialPerformancePanel from './SocialPerformancePanel.jsx';
 import ProFeatureLock from './ProFeatureLock.jsx';
 
 const fmt = (s) => {
@@ -413,7 +412,13 @@ export default function ShortsPanel({ onExport }) {
                 </label>
             </div>
 
-            {canPublish ? <SocialPerformancePanel /> : !isFree && <ProFeatureLock feature="social" required="pro" variant="inline" />}
+            {/* R178: post performance lives in the Planner now; a pointer stays here. */}
+            {canPublish ? (
+                <button type="button" onClick={() => navigate('/planner?view=performance')}
+                    className="mb-3 w-full px-2 py-1.5 rounded text-[11px] border border-border/70 text-muted-foreground hover:text-foreground flex items-center justify-center gap-1.5">
+                    <BarChart3 className="w-3 h-3" /> {t('shortsPanel.seePerformance', 'See how your posts perform in the Planner')}
+                </button>
+            ) : !isFree && <ProFeatureLock feature="social" required="pro" variant="inline" />}
 
             {sorted.length === 0 && <p className="text-[11px] text-muted-foreground">{t('shortsPanel.empty')}</p>}
 

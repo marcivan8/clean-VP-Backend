@@ -18,13 +18,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, CalendarDays, Check, ChevronLeft, ChevronRight, Film, Loader2, Plus, X } from 'lucide-react';
+import { ArrowLeft, BarChart3, CalendarDays, Check, ChevronLeft, ChevronRight, Film, Loader2, Plus, X } from 'lucide-react';
 import SocialPublisher from '../components/SocialPublisher.jsx';
 import { probeVideo } from '../lib/socialFormat.js';
 import { authFetch } from '../utils/authFetch.js';
 import { useUserPlan } from '../hooks/useUserPlan.js';
 import useDeviceType from '../hooks/useDeviceType';
 import ProFeatureLock from '../components/ProFeatureLock.jsx';
+import PerformanceDashboard from '../components/planner/PerformanceDashboard.jsx';
 import {
     canScheduleAt, dayKey, gridRange, groupByDay, localInputValue, monthGrid, moveToDay, postActions, postTime,
 } from '../lib/socialCalendar.js';
@@ -66,6 +67,18 @@ export default function PlannerPage() {
     const [dragId, setDragId] = useState(null);
     const [hasAnyPosts, setHasAnyPosts] = useState(null);
     const [newPostOpen, setNewPostOpen] = useState(false);
+    // R178: the Planner has two views; ?view=performance opens the second.
+    const [view, setView] = useState(() => {
+        try { return new URLSearchParams(window.location.search).get('view') === 'performance' ? 'performance' : 'calendar'; } catch { return 'calendar'; }
+    });
+    const switchView = (next) => {
+        setView(next);
+        try {
+            const url = new URL(window.location.href);
+            if (next === 'performance') url.searchParams.set('view', 'performance'); else url.searchParams.delete('view');
+            window.history.replaceState(null, '', url.toString());
+        } catch { /* the view still switches without the URL */ }
+    };
 
     const grid = useMemo(() => monthGrid(cursor.year, cursor.month), [cursor]);
     const byDay = useMemo(() => groupByDay(posts), [posts]);
@@ -215,7 +228,7 @@ export default function PlannerPage() {
                             {t('planner.subtitle', 'Every scheduled and published post, across all your projects.')}
                         </p>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {view === 'calendar' && <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <button type="button" aria-label={t('planner.prev', 'Previous month')} onClick={() => shiftMonth(-1)} style={{ ...ghostBtn, padding: 8 }}><ChevronLeft size={16} /></button>
                         <span style={{ minWidth: 150, textAlign: 'center', fontWeight: 600, textTransform: 'capitalize' }}>{monthLabel}</span>
                         <button type="button" aria-label={t('planner.next', 'Next month')} onClick={() => shiftMonth(1)} style={{ ...ghostBtn, padding: 8 }}><ChevronRight size={16} /></button>
@@ -227,8 +240,25 @@ export default function PlannerPage() {
                                 <Plus size={14} /> {t('planner.newPost', 'New post')}
                             </button>
                         )}
-                    </div>
+                    </div>}
                 </div>
+
+                <div role="tablist" aria-label={t('planner.views', 'Planner views')} style={{ display: 'inline-flex', gap: 4, padding: 3, borderRadius: 999, border: '0.5px solid rgba(255,255,255,0.09)', background: 'rgba(255,255,255,0.03)', marginBottom: 16 }}>
+                    {[['calendar', <CalendarDays key="i" size={14} />, t('planner.tabCalendar', 'Calendar')], ['performance', <BarChart3 key="i" size={14} />, t('planner.tabPerformance', 'Performance')]].map(([id, icon, label]) => (
+                        <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => switchView(id)}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 999, border: 'none', cursor: 'pointer', fontSize: 13,
+                                background: view === id ? 'color-mix(in oklch, var(--accent) 18%, transparent)' : 'transparent',
+                                color: view === id ? 'var(--fg)' : 'var(--fg-3)', fontWeight: view === id ? 600 : 400 }}>
+                            {icon} {label}
+                        </button>
+                    ))}
+                </div>
+
+                {view === 'performance' ? (
+                    planLoading ? null : isPro
+                        ? <PerformanceDashboard t={t} isMobile={isMobile} />
+                        : <ProFeatureLock feature="social" required="pro" variant="inline" />
+                ) : (<>
 
                 {!isPro && !planLoading && <div style={{ marginBottom: 14 }}><ProFeatureLock feature="planner" required="pro" variant="inline" /></div>}
 
@@ -335,6 +365,7 @@ export default function PlannerPage() {
                         </div>
                     </div>
                 </div>
+                </>)}
             </div>
         </div>
         </>

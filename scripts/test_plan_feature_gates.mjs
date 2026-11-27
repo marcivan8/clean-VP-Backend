@@ -69,7 +69,7 @@ console.log('\n§3 the browser shows the lock');
 const ds = code('../client/src/pages/DesignStudioPage.jsx');
 ok(/if \(plan !== 'pro'\) return <ProFeatureLock feature="designStudio"/.test(ds) && /return <DesignProjectGate \/>/.test(ds), 'Design Studio renders the lock for every plan but Pro');
 const shorts = code('../client/src/components/ShortsPanel.jsx');
-ok(/canPublish = plan === 'pro'/.test(shorts) && /\{canPublish && <SocialPublisher/.test(shorts) && /canPublish \? <SocialPerformancePanel/.test(shorts), 'Shorts panel hides publishing and analytics below Pro');
+ok(/canPublish = plan === 'pro'/.test(shorts) && /\{canPublish && <SocialPublisher/.test(shorts) && /canPublish \? \(\s*<button[\s\S]{0,120}?navigate\('\/planner\?view=performance'\)/.test(shorts), 'Shorts panel hides publishing and analytics below Pro');
 const share = code('../client/src/components/ShareDestinations.jsx');
 ok(/canConnect = plan === 'pro'/.test(share) && /clickable = d\.configured && \(connected \|\| canConnect\)/.test(share), 'Publish-to rows cannot start a connection below Pro, but can still disconnect');
 

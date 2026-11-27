@@ -1382,3 +1382,17 @@ section { padding: 96px 0; position: relative; }
   .chat-composer__menu-item { transition: none; }
   .chat-composer__send:hover { transform: none; }
 }
+
+/* R178 — Planner performance chart series. Validated with the dataviz
+   palette validator against each theme's raised surface (lightness band,
+   chroma floor, colour-blind separation, contrast): cyan/violet steps
+   darker than the UI accents, which fail the lightness band on dark. */
+.vibed-analytics {
+  --series-youtube: #00A3B8;
+  --series-instagram: #A857EC;
+}
+.theme-warm .vibed-analytics,
+[data-theme="warm"] .vibed-analytics {
+  --series-youtube: #0091A8;
+  --series-instagram: #8A2BE2;
+}
