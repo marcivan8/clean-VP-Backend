@@ -1,4 +1,13 @@
 require('dotenv').config();
+// R177: AI calls made by a job are traced as one unit per job (no model call, no trace).
+const { initTracing, runWithTraceContext } = require('./services/tracing/langfuse');
+initTracing();
+const traced = (queueName, processor) => (job, ...rest) => runWithTraceContext({
+    feature: `job/${queueName}`,
+    userId: job?.data?.userId || null,
+    sessionId: typeof job?.data?.projectId === 'string' ? job.data.projectId : null,
+    input: { queue: queueName, jobId: job?.id, name: job?.name },
+}, () => processor(job, ...rest));
 const { Worker } = require('bullmq');
 const { queue: socialQueue } = require('./services/social/publicationQueue');
 const { connection } = require('./queue/connection');
@@ -28,7 +37,7 @@ console.log('👷 Worker service starting...');
 // instance and takes the whole process down mid-request, which is what
 // produced a 502 on an unrelated clip's proxy.mp4 while a batch of 5
 // uploads was in flight. See R24.
-const videoWorker = new Worker('video-processing', processVideoJob, {
+const videoWorker = new Worker('video-processing', traced('video-processing', processVideoJob), {
     connection,
     concurrency: CONCURRENCY.video, // default 1, see above
     limiter: { max: 10, duration: 60000 }
@@ -42,7 +51,7 @@ videoWorker.on('failed', (job, err) => {
 });
 
 // 2. Audio Processing Worker (transcribe, denoise, normalize, beat-detect, silence-detect)
-const audioWorker = new Worker('audio-processing', processAudioJob, {
+const audioWorker = new Worker('audio-processing', traced('audio-processing', processAudioJob), {
     connection,
     // Keep at 1: each filler-detect job downloads a raw MP4 from GCS, runs
     // FFmpeg audio extraction, then calls OpenAI Whisper. Two concurrent jobs
@@ -63,7 +72,7 @@ audioWorker.on('failed', (job, err) => {
 });
 
 // 3. Analysis Processing Worker (Virality)
-const analysisWorker = new Worker('analysis-processing', processAnalysisJob, {
+const analysisWorker = new Worker('analysis-processing', traced('analysis-processing', processAnalysisJob), {
     connection,
     concurrency: CONCURRENCY.analysis,
 });
@@ -76,7 +85,7 @@ analysisWorker.on('failed', (job, err) => {
 });
 
 // 4. Export Processing Worker (timeline render)
-const exportWorker = new Worker('export-processing', processExportJob, {
+const exportWorker = new Worker('export-processing', traced('export-processing', processExportJob), {
     connection,
     concurrency: CONCURRENCY.export, // default 1: exports are very CPU/disk intensive
 });
@@ -116,7 +125,7 @@ try {
 // upload burst. See R24 — this and the videoWorker concurrency drop above
 // are the fix for the OOM-driven 502 that surfaced under 5 simultaneous
 // uploads.
-const assetAnalysisWorker = new Worker('asset-analysis', async (job) => {
+const assetAnalysisWorker = new Worker('asset-analysis', traced('asset-analysis', async (job) => {
     if (!_MediaIntelligencePipeline) {
         throw new Error('MediaIntelligencePipeline not loaded — redeploy with server/brain/ committed');
     }
@@ -134,7 +143,7 @@ const assetAnalysisWorker = new Worker('asset-analysis', async (job) => {
     } else {
         await pipeline.analyzeAsset(assetId, filePath, projectId, userId, name || null, isReference === true);
     }
-}, { connection, concurrency: CONCURRENCY.assetAnalysis });
+}), { connection, concurrency: CONCURRENCY.assetAnalysis });
 
 assetAnalysisWorker.on('completed', job => {
     console.log(`✅ [AssetAnalysisQueue] Job ${job.id} completed`);
@@ -170,7 +179,7 @@ try {
 // so it competes for bandwidth/disk with videoWorker during an upload burst
 // but not for CPU — see R24's reasoning for why that distinction matters on a
 // small Railway instance.
-const objectSegmentationWorker = new Worker('object-segmentation', processObjectSegmentationJob, {
+const objectSegmentationWorker = new Worker('object-segmentation', traced('object-segmentation', processObjectSegmentationJob), {
     connection,
     concurrency: CONCURRENCY.objectSegmentation,
     // SAM2 video inference can run several minutes; give BullMQ enough lock
@@ -180,7 +189,7 @@ const objectSegmentationWorker = new Worker('object-segmentation', processObject
     lockDuration: 10 * 60 * 1000,
 });
 
-const socialPublicationWorker = new Worker('social-publishing', processSocialPublication, {
+const socialPublicationWorker = new Worker('social-publishing', traced('social-publishing', processSocialPublication), {
     connection,
     concurrency: Number(process.env.WORKER_CONCURRENCY_SOCIAL) || 2,
     lockDuration: 5 * 60 * 1000,

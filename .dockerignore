@@ -5,6 +5,12 @@
 Social SFX Pack - Collection 1/
 .git
 .gitignore
+# Installed inside the image by `npm ci`. A local node_modules copied in by
+# `COPY . .` would overwrite those Linux binaries with the host's (macOS ARM
+# canvas/tfjs-node fail with "invalid ELF header"). Railway builds from git,
+# which has no node_modules, so this only bit local builds.
+node_modules
+client/node_modules
 .DS_Store
 *.log
 .env*

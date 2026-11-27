@@ -208,7 +208,7 @@
               ],
               [
                 "Langfuse (Langfuse GmbH)",
-                "Tracing of AI editing runs you start (goal, steps, your approvals, and excerpts of the prompts and answers, which can include transcript text), to check and improve them",
+                "Tracing of the AI features (a sample of requests, and every editing run you start): which feature ran, the model, timings, cost, your approvals, and excerpts of the prompts and answers, which can include transcript text. Email addresses, phone numbers, keys and images are removed before sending",
                 "European Union"
               ],
               [

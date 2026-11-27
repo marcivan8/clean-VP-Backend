@@ -139,9 +139,12 @@ function builder(table) {
 const stub = (rel, exports) => { const p = require.resolve(rel); require.cache[p] = { id: p, filename: p, loaded: true, exports }; };
 stub('../config/database.js', { supabaseAdmin: { from: builder } });
 stub('../middleware/auth.js', { authenticateUser: (req, res, next) => { const id = req.headers['x-user']; if (!id) return res.status(401).end(); req.user = { id }; next(); } });
-process.env.LANGFUSE_PUBLIC_KEY = 'pk-lf-test';
-process.env.LANGFUSE_SECRET_KEY = 'sk-lf-test';
+// R177: the REAL Langfuse span processor (masking, propagation, environment),
+// with its network exporter replaced by an in-memory one.
+const { InMemorySpanExporter } = require('@opentelemetry/sdk-trace-base');
+const memory = new InMemorySpanExporter();
 const L = require('../services/tracing/langfuse.js');
+L.initTracing({ exporter: memory, env: { NODE_ENV: 'test', LANGFUSE_SAMPLE_RATE: '1' } });
 const routes = require(routesPath);
 {
     const clientStatuses = Object.values(R.STATUS).sort().join();
@@ -213,51 +216,62 @@ try {
 }
 
 // ── §5 ──────────────────────────────────────────────────────────────────────
-console.log('\n§5 Langfuse tracing');
+console.log('\n§5 Langfuse tracing (official SDK)');
 {
     const runId = '44444444-4444-4444-8444-444444444444';
-    ok(L.traceIdFor(runId) === '44444444444444448444444444444444' && L.traceIdFor('not-a-uuid') === null, 'the trace id is the run id without dashes');
-    ok(L.spanIdFor(runId, 'root') === L.spanIdFor(runId, 'root') && L.spanIdFor(runId, 'root').length === 16, 'span ids are stable 16-hex values');
+    const flush = () => new Promise(r => setTimeout(r, 30));
+    const attrs = (s) => s.attributes;
+    ok(L.isEnabled() && L.traceIdFor(runId) === '44444444444444448444444444444444' && L.traceIdFor('x') === null, 'tracing is on with a test exporter; a run trace id is its UUID without dashes');
+    memory.reset();
     const prev = { id: runId, projectId: P1, goal, status: 'finding', state: { createdAt: 1000, steps: [{ id: 'find', status: 'running', startedAt: 2000 }], approvals: [{ kind: 'plan', decision: 'approved', at: 1500 }] } };
     const next = { id: runId, projectId: P1, goal, status: 'stopped', cost: { aiCalls: 2 }, state: { createdAt: 1000, stopReason: 'Stopped by you', steps: [{ id: 'find', status: 'stopped', startedAt: 2000, endedAt: 3000, note: 'Stopped by you' }], approvals: [{ kind: 'plan', decision: 'approved', at: 1500 }], decisions: { s1: { decision: 'dropped', reason: 'off topic', at: 2500 } } } };
-    const spans = L.spansForRunChange(prev, next, { userId: 'u1', now: 4000 });
-    const names = spans.map(s => s.name);
-    ok(names.includes('step: find') && names.includes('short dropped') && spans.some(s => s.spanId === L.spanIdFor(runId, 'root')), 'a change yields the finished step, the new decision and, on ending, the run itself');
-    ok(!names.some(n => n.startsWith('approval:')), 'an approval already traced is not sent again');
-    const attrs = (s) => Object.fromEntries(s.attributes.map(a => [a.key, Object.values(a.value)[0]]));
-    const stepSpan = spans.find(s => s.name === 'step: find');
-    ok(attrs(stepSpan)['langfuse.user.id'] === 'u1' && attrs(stepSpan)['langfuse.session.id'] === P1 && attrs(stepSpan)['langfuse.trace.name'] === 'shorts_from_long_video', 'every span carries the trace name, the user and the project as session');
-    ok(attrs(stepSpan)['langfuse.observation.level'] === 'WARNING' && stepSpan.parentSpanId === L.spanIdFor(runId, 'root'), 'a stopped step is a warning under the run');
-    const root = spans.find(s => s.spanId === L.spanIdFor(runId, 'root'));
-    ok(attrs(root)['langfuse.observation.type'] === 'agent' && /Stopped by you/.test(attrs(root)['langfuse.trace.output']), 'the run span is typed agent and its output says why it stopped');
-    ok(stepSpan.startTimeUnixNano === '2000000000' && stepSpan.endTimeUnixNano === '3000000000', 'times are sent in nanoseconds');
-    const decision = spans.find(s => s.name === 'short dropped');
-    ok(attrs(decision)['langfuse.observation.type'] === 'event' && attrs(decision)['langfuse.observation.metadata.reason'] === 'off topic', 'a decision is an event with its reason');
-
-    // Sending
-    L._resetForTests();
     L.recordRunChange(prev, next, { userId: 'u1' });
-    let sent = null;
-    const status = await L.flush(async (url, opts) => { sent = { url, opts }; return { ok: true, status: 200 }; });
-    ok(status === 200 && sent.url === 'https://cloud.langfuse.com/api/public/otel/v1/traces', 'spans go to the EU cloud OpenTelemetry endpoint by default');
-    ok(sent.opts.headers.Authorization === `Basic ${Buffer.from('pk-lf-test:sk-lf-test').toString('base64')}` && sent.opts.headers['x-langfuse-ingestion-version'] === '4', 'with Basic auth and the v4 ingestion header');
-    const body = JSON.parse(sent.opts.body);
-    ok(body.resourceSpans[0].scopeSpans[0].spans.length === spans.length, 'as one OTLP export request');
-    ok(await L.flush(async () => { throw new Error('down'); }) === null, 'an empty queue sends nothing');
-    L.recordRunChange(prev, next, { userId: 'u1' });
-    ok(await L.flush(async () => { throw new Error('down'); }) === null && L._queue().length === 0, 'a failed send is dropped without throwing');
-    const huge = L.buildSpan({ runId, key: 'x', input: 'y'.repeat(20_000) });
-    ok(Object.values(huge.attributes.find(a => a.key === 'langfuse.observation.input').value)[0].length < 8100, 'inputs are truncated before they leave');
+    await flush();
+    const spans = memory.getFinishedSpans();
+    const by = (n) => spans.find(s => s.name === n);
+    const root = by('shorts_from_long_video'), step = by('step-find'), decision = by('short-dropped');
+    ok(root && step && decision && !spans.some(s => s.name.startsWith('approval-')), 'a change yields the ended step, the new decision and, on ending, the run; an approval already traced is not sent again');
+    ok(spans.every(s => s.spanContext().traceId === L.traceIdFor(runId)), 'all in the run trace');
+    ok(root.spanContext().spanId === L.spanIdFor(runId, 'root') && step.parentSpanContext?.spanId === L.spanIdFor(runId, 'root') && decision.parentSpanContext?.spanId === L.spanIdFor(runId, 'root'), 'the run root takes the pinned id its children already named');
+    ok(attrs(root)['langfuse.observation.type'] === 'agent' && attrs(step)['langfuse.observation.type'] === 'span' && attrs(decision)['langfuse.observation.type'] === 'event', 'typed agent / span / event');
+    ok(spans.every(s => attrs(s)['user.id'] === 'u1' && attrs(s)['session.id'] === P1 && attrs(s)['langfuse.trace.name'] === 'shorts_from_long_video' && attrs(s)['langfuse.environment'] === 'test'), 'every span carries user, project as session, trace name and environment');
+    ok(attrs(step)['langfuse.observation.level'] === 'WARNING' && /Stopped by you/.test(attrs(root)['langfuse.observation.output']), 'a stopped step is a warning and the run says why it stopped');
+    ok(/off topic/.test(attrs(decision)['langfuse.observation.metadata.reason']), 'a decision keeps its reason');
+    ok(Number(step.startTime[0]) === 2 && Number(step.endTime[0]) === 3, 'step times come from the run state');
 
-    delete process.env.LANGFUSE_SECRET_KEY;
-    ok(!L.isEnabled(), 'without both keys tracing is off');
-    L._resetForTests();
-    L.recordRunChange(prev, next, {});
-    ok(L._queue().length === 0, 'and nothing is queued');
-    process.env.LANGFUSE_SECRET_KEY = 'sk-lf-test';
-    process.env.LANGFUSE_TRACING = 'off';
-    ok(!L.isEnabled(), 'LANGFUSE_TRACING=off turns it off with the keys set');
-    delete process.env.LANGFUSE_TRACING;
+    // Every AI call of a request or job: one trace, a generation inside.
+    memory.reset();
+    const client = { chat: { completions: { create: async () => ({ model: 'gpt-x', choices: [{ message: { content: 'answer' } }], usage: { prompt_tokens: 12, completion_tokens: 5 } }) } },
+        audio: { transcriptions: { create: async () => ({ text: 'spoken words' }) } } };
+    const { currentRunContext } = require('../services/tracing/runContext.js');
+    L.instrumentClient(client, 'openai', currentRunContext);
+    await client.chat.completions.create({ model: 'gpt-x', messages: [{ role: 'user', content: 'outside any request' }] });
+    await flush();
+    ok(memory.getFinishedSpans().length === 0, 'a call outside a request or job is not traced');
+    await L.runWithTraceContext({ feature: 'job/asset-analysis', userId: 'u9', sessionId: P1 }, async () => {
+        await client.chat.completions.create({ model: 'gpt-x', temperature: 0.3, messages: [{ role: 'user', content: [{ type: 'text', text: 'mail me at bob@example.com, key sk-proj-abcdefghijklmnop1234' }, { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AAAA' } }] }] });
+        await client.audio.transcriptions.create({ model: 'whisper-1', file: Buffer.from('x') });
+    });
+    await flush();
+    const js = memory.getFinishedSpans();
+    const jroot = js.find(s => s.name === 'job/asset-analysis');
+    const gen = js.find(s => s.name === 'generate-vision');
+    const audio = js.find(s => s.name === 'transcribe-audio');
+    ok(jroot && gen && audio && gen.parentSpanContext?.spanId === jroot.spanContext().spanId && audio.parentSpanContext?.spanId === jroot.spanContext().spanId, 'a job is one trace, its model calls generations inside it');
+    ok(attrs(gen)['langfuse.observation.type'] === 'generation' && attrs(gen)['langfuse.observation.model.name'] === 'gpt-x' && /"total":17/.test(attrs(gen)['langfuse.observation.usage_details']) && /temperature/.test(attrs(gen)['langfuse.observation.model.parameters']), 'model, parameters and tokens are recorded');
+    ok(attrs(jroot)['user.id'] === 'u9' && attrs(gen)['session.id'] === P1 && attrs(gen)['langfuse.trace.name'] === 'job/asset-analysis', 'with the user, the project and a stable feature name');
+    const input = attrs(gen)['langfuse.observation.input'];
+    ok(/\[email\]/.test(input) && /\[secret\]/.test(input) && /image omitted/.test(input) && !/bob@example|sk-proj|base64/.test(input), 'emails, keys and images are masked before export');
+    ok(attrs(jroot)['langfuse.observation.output'] === 'spoken words' || attrs(jroot)['langfuse.observation.output'] === 'answer', 'the trace output is the answer');
+
+    // Sampling: outside agent runs only a share of requests is traced.
+    const sampled = L.config({ LANGFUSE_PUBLIC_KEY: 'a', LANGFUSE_SECRET_KEY: 'b' });
+    ok(sampled.sampleRate === 0.25 && L.config({ LANGFUSE_SAMPLE_RATE: '0' }).sampleRate === 0 && L.config({ LANGFUSE_SAMPLE_RATE: '7' }).sampleRate === 0.25, 'default sample rate 25%, 0 allowed, nonsense ignored');
+    ok(!L.config({ LANGFUSE_PUBLIC_KEY: 'a' }).enabled && !L.config({ LANGFUSE_PUBLIC_KEY: 'a', LANGFUSE_SECRET_KEY: 'b', LANGFUSE_TRACING: 'off' }).enabled, 'off without both keys, and with LANGFUSE_TRACING=off');
+    ok(L.environmentName({ NODE_ENV: 'production' }) === 'production' && L.environmentName({ LANGFUSE_TRACING_ENVIRONMENT: 'Langfuse Prod!' }) === 'development', 'environment names follow the Langfuse rule');
+    ok(L.featureFromRequest({ baseUrl: '/api/ai', route: { path: '/parse-intent' } }) === 'ai/parse-intent' && L.featureFromRequest({ baseUrl: '/api/agent-runs', route: { path: '/:id' } }) === 'agent-runs', 'trace names are stable (no ids in them)');
+    ok(L.maskValue('call me on +33 6 12 34 56 78') === 'call me on [phone]' && L.maskValue('at 12:30, 2 shorts of 45 s') === 'at 12:30, 2 shorts of 45 s', 'phone numbers are masked, times and counts are not');
+    ok(L.maskValue('x'.repeat(9000)).length < 6100, 'long text is cut');
     const { readContext } = require('../services/tracing/runContext.js');
     const req = (h) => ({ get: (k) => h[k.toLowerCase()] });
     ok(readContext(req({ 'x-vibed-agent-run': runId, 'x-vibed-agent-step': 'find' }))?.stepId === 'find', 'the run context is read from the headers');

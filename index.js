@@ -26,6 +26,9 @@ const path       = require('path');
 const fs         = require('fs');
 const { execSync } = require('child_process');
 require('dotenv').config();
+// R177: Langfuse tracing of every AI call (isolated provider; Sentry keeps its own).
+// After dotenv so the keys are read, before any route can make a model call.
+require('./services/tracing/langfuse').initTracing();
 
 const app = express();
 // Railway injects PORT dynamically — process.env.PORT is authoritative

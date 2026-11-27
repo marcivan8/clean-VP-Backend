@@ -208,7 +208,7 @@
               ],
               [
                 "Langfuse (Langfuse GmbH)",
-                "Traçage des créations IA que vous lancez (objectif, étapes, vos validations, et extraits des requêtes et réponses, qui peuvent contenir du texte de transcription), pour les vérifier et les améliorer",
+                "Traçage des fonctions d'IA (un échantillon des requêtes, et chaque création que vous lancez) : fonction utilisée, modèle, durées, coût, vos validations, et extraits des requêtes et réponses, qui peuvent contenir du texte de transcription. Adresses e-mail, numéros de téléphone, clés et images sont retirés avant l'envoi",
                 "Union européenne"
               ],
               [

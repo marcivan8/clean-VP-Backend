@@ -43,7 +43,14 @@
     "@aws-sdk/client-lambda": "^3.1053.0",
     "@ffprobe-installer/ffprobe": "^2.1.2",
     "@google-cloud/storage": "^7.16.0",
+    "@langfuse/otel": "6.1.1",
+    "@langfuse/tracing": "6.1.1",
     "@napi-rs/canvas": "^1.0.10",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/context-async-hooks": "2.8.0",
+    "@opentelemetry/exporter-trace-otlp-http": "0.223.2",
+    "@opentelemetry/sdk-trace-base": "2.8.0",
+    "@opentelemetry/sdk-trace-node": "2.8.0",
     "@paddle/paddle-node-sdk": "^3.2.0",
     "@sentry/node": "^10.57.0",
     "@supabase/storage-js": "^2.10.4",
@@ -89,7 +96,7 @@
     "vite": "^5.4.21"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   },
   "keywords": [
     "ai",

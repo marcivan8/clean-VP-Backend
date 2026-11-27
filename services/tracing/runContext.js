@@ -1,9 +1,12 @@
 // services/tracing/runContext.js
-// Which agent run (and step) the current request belongs to, for tracing only
-// (R176b). Set from the X-Vibed-Agent-Run / X-Vibed-Agent-Step headers by
-// `agentRunContext` middleware and read by the AI client wrapper in
-// services/AIProvider.js through AsyncLocalStorage, so the AI calls a run
-// makes are filed under its trace without threading an id through every route.
+// The tracing context of the current request or background job (R176b, R177).
+//
+// `agentRunContext` (mounted in index.js before every AI route) gives each
+// request a small context object through AsyncLocalStorage: the request
+// itself (for its route, user and project), when it started, and, when the
+// browser sends X-Vibed-Agent-Run / X-Vibed-Agent-Step, the agent run and step
+// it belongs to. The AI client wrapper in services/tracing/langfuse.js reads
+// it to name and group the request's model calls into one trace.
 //
 // It never authorises anything: a forged header can at most add a span to a
 // trace. Billing grouping is the separate X-Vibed-Run-Id (R148).
@@ -16,6 +19,7 @@ const store = new AsyncLocalStorage();
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STEP = /^[a-z_]{2,24}$/;
 
+/** The agent run headers of a request, or null. */
 function readContext(req) {
     const runId = typeof req.get === 'function' ? req.get('x-vibed-agent-run') : null;
     if (!runId || !UUID.test(String(runId).trim())) return null;
@@ -24,13 +28,17 @@ function readContext(req) {
 }
 
 function agentRunContext(req, res, next) {
-    const ctx = readContext(req);
-    if (!ctx) return next();
-    return store.run(ctx, next);
+    const run = readContext(req);
+    return store.run({ req, startedAt: Date.now(), ...(run || {}) }, next);
+}
+
+/** Run `fn` inside a context built outside a request (a background job). */
+function runInContext(ctx, fn) {
+    return store.run(ctx, fn);
 }
 
 function currentRunContext() {
     return store.getStore() || null;
 }
 
-module.exports = { agentRunContext, currentRunContext, readContext };
+module.exports = { agentRunContext, currentRunContext, readContext, runInContext };

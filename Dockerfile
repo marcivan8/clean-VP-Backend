@@ -1,5 +1,5 @@
 # --- Stage 1: Build the React Frontend ---
-FROM node:20-slim AS frontend-build
+FROM node:22-slim AS frontend-build
 WORKDIR /app/client
 COPY client/package*.json ./
 RUN npm ci
@@ -22,7 +22,7 @@ ENV VITE_POSTHOG_HOST=$VITE_POSTHOG_HOST
 RUN npm run build
 
 # --- Stage 2: Setup the Backend ---
-FROM node:20-slim
+FROM node:22-slim
 WORKDIR /usr/src/app
 
 # Install system dependencies needed for canvas/sharp/tensorflow
