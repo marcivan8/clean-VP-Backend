@@ -24,6 +24,7 @@
 'use strict';
 
 const { deleteProjectFiles, referencedBy } = require('./projectFiles');
+const { exportProtection, isProtected } = require('./social/scheduledExports');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NOTICE_MS = DAY_MS;
@@ -164,6 +165,11 @@ async function runRetention({ db, bucket, sendEmail, getUserEmail }, { now = Dat
         }
     }
 
+    // R175: exports a scheduled post still needs are skipped by both deletion
+    // passes below; read once per run (or 'all-exports' if it cannot be read).
+    const protect = (bucket && (toDelete.length > 0 || budget > 0))
+        ? await exportProtection(db, null, bucket?.name || null) : null;
+
     // ── 3. Delete projects whose notice has run out ───────────────────────
     for (const p of toDelete) {
         if (budget <= 0) { report.errors.push('file budget reached, continuing tomorrow'); break; }
@@ -173,7 +179,7 @@ async function runRetention({ db, bucket, sendEmail, getUserEmail }, { now = Dat
             if (!full) continue;
             const { data: others, error: oErr } = await db.from('projects').select('id, user_id, thumbnail_url, timeline_state').eq('user_id', p.user_id).neq('id', p.id);
             if (oErr) throw new Error(oErr.message);
-            const r = await deleteProjectFiles(bucket, full, others || [], { userId: p.user_id, dryRun });
+            const r = await deleteProjectFiles(bucket, full, others || [], { userId: p.user_id, dryRun, protect });
             budget -= r.deleted.length;
             report.filesDeleted += r.deleted.length;
             if (r.failed.length) report.errors.push(`project ${p.id}: ${r.failed.length} file(s) failed`);
@@ -190,7 +196,8 @@ async function runRetention({ db, bucket, sendEmail, getUserEmail }, { now = Dat
     // ── 4. Stray files: unused uploads/proxies, pre-folder exports ────────
     if (bucket && budget > 0) {
         try {
-            const strays = await findStrayFiles({ db, bucket, now, profilesCache: profiles });
+            const strays = (await findStrayFiles({ db, bucket, now, profilesCache: profiles }))
+                .filter(f => !isProtected(f.name, protect));
             for (const f of strays.slice(0, budget)) {
                 try {
                     if (!dryRun) await f.delete({ ignoreNotFound: true });
@@ -222,7 +229,12 @@ async function findStrayFiles({ db, bucket, now, profilesCache = new Map() }) {
             const parts = f.name.split('/');
             const uid = parts[1];
             if (!uid) continue;
-            if (prefix === 'exports/' && parts.length !== 3) continue; // per-project exports go with their project
+            // Loose exports (exports/<uid>/<file>) and exports of a project that
+            // no longer exists (exports/<uid>/<projectId>/<file>): a live
+            // project's folder is protected by `referencedBy` below. R175: a
+            // project deleted while its export was scheduled leaves the file
+            // behind on purpose; this is what removes it once it is old enough.
+            if (prefix === 'exports/' && parts.length !== 3 && parts.length !== 4) continue;
             const created = Date.parse(f.metadata?.timeCreated || f.metadata?.updated || '') || now;
             const list = byUser.get(uid) || [];
             list.push({ file: f, created });

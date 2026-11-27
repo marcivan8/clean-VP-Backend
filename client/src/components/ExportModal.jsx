@@ -7,6 +7,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { PLATFORMS, RESOLUTIONS, QUALITY_PROFILES } from './exportPresets.js';
 import { useAudioEngine } from '../hooks/useAudioEngine.js';
+import ExportPublish from './ExportPublish.jsx';
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
@@ -655,6 +656,9 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                         ))}
                                     </div>
                                 )}
+
+                                {/* R175: post this export to YouTube / Instagram, now or later */}
+                                <ExportPublish result={exportResult} />
 
                                 {/* Actions */}
                                 <div style={{ display: 'flex', gap: 8, width: '100%' }}>

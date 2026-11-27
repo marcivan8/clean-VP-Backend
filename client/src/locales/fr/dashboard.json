@@ -132,6 +132,15 @@
     "close": "Fermer",
     "reschedule": "Changer l'heure",
     "markPosted": "Je l'ai publiée",
-    "cancel": "Annuler la publication"
+    "cancel": "Annuler la publication",
+    "newPost": "Nouvelle publication",
+    "postCreated": "Publication ajoutée au planning.",
+    "pickExport": "Choisissez une vidéo à publier",
+    "loadingExports": "Chargement de vos exports…",
+    "exportsError": "Vos exports n'ont pas pu se charger. Réessayez dans un instant.",
+    "noCloud": "Sur ce serveur, les exports ne sont pas stockés dans le cloud, ils ne peuvent donc pas être publiés d'ici.",
+    "noExports": "Aucun export pour l'instant. Exportez d'abord une vidéo depuis un projet, puis revenez la publier.",
+    "exportNoProject": "Export",
+    "otherVideo": "Choisir une autre vidéo"
   }
 }

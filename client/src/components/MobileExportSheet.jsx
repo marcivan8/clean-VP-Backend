@@ -5,6 +5,7 @@ import useTimelineStore from '../store/useTimelineStore';
 import { PLATFORMS, RESOLUTIONS, QUALITY_PROFILES } from './exportPresets.js';
 import MobileSheet, { SheetLabel } from './MobileSheet';
 import ShareDestinations from './ShareDestinations.jsx';
+import ExportPublish from './ExportPublish.jsx';
 import { SHARE_ROW, SHARE_ROW_LABEL, SHARE_LABEL } from './shareRow.js';
 
 /**
@@ -348,6 +349,8 @@ export default function MobileExportSheet({ open, onClose, onExport, isExporting
                             )}
                             <ShareDestinations />
                         </div>
+                        {/* R175: publish or schedule this export */}
+                        {result?.url && <div style={{ marginTop: 10 }}><ExportPublish result={result} /></div>}
                         {shareError && (
                             <p role="alert" style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--coral)' }}>{shareError}</p>
                         )}

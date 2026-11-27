@@ -22,6 +22,24 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { authFetch } from '../utils/authFetch.js';
+import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { ArrowLeft } from 'lucide-react';
+
+// Same "back to projects" control as the Planner, on every state of the page.
+function BackToProjects() {
+    const navigate = useNavigate();
+    const { t } = useTranslation('dashboard');
+    return (
+        <button
+            type="button"
+            onClick={() => navigate('/dashboard')}
+            style={{ background: 'transparent', border: 'none', color: 'var(--fg-2, #b4b4c4)', fontSize: 13, padding: '4px 0', marginBottom: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'inherit' }}
+        >
+            <ArrowLeft size={14} /> {t('planner.back', 'Projects')}
+        </button>
+    );
+}
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 
@@ -258,6 +276,7 @@ export default function UserStylePage() {
             <div style={S.page}>
                 <div style={S.inner}>
                     <div style={S.accentBar} />
+                    <BackToProjects />
                     <div style={{ ...S.emptyState, paddingTop: 60 }}>Loading your style data…</div>
                 </div>
             </div>
@@ -269,6 +288,7 @@ export default function UserStylePage() {
             <div style={S.page}>
                 <div style={S.inner}>
                     <div style={S.accentBar} />
+                    <BackToProjects />
                     <h1 style={S.heading}>Your Style</h1>
                     <div style={S.emptyState}>
                         Your style data has been deleted.<br />
@@ -284,6 +304,7 @@ export default function UserStylePage() {
             <div style={S.page}>
                 <div style={S.inner}>
                     <div style={S.accentBar} />
+                    <BackToProjects />
                     <h1 style={S.heading}>Your Style</h1>
                     <div style={{ ...S.emptyState, color: '#ff8faa' }}>{error}</div>
                 </div>
@@ -298,6 +319,7 @@ export default function UserStylePage() {
             <div style={S.inner}>
                 {/* Top accent bar */}
                 <div style={S.accentBar} />
+                    <BackToProjects />
 
                 {/* Page heading */}
                 <h1 style={S.heading}>Your Style</h1>

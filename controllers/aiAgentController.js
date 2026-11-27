@@ -1,5 +1,5 @@
 const OpenAI = require('openai');
-const { getAIClient, getBrainAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../services/AIProvider');
 const { repairAndParseJSON } = require('../services/motionProvider');
 const { analyzeStructure } = require('../viralEngine/structure.js');
 
@@ -2690,7 +2690,7 @@ const detectRepeatedTakesHandler = async (req, res) => {
 /**
  * Design Studio AI Copilot Handler
  * Translates natural language design instructions into canvas operations
- * using the configured LLM for the 'design' capability (or custom Railway Brain).
+ * using the configured LLM for the 'design' capability.
  */
 // ── Design Studio AI (R170) ─────────────────────────────────────────────────
 // One model call shared by the copilot and the Variations tray. The browser
@@ -2715,7 +2715,6 @@ function summarizeBrandKit(kit) {
 }
 
 async function callDesignModel(systemPrompt, userContent, { maxTokens = 3000, temperature = 0.3 } = {}) {
-    const brainTarget = getBrainAIClient();
     const cloudClient = getAIClient({ capability: 'design' });
     const model = resolveModel('gpt-4o', { capability: 'design' });
     const provider = resolveProvider({ capability: 'design' });
@@ -2724,24 +2723,11 @@ async function callDesignModel(systemPrompt, userContent, { maxTokens = 3000, te
         response_format: { type: 'json_object' },
         messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
     };
-    let completion = null;
-    let usedCustom = false;
-    if (brainTarget.isCustom && brainTarget.client) {
-        try {
-            completion = await brainTarget.client.chat.completions.create({ ...callPayload, model: brainTarget.model },
-                { timeout: Number(process.env.BRAIN_AI_TIMEOUT_MS) || 240_000 });
-            usedCustom = true;
-        } catch (customErr) {
-            console.warn('[DesignAI] Custom Railway Brain failed; failing over to cloud client:', customErr.message);
-        }
-    }
-    if (!completion) {
-        if (!cloudClient) throw new Error('AI client unavailable for design capability');
-        completion = await cloudClient.chat.completions.create(callPayload);
-    }
+    if (!cloudClient) throw new Error('AI client unavailable for design capability');
+    const completion = await cloudClient.chat.completions.create(callPayload);
     const parsed = repairAndParseJSON(completion?.choices?.[0]?.message?.content);
     if (!parsed.data) throw new Error(`Failed to parse AI response: ${parsed.error}`);
-    return { data: parsed.data, provider: usedCustom ? 'custom' : provider, model: usedCustom ? brainTarget.model : model };
+    return { data: parsed.data, provider, model };
 }
 
 const DESIGN_RULES = `Design principles:

@@ -99,7 +99,6 @@ function load(supabaseStub, { body = null, throwOnCall = false } = {}) {
             // keeps the reasoning_effort branch off, matching what a real
             // non-Groq provider would do.
             resolveProvider: () => 'openai',
-            getBrainAIClient: () => ({ client: null, model: 'gpt-4o', isCustom: false }),
             isAIConfigured: () => true,
             createGeminiChatCompletionWithFailover: async (client, payload) => {
                 state.calls++;

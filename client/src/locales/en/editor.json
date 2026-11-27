@@ -1812,7 +1812,17 @@
     "dismiss": "Dismiss reminder",
     "cancel": "Cancel schedule",
     "status_scheduled": "Scheduled",
-    "status_failed": "Needs attention"
+    "status_failed": "Needs attention",
+    "exportTitle": "Post to YouTube or Instagram",
+    "notPostable": "This export is not stored in the cloud, so it cannot be posted from here. Download it and post it yourself.",
+    "publishNow": "Publish now",
+    "publishing": "Publishing now. It appears in the Planner.",
+    "titleRequired": "Add a YouTube title first.",
+    "youtubeVideo": "YouTube",
+    "formatShort": "Goes out as a YouTube Short.",
+    "formatVideo": "Goes out as a regular YouTube video (a Short has to be vertical or square and 3 minutes or less).",
+    "reelBars": "Instagram posts it as a Reel; a landscape video shows with bars above and below.",
+    "reelTooLong": "Instagram Reels are limited to 15 minutes, so this video cannot be posted there."
   },
   "socialAnalytics": {
     "title": "Published performance",

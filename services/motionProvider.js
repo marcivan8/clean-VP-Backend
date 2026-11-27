@@ -25,7 +25,6 @@
 
 const {
     getAIClient,
-    getBrainAIClient,
     isAIConfigured,
     resolveProvider,
     resolveModel,
@@ -36,14 +35,14 @@ const DEFAULT_SCENE_TIMEOUT_MS = 30_000;
 const DEFAULT_MOTION_TIMEOUT_MS = 45_000;
 
 /** Supported motion providers */
-const MOTION_PROVIDERS = ['current', 'gemma-local', 'rules', 'mock', 'openai', 'groq', 'gemini', 'ollama', 'custom', 'railway', 'brain'];
+const MOTION_PROVIDERS = ['current', 'gemma-local', 'rules', 'mock', 'openai', 'groq', 'gemini', 'ollama'];
 
 /**
  * Resolve the active motion provider.
  * Respects AI_MOTION_PROVIDER, falling back to AI_PROVIDER, defaulting to 'current'.
  *
  * @param {Object} [env] - process.env override
- * @returns {string} - 'gemma-local' | 'rules' | 'mock' | 'current' | 'openai' | 'groq' | 'gemini' | 'ollama' | 'custom'
+ * @returns {string} - 'gemma-local' | 'rules' | 'mock' | 'current' | 'openai' | 'groq' | 'gemini' | 'ollama'
  */
 function resolveMotionProvider(env = process.env) {
     let raw = env.AI_MOTION_PROVIDER;
@@ -56,7 +55,6 @@ function resolveMotionProvider(env = process.env) {
     if (raw === 'gemma-groq' || raw === 'groq-gemma') return 'groq';
     if (raw === 'rules' || raw === 'none' || raw === 'deterministic') return 'rules';
     if (raw === 'mock') return 'mock';
-    if (raw === 'custom' || raw === 'railway' || raw === 'brain') return 'custom';
     if (MOTION_PROVIDERS.includes(raw)) return raw;
 
     return 'current';
@@ -475,9 +473,7 @@ async function generateScenePlan({
     // read when diagnosing a production issue.
     const effectiveProvider = resolveProvider({ capability: targetCapability });
 
-    const brainTarget = getBrainAIClient();
-    const isCustomBrain = Boolean(brainTarget.isCustom && brainTarget.client);
-    const isAvailable = effectiveProvider === 'mock' || effectiveProvider === 'gemma-local' || isAIConfigured({ capability: targetCapability }) || isCustomBrain;
+    const isAvailable = effectiveProvider === 'mock' || effectiveProvider === 'gemma-local' || isAIConfigured({ capability: targetCapability });
     if (!isAvailable) {
         logMotionTelemetry({
             operation: 'scene-plan',
@@ -512,12 +508,7 @@ async function generateScenePlan({
     let activeProvider = effectiveProvider;
 
     try {
-        let ai = getAIClient({ timeout, capability: targetCapability });
-        if (isCustomBrain && (effectiveProvider === 'custom' || !ai)) {
-            ai = brainTarget.client;
-            activeModel = brainTarget.model;
-            activeProvider = 'custom';
-        }
+        const ai = getAIClient({ timeout, capability: targetCapability });
 
         if (!ai) {
             failureCategory = 'client_initialization_failed';
@@ -703,9 +694,7 @@ async function generateMotionScript({
     // read when diagnosing a production issue.
     const effectiveProvider = resolveProvider({ capability: targetCapability });
 
-    const brainTarget = getBrainAIClient();
-    const isCustomBrain = Boolean(brainTarget.isCustom && brainTarget.client);
-    const isAvailable = effectiveProvider === 'mock' || effectiveProvider === 'gemma-local' || isAIConfigured({ capability: targetCapability }) || isCustomBrain;
+    const isAvailable = effectiveProvider === 'mock' || effectiveProvider === 'gemma-local' || isAIConfigured({ capability: targetCapability });
     if (!isAvailable) {
         logMotionTelemetry({
             operation: 'motion-compose',
@@ -754,12 +743,7 @@ async function generateMotionScript({
     let activeProvider = effectiveProvider;
 
     try {
-        let ai = getAIClient({ timeout, capability: targetCapability });
-        if (isCustomBrain && (effectiveProvider === 'custom' || !ai)) {
-            ai = brainTarget.client;
-            activeModel = brainTarget.model;
-            activeProvider = 'custom';
-        }
+        const ai = getAIClient({ timeout, capability: targetCapability });
 
         if (!ai) {
             failureCategory = 'client_initialization_failed';

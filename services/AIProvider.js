@@ -354,10 +354,6 @@ function resolveModel(requestedModel, capabilityOrOpts) {
     const provider = opts.provider || effectiveProvider({ capability });
     if (provider === 'openai') return requestedModel;
 
-    if (provider === 'custom' || provider === 'railway') {
-        return process.env.BRAIN_AI_MODEL || process.env.CUSTOM_AI_MODEL || 'editorial-brain-3b';
-    }
-
     if (provider === 'gemma-local') {
         return process.env.GEMMA_MODEL || 'gemma2:2b';
     }
@@ -592,53 +588,9 @@ function mockBodyFor(prompt = '') {
 function isAIConfigured(opts = {}) {
     const provider = opts.provider || resolveProvider(opts);
     if (provider === 'mock' || provider === 'ollama' || provider === 'gemma-local') return true;
-    if (provider === 'custom' || provider === 'railway') {
-        return !!(process.env.BRAIN_AI_BASE_URL || process.env.CUSTOM_AI_BASE_URL || process.env.AI_BRAIN_PROVIDER === 'custom' || process.env.AI_BRAIN_PROVIDER === 'railway');
-    }
     if (provider === 'groq') return !!process.env.GROQ_API_KEY;
     if (provider === 'gemini') return !!process.env.GEMINI_API_KEY;
     return !!process.env.OPENAI_API_KEY;
-}
-
-/**
- * Resolves client and model for the Editorial Brain.
- * Uses the custom Railway CPU model if configured (via AI_BRAIN_PROVIDER or BRAIN_AI_BASE_URL),
- * falling back cleanly to the primary chat provider (Groq/Gemini/OpenAI).
- *
- * @param {Object} [opts]
- * @returns {{ client: Object|null, model: string, provider: string, isCustom: boolean }}
- */
-function getBrainAIClient(opts = {}) {
-    const isCustomBrain = process.env.AI_BRAIN_PROVIDER === 'custom' ||
-                          process.env.AI_BRAIN_PROVIDER === 'railway' ||
-                          Boolean(process.env.BRAIN_AI_BASE_URL);
-
-    if (isCustomBrain) {
-        const OpenAI = require('openai');
-        const baseURL = process.env.BRAIN_AI_BASE_URL || process.env.CUSTOM_AI_BASE_URL || 'http://editorial-brain.railway.internal:8080/v1';
-        const apiKey = process.env.BRAIN_AI_API_KEY || process.env.CUSTOM_AI_API_KEY || 'custom-key';
-        const timeout = opts.timeout || Number(process.env.BRAIN_AI_TIMEOUT_MS) || 240_000;
-        const cacheKey = `brain:custom:${baseURL}:${timeout}`;
-
-        if (!_clientCache.has(cacheKey)) {
-            _clientCache.set(cacheKey, new OpenAI({
-                baseURL,
-                apiKey,
-                timeout,
-            }));
-        }
-
-        return {
-            client: _clientCache.get(cacheKey),
-            model: process.env.BRAIN_AI_MODEL || 'editorial-brain-3b',
-            provider: 'custom',
-            isCustom: true,
-            baseURL,
-        };
-    }
-
-    const { client, model, provider } = getAIFor('chat', 'gpt-4o', opts);
-    return { client, model, provider, isCustom: false, baseURL: null };
 }
 
 /** Test seam — clears the memoised clients so env changes take effect. */
@@ -757,7 +709,6 @@ async function createGeminiChatCompletionWithFailover(geminiClient, payload, opt
 
 module.exports = {
     getAIClient,
-    getBrainAIClient,
     getAIFor,
     isAIConfigured,
     resolveProvider,

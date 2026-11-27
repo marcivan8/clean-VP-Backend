@@ -40,7 +40,7 @@ const crypto = require('crypto');
 const { storyMapStyleNote } = require('./editingStyles');
 
 const { supabaseAdmin } = require('../../config/database');
-const { getAIClient, getBrainAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../../services/AIProvider');
 const { repairAndParseJSON } = require('../../services/motionProvider');
 
 /** Beat vocabulary. Closed, because the Brain switches on these. */
@@ -300,13 +300,12 @@ class StoryIntelligence {
     async deriveMap({ clips = [], projectMap = null, platform = null, editingStyle = null }) {
         if (!clips.length) return null;
 
-        const brainTarget = getBrainAIClient();
-        if (!this._openai && !isAIConfigured() && !brainTarget.isCustom) {
+        if (!this._openai && !isAIConfigured()) {
             throw new Error('no AI provider configured — cannot derive a story map');
         }
 
         const openai = this._openai || getAIClient({ timeout: 60_000 });
-        if (!openai && !brainTarget.isCustom) throw new Error('AI client unavailable');
+        if (!openai) throw new Error('AI client unavailable');
 
         if (clips.length > MAX_CLIPS_PER_STORY_BATCH) {
             return this._deriveMapInBatches({ clips, projectMap, platform, editingStyle, openai });
@@ -382,28 +381,11 @@ class StoryIntelligence {
             ...(isGroq ? { reasoning_effort: 'low' } : {}),
         };
 
-        const brainTarget = getBrainAIClient();
         let completion;
-
-        // 1. Try Custom Railway Editorial Brain model if configured
-        if (brainTarget.isCustom && brainTarget.client) {
-            try {
-                console.log(`[StoryIntelligence] Routing to custom Railway Brain model (${brainTarget.model})...`);
-                completion = await brainTarget.client.chat.completions.create({
-                    ...callPayload,
-                    max_tokens: Math.min(callPayload.max_tokens, 700),
-                    model: brainTarget.model,
-                    response_format: { type: 'json_object' },
-                }, { timeout: Number(process.env.BRAIN_AI_TIMEOUT_MS) || 240_000 });
-            } catch (customErr) {
-                const errDetail = customErr.cause?.message || customErr.message;
-                console.warn(`[StoryIntelligence] Custom Railway Brain model at ${brainTarget.baseURL || 'internal endpoint'} failed (${errDetail}); failing over to primary...`);
-            }
-        }
 
         if (!completion) {
             if (!openai) {
-                throw new Error('AI client unavailable and custom model failed');
+                throw new Error('AI client unavailable');
             }
             try {
                 completion = await openai.chat.completions.create(callPayload);

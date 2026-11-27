@@ -132,6 +132,15 @@
     "close": "Close",
     "reschedule": "Change time",
     "markPosted": "I posted it",
-    "cancel": "Cancel post"
+    "cancel": "Cancel post",
+    "newPost": "New post",
+    "postCreated": "Post added to the planner.",
+    "pickExport": "Choose a video to post",
+    "loadingExports": "Loading your exports…",
+    "exportsError": "Your exports could not load. Try again in a moment.",
+    "noCloud": "Exports are not stored in the cloud on this server, so they cannot be posted from here.",
+    "noExports": "No exports yet. Export a video from a project first, then come back to post it.",
+    "exportNoProject": "Export",
+    "otherVideo": "Choose another video"
   }
 }

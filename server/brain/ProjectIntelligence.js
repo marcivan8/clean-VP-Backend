@@ -39,7 +39,7 @@
 const crypto = require('crypto');
 const { projectMapStyleNote } = require('./editingStyles');
 
-const { getAIClient, getBrainAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../../services/AIProvider');
 const { repairAndParseJSON } = require('../../services/motionProvider');
 const { supabaseAdmin } = require('../../config/database');
 const { ASSET_ANALYSIS_DONE } = require('./media/analysisStatus');
@@ -201,9 +201,8 @@ class ProjectIntelligence {
         if (!assets.length) return null;
 
         const openai = this._resolveOpenAI();
-        const brainTarget = getBrainAIClient();
-        if (!openai && !brainTarget.isCustom) {
-            throw new Error('No AI provider or custom brain configured — cannot derive a project map');
+        if (!openai) {
+            throw new Error('No AI provider configured — cannot derive a project map');
         }
 
         const prompt = this.buildDerivationPrompt({ assets, clipCount, platform, editingStyle });
@@ -314,23 +313,7 @@ class ProjectIntelligence {
             ...(isGroq ? { reasoning_effort: 'low' } : {}),
         };
 
-        const brainTarget = getBrainAIClient();
         let completion;
-
-        // 1. Try Custom Railway Editorial Brain model if configured
-        if (brainTarget.isCustom && brainTarget.client) {
-            try {
-                console.log(`[ProjectIntelligence] Routing to custom Railway Brain model (${brainTarget.model})...`);
-                completion = await brainTarget.client.chat.completions.create({
-                    ...callPayload,
-                    model: brainTarget.model,
-                    response_format: { type: 'json_object' },
-                }, { timeout: Number(process.env.BRAIN_AI_TIMEOUT_MS) || 240_000 });
-            } catch (customErr) {
-                const errDetail = customErr.cause?.message || customErr.message;
-                console.warn(`[ProjectIntelligence] Custom Railway Brain model at ${brainTarget.baseURL || 'internal endpoint'} failed (${errDetail}); failing over to primary...`);
-            }
-        }
 
         if (!completion) {
             try {

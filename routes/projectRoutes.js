@@ -16,6 +16,7 @@ const { authenticateUser, optionalAuth } = require('../middleware/auth');
 const { supabaseAdmin }                  = require('../config/database');
 const storageConfig                      = require('../config/storage');
 const { deleteProjectFiles }             = require('../services/projectFiles');
+const { exportProtection }               = require('../services/social/scheduledExports');
 
 // Accept the thumbnail in memory (max 2 MB — more than enough for a JPEG thumb)
 const upload = multer({
@@ -116,7 +117,9 @@ router.delete('/:id', authMiddleware, async (req, res) => {
             .neq('id', projectId);
         if (othersErr) throw othersErr;
 
-        const report = await deleteProjectFiles(storageConfig.bucket, project, others || [], { userId });
+        // R175: keep any export a scheduled post still has to publish.
+        const protect = await exportProtection(supabaseAdmin, userId, storageConfig.bucket?.name || null);
+        const report = await deleteProjectFiles(storageConfig.bucket, project, others || [], { userId, protect });
         if (report.failed.length) {
             console.warn(`[projects] DELETE ${projectId}: ${report.failed.length} file(s) could not be deleted`, report.failed.slice(0, 5));
         }

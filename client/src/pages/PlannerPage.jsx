@@ -18,7 +18,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, CalendarDays, Check, ChevronLeft, ChevronRight, Loader2, X } from 'lucide-react';
+import { ArrowLeft, CalendarDays, Check, ChevronLeft, ChevronRight, Film, Loader2, Plus, X } from 'lucide-react';
+import SocialPublisher from '../components/SocialPublisher.jsx';
+import { probeVideo } from '../lib/socialFormat.js';
 import { authFetch } from '../utils/authFetch.js';
 import { useUserPlan } from '../hooks/useUserPlan.js';
 import useDeviceType from '../hooks/useDeviceType';
@@ -63,6 +65,7 @@ export default function PlannerPage() {
     const [notice, setNotice] = useState(null); // { type, text }
     const [dragId, setDragId] = useState(null);
     const [hasAnyPosts, setHasAnyPosts] = useState(null);
+    const [newPostOpen, setNewPostOpen] = useState(false);
 
     const grid = useMemo(() => monthGrid(cursor.year, cursor.month), [cursor]);
     const byDay = useMemo(() => groupByDay(posts), [posts]);
@@ -177,6 +180,25 @@ export default function PlannerPage() {
     const counts = posts.reduce((acc, p) => { acc[p.status] = (acc[p.status] || 0) + 1; return acc; }, {});
 
     return (
+        <>
+        {newPostOpen && (
+            <NewPostDialog
+                t={t}
+                isMobile={isMobile}
+                onClose={() => setNewPostOpen(false)}
+                onScheduled={(post) => {
+                    setNewPostOpen(false);
+                    setHasAnyPosts(true);
+                    if (post?.scheduledAt) {
+                        const d = new Date(post.scheduledAt);
+                        setCursor({ year: d.getFullYear(), month: d.getMonth() });
+                        setSelectedDay(dayKey(d));
+                    }
+                    setNotice({ type: 'ok', text: t('planner.postCreated', 'Post added to the planner.') });
+                    load();
+                }}
+            />
+        )}
         <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)', fontFamily: 'var(--f-sans)', padding: isMobile ? '20px 16px 64px' : '36px 24px 80px', boxSizing: 'border-box' }}>
             <div style={{ maxWidth: 1080, margin: '0 auto' }}>
                 <div style={{ height: 1, background: 'linear-gradient(90deg, var(--accent), var(--violet))', marginBottom: 20, borderRadius: 1 }} />
@@ -200,6 +222,11 @@ export default function PlannerPage() {
                         <button type="button" onClick={() => { setCursor({ year: today.getFullYear(), month: today.getMonth() }); setSelectedDay(todayKey); }} style={ghostBtn}>
                             {t('planner.today', 'Today')}
                         </button>
+                        {isPro && (
+                            <button type="button" onClick={() => setNewPostOpen(true)} style={{ ...ghostBtn, background: 'var(--accent)', color: '#fff', border: 'none', fontWeight: 600 }}>
+                                <Plus size={14} /> {t('planner.newPost', 'New post')}
+                            </button>
+                        )}
                     </div>
                 </div>
 
@@ -310,6 +337,7 @@ export default function PlannerPage() {
                 </div>
             </div>
         </div>
+        </>
     );
 }
 
@@ -372,6 +400,107 @@ function PostCard({ post, isPro, busy, timeFmt, t, onReschedule, onCancel, onMar
                     {actions.cancel && <button type="button" onClick={onCancel} disabled={busy} style={{ ...ghostBtn, color: 'var(--coral, #ff6b6b)' }}>{t('planner.cancel', 'Cancel post')}</button>}
                 </div>
             )}
+        </div>
+    );
+}
+
+/**
+ * R175: pick one of the user's recent exports (any project), then the same
+ * publisher the Shorts panel and Export screen use.
+ */
+function NewPostDialog({ t, isMobile, onClose, onScheduled }) {
+    const [state, setState] = useState({ loading: true, exports: [], error: null, storageUnavailable: false });
+    const [picked, setPicked] = useState(null);
+    const [video, setVideo] = useState(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const response = await authFetch('/api/social/exports');
+                const body = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(body.message || body.error || 'EXPORTS_UNAVAILABLE');
+                if (!cancelled) setState({ loading: false, exports: body.exports || [], error: null, storageUnavailable: !!body.storageUnavailable });
+            } catch (err) {
+                console.error('[Planner] exports load failed:', err.message);
+                if (!cancelled) setState({ loading: false, exports: [], error: t('planner.exportsError', 'Your exports could not load. Try again in a moment.'), storageUnavailable: false });
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [t]);
+
+    useEffect(() => {
+        if (!picked) return undefined;
+        let cancelled = false;
+        setVideo(null);
+        probeVideo(picked.mediaUrl).then(v => { if (!cancelled) setVideo(v); });
+        return () => { cancelled = true; };
+    }, [picked]);
+
+    useEffect(() => {
+        const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [onClose]);
+
+    const dateFmt = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const sizeLabel = (n) => (Number(n) > 0 ? `${(Number(n) / 1024 / 1024).toFixed(1)} MB` : '');
+
+    return (
+        <div role="dialog" aria-modal="true" aria-label={t('planner.newPost', 'New post')}
+            onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+            style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: isMobile ? 'flex-end' : 'center', justifyContent: 'center', padding: isMobile ? 0 : 16 }}>
+            <div style={{ ...surface, background: 'var(--bg-2)', width: '100%', maxWidth: 520, maxHeight: isMobile ? '88vh' : '85vh', overflowY: 'auto', padding: 18, boxSizing: 'border-box', borderRadius: isMobile ? '18px 18px 0 0' : 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600 }}>{picked ? (picked.projectName || picked.name) : t('planner.pickExport', 'Choose a video to post')}</h2>
+                    <button type="button" onClick={onClose} aria-label={t('planner.close', 'Close')} style={{ background: 'none', border: 'none', color: 'var(--fg-3)', cursor: 'pointer' }}><X size={18} /></button>
+                </div>
+
+                {!picked && state.loading && <p style={{ fontSize: 13, color: 'var(--fg-3)' }}><Loader2 size={14} className="animate-spin" style={{ verticalAlign: 'middle' }} /> {t('planner.loadingExports', 'Loading your exports…')}</p>}
+                {!picked && state.error && <p role="alert" style={{ fontSize: 13, color: 'var(--coral, #ff6b6b)' }}>{state.error}</p>}
+                {!picked && !state.loading && !state.error && state.exports.length === 0 && (
+                    <p style={{ fontSize: 13, color: 'var(--fg-3)', lineHeight: 1.5 }}>
+                        {state.storageUnavailable
+                            ? t('planner.noCloud', 'Exports are not stored in the cloud on this server, so they cannot be posted from here.')
+                            : t('planner.noExports', 'No exports yet. Export a video from a project first, then come back to post it.')}
+                    </p>
+                )}
+                {!picked && state.exports.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {state.exports.map(item => (
+                            <button key={item.id} type="button" onClick={() => setPicked(item)}
+                                style={{ ...surface, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', textAlign: 'left', cursor: 'pointer', color: 'var(--fg)' }}>
+                                <Film size={16} color="var(--accent)" style={{ flexShrink: 0 }} />
+                                <span style={{ flex: 1, minWidth: 0 }}>
+                                    <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {item.projectName || t('planner.exportNoProject', 'Export')}
+                                    </span>
+                                    <span style={{ display: 'block', fontSize: 11.5, color: 'var(--fg-3)' }}>
+                                        {[item.createdAt ? dateFmt.format(new Date(item.createdAt)) : null, sizeLabel(item.size)].filter(Boolean).join(' · ')}
+                                    </span>
+                                </span>
+                            </button>
+                        ))}
+                    </div>
+                )}
+
+                {picked && (
+                    <>
+                        <button type="button" onClick={() => setPicked(null)} style={{ ...ghostBtn, border: 'none', padding: '2px 0', marginBottom: 4 }}>
+                            <ArrowLeft size={14} /> {t('planner.otherVideo', 'Choose another video')}
+                        </button>
+                        <video src={picked.mediaUrl} controls muted playsInline preload="metadata"
+                            style={{ width: '100%', maxHeight: 260, borderRadius: 10, background: '#000', display: 'block' }} />
+                        <SocialPublisher
+                            mediaUrl={picked.mediaUrl}
+                            sourceId={`export:${picked.name}`}
+                            defaultTitle={picked.projectName || ''}
+                            video={video}
+                            onScheduled={onScheduled}
+                        />
+                    </>
+                )}
+            </div>
         </div>
     );
 }

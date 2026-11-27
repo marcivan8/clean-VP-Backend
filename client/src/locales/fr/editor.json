@@ -1812,7 +1812,17 @@
     "dismiss": "Masquer le rappel",
     "cancel": "Annuler la programmation",
     "status_scheduled": "Programmé",
-    "status_failed": "Action requise"
+    "status_failed": "Action requise",
+    "exportTitle": "Publier sur YouTube ou Instagram",
+    "notPostable": "Cet export n'est pas stocké dans le cloud, il ne peut donc pas être publié d'ici. Téléchargez-le et publiez-le vous-même.",
+    "publishNow": "Publier maintenant",
+    "publishing": "Publication en cours. Elle apparaît dans le Planning.",
+    "titleRequired": "Ajoutez d'abord un titre YouTube.",
+    "youtubeVideo": "YouTube",
+    "formatShort": "Publiée en tant que Short YouTube.",
+    "formatVideo": "Publiée en tant que vidéo YouTube classique (un Short doit être vertical ou carré et durer 3 minutes ou moins).",
+    "reelBars": "Instagram la publie en Reel ; une vidéo horizontale apparaît avec des bandes en haut et en bas.",
+    "reelTooLong": "Les Reels Instagram sont limités à 15 minutes, cette vidéo ne peut donc pas y être publiée."
   },
   "socialAnalytics": {
     "title": "Résultats des publications",

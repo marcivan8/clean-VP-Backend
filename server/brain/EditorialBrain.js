@@ -27,7 +27,7 @@ const { brainStyleSection, styleFocusSection, ledgerSection } = require('./editi
 // list that had drifted to 14 entries against 61 registered commands, so 47
 // real capabilities were invisible to the Brain and could never be suggested.
 const { commandsPromptSection } = require('./capabilityCatalog');
-const { getAIClient, getBrainAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel, resolveProvider, createGeminiChatCompletionWithFailover } = require('../../services/AIProvider');
 const { repairAndParseJSON } = require('../../services/motionProvider');
 const { ContextEngine } = require('./ContextEngine');
 const { UserProfileEngine } = require('./UserProfileEngine');
@@ -360,14 +360,13 @@ class EditorialBrain {
             const profile = input?.context?.profile || await this.profileEngine.getProfile(input?.userId);
             const platform = input?.context?.platform || null;
 
-            const brainTarget = getBrainAIClient();
             const cloudModel = resolveModel('gpt-4o', 'chat');
             const isGroq = resolveProvider({ capability: 'chat' }) === 'groq';
 
             // Groq free-tier has a strict 8,000 TPM limit where requested = prompt_tokens + max_tokens.
-            // When running under Groq or custom Railway CPU model (or when compact mode is requested),
-            // compact the prompt to keep evaluation latency minimal and ensure fast token generation.
-            const isCompact = isGroq || Boolean(brainTarget.isCustom) || Boolean(input?.context?.isCompactPrompt);
+            // When running under Groq (or when compact mode is requested), compact the prompt
+            // to keep evaluation latency minimal and ensure fast token generation.
+            const isCompact = isGroq || Boolean(input?.context?.isCompactPrompt);
             const systemPrompt = this.buildSystemPrompt(context, profile, platform, session, input?.rawInput, { isCompact });
 
             // Classify intent type for temperature selection
@@ -381,7 +380,7 @@ class EditorialBrain {
                 ? `User said: "${input.rawInput}"`
                 : `Trigger: ${input?.trigger || 'unknown'}. Analyze the project and provide suggestions.`;
 
-            const maxTokens = isGroq ? 500 : (brainTarget.isCustom ? 700 : 1200);
+            const maxTokens = isGroq ? 500 : 1200;
             const callPayload = {
                 model: cloudModel,
                 temperature,
@@ -395,25 +394,10 @@ class EditorialBrain {
             };
 
             let completion;
-            // 1. Try Custom Railway Editorial Brain model if configured
-            if (brainTarget.isCustom && brainTarget.client) {
-                try {
-                    console.log(`[EditorialBrain] Routing to custom Railway Brain model (${brainTarget.model})...`);
-                    completion = await brainTarget.client.chat.completions.create({
-                        ...callPayload,
-                        model: brainTarget.model,
-                        response_format: { type: 'json_object' },
-                    }, { timeout: Number(process.env.BRAIN_AI_TIMEOUT_MS) || 240_000 });
-                } catch (customErr) {
-                    const errDetail = customErr.cause?.message || customErr.message;
-                    console.warn(`[EditorialBrain] Custom Railway Brain model at ${brainTarget.baseURL || 'internal endpoint'} failed (${errDetail}); failing over to cloud providers...`);
-                }
-            }
-
             if (!completion) {
                 const cloudClient = this.openai || getAIClient({ capability: 'chat' });
                 if (!cloudClient) {
-                    console.warn('[EditorialBrain] No cloud AI client available and custom model unavailable — using fallback');
+                    console.warn('[EditorialBrain] No cloud AI client available — using fallback');
                     return this.fallbackOutput(input?.rawInput);
                 }
 

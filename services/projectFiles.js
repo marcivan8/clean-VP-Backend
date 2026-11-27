@@ -14,6 +14,8 @@
  */
 'use strict';
 
+const { isProtected } = require('./social/scheduledExports');
+
 const GCS_HOST = 'https://storage.googleapis.com/';
 const MEDIA_ROUTE = '/api/proxy/gcs-media/';
 
@@ -96,7 +98,7 @@ function referencedBy(projects, userId) {
  * @param project   the project row ({ id, user_id, timeline_state, thumbnail_url })
  * @param others    the user's OTHER projects (same shape) — their files are kept
  */
-async function deleteProjectFiles(bucket, project, others = [], { userId = null, dryRun = false } = {}) {
+async function deleteProjectFiles(bucket, project, others = [], { userId = null, dryRun = false, protect = null } = {}) {
     const uid = userId || project?.user_id;
     const { exact, prefixes } = filesForProject(project, uid);
     const keep = referencedBy(others, uid);
@@ -104,6 +106,8 @@ async function deleteProjectFiles(bucket, project, others = [], { userId = null,
     if (!bucket) return report;
 
     for (const p of exact) {
+        // R175: an export a scheduled post still needs stays until it is posted.
+        if (isProtected(p, protect)) { report.kept.push(p); continue; }
         if (keep.exact.has(p) || [...keep.prefixes].some(k => p.startsWith(k))) { report.kept.push(p); continue; }
         try {
             if (!dryRun) await bucket.file(p).delete({ ignoreNotFound: true });
@@ -117,7 +121,7 @@ async function deleteProjectFiles(bucket, project, others = [], { userId = null,
         try {
             const [files] = await bucket.getFiles({ prefix });
             for (const f of files) {
-                if (keep.exact.has(f.name)) { report.kept.push(f.name); continue; }
+                if (keep.exact.has(f.name) || isProtected(f.name, protect)) { report.kept.push(f.name); continue; }
                 if (!dryRun) await f.delete({ ignoreNotFound: true });
                 report.deleted.push(f.name);
             }

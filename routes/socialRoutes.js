@@ -258,7 +258,10 @@ router.post('/publications', authenticateUser, socialGate, async (req, res) => {
     const providerId = req.body?.provider;
     const provider = getProvider(providerId);
     const mediaUrlInput = typeof req.body?.mediaUrl === 'string' ? req.body.mediaUrl : '';
-    const scheduledMs = Date.parse(req.body?.scheduledAt);
+    // R175: "Publish now" queues the post with no delay instead of asking the
+    // client for a time a minute ahead.
+    const publishNow = req.body?.publishNow === true;
+    const scheduledMs = publishNow ? Date.now() : Date.parse(req.body?.scheduledAt);
     const title = String(req.body?.title || '').trim().slice(0, 100);
     const caption = String(req.body?.caption || '').trim().slice(0, 5000);
     const rawEdit = req.body?.editContext && typeof req.body.editContext === 'object' ? req.body.editContext : {};
@@ -272,7 +275,7 @@ router.post('/publications', authenticateUser, socialGate, async (req, res) => {
         speakerPopOutEnabled: rawEdit.speakerPopOutEnabled === true,
     };
     if (!['youtube', 'instagram'].includes(providerId) || !provider) return res.status(400).json({ error: 'UNSUPPORTED_PROVIDER' });
-    if (scheduleOutOfRange(scheduledMs)) {
+    if (!publishNow && scheduleOutOfRange(scheduledMs)) {
         return res.status(400).json({ error: 'SCHEDULE_OUT_OF_RANGE', message: 'Choose a time between one minute and six and a half days from now.' });
     }
     const mediaUrl = await ownedPublicMediaUrl(mediaUrlInput, req.user.id, scheduledMs);
@@ -304,7 +307,7 @@ router.post('/publications', authenticateUser, socialGate, async (req, res) => {
         return res.status(500).json({ error: 'SCHEDULE_FAILED' });
     }
     try {
-        await enqueuePublication(data, scheduledMs - Date.now());
+        await enqueuePublication(data, publishNow ? 0 : scheduledMs - Date.now());
     } catch (err) {
         await supabaseAdmin.from(PUBLICATION_TABLE).update({ status: 'failed', failure_code: 'QUEUE_UNAVAILABLE' }).eq('id', data.id);
         console.error('[social] enqueue publication failed:', err.message);
@@ -314,6 +317,53 @@ router.post('/publications', authenticateUser, socialGate, async (req, res) => {
         id: data.id, provider: data.provider, title: data.title, caption: data.caption,
         scheduledAt: data.scheduled_at, status: data.status,
     } });
+});
+
+// The user's own exports, newest first, for the Planner's "New post" (R175).
+// Lists exports/<user>/ in storage (per-project folders and older loose
+// files), videos only, with the project's name when it still exists.
+const POSTABLE_EXPORT = /\.(mp4|mov|webm)$/i;
+router.get('/exports', authenticateUser, socialGate, async (req, res) => {
+    const bucket = storageConfig.bucket;
+    if (!bucket || storageConfig.useLocalStorage) return res.json({ exports: [], storageUnavailable: true });
+    try {
+        const prefix = `exports/${req.user.id}/`;
+        const [files] = await bucket.getFiles({ prefix, autoPaginate: false, maxResults: 1000 });
+        const videos = (files || [])
+            .filter(f => POSTABLE_EXPORT.test(f.name) && !/\/_revideo-base-/.test(f.name))
+            .map(f => {
+                const parts = f.name.split('/');
+                return {
+                    path: f.name,
+                    projectId: parts.length === 4 ? parts[2] : null,
+                    name: parts[parts.length - 1],
+                    size: Number(f.metadata?.size) || null,
+                    createdAt: f.metadata?.timeCreated || f.metadata?.updated || null,
+                };
+            })
+            .sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0))
+            .slice(0, 40);
+        const projectIds = [...new Set(videos.map(v => v.projectId).filter(Boolean))];
+        const names = new Map();
+        if (projectIds.length) {
+            const { data, error } = await supabaseAdmin.from('projects').select('id,name')
+                .eq('user_id', req.user.id).in('id', projectIds);
+            if (error) console.error('[social] export project names failed:', error.message);
+            for (const row of data || []) names.set(row.id, row.name);
+        }
+        return res.json({ exports: videos.map(v => ({
+            id: v.path,
+            mediaUrl: `/api/proxy/gcs-media/${v.path.split('/').map(encodeURIComponent).join('/')}`,
+            name: v.name,
+            projectId: v.projectId,
+            projectName: v.projectId ? (names.get(v.projectId) || null) : null,
+            size: v.size,
+            createdAt: v.createdAt,
+        })) });
+    } catch (err) {
+        console.error('[social] list exports failed:', err.message);
+        return res.status(500).json({ error: 'EXPORTS_UNAVAILABLE' });
+    }
 });
 
 // Move a scheduled post (R172). The signed media URL is re-issued for the new
