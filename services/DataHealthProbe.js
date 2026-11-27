@@ -72,6 +72,13 @@ const DEPENDENCIES = [
         fix:     'node server/audio-engine/library/seeder.js  (see CLAUDE.md R12)',
     },
     {
+        table:   'agent_runs',
+        expect:  'accumulating',
+        feature: 'Agent runs (Shorts panel: plan, approvals, resume after reload), R176b',
+        fix:     'Apply supabase/migrations/20240014_agent_runs.sql. Empty is normal until someone '
+               + 'starts a run from the Shorts panel; unreadable means the migration was not applied.',
+    },
+    {
         table:   'media_assets',
         expect:  'accumulating',
         feature: 'Footage-aware Brain advice (scene type, framing, subject count)',

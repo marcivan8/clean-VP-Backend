@@ -55,7 +55,7 @@ export const LEGAL = {
         en: 'Christian Crozet, manager (gérant) of CIJE',
         fr: 'Christian Crozet, gérant de la CIJE',
     },
-    lastUpdated: '2026-11-25',
+    lastUpdated: '2026-11-27',
     railwayRegion: { en: 'United States', fr: 'États-Unis' },
     hostingerEntity: { en: 'Hostinger (Türkiye)', fr: 'Hostinger (Turquie)' },
     mediator: null,

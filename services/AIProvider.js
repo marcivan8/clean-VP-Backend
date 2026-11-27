@@ -116,6 +116,9 @@ const REAL_ONLY_CAPABILITIES = ['embeddings'];
 
 let _warnedProduction = false;
 let _warnedProdRealProvider = false;
+const { instrumentClient } = require('./tracing/langfuse');
+const { currentRunContext } = require('./tracing/runContext');
+
 let _clientCache = new Map();
 
 /**
@@ -327,6 +330,9 @@ function getAIClient(opts = {}) {
 
     const OpenAI = require('openai');
     const client = new OpenAI(config);
+    // R176b: AI calls made inside an agent run step are recorded under the
+    // run's trace (and counted for its cost). Outside a run this is a no-op.
+    instrumentClient(client, provider, currentRunContext);
     _clientCache.set(cacheKey, client);
     return client;
 }

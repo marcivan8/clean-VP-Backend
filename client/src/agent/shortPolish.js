@@ -26,6 +26,7 @@
  * sound library), from agent/sfxCues.js on the polished tracks.
  */
 
+import { normalizeBrand } from '../motion/BrandKit.js';
 import { composeMotion, COMPOSED } from '../motion/MotionComposer.js';
 import { stylePackToClipFields, groupWordsIntoSegments } from '../motion/CaptionModel.js';
 import { STYLE_RECIPES, pickTransitionCuts, recipeTransitionForCut } from '../motion/StyleRecipes.js';
@@ -840,6 +841,11 @@ export function polishShort(built, profile, opts = {}) {
         ...(referenceStyle.titleStyle?.color ? { titleColor: referenceStyle.titleStyle.color } : {}),
         } : {}),
     };
+    // R176b: a goal that asks for the brand ("in our colours") passes the
+    // project's brand kit. It wins over the platform look, the tone and a
+    // reference video: it is the one look the user asked for by name.
+    const brand = opts.brand ? normalizeBrand(opts.brand) : null;
+    if (brand) Object.assign(look, { accent: brand.accent, titleColor: brand.text, titleFont: brand.display });
     look.cameraEnergy = Math.max(0.2, Math.min(0.9,
         baseLook.cameraEnergy * (referenceStyle?.motionScale || 1) * approvedCameraEnergy));
     // ── R158 — which layers a short gets by default ──────────────────────────
@@ -1168,7 +1174,7 @@ export function polishShort(built, profile, opts = {}) {
                 },
             },
         } : baseFields;
-        const paletteAccent = referenceStyle?.accent || sourceAccent || look.accent;
+        const paletteAccent = brand?.accent || referenceStyle?.accent || sourceAccent || look.accent;
         if (paletteAccent && fields.captionStyle?.wordHighlight) {
             fields.captionStyle = {
                 ...fields.captionStyle,

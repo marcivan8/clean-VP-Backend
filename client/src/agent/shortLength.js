@@ -113,6 +113,32 @@ export function payoffDensity(events, totalDuration) {
 }
 
 /**
+ * R176b — a length the user asked for ("under 60 s") is a hard cap. It wins
+ * over the one-minute floor (a product default, not a rule the user agreed
+ * to), and the range is kept inside it: the picker gets room below the cap to
+ * reach a sentence ending, never above it. A cap under 10 s or past the
+ * platform ceiling is ignored. The finished short is a little longer than the
+ * picked passage (0.45 s of lead-in and tail), which the cap leaves room for.
+ */
+export function capToUserMax(plan, maxSeconds) {
+    const cap = Number(maxSeconds);
+    if (!(cap >= 10)) return plan;
+    const limit = Math.max(8, cap - 1);
+    if (plan.max <= limit) return plan;
+    const max = Math.min(plan.max, limit);
+    const min = Math.min(plan.min, Math.max(8, Math.round(max * 0.5)));
+    const target = Math.min(plan.target, Math.round(max * 0.85));
+    return {
+        ...plan,
+        min,
+        max,
+        target: Math.max(min, target),
+        capped: cap,
+        reasons: [`you asked for under ${Math.round(cap)} s`, ...plan.reasons],
+    };
+}
+
+/**
  * Plan one short's length range.
  *
  * @param {{platform?:string, totalDuration:number, words?:Array, events?:Array, style?:string|null}} opts
@@ -135,13 +161,13 @@ export function planShortLength(opts = {}) {
         // Honest degradation: take what exists and tell the caller it is not
         // a minute, rather than pretending the floor was met.
         const len = Math.max(0, usable);
-        return {
+        return capToUserMax({
             min: Math.min(10, len),
             max: len,
             target: len,
             floored: true,
             reasons: [`the source is only ${Math.round(total)} s, so a full minute cannot be cut from it`],
-        };
+        }, opts.maxSeconds);
     }
 
     const styleFactor = STYLE_FACTOR[opts.style] ?? 0.55;
@@ -189,13 +215,14 @@ export function planShortLength(opts = {}) {
     // max is that headroom, not a second target.
     const max = Math.min(ceiling, usable, Math.max(target * 1.3, MIN_SHORT_SECONDS + 15));
 
-    return {
+    const planned = {
         min: MIN_SHORT_SECONDS,
         max: Math.max(MIN_SHORT_SECONDS, max),
         target: Math.round(target),
         floored: false,
         reasons,
     };
+    return capToUserMax(planned, opts.maxSeconds);
 }
 
 /**
@@ -221,4 +248,4 @@ export function fitShortCount(totalDuration, requested, perShortSeconds = MIN_SH
     return Math.max(1, Math.min(want, Math.floor(total / per)));
 }
 
-export default { MIN_SHORT_SECONDS, planShortLength, fitShortCount, speechDensity, payoffDensity };
+export default { MIN_SHORT_SECONDS, planShortLength, capToUserMax, fitShortCount, speechDensity, payoffDensity };

@@ -2691,13 +2691,15 @@ export class MediaExecutionEngine {
                 // two-minute shorts need six minutes of source, and promising
                 // three from four minutes would have the picker silently drop
                 // two of them.
-                const sizing = planShortLength({ platform: platformsFromText(String(args.brief || ''))[0] || 'tiktok', totalDuration: total, words, events, style: editingStyle });
+                // R176b: a length the user asked for (a goal's "under 60 s") caps every slot.
+                const maxSeconds = Number(args.maxSeconds) > 0 ? Number(args.maxSeconds) : null;
+                const sizing = planShortLength({ platform: platformsFromText(String(args.brief || ''))[0] || 'tiktok', totalDuration: total, words, events, style: editingStyle, maxSeconds });
                 const count = fitShortCount(total, requested, sizing.target);
                 const platforms = assignPlatforms(count, Array.isArray(args.platforms) ? args.platforms : []);
 
                 const plans = platforms.map(id => ({
                     id,
-                    plan: planShortLength({ platform: id, totalDuration: total, words, events, style: editingStyle }),
+                    plan: planShortLength({ platform: id, totalDuration: total, words, events, style: editingStyle, maxSeconds }),
                 }));
                 const slots = plans.map(({ id, plan }) => ({ platform: id, min: plan.min, max: plan.max, target: plan.target }));
                 // R158 — `report` is filled with the slots that were skipped and

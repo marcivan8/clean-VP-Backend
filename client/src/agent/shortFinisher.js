@@ -351,6 +351,7 @@ export async function finishShort(state, short, opts = {}) {
         referenceStyleProfile: opts.referenceStyleProfile || null,
         assets: state.assets || [],
         popOut: !!opts.popOut, layers,
+        brand: opts.brand || null,
     });
     // Keep the Shorts panel's generated timeline in parity with the main
     // Pro Finish path: use upload-time visual matches as small, speaker-safe

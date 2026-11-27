@@ -126,8 +126,10 @@ await check('wired: player bar, main Export, prompts and Save leave the preview 
     assert.match(bar, /useEffect\(\(\) => \(\) => \{ useTimelineStore\.getState\(\)\.exitShortPreview\(\); \}, \[\]\)/, 'leaving the editor restores the main edit');
     const panel = read('client/src/components/ShortsPanel.jsx');
     assert.match(panel, /startShortPreview\(short, built/);
-    assert.match(panel, /mediaExecutionEngine\._ensureMatte/, 'pop-out bakes through the engine');
-    assert.match(panel, /No person was detected in this short/, 'the panel must explain when the matte found no person');
+    // R176b: the mask helper moved to agent/shortMattes.js (shared with the agent run).
+    assert.match(panel, /import \{ ensureMattesFor \} from '\.\.\/agent\/shortMattes\.js'/);
+    assert.match(read('client/src/agent/shortMattes.js'), /mediaExecutionEngine\._ensureMatte/, 'pop-out bakes through the engine');
+    assert.match(read('client/src/agent/shortMattes.js'), /No person was detected in this short/, 'the pop-out must explain when the matte found no person');
     assert.doesNotMatch(panel, /bakeClipMatte/);
     for (const lang of ['en', 'fr']) {
         const sp = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).shortsPanel;

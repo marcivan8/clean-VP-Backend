@@ -14,6 +14,8 @@ import { getNextAction, getQuickChips } from './SuggestionEngine.js';
 import { runAutopilot, stopAutopilot, isAutopilotRunning } from './StyleAutopilot.js';
 import { isQuestion, isReferenceGuidedEditRequest } from './EditingStyles.js';
 import { timelineFacts } from './EditRecap.js'; // R92 round B: measured impact per edit
+import { parseShortsGoal } from './runs/goalParser.js'; // R176b: a typed shorts request becomes a goal
+import { autoShortCount } from './PlatformProfiles.js';
 
 // Per-operation editorial descriptions and next-step suggestions.
 // Keys must match the `operation` field returned by IntentParser / EditJobManager.
@@ -606,7 +608,62 @@ export class WorkflowController {
             return;
         }
 
+        // R176b: "make 3 TikToks under 60 s with captions in our colours" is a
+        // GOAL, not one command: it becomes an agent run with checkable
+        // criteria, whose plan waits for approval in the Shorts tab. Normal
+        // mode on desktop only (the run UI is not on mobile yet, and Auto mode
+        // keeps running its own playbook).
+        const goal = this._shortsGoalFor(prompt);
+        if (goal) {
+            this._startShortsRun(goal);
+            return;
+        }
+
         this.actor.send({ type: 'START', prompt: prompt.trim() });
+    }
+
+    /** The shorts goal a prompt asks for, or null when it should run as a normal edit. */
+    _shortsGoalFor(prompt) {
+        try {
+            const st = useTimelineStore.getState();
+            if (st.editingMode === 'auto' || isQuestion(prompt)) return null;
+            if (typeof window !== 'undefined' && window.innerWidth < 768) return null;
+            const total = (st.tracks || []).reduce((m, t) => Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
+            if (total < 10) return null; // the command explains "too short" better than a plan would
+            return parseShortsGoal(prompt, { defaultCount: autoShortCount(total) });
+        } catch (err) {
+            console.error('[Workflow] shorts goal check failed; running as a normal edit:', err);
+            return null;
+        }
+    }
+
+    async _startShortsRun(goal) {
+        const ai = useAIStore.getState();
+        const log = (type, message) => ai.addLog({ id: `agent-run-${Date.now()}`, type, message, timestamp: new Date().toLocaleTimeString() });
+        try {
+            ai.setIsAnalyzing(false);
+            const { getUserPlanDirect } = await import('../hooks/useUserPlan.js');
+            if ((await getUserPlanDirect()) === 'free') {
+                EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, { reason: 'paid_feature', feature: 'shorts', upgradeRequired: 'creator',
+                    message: 'AI Shorts repurposing is available on Creator and Pro plans.' });
+                return;
+            }
+            const { default: useAgentRunStore } = await import('../store/useAgentRunStore.js');
+            const res = await useAgentRunStore.getState().start({ goal });
+            if (!res?.ok) { log('warning', useAgentRunStore.getState().error || 'The shorts run could not start.'); return; }
+            ai.setActiveTab?.('shorts');
+            const c = goal.criteria || {};
+            const wants = [
+                c.count ? `${c.count} short${c.count === 1 ? '' : 's'}` : null,
+                c.maxSeconds ? `under ${c.maxSeconds} s` : null,
+                c.captions === true ? 'captions on' : c.captions === false ? 'no captions' : null,
+                c.brand ? 'your brand colours' : null,
+            ].filter(Boolean);
+            log('assistant', `I drafted a plan in the Shorts tab${wants.length ? ` (${wants.join(', ')})` : ''}. Approve it there and I'll find the passages; you keep or drop each one, then I finish the kept ones and check them against what you asked.`);
+        } catch (err) {
+            console.error('[Workflow] could not start the shorts run:', err);
+            log('warning', 'The shorts run could not start. Try again from the Shorts tab.');
+        }
     }
 
     /**

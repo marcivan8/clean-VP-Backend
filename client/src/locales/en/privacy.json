@@ -168,7 +168,7 @@
               ],
               [
                 "Railway",
-                "Application servers, including our own speaker-separation and editing-assistant models",
+                "Application servers, including our own speaker-separation model",
                 "{{railwayRegion}}"
               ],
               [
@@ -205,6 +205,11 @@
                 "PostHog",
                 "Usage analytics, with consent",
                 "Germany (EU)"
+              ],
+              [
+                "Langfuse (Langfuse GmbH)",
+                "Tracing of AI editing runs you start (goal, steps, your approvals, and excerpts of the prompts and answers, which can include transcript text), to check and improve them",
+                "European Union"
               ],
               [
                 "{{hostingerEntity}}",

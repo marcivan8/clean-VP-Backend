@@ -168,7 +168,7 @@
               ],
               [
                 "Railway",
-                "Serveurs de l'application, y compris nos propres modèles de séparation des intervenants et d'assistant de montage",
+                "Serveurs de l'application, y compris notre propre modèle de séparation des intervenants",
                 "{{railwayRegion}}"
               ],
               [
@@ -205,6 +205,11 @@
                 "PostHog",
                 "Mesure d'utilisation, avec consentement",
                 "Allemagne (UE)"
+              ],
+              [
+                "Langfuse (Langfuse GmbH)",
+                "Traçage des créations IA que vous lancez (objectif, étapes, vos validations, et extraits des requêtes et réponses, qui peuvent contenir du texte de transcription), pour les vérifier et les améliorer",
+                "Union européenne"
               ],
               [
                 "{{hostingerEntity}}",

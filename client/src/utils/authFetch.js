@@ -11,6 +11,7 @@
 
 import { supabase } from '../lib/supabaseClient.js';
 import { currentAutoRunId } from '../agent/autoRunContext.js';
+import { agentRunHeaders } from '../agent/runs/agentRunContext.js';
 
 // Singleton refresh promise — prevents concurrent 401s from each spawning
 // their own supabase.auth.refreshSession() call, which interfere and all fail.
@@ -39,6 +40,8 @@ async function buildHeaders(token, options) {
         ...(token           ? { Authorization:  `Bearer ${token}` }   : {}),
         ...(anonSessionId   ? { 'X-Session-Id': anonSessionId }       : {}),
         ...(autoRunId       ? { 'X-Vibed-Run-Id': autoRunId }         : {}),
+        // R176b: tracing only (which agent run and step made this call).
+        ...agentRunHeaders(),
         ...(options.headers || {}),
     };
 

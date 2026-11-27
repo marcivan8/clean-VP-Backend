@@ -158,7 +158,11 @@ if (!ffmpeg) {
 // ── Wiring ────────────────────────────────────────────────────────────────
 {
     const panel = read('client/src/components/ShortsPanel.jsx');
-    assert.equal((panel.match(/\{ polish, popOut, sfx, duo \}/g) || []).length, 3, 'preview, export and open-as-project all pass duo');
+    // R176b: the three actions share one helper, which passes duo; a shorts
+    // agent run gets it from the same toggles.
+    assert.match(panel, /const opts = \{ polish, popOut, sfx, duo \};/, 'the shared finish helper passes duo');
+    assert.equal((panel.match(/await finished\(short/g) || []).length, 3, 'preview, export and open-as-project all use it');
+    assert.match(panel, /finish: \{ polish, sfx, duo, popOut \}/, 'an agent run is started with the same duo setting');
     assert.match(panel, /useState\(true\);[^\n]*\n?/);
     assert.match(read('client/src/agent/shortFinisher.js'), /sceneAnalysisByAsset: state\.sceneAnalysisByAsset/);
     assert.match(read('client/src/agent/shortFinisher.js'), /captionY: DUO_CAPTION_Y/);

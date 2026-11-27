@@ -21,9 +21,14 @@ import { useTranslation } from 'react-i18next';
 import { Smartphone, Play, Square, Download, Loader2, Trash2, Wand2, ExternalLink, Sparkles, Volume2, UserCheck, AlertTriangle, Lock, Rows2 } from 'lucide-react';
 
 import useTimelineStore from '../store/useTimelineStore';
-import { PLATFORM_IDS, PLATFORM_PROFILES, profileNotes } from '../agent/PlatformProfiles.js';
+import { PLATFORM_IDS, PLATFORM_PROFILES, profileNotes, autoShortCount } from '../agent/PlatformProfiles.js';
 import { MIN_WINDOW_SCORE } from '../agent/shortPicker.js';
 import { finishShort } from '../agent/shortFinisher.js';
+import { ensureMattesFor } from '../agent/shortMattes.js';
+import { getFinishedShort } from '../agent/finishedShortCache.js';
+import AgentRunCard from './AgentRunCard.jsx';
+import useAgentRunStore from '../store/useAgentRunStore.js';
+import { STATUS as RUN_STATUS, TERMINAL as RUN_TERMINAL } from '../agent/runs/runState.js';
 import { createProject } from '../lib/projectsApi.js';
 import { captureShortThumbnail, getCachedShortThumbnail, thumbnailKey } from '../utils/captureShortThumbnail.js';
 import { useUserPlan } from '../hooks/useUserPlan.js';
@@ -42,29 +47,6 @@ const fmt = (s) => {
 function mainEditState() {
     const st = useTimelineStore.getState();
     return st.shortPreview ? { ...st, ...st.shortPreview.saved } : st;
-}
-
-/** Bake the free background mask on the main-edit video clips a short uses. */
-async function ensureMattesFor(short) {
-    useTimelineStore.getState().exitShortPreview();
-    const st = useTimelineStore.getState();
-    const { mediaExecutionEngine } = await import('../agent/MediaExecutionEngine.js');
-    let videoCount = 0;
-    let personCount = 0;
-    for (const t of (st.tracks || []).filter(tr => tr.type === 'video')) {
-        for (const c of t.clips || []) {
-            const cs = Number(c.start) || 0;
-            const ce = cs + (Number(c.duration) || 0);
-            if (ce <= short.start || cs >= short.end || (c.type && c.type !== 'video')) continue;
-            videoCount += 1;
-            const r = await mediaExecutionEngine._ensureMatte(t.id, c.id, null);
-            if (!r?.ok) throw new Error(r?.error || 'The background mask could not be made.');
-            if (r.people !== false) personCount += 1;
-        }
-    }
-    if (!videoCount) throw new Error('There is no video clip in this short to separate from its background.');
-    if (!personCount) throw new Error('No person was detected in this short, so the speaker highlight could not be applied.');
-    return short;
 }
 
 /**
@@ -103,6 +85,13 @@ export default function ShortsPanel({ onExport }) {
     const [thumbs, setThumbs] = useState({});     // thumbnailKey -> data URL | null
     const [isFinding, setIsFinding] = useState(false);
     const isAnalyzing = useAIStore(s => s.isAnalyzing);
+    // R176b: "Find shorts" starts an agent run (plan -> approve -> find ->
+    // keep/drop -> finish). The chat command still finds shorts directly.
+    const run = useAgentRunStore(s => s.run);
+    const projectId = useTimelineStore(s => s.projectId);
+    const runActive = !!run && !RUN_TERMINAL.includes(run.status);
+    const reviewing = run?.status === RUN_STATUS.AWAITING_REVIEW;
+    useEffect(() => { if (projectId) useAgentRunStore.getState().loadLatest(projectId); }, [projectId]);
 
     useEffect(() => {
         if (!isAnalyzing) {
@@ -117,6 +106,15 @@ export default function ShortsPanel({ onExport }) {
     // On by default; only takes effect when the scene analysis found a duo.
     const [duo, setDuo] = useState(true);
     const [sfx, setSfx] = useState(true);
+
+    /** The finished short: the one an agent run already built, else build it now. */
+    const finished = useCallback(async (short, state) => {
+        const opts = { polish, popOut, sfx, duo };
+        const cached = getFinishedShort(short, opts);
+        if (cached) return cached;
+        if (popOut) await ensureMattesFor(short);
+        return finishShort(state || mainEditState(), short, opts);
+    }, [polish, popOut, sfx, duo]);
 
     const sorted = useMemo(() => [...shorts].sort((a, b) => (a.start || 0) - (b.start || 0)), [shorts]);
     const thumbKeys = sorted.map(thumbnailKey).join('|');
@@ -165,16 +163,13 @@ export default function ShortsPanel({ onExport }) {
                 : t('shortsPanel.tooShort', `The video on the timeline is ${Math.round(total)} s long, too short to cut shorts out of (at least 10 s required).`));
             return;
         }
-        setIsFinding(true);
         try {
-            const { workflowController } = await import('../agent/WorkflowController.js');
-            workflowController.processUserPrompt(t('shortsPanel.findPrompt'));
+            await useAgentRunStore.getState().start({ count: autoShortCount(total), finish: { polish, sfx, duo, popOut } });
         } catch (err) {
-            console.error('[ShortsPanel] find failed:', err.message);
-            setIsFinding(false);
+            console.error('[ShortsPanel] could not start the shorts run:', err.message);
             setPanelError(err.message);
         }
-    }, [t, isFree]);
+    }, [t, isFree, polish, sfx, duo, popOut]);
 
     const handlePreview = useCallback(async (short) => {
         if (isFree) {
@@ -193,8 +188,7 @@ export default function ShortsPanel({ onExport }) {
         setPreparing(short.id);
         setErrors(e => ({ ...e, [short.id]: null }));
         try {
-            if (popOut) await ensureMattesFor(short);
-            const built = await finishShort(mainEditState(), short, { polish, popOut, sfx, duo });
+            const built = await finished(short);
             const ok = useTimelineStore.getState().startShortPreview(short, built, { label: profile.label });
             if (!ok) setErrors(e => ({ ...e, [short.id]: t('shortsPanel.previewFailed') }));
         } catch (err) {
@@ -203,7 +197,7 @@ export default function ShortsPanel({ onExport }) {
         } finally {
             setPreparing(null);
         }
-    }, [preparing, polish, popOut, sfx, duo, t, isFree]);
+    }, [preparing, finished, t, isFree]);
 
     const handleExport = useCallback(async (short) => {
         if (isFree && process.env.NODE_ENV === 'production') {
@@ -220,8 +214,7 @@ export default function ShortsPanel({ onExport }) {
         setBusy(b => ({ ...b, [short.id]: 0 }));
         setErrors(e => ({ ...e, [short.id]: null }));
         try {
-            if (popOut) await ensureMattesFor(short);
-            const built = await finishShort(mainEditState(), short, { polish, popOut, sfx, duo });
+            const built = await finished(short);
             const result = await onExport(
                 { platform: profile.exportPreset, quality: 'high', resolution: '1080p', fps: profile.fps },
                 {
@@ -257,7 +250,7 @@ export default function ShortsPanel({ onExport }) {
         } finally {
             setBusy(b => { const n = { ...b }; delete n[short.id]; return n; });
         }
-    }, [onExport, busy, polish, popOut, sfx, duo, isFree, t]);
+    }, [onExport, busy, finished, isFree, t]);
 
     const handleOpenAsProject = useCallback(async (short) => {
         if (isFree) {
@@ -273,8 +266,7 @@ export default function ShortsPanel({ onExport }) {
         try {
             // The project is built from the main edit, so the preview ends first.
             useTimelineStore.getState().exitShortPreview();
-            if (popOut) await ensureMattesFor(short);
-            const built = await finishShort(useTimelineStore.getState(), short, { polish, popOut, sfx, duo });
+            const built = await finished(short, useTimelineStore.getState());
             const st = useTimelineStore.getState();
             const data = {
                 ...(st.saveProject() || {}),
@@ -296,11 +288,17 @@ export default function ShortsPanel({ onExport }) {
             console.error('[ShortsPanel] open as project failed:', err.message);
             setErrors(e => ({ ...e, [short.id]: err.message }));
         }
-    }, [navigate, polish, popOut, sfx, duo, t, isFree]);
+    }, [navigate, finished, t, isFree]);
 
     const handleRemove = useCallback((short) => {
         const st = useTimelineStore.getState();
         if (st.shortPreview?.shortId === short.id) st.exitShortPreview();
+        // A short removed while a run waits for keep/drop counts as dropped,
+        // or the run could never finish (it needs every short decided).
+        const r = useAgentRunStore.getState().run;
+        if (r?.status === RUN_STATUS.AWAITING_REVIEW && r.shortIds.includes(short.id)) {
+            useAgentRunStore.getState().decide(short.id, 'dropped', 'Removed from the list');
+        }
         st.removeShort(short.id);
     }, []);
 
@@ -369,7 +367,9 @@ export default function ShortsPanel({ onExport }) {
                 </div>
             )}
 
-            <button type="button" onClick={handleFind} disabled={isFinding}
+            <AgentRunCard />
+
+            {!runActive && <button type="button" onClick={handleFind} disabled={isFinding}
                 className="w-full mb-3 px-2 py-1.5 rounded text-[11px] bg-primary/15 border border-primary/40 text-primary flex items-center justify-center gap-1.5 disabled:opacity-50 transition-opacity">
                 {isFinding ? (
                     <>
@@ -383,7 +383,7 @@ export default function ShortsPanel({ onExport }) {
                         {isFree && <Lock className="w-2.5 h-2.5 ml-1 text-primary" />}
                     </>
                 )}
-            </button>
+            </button>}
 
             {/* Finish treatment toggles */}
             <div className="mb-3 p-2 rounded bg-secondary/20 border border-border/60 space-y-1.5 text-[11px]">
@@ -475,6 +475,27 @@ export default function ShortsPanel({ onExport }) {
                                             <AlertTriangle className="w-3 h-3 shrink-0 mt-px" /><span className="line-clamp-1">{n.text}</span>
                                         </p>
                                     ))}
+                                    {reviewing && run.shortIds.includes(short.id) && (
+                                        <div className="flex items-center gap-1 mb-1" role="group" aria-label={t('agentRun.keepOrDrop', 'Keep or drop')}>
+                                            {['kept', 'dropped'].map(decision => {
+                                                const on = run.decisions[short.id]?.decision === decision;
+                                                return (
+                                                    <button key={decision} type="button" aria-pressed={on}
+                                                        onClick={() => useAgentRunStore.getState().decide(short.id, decision)}
+                                                        className={`px-2 py-0.5 rounded border text-[10px] ${on
+                                                            ? (decision === 'kept' ? 'border-emerald-400/60 bg-emerald-400/15 text-emerald-300' : 'border-amber-400/60 bg-amber-400/15 text-amber-300')
+                                                            : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                                                        {decision === 'kept' ? t('agentRun.keep', 'Keep') : t('agentRun.drop', 'Drop')}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                    {short.finishedAt && (
+                                        <p className="text-[10px] text-emerald-400 mb-1" title={(short.finishedWith || []).join(', ')}>
+                                            {t('agentRun.finishedBadge', 'Finished, ready to preview and export')}
+                                        </p>
+                                    )}
                                     <div className="flex flex-wrap items-center gap-1">
                                         <button type="button" onClick={() => handleExport(short)} disabled={progress !== undefined || !onExport}
                                             title={t('shortsPanel.export', { platform: profile.label })}

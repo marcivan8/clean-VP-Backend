@@ -139,10 +139,11 @@ const corsOptions = {
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   // X-Session-Id carries the anonymous session (client/src/utils/authFetch.js)
   // and X-Vibed-Run-Id groups one Auto run's requests into a single billable
-  // AI operation (middleware/usageGate.js, R148). Both must be listed: a JSON
+  // AI operation (middleware/usageGate.js, R148). X-Vibed-Agent-Run/-Step only
+  // file an agent run's AI calls under its Langfuse trace (R176b). All must be listed: a JSON
   // POST already triggers a preflight, and a custom header missing from this
   // list makes the browser block the whole request, not just drop the header.
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'X-Session-Id', 'X-Vibed-Run-Id'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'X-Session-Id', 'X-Vibed-Run-Id', 'X-Vibed-Agent-Run', 'X-Vibed-Agent-Step'],
   exposedHeaders: ['Content-Length', 'Content-Type', 'X-Export-Filename', 'X-Export-Target'],
   maxAge: 86400,
 };
@@ -343,6 +344,9 @@ app.get('/api/analyze/test', (req, res) => {
 });
 
 // Mount API routes — rate limiters applied to expensive endpoints
+// R176b: which agent run/step a request belongs to, for Langfuse tracing only.
+app.use(require('./services/tracing/runContext').agentRunContext);
+app.use('/api/agent-runs', require('./routes/agentRunRoutes')); // Agent runs: goal, steps, approvals (owner only)
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/email', authLimiter, require('./routes/emailRoutes')); // Unsubscribe links
 // Publishing destinations. authLimiter counts only FAILED requests, which is

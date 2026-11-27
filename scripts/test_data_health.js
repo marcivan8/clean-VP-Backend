@@ -71,7 +71,7 @@ function loadProbeWith(counts, { throwOnAccess = false } = {}) {
 // adding it here fails loudly rather than leaving it silently untested.
 const HEALTHY = {
     assets: 109, sound_effects: 91, luts: 10, presets: 8,
-    media_assets: 42, user_editing_profiles: 7, editing_sessions: 96,
+    agent_runs: 3, media_assets: 42, user_editing_profiles: 7, editing_sessions: 96,
     project_intelligence: 12, story_intelligence: 9,
 };
 
