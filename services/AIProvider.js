@@ -332,7 +332,11 @@ function getAIClient(opts = {}) {
     const client = new OpenAI(config);
     // R176b: AI calls made inside an agent run step are recorded under the
     // run's trace (and counted for its cost). Outside a run this is a no-op.
-    instrumentClient(client, provider, currentRunContext);
+    // Not under Jest (NODE_ENV=test): the wrapper replaces chat.completions.create,
+    // which hides the jest.fn the server tests program with mockResolvedValueOnce
+    // (tests/ai.test.js broke on exactly that). Tracing is tested by calling
+    // instrumentClient directly (scripts/test_agent_runs.mjs).
+    if (process.env.NODE_ENV !== 'test') instrumentClient(client, provider, currentRunContext);
     _clientCache.set(cacheKey, client);
     return client;
 }

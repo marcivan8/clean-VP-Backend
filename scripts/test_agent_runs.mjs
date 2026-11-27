@@ -285,7 +285,7 @@ console.log('\n§6 wiring');
     ok(/'X-Vibed-Agent-Run', 'X-Vibed-Agent-Step'/.test(idx), 'CORS allows the agent run headers (or the browser blocks every tagged request)');
     ok(/app\.use\(require\('\.\/services\/tracing\/runContext'\)\.agentRunContext\)/.test(idx) && /app\.use\('\/api\/agent-runs'/.test(idx), 'the context middleware and the routes are mounted');
     ok(idx.indexOf('agentRunContext') < idx.indexOf("app.use('/api/ai'") && idx.indexOf('agentRunContext') < idx.indexOf("app.use('/api/motion'"), 'before the AI routes, so their calls are traced');
-    ok(/instrumentClient\(client, provider, currentRunContext\)/.test(read('services/AIProvider.js')), 'every AI client the factory builds is instrumented');
+    ok(/if \(process\.env\.NODE_ENV !== 'test'\) instrumentClient\(client, provider, currentRunContext\)/.test(read('services/AIProvider.js')), 'every AI client the factory builds is instrumented (outside Jest)');
     ok(/agentRunHeaders\(\)/.test(read('client/src/utils/authFetch.js')), 'authFetch sends the run and step');
     const store = read('client/src/store/useAgentRunStore.js');
     ok(/action: 'repurpose_shorts'/.test(store) && /finishShort\(mainEditState\(\), short, opts\)/.test(store), 'the run uses the existing find and finish pipeline');
