@@ -672,16 +672,16 @@ function describeAIError(err) {
 async function createGeminiChatCompletionWithFailover(geminiClient, payload, options = {}) {
     if (!geminiClient) throw new Error('Gemini client not provided');
     const primaryModel = payload.model || process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+    // R184: gemini-2.0-flash(-lite) and gemini-1.5-flash(-8b) are retired
+    // and answered 404, so four wasted calls came before a model that works.
+    // The light model goes right after the primary: it is the one that kept
+    // answering when 3.8-flash was rate-limited (429) in production.
     const fallbackModels = [
         primaryModel,
-        'gemini-3.8-flash',
-        'gemini-2.0-flash',
-        'gemini-2.0-flash-lite',
-        'gemini-1.5-flash',
-        'gemini-1.5-flash-8b',
         'gemini-3.1-flash-lite',
         'gemini-flash-lite-latest',
         'gemini-flash-latest',
+        'gemini-3.8-flash',
     ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
     let lastError = null;

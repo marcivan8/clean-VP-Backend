@@ -380,7 +380,13 @@ class EditorialBrain {
                 ? `User said: "${input.rawInput}"`
                 : `Trigger: ${input?.trigger || 'unknown'}. Analyze the project and provide suggestions.`;
 
-            const maxTokens = isGroq ? 500 : 1200;
+            // R184: 500 was too few for gpt-oss: it reasons before it writes and
+            // the reasoning counts here, so the JSON was cut off mid-answer and
+            // Groq refused it ("missing properties: 'learning'"). 1400 fits the
+            // whole answer and stays under Groq's free 8,000 tokens-per-minute
+            // (prompt + max_tokens) with the compact prompt; a 413 still takes
+            // the ultra-compact path below.
+            const maxTokens = isGroq ? 1400 : 1200;
             const callPayload = {
                 model: cloudModel,
                 temperature,
@@ -450,6 +456,27 @@ class EditorialBrain {
                                 return await cloudClient.chat.completions.create(fallbackPayload);
                             } catch (fbErr) {
                                 console.warn(`[EditorialBrain] Groq fallback model "${fallbackModel}" failed:`, fbErr.message);
+                            }
+                        }
+
+                        // R184: the last backup, OpenAI, when a key is set. It rarely
+                        // runs (Groq and Gemini both failed) and costs OpenAI
+                        // credits when it does. json_object rather than the strict
+                        // schema: strict mode needs every property required.
+                        if (isAIConfigured({ provider: 'openai' })) {
+                            try {
+                                const openaiAi = getAIClient({ provider: 'openai', capability: 'chat' });
+                                const openaiModel = process.env.OPENAI_BRAIN_FALLBACK_MODEL || 'gpt-4o-mini';
+                                console.warn(`[EditorialBrain] Groq and Gemini failed; trying OpenAI "${openaiModel}"...`);
+                                return await openaiAi.chat.completions.create({
+                                    model: openaiModel,
+                                    temperature,
+                                    max_tokens: 1200,
+                                    response_format: { type: 'json_object' },
+                                    messages: callPayload.messages,
+                                });
+                            } catch (openaiErr) {
+                                console.warn('[EditorialBrain] OpenAI fallback failed:', openaiErr.message);
                             }
                         }
 
