@@ -273,6 +273,8 @@ router.post('/publications', authenticateUser, socialGate, async (req, res) => {
         polishEnabled: rawEdit.polishEnabled === true,
         soundEffectsEnabled: rawEdit.soundEffectsEnabled === true,
         speakerPopOutEnabled: rawEdit.speakerPopOutEnabled === true,
+        // R180: the agent run that scheduled this post, so its views can score the run.
+        ...(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(rawEdit.agentRunId || '')) ? { agentRunId: String(rawEdit.agentRunId).toLowerCase() } : {}),
     };
     if (!['youtube', 'instagram'].includes(providerId) || !provider) return res.status(400).json({ error: 'UNSUPPORTED_PROVIDER' });
     if (!publishNow && scheduleOutOfRange(scheduledMs)) {

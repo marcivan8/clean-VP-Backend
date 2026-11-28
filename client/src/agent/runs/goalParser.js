@@ -51,6 +51,21 @@ export function brandFromText(text) {
     return /\b(brand(ed)?|on-brand|our colou?rs|my colou?rs|brand colou?rs|brand kit|charte( graphique)?|couleurs de (la |ma |notre )?marque|nos couleurs|mes couleurs)\b/.test(s);
 }
 
+/**
+ * Does the request also ask for the shorts to be posted? "...and schedule them
+ * through the week", "post them this week", "publish one a day", "programme-les
+ * sur la semaine". Conservative: posting needs a posting verb AND either "them"
+ * or a time frame, so "make shorts I can post" stays a plain shorts goal.
+ */
+export function wantsPosting(text) {
+    const s = fold(text);
+    const verb = /\b(schedule|post|publish|plan|queue|programme|programmer|programmez|planifie|planifier|publie|publier|poste|poster)\b/;
+    if (!verb.test(s)) return false;
+    const them = /\b(schedule|post|publish|queue|plan) (them|it|those|these)\b|\b(programme|planifie|publie|poste)[sz]?-?(les|la)\b|\bles (programmer|planifier|publier|poster)\b/;
+    const frame = /\b(through(out)? the week|this week|over the week|next week|one (a|per) day|daily|every day|each day|sur la semaine|cette semaine|la semaine prochaine|un par jour|chaque jour|tous les jours)\b/;
+    return them.test(s) || (verb.test(s) && frame.test(s));
+}
+
 /** Is this sentence a request to turn the video into several shorts? */
 export function isShortsGoalRequest(text) {
     const s = fold(text);
@@ -81,7 +96,8 @@ export function parseShortsGoal(text, ctx = {}) {
     const captions = captionsFromText(text);
     const brand = brandFromText(text);
 
-    const built = createGoal(GOAL_KINDS.SHORTS_FROM_LONG_VIDEO, {
+    const post = wantsPosting(text);
+    const built = createGoal(post ? GOAL_KINDS.SHORTS_TO_POSTS : GOAL_KINDS.SHORTS_FROM_LONG_VIDEO, {
         count,
         platforms: named,
         maxSeconds,
@@ -103,4 +119,4 @@ export function parseShortsGoal(text, ctx = {}) {
     return built.ok ? built.goal : null;
 }
 
-export default { parseShortsGoal, isShortsGoalRequest, maxSecondsFromText, captionsFromText, brandFromText };
+export default { parseShortsGoal, isShortsGoalRequest, wantsPosting, maxSecondsFromText, captionsFromText, brandFromText };

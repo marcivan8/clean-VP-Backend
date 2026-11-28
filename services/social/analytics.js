@@ -84,6 +84,12 @@ async function syncSocialAnalytics() {
             }).eq('id', post.id);
             if (updateError) throw new Error(`ANALYTICS_STATUS_STORE_FAILED: ${updateError.message}`);
             synced += 1;
+            // R180: a post an agent run scheduled scores that run once, at 7 days.
+            const runId = post.edit_context?.agentRunId;
+            const ageDays = (Date.now() - Date.parse(post.published_at)) / (24 * 60 * 60_000);
+            if (runId && ageDays >= 7 && ageDays < 8 && Number.isFinite(Number(metrics.views))) {
+                require('../tracing/langfuseEval').scorePostViews(runId, post.id, metrics.views, { provider: post.provider });
+            }
         } catch (err) {
             failed += 1;
             await supabaseAdmin.from(POSTS).update({

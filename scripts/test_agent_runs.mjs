@@ -129,6 +129,9 @@ function builder(table) {
         insert(row) { st.op = 'insert'; st.patch = row; return b; },
         update(p) { st.op = 'update'; st.patch = p; return b; },
         eq(c, v) { st.filters.push(r => r[c] === v); return b; },
+        // R180: the monthly budget and the history read use these.
+        in(c, vs) { st.filters.push(r => vs.includes(r[c])); return b; },
+        gte(c, v) { st.filters.push(r => String(r[c]) >= String(v)); return b; },
         not(c, op, list) { const vals = String(list).replace(/[()]/g, '').split(','); st.filters.push(r => !vals.includes(r[c])); return b; },
         maybeSingle() { st.single = true; return Promise.resolve(run()); },
         single() { st.single = true; return Promise.resolve(run()); },
@@ -151,7 +154,9 @@ const routes = require(routesPath);
     ok(clientStatuses === [...routes.STATUSES].sort().join(), 'the server accepts exactly the run statuses the client produces');
     ok(Object.values(G.GOAL_KINDS).sort().join() === [...routes.GOAL_KINDS].sort().join(), 'and exactly the goal kinds');
     const mig = read('supabase/migrations/20240014_agent_runs.sql');
-    ok(routes.STATUSES.every(s => mig.includes(`'${s}'`)), 'the migration check constraint lists every status');
+    // R179 widened the status check in a later migration; the newest one must list them all.
+    const statusMig = read('supabase/migrations/20240015_agent_run_posting.sql');
+    ok(routes.STATUSES.every(s => statusMig.includes(`'${s}'`)) && /drop constraint if exists agent_runs_status_check/.test(statusMig), 'the latest migration check constraint lists every status');
     ok(/enable row level security/.test(mig) && !/create policy/i.test(mig), 'the table is backend-only: RLS on, no policy');
     ok(/references auth\.users\(id\) on delete cascade/.test(mig) && /references projects\(id\) on delete cascade/.test(mig), 'runs are deleted with the account or the project');
 }

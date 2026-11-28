@@ -54,6 +54,7 @@ import TransformPanel from '../components/TransformPanel';
 import ColorGradePanel from '../components/Color/ColorGradePanel.jsx';
 import { PanelSection, ControlRow, TrackSlider } from '../components/ui/PanelControls.jsx';
 import ShortsPanel from '../components/ShortsPanel'; // R92 round B: repurposed shorts
+import { setShortExporter } from '../agent/runs/shortExporter.js';
 import SnapGuidesLayer from '../components/Player/SnapGuidesLayer.jsx'; // R92 round C
 import ShortPreviewBar from '../components/Player/ShortPreviewBar.jsx'; // R93
 import PreviewReloadIndicator from '../components/Player/PreviewReloadIndicator.jsx';
@@ -2231,6 +2232,12 @@ const IDELayout = ({ mode = 'editor' }) => {
             autoQaReport,
         };
     };
+    // R179: an agent run that schedules shorts exports them through this same
+    // function (as the Shorts panel's Export button does). The ref keeps the
+    // registration stable while the handler is redefined every render.
+    const shortExportRef = useRef(handleFfmpegExport);
+    shortExportRef.current = handleFfmpegExport;
+    useEffect(() => setShortExporter((settings, override) => shortExportRef.current(settings, override)), []);
     // route responds 500 "Render proxy not configured" and we surface a clear,
     // actionable error instead of a cryptic failure.
     const handleExportConfirm = async (settings) => {

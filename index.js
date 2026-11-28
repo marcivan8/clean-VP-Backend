@@ -372,6 +372,8 @@ app.get('/api/analyze/test', (req, res) => {
 // Mount API routes — rate limiters applied to expensive endpoints
 // R176b: which agent run/step a request belongs to, for Langfuse tracing only.
 app.use(require('./services/tracing/runContext').agentRunContext);
+// R180: a run step past its AI-call budget is refused before it reaches any AI route.
+app.use(require('./services/agentRunBudget').runBudgetGuard(require('./services/tracing/runContext').readContext));
 app.use('/api/agent-runs', require('./routes/agentRunRoutes')); // Agent runs: goal, steps, approvals (owner only)
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/email', authLimiter, require('./routes/emailRoutes')); // Unsubscribe links

@@ -648,6 +648,12 @@ export class WorkflowController {
                     message: 'AI Shorts repurposing is available on Creator and Pro plans.' });
                 return;
             }
+            // R179: scheduling the shorts is social publishing, Pro only (R167).
+            if (goal.kind === 'shorts_to_posts' && (await getUserPlanDirect()) !== 'pro') {
+                EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, { reason: 'paid_feature', feature: 'social', upgradeRequired: 'pro',
+                    message: 'Scheduling posts is available on Pro. Ask for the shorts alone to make them on your plan.' });
+                return;
+            }
             const { default: useAgentRunStore } = await import('../store/useAgentRunStore.js');
             const res = await useAgentRunStore.getState().start({ goal });
             if (!res?.ok) { log('warning', useAgentRunStore.getState().error || 'The shorts run could not start.'); return; }
@@ -659,7 +665,9 @@ export class WorkflowController {
                 c.captions === true ? 'captions on' : c.captions === false ? 'no captions' : null,
                 c.brand ? 'your brand colours' : null,
             ].filter(Boolean);
-            log('assistant', `I drafted a plan in the Shorts tab${wants.length ? ` (${wants.join(', ')})` : ''}. Approve it there and I'll find the passages; you keep or drop each one, then I finish the kept ones and check them against what you asked.`);
+            log('assistant', goal.kind === 'shorts_to_posts'
+                ? `I drafted a plan in the Shorts tab${wants.length ? ` (${wants.join(', ')})` : ''}. Approve it there and I'll find the passages; you keep or drop each one, I finish the kept ones, then I show you the whole schedule (times and copy) to approve once before anything is exported or scheduled.`
+                : `I drafted a plan in the Shorts tab${wants.length ? ` (${wants.join(', ')})` : ''}. Approve it there and I'll find the passages; you keep or drop each one, then I finish the kept ones and check them against what you asked.`);
         } catch (err) {
             console.error('[Workflow] could not start the shorts run:', err);
             log('warning', 'The shorts run could not start. Try again from the Shorts tab.');

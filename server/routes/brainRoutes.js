@@ -895,6 +895,8 @@ router.delete('/profile/reset', authenticateUser, async (req, res) => {
             supabaseAdmin.from('asset_usage_log').delete().eq('user_id', userId),
             supabaseAdmin.from('editing_sessions').delete().eq('user_id', userId),
             supabaseAdmin.from('user_asset_preferences').delete().eq('user_id', userId),
+            // R180: agent runs stay (history, export) but stop teaching the next plan.
+            supabaseAdmin.from('agent_runs').update({ learning_excluded: true }).eq('user_id', userId),
         ]);
 
         console.log(`[brainRoutes] Profile reset for user ${userId}`);
@@ -912,13 +914,15 @@ router.get('/profile/export', authenticateUser, async (req, res) => {
     const userId = req.user.id;
 
     try {
-        const [profileRes, feedbackRes, presetsRes, usageRes, sessionsRes, assetPrefsRes] = await Promise.all([
+        const [profileRes, feedbackRes, presetsRes, usageRes, sessionsRes, assetPrefsRes, agentRunsRes] = await Promise.all([
             supabaseAdmin.from('user_editing_profiles').select('*').eq('user_id', userId).maybeSingle(),
             supabaseAdmin.from('suggestion_feedback').select('*').eq('user_id', userId),
             supabaseAdmin.from('user_presets').select('*').eq('user_id', userId),
             supabaseAdmin.from('asset_usage_log').select('*').eq('user_id', userId),
             supabaseAdmin.from('editing_sessions').select('*').eq('user_id', userId),
             supabaseAdmin.from('user_asset_preferences').select('*').eq('user_id', userId),
+            // R180: agent runs (goal, plan, steps, approvals, decisions, posts, cost).
+            supabaseAdmin.from('agent_runs').select('*').eq('user_id', userId).order('created_at', { ascending: true }),
         ]);
 
         const exportData = {
@@ -930,6 +934,7 @@ router.get('/profile/export', authenticateUser, async (req, res) => {
             asset_usage_log:   usageRes.data      || [],
             editing_sessions:  sessionsRes.data   || [],
             asset_preferences: assetPrefsRes.data || [],
+            agent_runs:        agentRunsRes.data  || [],
         };
 
         res.setHeader('Content-Type', 'application/json');
