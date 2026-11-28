@@ -362,7 +362,12 @@ function resolveModel(requestedModel, capabilityOrOpts) {
     // cannot serve this capability would be sent to the openai client the
     // fallback hands back.
     const provider = opts.provider || effectiveProvider({ capability });
-    if (provider === 'openai') return requestedModel;
+    if (provider === 'openai') {
+        // R183: motion plans are short structured JSON; gpt-4o-mini answers
+        // them in a few seconds at a fraction of gpt-4o's price. Overridable.
+        if (capability === 'motion') return process.env.OPENAI_MOTION_MODEL || 'gpt-4o-mini';
+        return requestedModel;
+    }
 
     if (provider === 'gemma-local') {
         return process.env.GEMMA_MODEL || 'gemma2:2b';

@@ -359,9 +359,14 @@ async function executeChatCompletionWithFailover({
 
         // 2. Try secondary AI provider if configured (e.g. Groq, OpenAI, or Gemini)
         const baseProvider = resolveProvider({ capability: 'chat' });
-        const secondaryProvider = (baseProvider && baseProvider !== provider && isAIConfigured({ capability: 'chat' }))
-            ? baseProvider
-            : (provider === 'gemini' ? 'groq' : 'gemini');
+        // R183: with OpenAI as the motion provider, Gemini is the backup when
+        // it is configured (Marc's choice: OpenAI first, Gemini second, rules
+        // last), whatever the chat provider is.
+        const secondaryProvider = (provider === 'openai' && isAIConfigured({ provider: 'gemini' }))
+            ? 'gemini'
+            : (baseProvider && baseProvider !== provider && isAIConfigured({ capability: 'chat' }))
+                ? baseProvider
+                : (provider === 'gemini' ? 'groq' : 'gemini');
 
         if (!requestSignal.aborted && isAIConfigured({ provider: secondaryProvider })) {
             console.warn(
