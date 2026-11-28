@@ -265,13 +265,15 @@ ok(/<UpgradeFeatureDetails/.test(read('../client/src/components/ProFeatureLock.j
 const ide = read('../client/src/layouts/IDELayout.jsx');
 ok(/feature: payload\?\.feature/.test(ide) && /feature=\{quotaModal\.feature\}/.test(ide), 'the editor forwards the feature to the modal');
 ok(/feature=\{limitInfo\?\.feature\}/.test(read('../client/src/components/MobileFlow.jsx')) && /feature: info\.feature/.test(read('../client/src/store/useMobileFlowStore.js')), 'the guided mobile flow forwards it too');
+// R181: the Shorts panel also has the find-and-schedule button, whose prompt
+// is about social publishing (Pro), so it names 'social'.
 const emitters = [
-    ['../client/src/components/ShortsPanel.jsx', 'shorts'], ['../client/src/layouts/IDELayout.jsx', 'shorts'],
+    ['../client/src/components/ShortsPanel.jsx', 'shorts|social'], ['../client/src/layouts/IDELayout.jsx', 'shorts'],
     ['../client/src/components/AssetPanel.jsx', 'stock'], ['../client/src/agent/VideoEditorTools.js', 'stock'],
 ];
 for (const [file, feat] of emitters) {
     const blocks = read(file).split('EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED').slice(1).filter(b => /reason: 'paid_feature'/.test(b.slice(0, 300)));
-    ok(blocks.length > 0 && blocks.every(b => new RegExp(`feature: '${feat}'`).test(b.slice(0, 300))), `${file.split('/').pop()}: every paid-feature prompt names '${feat}' (${blocks.length})`);
+    ok(blocks.length > 0 && blocks.every(b => new RegExp(`feature: '(${feat})'`).test(b.slice(0, 300))), `${file.split('/').pop()}: every paid-feature prompt names '${feat}' (${blocks.length})`);
 }
 const picker = read('../client/src/components/Assistant/EditingStylePicker.jsx');
 ok(/feature: 'editingStyles'/.test(picker) && /feature: 'autoMode'/.test(picker), 'editing styles and Auto mode name themselves');

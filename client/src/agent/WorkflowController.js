@@ -16,6 +16,7 @@ import { isQuestion, isReferenceGuidedEditRequest } from './EditingStyles.js';
 import { timelineFacts } from './EditRecap.js'; // R92 round B: measured impact per edit
 import { parseShortsGoal } from './runs/goalParser.js'; // R176b: a typed shorts request becomes a goal
 import { autoShortCount } from './PlatformProfiles.js';
+import useMobileFlowStore from '../store/useMobileFlowStore.js';
 
 // Per-operation editorial descriptions and next-step suggestions.
 // Keys must match the `operation` field returned by IntentParser / EditJobManager.
@@ -627,7 +628,10 @@ export class WorkflowController {
         try {
             const st = useTimelineStore.getState();
             if (st.editingMode === 'auto' || isQuestion(prompt)) return null;
-            if (typeof window !== 'undefined' && window.innerWidth < 768) return null;
+            // R181: phones run goals too (the Shorts tab of the bottom sheet
+            // shows the run card), except inside the guided creation flow,
+            // which drives its own steps.
+            if (typeof window !== 'undefined' && window.innerWidth < 768 && useMobileFlowStore.getState().active) return null;
             const total = (st.tracks || []).reduce((m, t) => Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
             if (total < 10) return null; // the command explains "too short" better than a plan would
             return parseShortsGoal(prompt, { defaultCount: autoShortCount(total) });
@@ -657,7 +661,8 @@ export class WorkflowController {
             const { default: useAgentRunStore } = await import('../store/useAgentRunStore.js');
             const res = await useAgentRunStore.getState().start({ goal });
             if (!res?.ok) { log('warning', useAgentRunStore.getState().error || 'The shorts run could not start.'); return; }
-            ai.setActiveTab?.('shorts');
+            // Show the run card: the Shorts tab, opened as a sheet on a phone.
+            if (ai.requestPanel) ai.requestPanel('shorts'); else ai.setActiveTab?.('shorts');
             const c = goal.criteria || {};
             const wants = [
                 c.count ? `${c.count} short${c.count === 1 ? '' : 's'}` : null,

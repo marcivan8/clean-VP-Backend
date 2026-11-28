@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertCircle, CalendarClock, Check, Loader2, Sparkles, X } from 'lucide-react';
+import { AlertCircle, CalendarClock, Check, Copy, Loader2, Sparkles, X } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
 import { connectDestination, fetchDestinations, takeConnectOutcome } from '../lib/socialDestinations';
 import { postFormat } from '../lib/socialFormat.js';
@@ -101,6 +101,19 @@ export default function SocialPublisher({ short, mediaUrl, editContext, sourceId
         return () => clearInterval(timer);
     }, [load]);
 
+    const [copied, setCopied] = useState(false);
+    const copyText = async () => {
+        const text = [provider === 'youtube' ? title.trim() : '', caption.trim()].filter(Boolean).join('\n\n');
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+        } catch (err) {
+            console.warn('[social] copy to clipboard failed:', err?.message);
+            setMessage({ type: 'error', text: t('socialPublisher.copyFailed', 'Could not copy. Select the text and copy it by hand.') });
+        }
+    };
+
     const generate = async () => {
         setBusy('generate'); setMessage(null);
         try {
@@ -180,14 +193,22 @@ export default function SocialPublisher({ short, mediaUrl, editContext, sourceId
                     {formatNote(provider, format, t)}
                 </p>
             )}
-            {connected && <form onSubmit={schedule} className="space-y-2">
+            {/* R181: the copy can be written (and copied for a manual post) before
+                any account is connected; only scheduling needs the connection. */}
+            <form onSubmit={schedule} className="space-y-2">
                 {provider === 'youtube' && <input value={title} onChange={event => setTitle(event.target.value)} maxLength={100} placeholder={t('socialPublisher.youtubeTitle', 'YouTube title')} className="w-full rounded border border-border bg-background px-2 py-1.5 text-[11px] text-foreground" required />}
                 <textarea value={caption} onChange={event => setCaption(event.target.value)} maxLength={5000} rows={3} placeholder={provider === 'youtube' ? t('socialPublisher.description', 'Description') : t('socialPublisher.reelCaption', 'Reel caption')} className="w-full resize-y rounded border border-border bg-background px-2 py-1.5 text-[11px] text-foreground" />
                 <textarea value={context} onChange={event => setContext(event.target.value)} maxLength={5000} rows={2} placeholder={t('socialPublisher.context', 'What is this video about?')} className="w-full resize-y rounded border border-border bg-background px-2 py-1.5 text-[11px] text-foreground" />
-                <button type="button" onClick={generate} disabled={!!busy} className="flex items-center gap-1 rounded border border-primary/40 px-2 py-1.5 text-[10px] text-primary disabled:opacity-50">
-                    {busy === 'generate' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />} {t('socialPublisher.generate', 'Generate copy')}
-                </button>
                 <div className="flex gap-1.5">
+                    <button type="button" onClick={generate} disabled={!!busy} className="flex items-center gap-1 rounded border border-primary/40 px-2 py-1.5 text-[10px] text-primary disabled:opacity-50">
+                        {busy === 'generate' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />} {t('socialPublisher.generate', 'Generate copy')}
+                    </button>
+                    <button type="button" onClick={copyText} disabled={!title.trim() && !caption.trim()} className="flex items-center gap-1 rounded border border-border px-2 py-1.5 text-[10px] text-foreground disabled:opacity-50">
+                        {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />} {copied ? t('socialPublisher.copied', 'Copied') : t('socialPublisher.copy', 'Copy')}
+                    </button>
+                </div>
+                {!connected && <p className="text-[10px] text-muted-foreground">{t('socialPublisher.connectToSchedule', 'Connect the account above to schedule or publish. You can already write the copy and paste it when you post by hand.')}</p>}
+                {connected && <><div className="flex gap-1.5">
                     <input type="datetime-local" value={scheduledAt} onChange={event => setScheduledAt(event.target.value)} min={localInputValue(new Date(Date.now() + 60_000))} className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1.5 text-[10px] text-foreground" required />
                     <button type="submit" disabled={!!busy || !mediaUrl || blocked} className="rounded bg-primary px-2.5 py-1.5 text-[10px] font-semibold text-primary-foreground disabled:opacity-50">
                         {busy === 'schedule' ? <Loader2 className="h-3 w-3 animate-spin" /> : t('socialPublisher.schedule', 'Schedule')}
@@ -195,8 +216,8 @@ export default function SocialPublisher({ short, mediaUrl, editContext, sourceId
                 </div>
                 <button type="button" onClick={() => submit(true)} disabled={!!busy || !mediaUrl || blocked} className="w-full rounded border border-primary/40 px-2.5 py-1.5 text-[10px] font-semibold text-primary disabled:opacity-50">
                     {busy === 'now' ? <Loader2 className="mx-auto h-3 w-3 animate-spin" /> : t('socialPublisher.publishNow', 'Publish now')}
-                </button>
-            </form>}
+                </button></>}
+            </form>
             {message && <p role={message.type === 'error' ? 'alert' : 'status'} className={`flex items-start gap-1 text-[10px] ${message.type === 'error' ? 'text-amber-400' : 'text-emerald-400'}`}>
                 {message.type === 'error' ? <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" /> : <Check className="mt-0.5 h-3 w-3 shrink-0" />}{message.text}
             </p>}

@@ -19,6 +19,12 @@ const useAIStore = create((set) => ({
 
     // Actions
     setActiveTab: (tab) => set({ activeTab: tab }),
+    // R181: ask the editor to SHOW a panel (on a phone that means opening the
+    // bottom sheet on that tab; on desktop setting the tab is enough). IDELayout
+    // reacts to `panelRequest`; `at` makes a repeated request for the same tab
+    // still count.
+    panelRequest: null,
+    requestPanel: (tab) => set({ activeTab: tab, panelRequest: { tab, at: Date.now() } }),
     // Quick chips are refreshed from SuggestionEngine after every applied edit,
     // so they track the real project state instead of staying the fixed four
     // strings this store was initialised with.

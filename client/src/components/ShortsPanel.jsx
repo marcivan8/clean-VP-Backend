@@ -18,7 +18,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Smartphone, Play, Square, Download, Loader2, Trash2, Wand2, ExternalLink, Sparkles, Volume2, UserCheck, AlertTriangle, Lock, Rows2, BarChart3 } from 'lucide-react';
+import { Smartphone, Play, Square, Download, Loader2, Trash2, Wand2, ExternalLink, Sparkles, Volume2, UserCheck, AlertTriangle, Lock, Rows2, BarChart3, CalendarClock } from 'lucide-react';
 
 import useTimelineStore from '../store/useTimelineStore';
 import { PLATFORM_IDS, PLATFORM_PROFILES, profileNotes, autoShortCount } from '../agent/PlatformProfiles.js';
@@ -29,6 +29,7 @@ import { getFinishedShort } from '../agent/finishedShortCache.js';
 import AgentRunCard from './AgentRunCard.jsx';
 import useAgentRunStore from '../store/useAgentRunStore.js';
 import { STATUS as RUN_STATUS, TERMINAL as RUN_TERMINAL } from '../agent/runs/runState.js';
+import { GOAL_KINDS } from '../agent/runs/goalContract.js';
 import { createProject } from '../lib/projectsApi.js';
 import { captureShortThumbnail, getCachedShortThumbnail, thumbnailKey } from '../utils/captureShortThumbnail.js';
 import { useUserPlan } from '../hooks/useUserPlan.js';
@@ -144,7 +145,18 @@ export default function ShortsPanel({ onExport }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [thumbKeys]);
 
-    const handleFind = useCallback(async () => {
+    // R181: `schedule` starts the posting goal (find, finish, then one
+    // approval of the whole schedule), the same run a typed request starts.
+    const handleFind = useCallback(async (schedule = false) => {
+        if (schedule && !canPublish) {
+            EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
+                reason: 'paid_feature',
+                feature: 'social',
+                message: t('shortsPanel.scheduleLocked', 'Scheduling posts is available on Pro.'),
+                upgradeRequired: 'pro',
+            });
+            return;
+        }
         if (isFree) {
             EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
                 reason: 'paid_feature',
@@ -163,12 +175,15 @@ export default function ShortsPanel({ onExport }) {
             return;
         }
         try {
-            await useAgentRunStore.getState().start({ count: autoShortCount(total), finish: { polish, sfx, duo, popOut } });
+            await useAgentRunStore.getState().start({
+                kind: schedule ? GOAL_KINDS.SHORTS_TO_POSTS : GOAL_KINDS.SHORTS_FROM_LONG_VIDEO,
+                count: autoShortCount(total), finish: { polish, sfx, duo, popOut },
+            });
         } catch (err) {
             console.error('[ShortsPanel] could not start the shorts run:', err.message);
             setPanelError(err.message);
         }
-    }, [t, isFree, polish, sfx, duo, popOut]);
+    }, [t, isFree, canPublish, polish, sfx, duo, popOut]);
 
     const handlePreview = useCallback(async (short) => {
         if (isFree) {
@@ -368,7 +383,7 @@ export default function ShortsPanel({ onExport }) {
 
             <AgentRunCard />
 
-            {!runActive && <button type="button" onClick={handleFind} disabled={isFinding}
+            {!runActive && <button type="button" onClick={() => handleFind(false)} disabled={isFinding}
                 className="w-full mb-3 px-2 py-1.5 rounded text-[11px] bg-primary/15 border border-primary/40 text-primary flex items-center justify-center gap-1.5 disabled:opacity-50 transition-opacity">
                 {isFinding ? (
                     <>
@@ -383,6 +398,16 @@ export default function ShortsPanel({ onExport }) {
                     </>
                 )}
             </button>}
+
+            {!runActive && !isFinding && (
+                <button type="button" onClick={() => handleFind(true)}
+                    title={t('shortsPanel.findAndScheduleHint', 'Find and finish shorts, then approve one schedule (times and copy) before anything is exported or posted.')}
+                    className="w-full -mt-2 mb-3 px-2 py-1.5 rounded text-[11px] border border-border text-foreground hover:border-primary/40 flex items-center justify-center gap-1.5">
+                    <CalendarClock className="w-3 h-3 text-primary" />
+                    <span>{t('shortsPanel.findAndSchedule', 'Find shorts and schedule them')}</span>
+                    {!canPublish && <Lock className="w-2.5 h-2.5 ml-1 text-primary" />}
+                </button>
+            )}
 
             {/* Finish treatment toggles */}
             <div className="mb-3 p-2 rounded bg-secondary/20 border border-border/60 space-y-1.5 text-[11px]">

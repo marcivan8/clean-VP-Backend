@@ -1256,6 +1256,105 @@ function buildAudioMixGraph(segments, baseHasAudio) {
         : `${delayed};${labels}amix=inputs=${segments.length}:duration=longest:dropout_transition=0[aout]`;
 }
 
+// ── Joining the clip segments (R182) ─────────────────────────────────────────
+// Each clip is rendered to its own segment, each with its OWN AAC encode.
+// Joining those with the concat demuxer and `-c copy` (what STEP 2 did) has
+// two faults, both measured on a real export before this was written:
+//   1. DRIFT. Every separately encoded AAC piece comes out a little longer
+//      than its picture (encoder padding). Stream-copied end to end, the
+//      excess adds up: with 0.47 s cuts the sound was ~50 ms later per cut,
+//      ~200 ms late by the 6th and seconds late over a long silence-removed
+//      edit. The picture stays on time, so speech slides off the lips.
+//   2. NO SOUND AT ALL. The demuxer takes its streams from the FIRST file. A
+//      first clip whose source has no audio (b-roll, a screen recording, a
+//      muted proxy) made the whole export silent ("silent base" in STEP 3).
+// So the picture is still stream-copied (nothing about it changes), and the
+// sound is rebuilt once: each segment's audio decoded, cut or padded to
+// EXACTLY that segment's picture length (silence when it has none), joined as
+// PCM (no padding, sample-exact), and encoded a single time.
+
+/** A segment's picture length (seconds) and whether it has an audio stream. */
+function probeSegment(filePath) {
+    return new Promise((resolve) => {
+        ffmpeg.ffprobe(filePath, (err, metadata) => {
+            if (err) { resolve({ videoDuration: null, hasAudio: false }); return; }
+            const streams = metadata?.streams || [];
+            const v = streams.find(s => s.codec_type === 'video');
+            let videoDuration = Number(v?.duration);
+            if (!(videoDuration > 0)) {
+                const [num, den] = String(v?.avg_frame_rate || v?.r_frame_rate || '').split('/').map(Number);
+                const frames = Number(v?.nb_frames);
+                videoDuration = frames > 0 && num > 0 && den > 0 ? frames / (num / den) : Number(metadata?.format?.duration);
+            }
+            resolve({ videoDuration: videoDuration > 0 ? videoDuration : null, hasAudio: streams.some(s => s.codec_type === 'audio') });
+        });
+    });
+}
+
+const JOIN_SAMPLE_RATE = 48000;
+const JOIN_AUDIO_CONCURRENCY = 4;
+
+/**
+ * Join rendered segments into `outputPath` with the sound in sync (see above).
+ * @param {string[]} segments  segment files, in timeline order
+ * @param {{ tmpDir: string, audioBitrate?: string, bin?: string }} opts
+ * @returns {Promise<{ segments: number, silentSegments: number, audioSeconds: number }>}
+ */
+async function joinSegments(segments, outputPath, { tmpDir, audioBitrate = '192k', bin = ffmpegPath, durations = null } = {}) {
+    const probes = await Promise.all(segments.map(probeSegment));
+    const missing = probes.findIndex(p => !p.videoDuration);
+    if (missing !== -1) throw new Error(`segment ${missing + 1} has no readable video length`);
+    // Each segment's place on the OUTPUT clock: the length the timeline gave
+    // it (STEP 1's segOutputStarts) when known, else its picture length. A
+    // picture rounds to whole frames (0.47 s at 30 fps is 14 frames, 0.467 s);
+    // using the timeline length keeps every later segment, caption and sound
+    // effect where the timeline put it instead of accumulating that rounding.
+    const lengths = probes.map((p, i) => (Number(durations?.[i]) > 0 ? Number(durations[i]) : p.videoDuration));
+
+    // 1. Pictures: unchanged, stream-copied.
+    const videoList = path.join(tmpDir, 'join-video.txt');
+    // `duration` pins each file to its PICTURE length. Without it the demuxer
+    // uses the file's overall length, which a slightly longer audio stream
+    // stretches, and the pictures would no longer line up with the sound
+    // rebuilt below from the same lengths.
+    fs.writeFileSync(videoList, segments.map((s, i) => `file '${s}'\noutpoint ${lengths[i].toFixed(6)}\nduration ${lengths[i].toFixed(6)}`).join('\n'));
+    const videoOnly = path.join(tmpDir, 'join-video.mp4');
+    await runFfmpegArgs(bin, ['-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', videoList, '-map', '0:v:0', '-c:v', 'copy', videoOnly]);
+
+    // 2. Sound per segment, exactly as long as its picture, as PCM.
+    const wavs = new Array(segments.length);
+    let next = 0;
+    const worker = async () => {
+        while (next < segments.length) {
+            const i = next++;
+            const dur = lengths[i].toFixed(6);
+            const wav = path.join(tmpDir, `join-audio-${i}.wav`);
+            const args = probes[i].hasAudio
+                ? ['-y', '-v', 'error', '-i', segments[i], '-map', '0:a:0', '-af', `aresample=${JOIN_SAMPLE_RATE},aformat=sample_fmts=s16:channel_layouts=stereo,apad`, '-t', dur, '-c:a', 'pcm_s16le', wav]
+                : ['-y', '-v', 'error', '-f', 'lavfi', '-i', `anullsrc=channel_layout=stereo:sample_rate=${JOIN_SAMPLE_RATE}`, '-t', dur, '-c:a', 'pcm_s16le', wav];
+            await runFfmpegArgs(bin, args);
+            wavs[i] = wav;
+        }
+    };
+    await Promise.all(Array.from({ length: Math.min(JOIN_AUDIO_CONCURRENCY, segments.length) }, worker));
+
+    // 3. Join the PCM (sample-exact) and encode the whole track once.
+    const audioList = path.join(tmpDir, 'join-audio.txt');
+    fs.writeFileSync(audioList, wavs.map(w => `file '${w}'`).join('\n'));
+    const joinedWav = path.join(tmpDir, 'join-audio.wav');
+    await runFfmpegArgs(bin, ['-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', audioList, '-c:a', 'copy', joinedWav]);
+    await runFfmpegArgs(bin, ['-y', '-v', 'error', '-i', videoOnly, '-i', joinedWav,
+        '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-b:a', audioBitrate,
+        '-ar', String(JOIN_SAMPLE_RATE), '-movflags', '+faststart', outputPath]);
+
+    for (const f of [videoList, videoOnly, audioList, joinedWav, ...wavs]) { try { fs.unlinkSync(f); } catch { /* temp file */ } }
+    return {
+        segments: segments.length,
+        silentSegments: probes.filter(p => !p.hasAudio).length,
+        audioSeconds: lengths.reduce((sum, d) => sum + d, 0),
+    };
+}
+
 function hasAudioStream(filePath) {
     return new Promise((resolve) => {
         ffmpeg.ffprobe(filePath, (err, metadata) => {
@@ -3787,21 +3886,11 @@ module.exports = async function processExportJob(job) {
     if (segments.length === 1) {
         fs.renameSync(segments[0], outputPath);
     } else {
-        const concatList = path.join(tmpDir, 'concat.txt');
-        fs.writeFileSync(concatList, segments.map(s => `file '${s}'`).join('\n'));
-
-        await new Promise((resolve, reject) => {
-            ffmpeg()
-                .input(concatList)
-                .inputOptions(['-f', 'concat', '-safe', '0'])
-                .videoCodec('copy')
-                .audioCodec('copy')
-                .output(outputPath)
-                .on('end', resolve)
-                .on('error', reject)
-                .run();
-        });
-        console.log(`  ✅ Concatenated ${segments.length} segments`);
+        // R182: pictures stream-copied, sound rebuilt once so it cannot drift
+        // and a clip without audio cannot silence the export (joinSegments).
+        const durations = segOutputStarts.map((start, i) => (i + 1 < segOutputStarts.length ? segOutputStarts[i + 1] : cumulativeOut) - start);
+        const joined = await joinSegments(segments, outputPath, { tmpDir, audioBitrate, durations: durations.length === segments.length ? durations : null });
+        console.log(`  ✅ Concatenated ${joined.segments} segments (sound rebuilt: ${joined.audioSeconds.toFixed(2)} s${joined.silentSegments ? `, ${joined.silentSegments} without audio filled with silence` : ''})`);
     }
 
     await job.updateProgress(70);
@@ -5247,6 +5336,7 @@ module.exports.FONT_SPECS = FONT_SPECS;
 module.exports.rotationFromProbeStream = rotationFromProbeStream;
 module.exports.buildSmoothZoomFilter = buildSmoothZoomFilter;
 module.exports.atempoChain = atempoChain;
+module.exports.joinSegments = joinSegments;
 // R100 — pure helpers, exported for scripts/test_base_clip_transform_export.mjs.
 module.exports.fitContainSizePx = fitContainSizePx;
 module.exports.hasBaseClipTransform = hasBaseClipTransform;

@@ -1547,7 +1547,10 @@
     "lockedDescription": "Trouvez automatiquement les moments viraux et découpez vos vidéos au format 9:16 avec cadrage intelligent, sous-titres et bruitages sur les forfaits Creator et Pro.",
     "lockedCta": "Débloquer les Shorts",
     "lockedMessage": "La découpe en shorts IA est disponible sur les forfaits Creator et Pro.",
-    "seePerformance": "Voir les performances de vos publications dans le planificateur"
+    "seePerformance": "Voir les performances de vos publications dans le planificateur",
+    "findAndSchedule": "Trouver des shorts et les programmer",
+    "findAndScheduleHint": "Trouve et finalise des shorts, puis vous validez un seul planning (heures et textes) avant tout export ou publication.",
+    "scheduleLocked": "La programmation des publications est disponible avec Pro."
   },
   "scenePanel": {
     "title": "Scène",
@@ -1823,7 +1826,11 @@
     "formatShort": "Publiée en tant que Short YouTube.",
     "formatVideo": "Publiée en tant que vidéo YouTube classique (un Short doit être vertical ou carré et durer 3 minutes ou moins).",
     "reelBars": "Instagram la publie en Reel ; une vidéo horizontale apparaît avec des bandes en haut et en bas.",
-    "reelTooLong": "Les Reels Instagram sont limités à 15 minutes, cette vidéo ne peut donc pas y être publiée."
+    "reelTooLong": "Les Reels Instagram sont limités à 15 minutes, cette vidéo ne peut donc pas y être publiée.",
+    "copy": "Copier",
+    "copied": "Copié",
+    "copyFailed": "Copie impossible. Sélectionnez le texte et copiez-le à la main.",
+    "connectToSchedule": "Connectez le compte ci-dessus pour programmer ou publier. Vous pouvez déjà rédiger le texte et le coller quand vous publiez à la main."
   },
   "socialAnalytics": {
     "title": "Résultats des publications",

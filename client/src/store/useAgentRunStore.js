@@ -147,13 +147,13 @@ const useAgentRunStore = create((set, get) => ({
      * Propose a plan. Nothing happens until it is approved.
      * Pass a ready goal (from goalParser, i.e. a typed request) or plain params.
      */
-    start: async ({ goal = null, count, platforms, finish } = {}) => {
+    start: async ({ goal = null, kind = GOAL_KINDS.SHORTS_FROM_LONG_VIDEO, count, platforms, finish } = {}) => {
         const existing = get().run;
         if (existing && !TERMINAL.includes(existing.status)) {
             set({ error: 'A run is already in progress. Stop it first.' });
             return { ok: false };
         }
-        const built = goal ? { ok: true, goal } : createGoal(GOAL_KINDS.SHORTS_FROM_LONG_VIDEO, { count, platforms, finish });
+        const built = goal ? { ok: true, goal } : createGoal(kind, { count, platforms, finish });
         if (!built.ok) { set({ error: built.error }); return { ok: false }; }
         // A posting goal that names no platform targets the accounts that are
         // connected (both supported platforms when none is, so the schedule

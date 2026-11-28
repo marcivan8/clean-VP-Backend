@@ -906,6 +906,17 @@ const IDELayout = ({ mode = 'editor' }) => {
     }, [isMobile, mobileSheet, activeTab, updateTabScrollState]);
 
     const setActiveTab = useAIStore(s => s.setActiveTab);
+    // R181: something outside the editor (a run started from the chat) asked
+    // to show a panel. On a phone, open the bottom sheet on it; on desktop,
+    // make sure the panel is not collapsed.
+    const panelRequest = useAIStore(s => s.panelRequest);
+    useEffect(() => {
+        if (!panelRequest?.tab) return;
+        if (isMobile) setMobileSheet('media');
+        else persistCollapsed(false);
+        // Only when a new request arrives.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [panelRequest]);
     const { plan: userPlan } = useUserPlan();
     const isFree = userPlan === 'free';
     const [assetInitialTab, setAssetInitialTab] = useState('sfx');

@@ -1547,7 +1547,10 @@
     "lockedDescription": "Automatically find viral moments and repurpose your long-form videos into 9:16 Shorts with smart framing, captions, and sound effects on Creator and Pro plans.",
     "lockedCta": "Upgrade to unlock Shorts",
     "lockedMessage": "AI Shorts repurposing is available on Creator and Pro plans.",
-    "seePerformance": "See how your posts perform in the Planner"
+    "seePerformance": "See how your posts perform in the Planner",
+    "findAndSchedule": "Find shorts and schedule them",
+    "findAndScheduleHint": "Find and finish shorts, then approve one schedule (times and copy) before anything is exported or posted.",
+    "scheduleLocked": "Scheduling posts is available on Pro."
   },
   "scenePanel": {
     "title": "Scene",
@@ -1823,7 +1826,11 @@
     "formatShort": "Goes out as a YouTube Short.",
     "formatVideo": "Goes out as a regular YouTube video (a Short has to be vertical or square and 3 minutes or less).",
     "reelBars": "Instagram posts it as a Reel; a landscape video shows with bars above and below.",
-    "reelTooLong": "Instagram Reels are limited to 15 minutes, so this video cannot be posted there."
+    "reelTooLong": "Instagram Reels are limited to 15 minutes, so this video cannot be posted there.",
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyFailed": "Could not copy. Select the text and copy it by hand.",
+    "connectToSchedule": "Connect the account above to schedule or publish. You can already write the copy and paste it when you post by hand."
   },
   "socialAnalytics": {
     "title": "Published performance",
